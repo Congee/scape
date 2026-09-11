@@ -15,6 +15,7 @@ import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { dayDataStore } from '@state/dayData';
+import { mapStatusStore } from '@state/mapStatus';
 import { findBasemap, settingsStore } from '@state/settings';
 import { worldStore } from '@state/world';
 import { eventLines, liveLines } from './overlays';
@@ -75,8 +76,14 @@ export class MapController {
     this.map.on('click', (e: MapMouseEvent) => {
       if (settingsStore.getState().clickMovesPin) worldStore.getState().setPin({ lng: e.lngLat.lng, lat: e.lngLat.lat });
     });
+    this.map.on('error', (e) => {
+      const msg = e.error?.message || 'Map error';
+      mapStatusStore.getState().setError(msg);
+      console.warn('[scape] map error:', msg);
+    });
     this.map.on('style.load', () => {
       this.styleReady = true;
+      mapStatusStore.getState().setError(null);
       this.addOverlayLayers();
       this.updateRay();
       this.renderAll();

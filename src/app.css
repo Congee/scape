@@ -534,3 +534,17 @@ label.file input {
 .readout-row .val:nth-of-type(1) { grid-area: az; color: var(--fg-2); }
 .readout-row .val:nth-of-type(2) { grid-area: alt; min-width: 56px; text-align: right; color: var(--fg-2); }
 .readout-row .extra { grid-area: extra; color: var(--fg-3); font-size: 12px; }
+
+.error {
+  margin: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgb(255 92 92 / 0.12);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.hint {
+  margin: 6px 4px 0;
+  font-size: 12px;
+}

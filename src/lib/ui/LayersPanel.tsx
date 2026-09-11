@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BUILTIN_BASEMAPS, type PmFlavor } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
+import { useMapStatus } from '@state/mapStatus';
 import { settingsStore, useSettings, type Settings } from '@state/settings';
 
 const FLAVORS: PmFlavor[] = ['light', 'dark', 'white', 'grayscale', 'black'];
@@ -11,6 +12,7 @@ export function LayersPanel() {
   const { update, addBasemap, removeBasemap } = settingsStore.getState();
   const [url, setUrl] = useState('');
   const [flavor, setFlavor] = useState<PmFlavor>('light');
+  const mapError = useMapStatus((s) => s.error);
 
   const addUrl = () => {
     const u = url.trim();
@@ -29,6 +31,7 @@ export function LayersPanel() {
   return (
     <div className="layers">
       <h3>Basemap</h3>
+      {mapError && <p className="error">Basemap problem: {mapError}</p>}
       <ul className="radio-list">
         {[...BUILTIN_BASEMAPS, ...custom].map((b) => (
           <li key={b.id}>
@@ -55,6 +58,7 @@ export function LayersPanel() {
         </select>
         <button onClick={addUrl}>Add</button>
       </div>
+      <p className="muted hint">Remote archives must allow cross-origin range requests (CORS). Protomaps' planet builds do not; host your own extract or open a local file.</p>
       <label className="file">
         <input type="file" accept=".pmtiles" onChange={(e) => addFile(e.target.files?.[0])} />
         Open a local .pmtiles file (this session only; persistent storage arrives with the offline manager)
