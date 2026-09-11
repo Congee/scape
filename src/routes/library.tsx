@@ -56,6 +56,9 @@ function LibraryPage() {
                 <span className="name">{l.name}</span>
                 <span className="detail">{formatLngLat(l, format)}</span>
               </button>
+              <button className="link" onClick={() => worldStore.getState().setPin2({ lat: l.lat, lng: l.lng })} title="Use as the secondary pin for geodetics">
+                pin 2
+              </button>
               <button className="link" onClick={() => libraryStore.getState().remove(l.id)} title="Delete">
                 delete
               </button>

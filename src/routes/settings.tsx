@@ -51,6 +51,14 @@ function SettingsPage() {
         <p className="muted">Twilight bounds follow the standard −6°, −12° and −18° definitions.</p>
       </section>
       <section>
+        <h2>Terrain</h2>
+        <label className="field">
+          <span>Fetch elevation data (Terrain Tiles)</span>
+          <input type="checkbox" checked={s.terrain} onChange={(e) => update({ terrain: e.target.checked })} />
+        </label>
+        <p className="muted">Powers the elevation badge, the sightline profile and the terrain horizon. Water reads as depth in the data; sightlines treat it as sea level.</p>
+      </section>
+      <section>
         <h2>Reset</h2>
         <button onClick={() => update({ ...DEFAULT_SETTINGS, customBasemaps: s.customBasemaps })}>Restore default settings</button>
       </section>

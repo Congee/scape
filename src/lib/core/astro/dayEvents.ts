@@ -20,7 +20,10 @@ export type EventKind =
   | 'set'
   | 'civilDusk'
   | 'nauticalDusk'
-  | 'astroDusk';
+  | 'astroDusk'
+  /** Upper limb clearing / dropping behind the terrain horizon. */
+  | 'terrainRise'
+  | 'terrainSet';
 
 export interface DayEvent {
   body: SkyBody;

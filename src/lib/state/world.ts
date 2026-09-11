@@ -18,6 +18,10 @@ export interface WorldState {
   pin: LngLat;
   /** Observer height above local ground, metres (horizon dip). */
   pinHeightM: number;
+  /** Secondary pin for geodetics (sightline target); null when off. */
+  pin2: LngLat | null;
+  /** Target height above ground at the secondary pin, metres. */
+  pin2HeightM: number;
   /** Simulated clock, epoch ms. */
   time: number;
   /** True while the clock follows real time. */
@@ -28,6 +32,9 @@ export interface WorldState {
   fly: FlyRequest | null;
   setPin(pin: LngLat): void;
   setPinHeight(m: number): void;
+  setPin2(pin: LngLat | null): void;
+  setPin2Height(m: number): void;
+  swapPins(): void;
   setTime(ms: number): void;
   nudgeTime(deltaMs: number): void;
   setDate(isoDate: string): void;
@@ -54,6 +61,8 @@ export const worldStore = create<WorldState>()(
       (set) => ({
         pin: DEFAULT_PIN,
         pinHeightM: 0,
+        pin2: null,
+        pin2HeightM: 0,
         time: Date.now(),
         live: true,
         tz: tzForPoint(DEFAULT_PIN),
@@ -62,6 +71,10 @@ export const worldStore = create<WorldState>()(
         fly: null,
         setPin: (pin) => set((s) => ({ pin, tz: s.tzAuto ? tzForPoint(pin) : s.tz })),
         setPinHeight: (pinHeightM) => set({ pinHeightM }),
+        setPin2: (pin2) => set({ pin2 }),
+        setPin2Height: (pin2HeightM) => set({ pin2HeightM }),
+        swapPins: () =>
+          set((s) => (s.pin2 ? { pin: s.pin2, pin2: s.pin, tz: s.tzAuto ? tzForPoint(s.pin2) : s.tz } : {})),
         setTime: (time) => set({ time, live: false }),
         nudgeTime: (d) => set((s) => ({ time: s.time + d, live: false })),
         setDate: (iso) => set((s) => ({ time: withLocalDate(new Date(s.time), iso, s.tz).getTime(), live: false })),
@@ -74,7 +87,7 @@ export const worldStore = create<WorldState>()(
       }),
       {
         name: 'scape.world',
-        partialize: (s) => ({ pin: s.pin, pinHeightM: s.pinHeightM, tz: s.tz, tzAuto: s.tzAuto, view: s.view })
+        partialize: (s) => ({ pin: s.pin, pinHeightM: s.pinHeightM, pin2: s.pin2, pin2HeightM: s.pin2HeightM, tz: s.tz, tzAuto: s.tzAuto, view: s.view })
       }
     )
   )

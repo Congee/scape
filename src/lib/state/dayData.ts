@@ -4,6 +4,7 @@ import type { DayEvent } from '@core/astro/dayEvents';
 import { dayBounds } from '@core/time/localDay';
 import type { AstroRequest, AstroResponse } from '@workers/astro.protocol';
 import { settingsStore } from './settings';
+import { horizonKeyFor, terrainStore } from './terrain';
 import { worldStore } from './world';
 
 export interface DayDataState {
@@ -47,7 +48,11 @@ export function startDayDataSync(): () => void {
     const w = worldStore.getState();
     const s = settingsStore.getState();
     const b = dayBounds(new Date(w.time), w.tz);
-    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, w.tz, b.isoDate, s.goldenAltitude].join('|');
+    // Only a horizon swept for the current pin may shape the events; a stale one is left out.
+    const t = terrainStore.getState();
+    const hk = horizonKeyFor(w, s);
+    const horizon = hk && t.horizon && t.horizonKey === hk ? t.horizon.profile : undefined;
+    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, w.tz, b.isoDate, s.goldenAltitude, horizon ? hk : '-'].join('|');
     if (key === dayDataStore.getState().key) return;
     seq++;
     const startMs = b.start.getTime();
@@ -59,7 +64,8 @@ export function startDayDataSync(): () => void {
       heightAboveGroundM: w.pinHeightM,
       startMs,
       endMs,
-      goldenAltitude: s.goldenAltitude
+      goldenAltitude: s.goldenAltitude,
+      horizon
     };
     worker.postMessage(req);
   };
@@ -72,7 +78,7 @@ export function startDayDataSync(): () => void {
   };
 
   compute();
-  const unsubs = [worldStore.subscribe(schedule), settingsStore.subscribe(schedule)];
+  const unsubs = [worldStore.subscribe(schedule), settingsStore.subscribe(schedule), terrainStore.subscribe(schedule)];
   return () => {
     for (const u of unsubs) u();
     clearTimeout(timer);

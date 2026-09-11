@@ -1,8 +1,10 @@
 import { makeObserver } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
+import { horizonAngleAt } from '@core/terrain/horizon';
 import { formatTime } from '@core/time/format';
 import { dayDataStore } from '@state/dayData';
 import { settingsStore } from '@state/settings';
+import { horizonKeyFor, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
 
 const PAD = { l: 30, r: 10, t: 18, b: 16 };
@@ -21,7 +23,8 @@ const COLORS = {
   moon: '#5aa9ff',
   gc: '#b48cff',
   cursor: '#e6edf3',
-  now: '#8fd18c'
+  now: '#8fd18c',
+  terrain: '#8fd18c'
 };
 
 function bandColor(sunAlt: number): string {
@@ -53,7 +56,8 @@ export class ChartController {
     this.unsubs.push(
       dayDataStore.subscribe(() => this.schedule()),
       worldStore.subscribe(() => this.schedule()),
-      settingsStore.subscribe(() => this.schedule())
+      settingsStore.subscribe(() => this.schedule()),
+      terrainStore.subscribe(() => this.schedule())
     );
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -126,8 +130,10 @@ export class ChartController {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const { dayStart, dayEnd, curve, events } = dayDataStore.getState();
-    const { time, tz, pin, pinHeightM } = worldStore.getState();
-    const { hour12, showGc } = settingsStore.getState();
+    const world = worldStore.getState();
+    const cfg = settingsStore.getState();
+    const { time, tz, pin, pinHeightM } = world;
+    const { hour12, showGc } = cfg;
     if (dayEnd <= dayStart || w < 40) return;
     const X = (t: number) => this.x(t, dayStart, dayEnd);
     const curveOk = curve && curve.startMs === dayStart;
@@ -178,6 +184,38 @@ export class ChartController {
     ctx.stroke();
     ctx.fillText('0°', PAD.l - 4, y0);
 
+    // Terrain horizon along the sun's path (filled) and the moon's path (dashed).
+    const t = terrainStore.getState();
+    const hk = horizonKeyFor(world, cfg);
+    const horizon = curveOk && hk && t.horizon && t.horizonKey === hk ? t.horizon.profile : null;
+    if (curveOk && horizon) {
+      const trace = (b: 'sun' | 'moon') => {
+        ctx.beginPath();
+        const azs = curve.azimuth[b];
+        for (let i = 0; i < curve.n; i++) {
+          const x = X(curve.startMs + i * curve.stepMs);
+          const y = this.y(clamp(horizonAngleAt(horizon, azs[i]), ALT_MIN, ALT_MAX));
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+      };
+      trace('sun');
+      ctx.lineTo(X(dayEnd), h - PAD.b);
+      ctx.lineTo(X(dayStart), h - PAD.b);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(143, 209, 140, 0.16)';
+      ctx.fill();
+      ctx.lineWidth = 1;
+      trace('sun');
+      ctx.strokeStyle = 'rgba(143, 209, 140, 0.85)';
+      ctx.stroke();
+      trace('moon');
+      ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = 'rgba(143, 209, 140, 0.6)';
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     if (curveOk) {
       const bodies: Array<['sun' | 'moon' | 'gc', string, number]> = [
         ['gc', COLORS.gc, 1.5],
@@ -202,13 +240,23 @@ export class ChartController {
       ctx.setLineDash([]);
     }
 
-    // Rise/set markers on the horizon.
+    // Rise/set markers: geometric ones on the 0° line, terrain ones where the limb meets the skyline.
     for (const ev of events) {
-      if (ev.kind !== 'rise' && ev.kind !== 'set') continue;
       if (ev.body === 'gc' && !showGc) continue;
+      const terrainEv = ev.kind === 'terrainRise' || ev.kind === 'terrainSet';
+      if (!terrainEv && ev.kind !== 'rise' && ev.kind !== 'set') continue;
+      const x = X(ev.time);
+      const y = terrainEv ? this.y(clamp(ev.altitude, ALT_MIN, ALT_MAX)) : y0;
+      if (terrainEv) {
+        ctx.strokeStyle = COLORS.terrain;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.fillStyle = COLORS[ev.body];
       ctx.beginPath();
-      ctx.arc(X(ev.time), y0, 3, 0, Math.PI * 2);
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
       ctx.fill();
     }
 

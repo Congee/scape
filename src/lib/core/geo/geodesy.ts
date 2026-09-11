@@ -75,9 +75,46 @@ export function geodesicRay(
   return out;
 }
 
+/** Standard terrestrial refraction coefficient; light bends down, so the Earth looks slightly flatter. */
+export const REFRACTION_K = 0.13;
+
+/** Curvature drop of the surface below the observer's tangent plane at `distM`, refraction included. */
+export function curvatureDropM(distM: number, k = REFRACTION_K): number {
+  return distM ** 2 / (2 * (EARTH_RADIUS_M / (1 - k)));
+}
+
 /** Elevation angle from observer to a target given horizontal distance and height difference. */
-export function elevationAngleDeg(distM: number, dHeightM: number): number {
-  // Includes the drop of the Earth's surface below the tangent plane.
-  const drop = distM ** 2 / (2 * EARTH_RADIUS_M);
-  return Math.atan2(dHeightM - drop, distM) * R2D;
+export function elevationAngleDeg(distM: number, dHeightM: number, k = REFRACTION_K): number {
+  return Math.atan2(dHeightM - curvatureDropM(distM, k), distM) * R2D;
+}
+
+/** Point a fraction `f` (0..1) along the great circle from a to b. */
+export function intermediatePoint(a: LngLat, b: LngLat, f: number): LngLat {
+  const φ1 = a.lat * D2R;
+  const λ1 = a.lng * D2R;
+  const φ2 = b.lat * D2R;
+  const λ2 = b.lng * D2R;
+  const δ = distanceM(a, b) / EARTH_RADIUS_M;
+  if (δ < 1e-12) return { ...a };
+  const A = Math.sin((1 - f) * δ) / Math.sin(δ);
+  const B = Math.sin(f * δ) / Math.sin(δ);
+  const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+  const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+  const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+  return { lng: normalizeLng(Math.atan2(y, x) * R2D), lat: Math.atan2(z, Math.sqrt(x * x + y * y)) * R2D };
+}
+
+/** Densified great-circle path from a to b as GeoJSON positions, longitude kept continuous. */
+export function geodesicPath(a: LngLat, b: LngLat, segments = 32): [number, number][] {
+  const out: [number, number][] = [[a.lng, a.lat]];
+  let prevLng = a.lng;
+  for (let i = 1; i <= segments; i++) {
+    const p = intermediatePoint(a, b, i / segments);
+    let lng = p.lng;
+    while (lng - prevLng > 180) lng -= 360;
+    while (lng - prevLng < -180) lng += 360;
+    prevLng = lng;
+    out.push([lng, p.lat]);
+  }
+  return out;
 }

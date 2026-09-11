@@ -18,13 +18,22 @@ const LABELS: Record<SkyBody, Partial<Record<EventKind, string>>> = {
     set: 'Sunset',
     civilDusk: 'Civil dusk',
     nauticalDusk: 'Nautical dusk',
-    astroDusk: 'Astronomical dusk'
+    astroDusk: 'Astronomical dusk',
+    terrainRise: 'Sun clears the terrain',
+    terrainSet: 'Sun behind the terrain'
   },
-  moon: { rise: 'Moonrise', transit: 'Moon transit', set: 'Moonset' },
-  gc: { rise: 'Galactic Centre rises', transit: 'Galactic Centre transit', set: 'Galactic Centre sets' }
+  moon: { rise: 'Moonrise', transit: 'Moon transit', set: 'Moonset', terrainRise: 'Moon clears the terrain', terrainSet: 'Moon behind the terrain' },
+  gc: {
+    rise: 'Galactic Centre rises',
+    transit: 'Galactic Centre transit',
+    set: 'Galactic Centre sets',
+    terrainRise: 'Galactic Centre clears the terrain',
+    terrainSet: 'Galactic Centre behind the terrain'
+  }
 };
 
-const RISING = new Set<EventKind>(['astroDawn', 'nauticalDawn', 'civilDawn', 'rise', 'goldenEnd']);
+const RISING = new Set<EventKind>(['astroDawn', 'nauticalDawn', 'civilDawn', 'rise', 'goldenEnd', 'terrainRise']);
+const TERRAIN = new Set<EventKind>(['terrainRise', 'terrainSet']);
 
 function shade(kind: EventKind): string {
   if (kind === 'transit') return 'mid';
@@ -59,7 +68,7 @@ function Row({ ev, active, tz, hour12 }: { ev: DayEvent; active: boolean; tz: st
   return (
     <li className={active ? 'active' : ''}>
       <button onClick={() => worldStore.getState().setTime(ev.time)} title="Set the clock to this event">
-        <span className={`dot ${ev.body} ${shade(ev.kind)}`} aria-hidden="true" />
+        <span className={`dot ${ev.body} ${shade(ev.kind)}${TERRAIN.has(ev.kind) ? ' terrain' : ''}`} aria-hidden="true" />
         <span className="label">{LABELS[ev.body][ev.kind] ?? ev.kind}</span>
         <span className="time">{formatTime(ev.time, tz, hour12)}</span>
         <span className="az">{degrees(ev.azimuth)}</span>

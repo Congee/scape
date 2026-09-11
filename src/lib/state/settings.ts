@@ -17,6 +17,13 @@ export interface Settings {
   showShadow: boolean;
   showGc: boolean;
   clickMovesPin: boolean;
+  /** Fetch elevation data at all (Terrain Tiles). */
+  terrain: boolean;
+  /** Sweep the terrain horizon: chart curve and terrain rise/set. */
+  terrainHorizon: boolean;
+  horizonRangeKm: number;
+  showHillshade: boolean;
+  terrain3d: boolean;
 }
 
 export interface SettingsState extends Settings {
@@ -36,7 +43,12 @@ export const DEFAULT_SETTINGS: Settings = {
   showLiveLines: true,
   showShadow: true,
   showGc: true,
-  clickMovesPin: true
+  clickMovesPin: true,
+  terrain: true,
+  terrainHorizon: true,
+  horizonRangeKm: 100,
+  showHillshade: false,
+  terrain3d: false
 };
 
 export const settingsStore = create<SettingsState>()(

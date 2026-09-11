@@ -12,6 +12,8 @@ interface MapSearch {
   lat?: number;
   lng?: number;
   z?: number;
+  lat2?: number;
+  lng2?: number;
   /** ISO instant, minute precision. */
   t?: string;
   tz?: string;
@@ -25,6 +27,8 @@ export const Route = createFileRoute('/')({
     lat: num(raw.lat),
     lng: num(raw.lng),
     z: num(raw.z),
+    lat2: num(raw.lat2),
+    lng2: num(raw.lng2),
     t: str(raw.t),
     tz: str(raw.tz)
   }),
@@ -45,6 +49,7 @@ function MapPage() {
       w.setPin(p);
       w.flyTo(p, search.z ?? w.view.zoom, false);
     }
+    if (search.lat2 != null && search.lng2 != null && Math.abs(search.lat2) <= 90 && Math.abs(search.lng2) <= 180) w.setPin2({ lat: search.lat2, lng: search.lng2 });
     if (search.tz) w.setTz(search.tz);
     if (search.t) {
       const ms = Date.parse(search.t);
@@ -65,6 +70,8 @@ function MapPage() {
           lat: round(w.pin.lat, 5),
           lng: round(w.pin.lng, 5),
           z: round(w.view.zoom, 2),
+          lat2: w.pin2 ? round(w.pin2.lat, 5) : undefined,
+          lng2: w.pin2 ? round(w.pin2.lng, 5) : undefined,
           t: w.live ? undefined : new Date(w.time).toISOString().slice(0, 16) + 'Z',
           tz: w.tzAuto ? undefined : w.tz
         }

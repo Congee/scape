@@ -204,13 +204,22 @@ Everything exportable as one JSON (`.scape.json`) plus KML/GeoJSON for points.
 | 7 | Extras | Each calculator cross-checked against PlanIt worked examples |
 
 Phase 1 shipped on 2026-09-11 (the elevation badge moved to Phase 2 alongside the DEM work).
-Phase 2 is next.
+Phase 2 shipped on 2026-09-11: elevation badge, secondary pin with sightline (distance, bearing,
+elevation angle, profile chart, clear/marginal/blocked colouring), 360° terrain horizon swept in a
+worker from Terrarium tiles (0.5° azimuth steps, zoom ladder 14→8 out to a configurable range),
+terrain rise/set events for sun, moon and Galactic Centre, skyline on the altitude chart, hillshade
+and 3D terrain toggles. Phase 3 is next.
 
 ## 8. Risks and decisions taken
 
 - **Time zone accuracy**: tz-lookup mismatches near borders. Mitigation: show tz badge with
   "auto" marker, one-click override, and remember overrides per saved location.
 - **Terrarium tile licensing** is mixed (mostly PD, some CC BY). Show attribution per region.
+- **Never decode DEM PNGs through a canvas.** Chromium's image pipeline nudges isolated channel
+  values by one, and one unit of red is 256 m in Terrarium; the result was 170 m phantom cliffs
+  next to the pin. Tiles are decoded by hand (`core/terrain/png.ts`), canvas is only a fallback.
+- **Water is bathymetry** in Terrarium, so sightlines and the horizon clamp ground to sea level.
+  Land below sea level (Death Valley, Dead Sea) is therefore treated as 0 m there.
 - **Safari storage eviction** can purge OPFS after long idle. Warn, and make re-download easy.
 - **OpenFreeMap vs Protomaps schema** differ, so online and offline styles will look a little
   different. Acceptable for dogfooding; can unify by serving Protomaps offline builds online

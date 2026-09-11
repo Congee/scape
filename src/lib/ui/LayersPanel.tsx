@@ -13,6 +13,8 @@ export function LayersPanel() {
   const [url, setUrl] = useState('');
   const [flavor, setFlavor] = useState<PmFlavor>('light');
   const mapError = useMapStatus((s) => s.error);
+  const terrain = useSettings((s) => s.terrain);
+  const rangeKm = useSettings((s) => s.horizonRangeKm);
 
   const addUrl = () => {
     const u = url.trim();
@@ -70,6 +72,23 @@ export function LayersPanel() {
       <Toggle k="showShadow" label="Sun shadow direction" />
       <Toggle k="showGc" label="Galactic Centre" />
       <Toggle k="clickMovesPin" label="Clicking the map moves the pin" />
+
+      <h3>Terrain</h3>
+      {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
+      <Toggle k="showHillshade" label="Hillshade" />
+      <Toggle k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)" />
+      <Toggle k="terrainHorizon" label="Terrain horizon: skyline on the chart, rise and set behind terrain" />
+      <label className="toggle">
+        <span>Horizon range</span>
+        <select value={rangeKm} onChange={(e) => update({ horizonRangeKm: Number(e.target.value) })} title="How far the skyline sweep looks">
+          {[50, 100, 150, 200].map((km) => (
+            <option key={km} value={km}>
+              {km} km
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted hint">Elevation from Terrain Tiles (Mapzen, AWS Open Data), fetched per tile as needed and cached by the browser.</p>
     </div>
   );
 }
