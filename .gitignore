@@ -27,3 +27,6 @@ src/routeTree.gen.ts
 
 # Build output
 dist
+
+# Local dev-only data (PMTiles extracts etc.)
+public/dev/
