@@ -1,3 +1,5 @@
+import type { FinderSettings } from './astro/finder';
+import type { LngLat } from './geo/geodesy';
 import type { Orientation } from './optics/fov';
 
 export interface SavedLocation {
@@ -23,6 +25,15 @@ export const MarkerCategory = {
 } as const;
 export type MarkerCategory = (typeof MarkerCategory)[keyof typeof MarkerCategory];
 
+/** How the viewfinder draws the marker: a flat bar, or a flat-shaded 3D solid. */
+export const MarkerShape = {
+  Bar: 'Bar',
+  Box: 'Box',
+  Cylinder: 'Cylinder',
+  Spire: 'Spire'
+} as const;
+export type MarkerShape = (typeof MarkerShape)[keyof typeof MarkerShape];
+
 export interface SavedMarker {
   id: string;
   name: string;
@@ -33,6 +44,12 @@ export interface SavedMarker {
   heightM: number;
   /** Width across the sightline, metres; drawn in the viewfinder when > 0. */
   widthM: number;
+  /** Viewfinder solid; absent means Bar. */
+  shape?: MarkerShape;
+  /** Footprint depth along the rotation axis, metres; Box only, defaults to widthM. */
+  depthM?: number;
+  /** Footprint rotation, degrees clockwise from north about the marker point. */
+  rotationDeg?: number;
   /** 0 (unrated) to 5. */
   rating: number;
   notes: string;
@@ -72,6 +89,16 @@ export interface SavedPlan {
   updatedAt: number;
 }
 
+/** A finder search kept for re-running; the pin records where it was run from. */
+export interface SavedSearch {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  pin: LngLat | null;
+  settings: FinderSettings;
+}
+
 export interface ScapeExport {
   format: 'scape';
   version: 1;
@@ -79,4 +106,6 @@ export interface ScapeExport {
   locations: SavedLocation[];
   markers: SavedMarker[];
   plans: SavedPlan[];
+  /** Added after version 1; absent in older files. */
+  searches?: SavedSearch[];
 }

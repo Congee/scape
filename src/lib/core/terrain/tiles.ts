@@ -53,3 +53,15 @@ export function tilePixelToLngLat(z: number, x: number, y: number, px: number, p
   const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * yf))) * R2D;
   return { lng, lat };
 }
+
+/** Tiles at zoom `z` overlapping a normalized Mercator extent (0..1 on both axes). */
+export function tilesInBounds(b: { x0: number; x1: number; y0: number; y1: number }, z: number): TileCoord[] {
+  const n = 2 ** z;
+  const x0 = clamp(Math.floor(b.x0 * n), 0, n - 1);
+  const x1 = clamp(Math.floor(b.x1 * n), 0, n - 1);
+  const y0 = clamp(Math.floor(b.y0 * n), 0, n - 1);
+  const y1 = clamp(Math.floor(b.y1 * n), 0, n - 1);
+  const out: TileCoord[] = [];
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) out.push({ z, x, y });
+  return out;
+}

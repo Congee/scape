@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { PointRecord } from '@core/io/points';
-import { MarkerCategory, type SavedMarker } from '@core/plan';
+import { MarkerCategory, MarkerShape, type SavedMarker } from '@core/plan';
 import { deleteOne, listAll, putOne } from '@data/db';
 
 export interface MarkersState {
@@ -28,6 +28,9 @@ const withDefaults = (input: Partial<SavedMarker> & Pick<SavedMarker, 'lat' | 'l
     lng: input.lng,
     heightM: input.heightM ?? 0,
     widthM: input.widthM ?? 0,
+    shape: input.shape ?? MarkerShape.Bar,
+    depthM: input.depthM,
+    rotationDeg: input.rotationDeg ?? 0,
     rating: input.rating ?? 0,
     notes: input.notes ?? '',
     showInViewfinder: input.showInViewfinder ?? true,

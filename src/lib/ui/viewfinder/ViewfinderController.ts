@@ -7,11 +7,12 @@ import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@co
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, position } from '@core/astro/positions';
 import { SEMIDIAMETER_DEG } from '@core/astro/terrainEvents';
-import { compass, degrees, distance } from '@core/format';
-import { bearingDeg, distanceM, elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
+import { compass, degrees, distance, height, Units } from '@core/format';
+import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
+import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
 import { frameFov, frameMm } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
-import type { SavedMarker } from '@core/plan';
+import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
 import { columnAt, occluded, surfaceAt, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
@@ -31,6 +32,8 @@ const D2R = Math.PI / 180;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
 const MARGIN = 26;
+// Wide enough for the side rulers' labels ("-1410 ft").
+const MARGIN_X = 46;
 const MAX_COLUMNS = 2400;
 // MapLibre's near plane cuts the 3D ground within a few metres of the eye; the canvas paints that band.
 const NEAR_M = 6;
@@ -43,6 +46,17 @@ const smooth = (a: number, b: number, x: number) => {
 };
 const mix = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const css = (c: number[]) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+/** Round 1/2/5 × 10ⁿ step at or above `raw`, for ruler ticks. */
+const niceStep = (raw: number) => {
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / pow;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
+};
+/** Hex colour multiplied by a flat shade factor. */
+const shaded = (hex: string, k: number) => {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`;
+};
 
 /** Sky and ground colours for a sun altitude, shared by the raster and the 3D view's sky. */
 function palette(sunAlt: number) {
@@ -188,7 +202,7 @@ export class ViewfinderController {
 
   /** Frame with the sensor's aspect ratio, centred with room for the tick rulers. */
   private frameRect(frameWmm: number, frameHmm: number): Frame {
-    const availW = Math.max(40, this.w - 2 * MARGIN);
+    const availW = Math.max(40, this.w - 2 * MARGIN_X);
     const availH = Math.max(40, this.h - 2 * MARGIN);
     const scale = Math.min(availW / frameWmm, availH / frameHmm);
     const w = frameWmm * scale;
@@ -677,19 +691,71 @@ export class ViewfinderController {
         ctx.fillText(cardinal || `${Math.round(norm)}°`, x, frame.y - 3);
       }
     }
-    ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
+    // PlanIt puts heights at the subject distance on the left and degrees on the right.
+    const refM = this.rulerDistanceM();
+    if (refM == null || !this.drawHeightRuler(sc, refM)) this.drawDegreeRuler(sc, true);
+    this.drawDegreeRuler(sc, false);
+  }
+
+  /** Distance the left ruler reads heights at: the target, else the composed aim distance. */
+  private rulerDistanceM(): number | null {
+    const w = worldStore.getState();
+    if (w.pin2) return distanceM(w.pin, w.pin2);
+    const c = compositionStore.getState();
+    const d = c.focusDistM ?? c.fovRangeM;
+    return d != null && d > 0 ? d : null;
+  }
+
+  private drawDegreeRuler(sc: Scene, left: boolean) {
+    const { ctx } = this;
+    const { frame } = sc;
+    const x0 = left ? frame.x : frame.x + frame.w;
+    const dir = left ? 1 : -1;
+    ctx.textAlign = left ? 'right' : 'left';
     const altStep = sc.vfov < 10 ? 1 : sc.vfov < 30 ? 5 : 10;
     for (let alt = -80; alt <= 80; alt += altStep) {
       const p = this.toPx(sc, sc.aim.azimuthDeg, alt);
       if (!p || p.y < frame.y || p.y > frame.y + frame.h) continue;
       const y = Math.round(p.y) + 0.5;
       ctx.beginPath();
-      ctx.moveTo(frame.x, y);
-      ctx.lineTo(frame.x + (alt === 0 ? 12 : 6), y);
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x0 + dir * (alt === 0 ? 12 : 6), y);
       ctx.stroke();
-      ctx.fillText(`${alt > 0 ? '+' : ''}${alt}°`, frame.x - 3, y);
+      ctx.fillText(`${alt > 0 ? '+' : ''}${alt}°`, x0 - dir * 3, y);
     }
+  }
+
+  /** Heights above sea level read at `refM`; false when the span is unusable so degrees stay. */
+  private drawHeightRuler(sc: Scene, refM: number): boolean {
+    const { ctx } = this;
+    const { frame } = sc;
+    const units = settingsStore.getState().units;
+    const perM = units === Units.Imperial ? 3.28084 : 1;
+    const altAt = (yMm: number) => clamp(unproject(sc.cam, sc.basis, 0, yMm).altitudeDeg, -80, 80);
+    const lo = heightAtAngle(sc.eyeM, refM, altAt(-sc.cam.frameHmm / 2)) * perM;
+    const hi = heightAtAngle(sc.eyeM, refM, altAt(sc.cam.frameHmm / 2)) * perM;
+    const span = hi - lo;
+    if (!Number.isFinite(span) || span <= 0) return false;
+    const step = niceStep(span / 8);
+    if (!Number.isFinite(step) || step <= 0 || span / step > 200) return false;
+    ctx.textAlign = 'right';
+    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+      const m = v / perM;
+      const p = this.toPx(sc, sc.aim.azimuthDeg, elevationAngleDeg(refM, m - sc.eyeM));
+      if (!p || p.y < frame.y || p.y > frame.y + frame.h) continue;
+      const y = Math.round(p.y) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(frame.x, y);
+      ctx.lineTo(frame.x + 6, y);
+      ctx.stroke();
+      ctx.fillText(height(m, units), frame.x - 3, y);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`at ${distance(refM, units)}`, 2, frame.y - 3);
+    ctx.textBaseline = 'middle';
+    return true;
   }
 
   private drawPath(sc: Scene, body: SkyBody, color: string) {
@@ -850,6 +916,8 @@ export class ViewfinderController {
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
+    // Flat shading follows the sun by day and a fixed key light from the camera's left at night.
+    const sunAz = sc.sunAlt > -6 ? position(SkyBody.Sun, sc.time, sc.obs).azimuth : null;
     const markers: SavedMarker[] = markersStore.getState().markers.filter((m) => m.showInViewfinder);
     for (const m of markers) {
       const d = distanceM(w.pin, m);
@@ -863,15 +931,21 @@ export class ViewfinderController {
       const topAlt = ground != null ? elevationAngleDeg(d, ground + m.heightM - sc.eyeM) : baseAlt + (m.heightM / d) / D2R;
       const base = this.toPx(sc, az, baseAlt);
       const top = this.toPx(sc, az, topAlt);
-      if (!base || !top || !(this.inFrame(sc, base, 20) || this.inFrame(sc, top, 20))) continue;
+      const halfW = m.widthM > 0 ? (Math.atan(m.widthM / 2 / d) / D2R / sc.hfov) * sc.frame.w : 0;
+      if (!base || !top || !(this.inFrame(sc, base, 20 + halfW) || this.inFrame(sc, top, 20 + halfW))) continue;
       const hidden = !!sc.view && occluded(sc.view, az, topAlt, d);
       const color = CATEGORY_COLORS[m.category];
       ctx.globalAlpha = hidden ? 0.4 : 1;
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
       ctx.lineWidth = 1.5;
-      const halfW = m.widthM > 0 ? (Math.atan(m.widthM / 2 / d) / D2R / sc.hfov) * sc.frame.w : 0;
-      if (m.heightM > 0 || halfW > 0) {
+      const shape = m.shape ?? MarkerShape.Bar;
+      const solid = shape === MarkerShape.Bar ? null : solidOf(shape, { widthM: m.widthM, depthM: m.depthM ?? m.widthM, heightM: m.heightM, rotationDeg: m.rotationDeg ?? 0 });
+      if (solid?.faces.length) {
+        const groundM = ground ?? heightAtAngle(sc.eyeM, d, baseAlt);
+        this.drawSolid(sc, m, solid, d, groundM, color, sunAz ?? bearingDeg(m, w.pin) + 90);
+        ctx.fillStyle = color;
+      } else if (m.heightM > 0 || halfW > 0) {
         ctx.beginPath();
         ctx.rect(base.x - Math.max(halfW, 1), top.y, Math.max(halfW * 2, 2), Math.max(1, base.y - top.y));
         ctx.stroke();
@@ -886,6 +960,40 @@ export class ViewfinderController {
       ctx.fillText(`${m.name} · ${distance(d, s.units)}`, top.x, top.y - 22);
     }
     ctx.restore();
+  }
+
+  /** Flat-shaded prism for a marker: every footprint vertex placed on the ground, faces painted back to front. */
+  private drawSolid(sc: Scene, m: SavedMarker, solid: Solid, distM: number, groundM: number, color: string, lightAzDeg: number) {
+    const { ctx } = this;
+    const pin = worldStore.getState().pin;
+    const toCam = bearingDeg(m, pin) * D2R;
+    const eye = { e: distM * Math.sin(toCam), n: distM * Math.cos(toCam), u: sc.eyeM - groundM };
+    const pts = solid.vertices.map((v) => {
+      const pol = polarOf(v);
+      const gp = pol.distM > 1e-6 ? destination(m, pol.bearingDeg, pol.distM) : m;
+      const dv = distanceM(pin, gp);
+      if (dv < 1e-6) return null;
+      return this.toPx(sc, bearingDeg(pin, gp), elevationAngleDeg(dv, groundM + v.u - sc.eyeM));
+    });
+    // Vertices projected well past the frame are still drawn; only a wholly off-screen face is dropped.
+    const slack = Math.max(sc.frame.w, sc.frame.h) * 2;
+    ctx.lineWidth = 1;
+    for (const f of facesToward(solid, eye)) {
+      const poly = f.v.map((i) => pts[i]);
+      if (poly.some((p) => p == null)) continue;
+      if (poly.every((p) => !this.inFrame(sc, p, slack))) continue;
+      ctx.fillStyle = shaded(color, faceShade(f, lightAzDeg));
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      for (const [i, p] of poly.entries()) {
+        if (i === 0) ctx.moveTo(p!.x, p!.y);
+        else ctx.lineTo(p!.x, p!.y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.lineWidth = 1.5;
   }
 
   /** Elevation angle of the terrain surface at a distance along an azimuth, from the sweep's visible points. */

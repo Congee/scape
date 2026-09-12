@@ -5,18 +5,21 @@ import {
   NavigationControl,
   ScaleControl,
   type GeoJSONSource,
+  type ImageSource,
   type MapMouseEvent
 } from 'maplibre-gl';
 import { shallow } from 'zustand/shallow';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
 import { bearingDeg, destination, distanceM, type LngLat } from '@core/geo/geodesy';
+import { cellOf, gridCorners } from '@core/geo/grid';
 import { depthOfField } from '@core/optics/dof';
 import { circleOfConfusionMm, clampFocalMm, focalForFovMm, fovDeg, frameMm } from '@core/optics/fov';
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_URL } from '@data/terrainTiles';
+import { alignStore } from '@state/align';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById } from '@state/gear';
@@ -26,6 +29,8 @@ import { findBasemap, settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
 import { PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
+import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
+import { paintHeat } from './heat';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 
 const EVENTS_SRC = 'sky-events';
@@ -33,6 +38,10 @@ const LIVE_SRC = 'sky-live';
 const GEO_SRC = 'geodetic';
 const FOV_SRC = 'fov';
 const MARKERS_SRC = 'markers';
+const HEAT_SRC = 'heat';
+const HEAT_LAYER = 'heat';
+// Stand-in until the first grid arrives; an image source needs a URL up front.
+const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 // MapLibre wants separate DEM sources for hillshade and 3D terrain; same tiles, cached once by the browser.
 const DEM_SRC = 'terrain-dem';
 const HILL_SRC = 'terrain-dem-hillshade';
@@ -61,6 +70,7 @@ export class MapController {
   private map: MaplibreMap;
   private pin: Marker;
   private pin2: Marker | null = null;
+  private candidate: Marker | null = null;
   private fovHandle: Marker | null = null;
   private fovEdgeHandle: Marker | null = null;
   private scale: ScaleControl;
@@ -98,6 +108,8 @@ export class MapController {
 
     this.map.on('click', (e: MapMouseEvent) => {
       const p = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+      const al = alignStore.getState();
+      if ((al.mode === HeatMode.Align || al.mode === HeatMode.Time) && al.result && cellOf(al.result.grid, p)) return al.pick(p);
       if (this.map.getLayer('markers-circle') && this.map.queryRenderedFeatures(e.point, { layers: ['markers-circle'] }).length) return;
       const ms = markersStore.getState();
       if (ms.placing || e.originalEvent.altKey) {
@@ -189,7 +201,9 @@ export class MapController {
         { equalityFn: shallow }
       ),
       settingsStore.subscribe((st) => st.showLightPollution, () => this.applyNightLights()),
-      settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u))
+      settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
+      alignStore.subscribe((st) => [st.result, st.opacity] as const, () => this.renderHeat(), { equalityFn: shallow }),
+      alignStore.subscribe((st) => st.candidate, (c) => this.syncCandidate(c))
     );
   }
 
@@ -251,6 +265,17 @@ export class MapController {
 
   private addOverlayLayers() {
     if (this.map.getSource(EVENTS_SRC)) return;
+    this.map.addSource(HEAT_SRC, { type: 'image', url: BLANK_PNG, coordinates: [[-1, 1], [1, 1], [1, -1], [-1, -1]] });
+    this.map.addLayer(
+      {
+        id: HEAT_LAYER,
+        type: 'raster',
+        source: HEAT_SRC,
+        layout: { visibility: 'none' },
+        paint: { 'raster-opacity': alignStore.getState().opacity, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 }
+      },
+      this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id
+    );
     this.map.addSource(EVENTS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(LIVE_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(GEO_SRC, { type: 'geojson', data: EMPTY });
@@ -383,7 +408,7 @@ export class MapController {
     const t3d = s.terrain && s.terrain3d;
     if (hill && !this.map.getLayer('hillshade')) {
       this.ensureDem(HILL_SRC);
-      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id ?? 'fov-fill';
+      const before = this.map.getLayer(HEAT_LAYER) ? HEAT_LAYER : (this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id ?? 'fov-fill');
       this.map.addLayer(
         { id: 'hillshade', type: 'hillshade', source: HILL_SRC, paint: { 'hillshade-method': 'igor', 'hillshade-exaggeration': 0.6 } },
         before
@@ -421,10 +446,38 @@ export class MapController {
     this.renderGeodetic();
     this.renderFov();
     this.renderMarkers();
+    this.renderHeat();
   }
 
   private source(id: string): GeoJSONSource | undefined {
     return this.styleReady ? (this.map.getSource(id) as GeoJSONSource | undefined) : undefined;
+  }
+
+  private renderHeat() {
+    const src = this.styleReady ? (this.map.getSource(HEAT_SRC) as ImageSource | undefined) : undefined;
+    if (!src || !this.map.getLayer(HEAT_LAYER)) return;
+    const a = alignStore.getState();
+    if (!a.result) return void this.map.setLayoutProperty(HEAT_LAYER, 'visibility', 'none');
+    src.updateImage({ url: paintHeat(a.result, { toleranceDeg: a.toleranceDeg, windowMin: a.windowMin }), coordinates: gridCorners(a.result.grid) });
+    this.map.setPaintProperty(HEAT_LAYER, 'raster-opacity', a.opacity);
+    this.map.setLayoutProperty(HEAT_LAYER, 'visibility', 'visible');
+  }
+
+  private syncCandidate(c: AlignCandidate | null) {
+    if (!c) {
+      this.candidate?.remove();
+      this.candidate = null;
+      return;
+    }
+    if (!this.candidate) {
+      const el = document.createElement('div');
+      el.className = 'map-candidate';
+      el.title = 'Alignment candidate; click to clear';
+      el.addEventListener('click', () => alignStore.getState().clearCandidate());
+      this.candidate = new Marker({ element: el }).setLngLat([c.lng, c.lat]).addTo(this.map);
+      return;
+    }
+    this.candidate.setLngLat([c.lng, c.lat]);
   }
 
   private renderEvents() {
@@ -525,6 +578,7 @@ export class MapController {
     for (const u of this.unsubs) u();
     this.pin.remove();
     this.pin2?.remove();
+    this.candidate?.remove();
     this.fovHandle?.remove();
     this.fovEdgeHandle?.remove();
     this.map.remove();

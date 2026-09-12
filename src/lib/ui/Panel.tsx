@@ -1,3 +1,4 @@
+import { FindPanel } from './FindPanel';
 import { FramePanel } from './FramePanel';
 import { GeodeticsPanel } from './GeodeticsPanel';
 import { LayersPanel } from './LayersPanel';
@@ -7,7 +8,7 @@ import { NightPanel } from './NightPanel';
 import { Timeline } from './Timeline';
 import { PanelTab, uiStore, useUi } from '@state/ui';
 
-const TABS: PanelTab[] = [PanelTab.Timeline, PanelTab.Geodetics, PanelTab.Frame, PanelTab.Night, PanelTab.Markers, PanelTab.Layers];
+const TABS: PanelTab[] = [PanelTab.Timeline, PanelTab.Geodetics, PanelTab.Frame, PanelTab.Night, PanelTab.Find, PanelTab.Markers, PanelTab.Layers];
 
 export function Panel() {
   const tab = useUi((s) => s.panelTab);
@@ -30,6 +31,7 @@ export function Panel() {
         {tab === PanelTab.Geodetics && <GeodeticsPanel />}
         {tab === PanelTab.Frame && <FramePanel />}
         {tab === PanelTab.Night && <NightPanel />}
+        {tab === PanelTab.Find && <FindPanel />}
         {tab === PanelTab.Markers && <MarkersPanel />}
         {tab === PanelTab.Layers && <LayersPanel />}
       </div>

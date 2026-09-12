@@ -1,5 +1,5 @@
 import type { Feature, FeatureCollection, Point } from 'geojson';
-import { MarkerCategory, type SavedMarker } from '@core/plan';
+import { MarkerCategory, MarkerShape, type SavedMarker } from '@core/plan';
 
 /** A point read from or written to an interchange file; everything but the position is optional. */
 export interface PointRecord {
@@ -10,6 +10,9 @@ export interface PointRecord {
   category?: MarkerCategory;
   heightM?: number;
   widthM?: number;
+  shape?: MarkerShape;
+  depthM?: number;
+  rotationDeg?: number;
   rating?: number;
   showInViewfinder?: boolean;
 }
@@ -19,6 +22,9 @@ export interface MarkerProps {
   category: MarkerCategory;
   heightM: number;
   widthM: number;
+  shape?: MarkerShape;
+  depthM?: number;
+  rotationDeg?: number;
   rating: number;
   notes: string;
   showInViewfinder: boolean;
@@ -41,7 +47,7 @@ export function markersToGeoJson(markers: SavedMarker[]): FeatureCollection<Poin
     features: markers.map((m) => ({
       type: 'Feature',
       id: m.id,
-      properties: { name: m.name, category: m.category, heightM: m.heightM, widthM: m.widthM, rating: m.rating, notes: m.notes, showInViewfinder: m.showInViewfinder },
+      properties: { name: m.name, category: m.category, heightM: m.heightM, widthM: m.widthM, shape: m.shape, depthM: m.depthM, rotationDeg: m.rotationDeg, rating: m.rating, notes: m.notes, showInViewfinder: m.showInViewfinder },
       geometry: { type: 'Point', coordinates: [m.lng, m.lat] }
     }))
   };
@@ -54,10 +60,11 @@ function recordFromProps(lng: number, lat: number, props: Record<string, unknown
   if (notes) r.notes = notes;
   const cat = categoryFrom(p.category) ?? categoryFrom(p.type);
   if (cat) r.category = cat;
-  for (const k of ['heightM', 'widthM', 'rating'] as const) {
+  for (const k of ['heightM', 'widthM', 'depthM', 'rotationDeg', 'rating'] as const) {
     const v = num(p[k]);
     if (v !== undefined) r[k] = v;
   }
+  if (typeof p.shape === 'string' && (Object.values(MarkerShape) as string[]).includes(p.shape)) r.shape = p.shape as MarkerShape;
   if (typeof p.showInViewfinder === 'boolean') r.showInViewfinder = p.showInViewfinder;
   return r;
 }

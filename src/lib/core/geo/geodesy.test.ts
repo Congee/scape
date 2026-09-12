@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bearingDeg, destination, distanceM, elevationAngleDeg, geodesicRay } from './geodesy';
+import { bearingDeg, destination, distanceM, elevationAngleDeg, geodesicRay, heightAtAngle } from './geodesy';
 
 const nyc = { lng: -74.006, lat: 40.7128 };
 const london = { lng: -0.1276, lat: 51.5072 };
@@ -25,5 +25,11 @@ describe('geodesy', () => {
   it('computes an elevation angle with Earth curvature', () => {
     expect(elevationAngleDeg(1000, 100)).toBeCloseTo(5.71, 1);
     expect(elevationAngleDeg(50_000, 0)).toBeLessThan(0);
+  });
+
+  it('inverts the elevation angle back to a height', () => {
+    for (const [d, h] of [[1000, 1400], [42_000, 120], [250, -30]]) {
+      expect(heightAtAngle(90, d, elevationAngleDeg(d, h - 90))).toBeCloseTo(h, 6);
+    }
   });
 });

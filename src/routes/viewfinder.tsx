@@ -4,6 +4,7 @@ import { Badges } from '@ui/Badges';
 import { DateBar } from '@ui/DateBar';
 import { Panel } from '@ui/Panel';
 import { AltitudeChart } from '@ui/chart/AltitudeChart';
+import { BodyStrip } from '@ui/viewfinder/BodyStrip';
 import { Viewfinder } from '@ui/viewfinder/Viewfinder';
 import { ViewTools } from '@ui/viewfinder/ViewTools';
 
@@ -27,6 +28,7 @@ function ViewfinderPage() {
         <DateBar />
         <Badges />
       </header>
+      <BodyStrip />
       <div className="vf-area">
         <Viewfinder />
       </div>

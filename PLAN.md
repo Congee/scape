@@ -224,10 +224,23 @@ in the astro worker (dark sky × core altitude or skyline × moon rule) with a N
 band; 500/NPF rules from the camera's pixel pitch; IMO shower list with peak dates from solar
 longitude; Polaris clock positions; NASA VIIRS night-lights overlay. The Frame tab gained a searchable
 camera and lens catalogue (185 bodies, 346 lenses) that sets sensor, pixel count, focal range and
-aperture. Phase 5 is next.
+aperture.
 Viewfinder 3D (2026-09-11): a second MapLibre instance under the viewfinder canvas shows the map's
 terrain, textured with the current basemap, from the camera location with the frame's exact field of
 view; the canvas leaves the ground transparent and keeps the swept skyline, sky, stars and overlays.
+Phase 5 shipped on 2026-09-12: a constrained-search engine (`core/astro/finder.ts`) that lists every
+stay of the sun, moon or Galactic Centre inside an azimuth × altitude window over a date range:
+altitude bands from exact crossing searches refined against the refracted position, azimuth steps
+bounded by the sidereal rate so no pass is skipped, bisection at the window edges, an optional terrain
+skyline, then sky, moon-illumination, moon-down and weekday filters; it runs in a worker in 14-day
+chunks with progress. The Find tab sets the window from the target location or the frame, has
+full-moon and dark-sky presets, results that set the time, CSV export and saved searches (Library and
+backup). Shot alignment and visibility heat layers come from a second worker over the DEM
+(`core/align/`): Align and Time around the target location (camera cells that put the body behind it
+within a tolerance during the time window, sightline checked; picking a cell moves the camera and the
+time), Visible (cells where the body clears the terrain at the moment) and Viewshed (ground seen from
+the camera). The viewfinder gained landmark solids (box, cylinder and spire markers drawn as
+flat-shaded prisms), a height ruler at the target distance and a sun/moon header. Phase 6 is next.
 
 ## 8. Risks and decisions taken
 
@@ -260,6 +273,20 @@ view; the canvas leaves the ground transparent and keeps the swept skyline, sky,
   the ground at the camera's feet, which the canvas paints and fades in; Mercator has no earth
   curvature, so ridges beyond ~50 km sit up to 0.4° higher than the sweep, hidden under the canvas sky;
   the basemap's labels are stripped in the 3D view.
+- **Finder searches exactly instead of sampling.** Band edges come from astronomy-engine's altitude
+  search (refined by bisection, because that search ignores refraction while positions include it),
+  azimuth is stepped no further than the sidereal rate allows at that altitude, and edges are bisected
+  to the second. A brute-force 30 s scan is the unit-test oracle.
+- **Heat grids live in normalised Mercator.** Cells are square on the ground, the image source maps
+  onto the map without resampling, and one topocentric RA/Dec per time sample plus per-cell trig
+  (`core/astro/fastHorizon.ts`) keeps a 64 × 64 × 240 grid under a second; the error stays below 0.02°
+  within 60 km of the reference observer.
+- **Terrarium, not HGT.** PlanIt reads SRTM `.hgt` tiles; Terrarium already merges that SRTM with 3DEP
+  and EU-DEM and is fetched per tile. Its ~30 m ground resolution bounds alignment precision, which is
+  why the Align mode has a tolerance and the panel says to confirm the framing in the viewfinder.
+- **Landmark solids before 3D models.** Box, cylinder and spire markers give exact angular geometry
+  from height, width, depth and rotation on the existing canvas. glTF/OBJ model import and OSM
+  building extrusion are possible follow-ups; both are stack decisions left to the user.
 - **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
   string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
   objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.

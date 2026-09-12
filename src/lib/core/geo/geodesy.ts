@@ -88,6 +88,11 @@ export function elevationAngleDeg(distM: number, dHeightM: number, k = REFRACTIO
   return Math.atan2(dHeightM - curvatureDropM(distM, k), distM) * R2D;
 }
 
+/** Inverse of `elevationAngleDeg`: height of a point seen at `angleDeg` from an eye at `eyeM`. */
+export function heightAtAngle(eyeM: number, distM: number, angleDeg: number, k = REFRACTION_K): number {
+  return eyeM + distM * Math.tan(angleDeg * D2R) + curvatureDropM(distM, k);
+}
+
 /** Point a fraction `f` (0..1) along the great circle from a to b. */
 export function intermediatePoint(a: LngLat, b: LngLat, f: number): LngLat {
   const φ1 = a.lat * D2R;

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { compass, degrees, distance } from '@core/format';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
 import { markersToGeoJson, markersToGpx, markersToKml } from '@core/io/points';
-import { MarkerCategory, type SavedMarker } from '@core/plan';
+import { MarkerCategory, MarkerShape, type SavedMarker } from '@core/plan';
 import { parsePointsText } from '@data/importPoints';
 import { markersStore, useMarkers } from '@state/markers';
 import { useSettings } from '@state/settings';
@@ -11,6 +11,7 @@ import { downloadText } from './download';
 import { CATEGORY_COLORS } from './map/overlays';
 
 const CATEGORIES = Object.values(MarkerCategory);
+const SHAPES = Object.values(MarkerShape);
 
 export function MarkersPanel() {
   const markers = useMarkers((s) => s.markers);
@@ -99,6 +100,7 @@ function MarkerEditor({ m }: { m: SavedMarker }) {
   const units = useSettings((s) => s.units);
   const ms = markersStore.getState();
   const patch = (p: Partial<SavedMarker>) => void ms.save({ ...m, ...p });
+  const shape = m.shape ?? MarkerShape.Bar;
   return (
     <div className="kv">
       <span className="k">Name</span>
@@ -125,6 +127,34 @@ function MarkerEditor({ m }: { m: SavedMarker }) {
         <input type="number" min={0} step={1} value={m.widthM} onChange={(e) => patch({ widthM: Math.max(0, Number(e.target.value) || 0) })} aria-label="Width, metres" />
         <span className="muted">m</span>
       </b>
+      <span className="k">Shape</span>
+      <b className="v">
+        <select value={shape} onChange={(e) => patch({ shape: e.target.value as MarkerShape })} aria-label="Viewfinder shape" title="Bar is a flat outline; the others draw a shaded 3D solid">
+          {SHAPES.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </b>
+      {shape === MarkerShape.Box && (
+        <>
+          <span className="k">Depth</span>
+          <b className="v">
+            <input type="number" min={0} step={1} value={m.depthM ?? m.widthM} onChange={(e) => patch({ depthM: Math.max(0, Number(e.target.value) || 0) })} aria-label="Depth, metres" />
+            <span className="muted">m</span>
+          </b>
+        </>
+      )}
+      {shape !== MarkerShape.Bar && (
+        <>
+          <span className="k">Rotation</span>
+          <b className="v">
+            <input type="number" step={1} value={m.rotationDeg ?? 0} onChange={(e) => patch({ rotationDeg: Number(e.target.value) || 0 })} aria-label="Footprint rotation, degrees clockwise from north" />
+            <span className="muted">° from north</span>
+          </b>
+        </>
+      )}
       <span className="k">Rating</span>
       <b className="v stars">
         {[1, 2, 3, 4, 5].map((r) => (

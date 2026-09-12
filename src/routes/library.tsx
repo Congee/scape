@@ -6,11 +6,17 @@ import { exportAll, importAll, ImportMode, isScapeExport } from '@data/db';
 import { libraryStore, useLibrary } from '@state/library';
 import { markersStore, useMarkers } from '@state/markers';
 import { applyPlan, capturePlan, plansStore, usePlans } from '@state/plans';
+import { searchesStore, useSearches } from '@state/searches';
 import { useSettings } from '@state/settings';
+import { PanelTab, uiStore } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
 import { downloadText } from '@ui/download';
 
 export const Route = createFileRoute('/library')({ component: LibraryPage });
+
+function removeSearch(id: string, label: string) {
+  if (window.confirm(`Delete the search "${label}"?`)) void searchesStore.getState().remove(id);
+}
 
 async function exportEverything() {
   const data = await exportAll();
@@ -23,6 +29,8 @@ function LibraryPage() {
   const plans = usePlans((s) => s.plans);
   const plansLoaded = usePlans((s) => s.loaded);
   const markers = useMarkers((s) => s.markers);
+  const searches = useSearches((s) => s.searches);
+  const searchesLoaded = useSearches((s) => s.loaded);
   const pin = useWorld((s) => s.pin);
   const tz = useWorld((s) => s.tz);
   const format = useSettings((s) => s.coordFormat);
@@ -35,7 +43,8 @@ function LibraryPage() {
   useEffect(() => {
     if (!loaded) void libraryStore.getState().load();
     if (!plansLoaded) void plansStore.getState().load();
-  }, [loaded, plansLoaded]);
+    if (!searchesLoaded) void searchesStore.getState().load();
+  }, [loaded, plansLoaded, searchesLoaded]);
 
   const save = async () => {
     const n = name.trim();
@@ -64,14 +73,20 @@ function LibraryPage() {
     void navigate({ to: '/' });
   };
 
+  const runSearch = (id: string, here: boolean) => {
+    searchesStore.getState().apply(id, { here });
+    uiStore.getState().setPanelTab(PanelTab.Find);
+    void navigate({ to: '/' });
+  };
+
   const importEverything = async (file: File | undefined, mode: ImportMode) => {
     if (!file) return;
     try {
       const data: unknown = JSON.parse(await file.text());
       if (!isScapeExport(data)) throw new Error('Not a Scape export file');
       await importAll(data, mode);
-      await Promise.all([libraryStore.getState().load(), plansStore.getState().load(), markersStore.getState().load()]);
-      setStatus({ ok: true, text: `Imported ${data.locations.length} locations, ${data.plans.length} plans and ${data.markers.length} markers.` });
+      await Promise.all([libraryStore.getState().load(), plansStore.getState().load(), markersStore.getState().load(), searchesStore.getState().load()]);
+      setStatus({ ok: true, text: `Imported ${data.locations.length} locations, ${data.plans.length} plans, ${data.markers.length} markers and ${data.searches?.length ?? 0} searches.` });
     } catch (e) {
       setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
     }
@@ -133,6 +148,32 @@ function LibraryPage() {
                 update
               </button>
               <button className="link" onClick={() => void plansStore.getState().remove(p.id)} title="Delete">
+                delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section>
+        <h2>Visual searches</h2>
+        <p className="muted">A search stores the sky window and filters from the Find tab, with the camera location it was saved at.</p>
+        {searchesLoaded && searches.length === 0 && <p className="muted">No searches yet. Save one in the Find tab.</p>}
+        <ul className="list">
+          {searches.map((sv) => (
+            <li key={sv.id}>
+              <button className="primary" onClick={() => runSearch(sv.id, false)} title="Run at the saved camera location">
+                <span className="name">
+                  {sv.name} <span className="meta">{sv.settings.body === 'Gc' ? 'Galactic Centre' : sv.settings.body}</span>
+                </span>
+                <span className="detail">
+                  az {Math.round(sv.settings.azFromDeg)}–{Math.round(sv.settings.azToDeg)}°, alt {Math.round(sv.settings.altMinDeg)}–{Math.round(sv.settings.altMaxDeg)}° · {sv.settings.startIso} + {sv.settings.days} d ·{' '}
+                  {sv.pin ? `${sv.pin.lat.toFixed(4)}, ${sv.pin.lng.toFixed(4)}` : 'current camera location'}
+                </span>
+              </button>
+              <button className="link" onClick={() => runSearch(sv.id, true)} title="Run at the current camera location">
+                run here
+              </button>
+              <button className="link" onClick={() => removeSearch(sv.id, sv.name)} title="Delete">
                 delete
               </button>
             </li>
