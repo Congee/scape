@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { bearingDeg, normalizeBearing } from '@core/geo/geodesy';
 import { DEFAULT_SENSOR_ID, Orientation } from '@core/optics/fov';
-import type { WorldState } from './world';
+import { worldStore, type WorldState } from './world';
 
 /** Camera set-up shared by the map's FOV cone, the Frame panel and the viewfinder. */
 export interface Composition {
@@ -25,6 +25,16 @@ export interface Composition {
   showGrid: boolean;
   showMarkers: boolean;
   showPaths: boolean;
+  showStars: boolean;
+  showConstellations: boolean;
+  showStarNames: boolean;
+  showMilkyWay: boolean;
+  /** Star trails over `trailMinutes` from the simulated time. */
+  showTrails: boolean;
+  trailMinutes: number;
+  showRadiants: boolean;
+  /** Lens from the gear list constraining focal length and aperture; null for free values. */
+  lensId: string | null;
 }
 
 export interface CompositionState extends Composition {
@@ -48,7 +58,15 @@ export const DEFAULT_COMPOSITION: Composition = {
   panoOverlap: 0.3,
   showGrid: false,
   showMarkers: true,
-  showPaths: true
+  showPaths: true,
+  showStars: true,
+  showConstellations: false,
+  showStarNames: true,
+  showMilkyWay: true,
+  showTrails: false,
+  trailMinutes: 30,
+  showRadiants: true,
+  lensId: null
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -70,6 +88,14 @@ export const compositionStore = create<CompositionState>()(
 );
 
 export const useComposition = compositionStore;
+
+// Placing or moving the target means "frame it": the aim follows it again until the user aims elsewhere.
+worldStore.subscribe(
+  (s) => s.pin2,
+  (pin2, prev) => {
+    if (pin2 && (!prev || pin2.lat !== prev.lat || pin2.lng !== prev.lng)) compositionStore.setState({ aimAtTarget: true });
+  }
+);
 
 export interface Aim {
   azimuthDeg: number;

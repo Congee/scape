@@ -4,8 +4,10 @@ import type { LngLat } from '@core/geo/geodesy';
 export const SkyBody = { Sun: 'Sun', Moon: 'Moon', Gc: 'Gc' } as const;
 export type SkyBody = (typeof SkyBody)[keyof typeof SkyBody];
 
-// Sgr A* (J2000), the Galactic Centre, in astronomy-engine's first user star slot.
+// Sgr A* (J2000), the Galactic Centre, and Polaris in astronomy-engine's user star slots.
 DefineStar(Body.Star1, 17.76112, -29.00781, 26_000);
+DefineStar(Body.Star2, 2.530301, 89.264109, 433);
+export const POLARIS_BODY = Body.Star2;
 
 export const BODY: Record<SkyBody, Body> = { Sun: Body.Sun, Moon: Body.Moon, Gc: Body.Star1 };
 

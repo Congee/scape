@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export const PanelTab = { Timeline: 'Timeline', Geodetics: 'Geodetics', Frame: 'Frame', Markers: 'Markers', Layers: 'Layers' } as const;
+export const PanelTab = { Timeline: 'Timeline', Geodetics: 'Geodetics', Frame: 'Frame', Night: 'Night', Markers: 'Markers', Layers: 'Layers' } as const;
 export type PanelTab = (typeof PanelTab)[keyof typeof PanelTab];
 
 export interface UiState {

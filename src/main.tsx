@@ -5,10 +5,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { startClock } from '@state/clock';
 import { compositionStore } from '@state/composition';
-import { startDayDataSync } from '@state/dayData';
+import { dayDataStore, startDayDataSync } from '@state/dayData';
+import { gearStore } from '@state/gear';
 import { markersStore } from '@state/markers';
 import { plansStore } from '@state/plans';
 import { settingsStore } from '@state/settings';
+import { skyStore } from '@state/sky';
 import { startTerrainSync, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
 import { routeTree } from './routeTree.gen';
@@ -24,7 +26,7 @@ declare module '@tanstack/react-router' {
 if (import.meta.env.DEV) {
   window.addEventListener('error', (e) => console.error('[scape] error:', e.message, e.filename, e.lineno, e.error?.stack));
   window.addEventListener('unhandledrejection', (e) => console.error('[scape] rejection:', e.reason));
-  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, plans: plansStore };
+  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, plans: plansStore, gear: gearStore, sky: skyStore, dayData: dayDataStore };
 }
 
 startTerrainSync();

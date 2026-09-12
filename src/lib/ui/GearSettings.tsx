@@ -5,6 +5,7 @@ import { DEFAULT_FOCALS, gearStore, useGear } from '@state/gear';
 /** Custom sensor formats and the focal-length quick picks. */
 export function GearSettings() {
   const cameras = useGear((s) => s.cameras);
+  const lenses = useGear((s) => s.lenses);
   const focals = useGear((s) => s.focalPresets);
   const [name, setName] = useState('');
   const [w, setW] = useState('');
@@ -33,13 +34,16 @@ export function GearSettings() {
     <section>
       <h2>Gear</h2>
       <p className="muted">
-        Built in: {SENSORS.map((s) => s.name).join(' · ')}. Add your own sensor size below; it appears in the Frame panel.
+        Built in: {SENSORS.map((s) => s.name).join(' · ')}. Search the camera and lens catalogue in the Frame tab, or add a sensor size by hand below.
       </p>
       <ul className="list">
         {cameras.map((c) => (
           <li key={c.id}>
             <span>
-              {c.name} <span className="meta">{c.widthMm} × {c.heightMm} mm</span>
+              {c.name}{' '}
+              <span className="meta">
+                {c.widthMm} × {c.heightMm} mm{c.pixelsWide ? ` · ${c.pixelsWide} px wide` : ''}
+              </span>
             </span>
             <button className="link" onClick={() => gearStore.getState().removeCamera(c.id)}>
               remove
@@ -55,6 +59,23 @@ export function GearSettings() {
           Add
         </button>
       </div>
+      <h3>Lenses</h3>
+      {lenses.length === 0 && <p className="muted">No lenses yet; pick them from the search in the Frame tab.</p>}
+      <ul className="list">
+        {lenses.map((l) => (
+          <li key={l.id}>
+            <span>
+              {l.name}{' '}
+              <span className="meta">
+                {l.minMm === l.maxMm ? `${l.minMm} mm` : `${l.minMm}–${l.maxMm} mm`} f/{l.maxAperture} · {l.mount}
+              </span>
+            </span>
+            <button className="link" onClick={() => gearStore.getState().removeLens(l.id)}>
+              remove
+            </button>
+          </li>
+        ))}
+      </ul>
       <label className="field">
         <span>Focal length quick picks (mm)</span>
         <input value={focalText} onChange={(e) => setFocalText(e.target.value)} onBlur={applyFocals} onKeyDown={(e) => e.key === 'Enter' && applyFocals()} aria-label="Focal length presets" style={{ flex: 1 }} />

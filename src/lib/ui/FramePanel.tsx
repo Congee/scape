@@ -5,13 +5,14 @@ import { position } from '@core/astro/positions';
 import { compass, degrees, distance } from '@core/format';
 import { distanceM } from '@core/geo/geodesy';
 import { depthOfField, panoramaShots } from '@core/optics/dof';
-import { circleOfConfusionMm, clampFocalMm, equivalentFocalMm, F_STOPS, frameFov, Orientation } from '@core/optics/fov';
+import { aperturesFor, circleOfConfusionMm, clampFocalMm, equivalentFocalMm, frameFov, lensFocals, Orientation } from '@core/optics/fov';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
-import { allSensors, sensorById, useGear } from '@state/gear';
+import { allSensors, lensById, sensorById, useGear } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
 import { settingsStore, useSettings } from '@state/settings';
 import { profileKeyFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
+import { GearSearch } from './GearSearch';
 
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg)}`;
 const dist = (m: number, units: Parameters<typeof distance>[1]) => (Number.isFinite(m) ? distance(m, units) : '∞');
@@ -20,6 +21,7 @@ export function FramePanel() {
   const c = useComposition();
   const cameras = useGear((s) => s.cameras);
   const focals = useGear((s) => s.focalPresets);
+  const lenses = useGear((s) => s.lenses);
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const pinHeightM = useWorld((s) => s.pinHeightM);
@@ -32,6 +34,7 @@ export function FramePanel() {
 
   const fresh = profile && profileKey === profileKeyFor(worldStore.getState(), settingsStore.getState()) ? profile : null;
   const sensor = sensorById(c.sensorId, cameras);
+  const lens = lensById(c.lensId, lenses);
   const fov = frameFov(sensor, c.focalMm, c.orientation);
   const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
   const targetM = pin2 ? distanceM(pin, pin2) : null;
@@ -45,7 +48,12 @@ export function FramePanel() {
     const p = position(body, new Date(time), makeObserver(pin, pinHeightM));
     compositionStore.getState().aim(p.azimuth, Math.max(0, p.altitude));
   };
-  const setFocal = (v: number) => update({ focalMm: Math.round(clampFocalMm(v) * 10) / 10 });
+  const clampLens = (v: number) => (lens ? Math.min(lens.maxMm, Math.max(lens.minMm, v)) : v);
+  const setFocal = (v: number) => update({ focalMm: Math.round(clampFocalMm(clampLens(v)) * 10) / 10 });
+  const selectLens = (id: string) => {
+    const l = lensById(id || null, lenses);
+    update(l ? { lensId: l.id, focalMm: Math.round(Math.min(l.maxMm, Math.max(l.minMm, c.focalMm)) * 10) / 10, fNumber: Math.max(c.fNumber, l.maxAperture) } : { lensId: null });
+  };
   const savePlan = async () => {
     const plan = capturePlan(planName);
     await plansStore.getState().save(plan);
@@ -56,6 +64,7 @@ export function FramePanel() {
   return (
     <div className="frame">
       <h3>Camera</h3>
+      <GearSearch />
       <div className="kv">
         <span className="k">Sensor</span>
         <b className="v">
@@ -63,6 +72,17 @@ export function FramePanel() {
             {allSensors(cameras).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
+              </option>
+            ))}
+          </select>
+        </b>
+        <span className="k">Lens</span>
+        <b className="v">
+          <select value={lens?.id ?? ''} onChange={(e) => selectLens(e.target.value)} aria-label="Lens">
+            <option value="">Any focal length</option>
+            {lenses.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
               </option>
             ))}
           </select>
@@ -79,12 +99,12 @@ export function FramePanel() {
         </b>
         <span className="k">Focal length</span>
         <b className="v">
-          <input type="number" min={4} max={2400} step={1} value={c.focalMm} onChange={(e) => setFocal(Number(e.target.value) || c.focalMm)} aria-label="Focal length, millimetres" />
+          <input type="number" min={lens?.minMm ?? 4} max={lens?.maxMm ?? 2400} step={1} value={c.focalMm} onChange={(e) => setFocal(Number(e.target.value) || c.focalMm)} aria-label="Focal length, millimetres" />
           <span className="muted">mm · {equivalentFocalMm(sensor, c.focalMm).toFixed(0)} mm equiv.</span>
         </b>
       </div>
       <div className="chips" aria-label="Focal length presets">
-        {focals.map((f) => (
+        {(lens ? lensFocals(lens, focals) : focals).map((f) => (
           <button key={f} className={Math.abs(f - c.focalMm) < 0.05 ? 'on' : ''} onClick={() => setFocal(f)}>
             {f}
           </button>
@@ -94,7 +114,7 @@ export function FramePanel() {
         <span className="k">Aperture</span>
         <b className="v">
           <select value={c.fNumber} onChange={(e) => update({ fNumber: Number(e.target.value) })} aria-label="Aperture">
-            {F_STOPS.map((f) => (
+            {aperturesFor(lens).map((f) => (
               <option key={f} value={f}>
                 f/{f}
               </option>

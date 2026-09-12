@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
+import { MoonRule } from '@core/astro/milkyWay';
 import { Units } from '@core/format';
 import { CoordFormat } from '@core/geo/coords';
 import { BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, type Basemap } from '@data/basemaps';
@@ -24,6 +25,13 @@ export interface Settings {
   horizonRangeKm: number;
   showHillshade: boolean;
   terrain3d: boolean;
+  /** NASA VIIRS night-lights raster as a light-pollution proxy. */
+  showLightPollution: boolean;
+  /** Milky Way core window rules. */
+  mwSunMaxAlt: number;
+  mwGcMinAlt: number;
+  mwMoonRule: MoonRule;
+  mwMoonMaxIllum: number;
 }
 
 export interface SettingsState extends Settings {
@@ -48,7 +56,12 @@ export const DEFAULT_SETTINGS: Settings = {
   terrainHorizon: true,
   horizonRangeKm: 100,
   showHillshade: false,
-  terrain3d: false
+  terrain3d: false,
+  showLightPollution: false,
+  mwSunMaxAlt: -18,
+  mwGcMinAlt: 10,
+  mwMoonRule: MoonRule.Down,
+  mwMoonMaxIllum: 0.25
 };
 
 export const settingsStore = create<SettingsState>()(

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { DayCurve } from '@core/astro/dayCurve';
 import type { DayEvent } from '@core/astro/dayEvents';
+import type { MilkyWayWindow } from '@core/astro/milkyWay';
 import { dayBounds } from '@core/time/localDay';
 import type { AstroRequest, AstroResponse } from '@workers/astro.protocol';
 import { settingsStore } from './settings';
@@ -15,6 +16,8 @@ export interface DayDataState {
   isoDate: string;
   events: DayEvent[];
   curve: DayCurve | null;
+  /** Milky Way core visibility windows for the day under the current settings. */
+  milkyWay: MilkyWayWindow[];
 }
 
 export const dayDataStore = create<DayDataState>()(() => ({
@@ -24,7 +27,8 @@ export const dayDataStore = create<DayDataState>()(() => ({
   dayEnd: 0,
   isoDate: '',
   events: [],
-  curve: null
+  curve: null,
+  milkyWay: []
 }));
 
 export const useDayData = dayDataStore;
@@ -40,7 +44,7 @@ export function startDayDataSync(): () => void {
 
   worker.addEventListener('message', (e: MessageEvent<AstroResponse>) => {
     if (e.data.id !== seq) return;
-    dayDataStore.setState({ loading: false, events: e.data.events, curve: e.data.curve });
+    dayDataStore.setState({ loading: false, events: e.data.events, curve: e.data.curve, milkyWay: e.data.milkyWay });
   });
 
   const compute = () => {
@@ -52,7 +56,8 @@ export function startDayDataSync(): () => void {
     const t = terrainStore.getState();
     const hk = horizonKeyFor(w, s);
     const horizon = hk && t.horizon && t.horizonKey === hk ? t.horizon.profile : undefined;
-    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, w.tz, b.isoDate, s.goldenAltitude, horizon ? hk : '-'].join('|');
+    const milkyWay = { sunMaxAltDeg: s.mwSunMaxAlt, gcMinAltDeg: s.mwGcMinAlt, moonRule: s.mwMoonRule, moonMaxIllumination: s.mwMoonMaxIllum };
+    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, w.tz, b.isoDate, s.goldenAltitude, ...Object.values(milkyWay), horizon ? hk : '-'].join('|');
     if (key === dayDataStore.getState().key) return;
     seq++;
     const startMs = b.start.getTime();
@@ -65,6 +70,7 @@ export function startDayDataSync(): () => void {
       startMs,
       endMs,
       goldenAltitude: s.goldenAltitude,
+      milkyWay,
       horizon
     };
     worker.postMessage(req);

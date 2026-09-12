@@ -11,6 +11,31 @@ export interface SensorFormat {
   widthMm: number;
   /** Short side, mm. */
   heightMm: number;
+  /** Pixels along the long side, when known (star-trail rules need the pixel pitch). */
+  pixelsWide?: number;
+  mount?: string;
+}
+
+export interface LensSpec {
+  id: string;
+  name: string;
+  minMm: number;
+  /** Equals `minMm` for a prime. */
+  maxMm: number;
+  /** Widest f-number at the short end. */
+  maxAperture: number;
+  mount: string;
+}
+
+/** Quick-pick focal lengths for a lens: its ends plus the presets that fall inside. */
+export function lensFocals(lens: LensSpec, presets: number[]): number[] {
+  return [...new Set([lens.minMm, ...presets.filter((f) => f > lens.minMm && f < lens.maxMm), lens.maxMm])].toSorted((a, b) => a - b);
+}
+
+/** Standard stops the lens can reach, starting at its widest aperture. */
+export function aperturesFor(lens: LensSpec | null, stops: readonly number[] = F_STOPS): number[] {
+  if (!lens) return [...stops];
+  return [...new Set([lens.maxAperture, ...stops.filter((f) => f > lens.maxAperture + 1e-9)])].toSorted((a, b) => a - b);
 }
 
 export const FULL_FRAME_DIAGONAL_MM = Math.hypot(36, 24);

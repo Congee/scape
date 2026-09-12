@@ -13,7 +13,8 @@ const TILE_HOSTS = new Set([
   'a.tile.opentopomap.org',
   'b.tile.opentopomap.org',
   'c.tile.opentopomap.org',
-  's3.amazonaws.com'
+  's3.amazonaws.com',
+  'gibs.earthdata.nasa.gov'
 ]);
 
 export default defineConfig({
@@ -35,7 +36,7 @@ export default defineConfig({
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,bin,jpg,json}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: 'index.html',
         runtimeCaching: [

@@ -36,6 +36,10 @@ const MARKERS_SRC = 'markers';
 // MapLibre wants separate DEM sources for hillshade and 3D terrain; same tiles, cached once by the browser.
 const DEM_SRC = 'terrain-dem';
 const HILL_SRC = 'terrain-dem-hillshade';
+// NASA GIBS, public domain; a coarse (zoom ≤ 8) proxy for light pollution.
+const LIGHTS_SRC = 'night-lights';
+const LIGHTS_URL = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png';
+const LIGHTS_ATTRIBUTION = 'Night lights: <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>, VIIRS Black Marble 2016';
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
@@ -121,6 +125,7 @@ export class MapController {
       mapStatusStore.getState().setError(null);
       this.addOverlayLayers();
       this.applyTerrain();
+      this.applyNightLights();
       this.updateRay();
       this.renderAll();
     });
@@ -183,6 +188,7 @@ export class MapController {
         () => this.applyTerrain(),
         { equalityFn: shallow }
       ),
+      settingsStore.subscribe((st) => st.showLightPollution, () => this.applyNightLights()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u))
     );
   }
@@ -387,6 +393,18 @@ export class MapController {
     }
     if (t3d) this.ensureDem(DEM_SRC);
     this.map.setTerrain(t3d ? { source: DEM_SRC, exaggeration: 1 } : null);
+  }
+
+  private applyNightLights() {
+    if (!this.styleReady) return;
+    const on = settingsStore.getState().showLightPollution;
+    if (on && !this.map.getLayer(LIGHTS_SRC)) {
+      if (!this.map.getSource(LIGHTS_SRC)) this.map.addSource(LIGHTS_SRC, { type: 'raster', tiles: [LIGHTS_URL], tileSize: 256, maxzoom: 8, attribution: LIGHTS_ATTRIBUTION });
+      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id ?? 'fov-fill';
+      this.map.addLayer({ id: LIGHTS_SRC, type: 'raster', source: LIGHTS_SRC, paint: { 'raster-opacity': 0.75 } }, before);
+    } else if (!on && this.map.getLayer(LIGHTS_SRC)) {
+      this.map.removeLayer(LIGHTS_SRC);
+    }
   }
 
   /** Lines run far past the viewport so they reach the map edge at any zoom. */

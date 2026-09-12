@@ -150,6 +150,18 @@ export class ChartController {
       ctx.fillRect(PAD.l, PAD.t, w - PAD.l - PAD.r, h - PAD.t - PAD.b);
     }
 
+    // Milky Way core windows: a violet wash with a bar along the bottom.
+    if (showGc) {
+      for (const win of dayDataStore.getState().milkyWay) {
+        const x0 = X(win.startMs);
+        const x1 = X(win.endMs);
+        ctx.fillStyle = 'rgba(180, 140, 255, 0.10)';
+        ctx.fillRect(x0, PAD.t, x1 - x0, h - PAD.t - PAD.b);
+        ctx.fillStyle = 'rgba(180, 140, 255, 0.85)';
+        ctx.fillRect(x0, h - PAD.b - 3, x1 - x0, 3);
+      }
+    }
+
     // Grid: every 3 hours, altitude lines at 0/30/60.
     ctx.font = '10px system-ui, sans-serif';
     ctx.textBaseline = 'top';

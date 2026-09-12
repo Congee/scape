@@ -150,7 +150,8 @@ search params.
 | PWA | `vite-plugin-pwa` 1.3 (Workbox) | precache shell, runtime-cache tiles |
 | Geocoding | Photon public API online; GeoNames cities offline | |
 | 3D viewfinder | 2D canvas over the DEM sweep (Phase 3); Three.js 0.186 reserved for the star field and 3D orbit view | separate canvas |
-| Sky data | HYG v4.1 (CC BY-SA), NASA SVS Deep Star Maps (PD), d3-celestial lines (BSD-3) | |
+| Sky data | HYG v4.1 (CC BY-SA), NASA SVS Deep Star Maps (PD), d3-celestial lines (BSD-3) | built into `public/sky` by `scripts/build-sky.ts`; sources listed in `public/sky/README.md` |
+| Light pollution | NASA GIBS VIIRS Black Marble raster (PD) | Falchi's atlas and the usual tile sets are CC BY-NC, so night lights stand in for now |
 | Tests | Vitest for core; Playwright later for UI smoke | pure unit tests, no I/O |
 
 ## 5. UI layout
@@ -214,7 +215,16 @@ FOV cone on the map with draggable tip and edge handles, depth-of-field arcs and
 markers with categories, height/width, rating, notes, KML/GPX/GeoJSON import/export; plans and a
 full `.scape.json` backup in the Library; the viewfinder route, a 2D canvas that ray-marches the DEM
 per column (worker `View` request, layered visible ridges, distance haze) and projects sun/moon/GC
-paths, target and markers through a rectilinear camera model. Phase 4 is next.
+paths, target and markers through a rectilinear camera model.
+Phase 4 shipped on 2026-09-11: bundled sky data built by `scripts/build-sky.ts` (HYG stars to magnitude
+6.5 as a 107 KB binary, d3-celestial constellation lines, NASA Milky Way map at 2048 × 1024); star
+field, constellation figures, pole marker, Milky Way texture, star trails and meteor radiants in the
+viewfinder, all through the same camera model and terrain occlusion; Milky Way core windows computed
+in the astro worker (dark sky × core altitude or skyline × moon rule) with a Night tab and a chart
+band; 500/NPF rules from the camera's pixel pitch; IMO shower list with peak dates from solar
+longitude; Polaris clock positions; NASA VIIRS night-lights overlay. The Frame tab gained a searchable
+camera and lens catalogue (185 bodies, 346 lenses) that sets sensor, pixel count, focal range and
+aperture. Phase 5 is next.
 
 ## 8. Risks and decisions taken
 
@@ -234,6 +244,12 @@ paths, target and markers through a rectilinear camera model. Phase 4 is next.
 - **Viewfinder without Three.js.** The silhouette precision the acceptance test asks for comes from
   ray-marching the DEM per pixel column (`core/terrain/view.ts`), which a 2D canvas draws exactly; a
   mesh would only approximate it. Three.js stays on the list for the Phase 4 star field.
+- **Star field on the 2D canvas.** 9k stars cost under a millisecond per frame once bucketed by colour
+  and brightness; the terrain raster dominates the frame budget. Three.js stays unneeded so far.
+- **Sky texture orientation.** NASA's equatorial maps put RA 0h at the centre with RA increasing to
+  the left (viewed from inside); `public/sky/README.md` records it so the lookup is not re-derived.
+- **Aim lock.** Placing or moving the target re-enables "aim at target"; a drag in the viewfinder or of
+  the cone tip releases it. Without this the viewfinder looked out of sync with the map after one drag.
 - **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
   string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
   objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.

@@ -821,3 +821,98 @@ label.file input {
   text-decoration: none;
   color: inherit;
 }
+
+/* Gear search (Frame tab) */
+.gear-search {
+  position: relative;
+  padding: 4px 6px;
+}
+
+.gear-search input {
+  width: 100%;
+}
+
+.gear-results {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 100%;
+  z-index: 5;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+}
+
+.gear-results .group {
+  padding: 6px 8px 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+
+.gear-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 5px 8px;
+}
+
+.gear-results button:hover {
+  background: var(--bg-3);
+}
+
+.gear-results .meta,
+.list li .name .meta {
+  display: block;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+
+.list li .name .meta {
+  display: inline;
+  margin-left: 4px;
+}
+
+/* Viewfinder page: layer chips above the shared panel */
+.vf-panel {
+  flex-direction: column;
+}
+
+.vf-tools {
+  flex: none;
+  border-bottom: 1px solid var(--line);
+  padding: 6px;
+}
+
+.topbar .exit {
+  white-space: nowrap;
+}
+
+/* Night tab */
+.night .verdict {
+  margin: 4px 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgb(180 140 255 / 0.14);
+  color: var(--gc);
+}
+
+.night .verdict.off {
+  background: rgb(255 255 255 / 0.04);
+  color: var(--fg-2);
+}
+
+.night .verdict .why {
+  color: var(--fg-3);
+}
+
+.night label.toggle input[type='number'] {
+  margin: 0 4px;
+}

@@ -71,6 +71,7 @@ export function LayersPanel() {
       <Toggle k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
       <Toggle k="showShadow" label="Sun shadow direction" />
       <Toggle k="showGc" label="Galactic Centre" />
+      <Toggle k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
       <Toggle k="clickMovesPin" label="Clicking the map moves the camera" />
 
       <h3>Terrain</h3>

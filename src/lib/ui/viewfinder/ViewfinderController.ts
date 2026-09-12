@@ -1,5 +1,10 @@
+import type { Observer } from 'astronomy-engine';
 import { shallow } from 'zustand/shallow';
 import { BODIES, makeObserver, SkyBody } from '@core/astro/bodies';
+import type { PreparedConstellations } from '@core/astro/constellations';
+import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
+import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
+import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, position } from '@core/astro/positions';
 import { SEMIDIAMETER_DEG } from '@core/astro/terrainEvents';
 import { compass, degrees, distance } from '@core/format';
@@ -15,12 +20,15 @@ import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById } from '@state/gear';
 import { markersStore } from '@state/markers';
 import { settingsStore } from '@state/settings';
+import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, profileKeyFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { CATEGORY_COLORS } from '../map/overlays';
 
 const D2R = Math.PI / 180;
+const DAY_MS = 86_400_000;
+const SIN_10_DEG = Math.sin(10 * D2R);
 const MARGIN = 26;
 const MAX_COLUMNS = 2400;
 const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
@@ -50,6 +58,27 @@ interface Scene {
   eyeM: number;
   eyeAboveGroundM: number;
   sunAlt: number;
+  time: Date;
+  obs: Observer;
+  /** How dark the sky is for stars, 0 by day to 1 in astronomical night. */
+  night: number;
+  /** Moonlight washing out faint stars and the Milky Way, 0..1. */
+  moonFactor: number;
+  /** Highest skyline angle in the sweep; directions above it need no occlusion test. */
+  maxSkyline: number;
+}
+
+interface Placed {
+  x: number;
+  y: number;
+  altDeg: number;
+  /** Behind the terrain skyline (or below the flat horizon). */
+  hidden: boolean;
+}
+
+interface StarGroup {
+  style: string;
+  idx: number[];
 }
 
 /** Synthetic camera view: terrain layers from the DEM sweep, sky, sun/moon/GC paths, target and markers. */
@@ -64,6 +93,9 @@ export class ViewfinderController {
   private dpr = 1;
   private drag: { x: number; y: number; az: number; el: number } | null = null;
   private quality = 1;
+  private starGroups: { cat: StarCatalog; groups: StarGroup[]; polaris: number } | null = null;
+  private showers: { day: number; list: ShowerStatus[] } | null = null;
+  private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -81,6 +113,7 @@ export class ViewfinderController {
       settingsStore.subscribe(bump),
       terrainStore.subscribe(() => this.schedule()),
       dayDataStore.subscribe(() => this.schedule()),
+      skyStore.subscribe(() => this.schedule()),
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow })
     );
     canvas.addEventListener('pointerdown', this.onDown);
@@ -139,8 +172,19 @@ export class ViewfinderController {
     const view = s.terrain && t.view && t.viewKey.startsWith(here) ? t.view : null;
     const ground = t.pinGroundM ?? 0;
     const eyeM = view?.eyeM ?? Math.max(Number.isNaN(ground) ? 0 : ground, 0) + eyeAboveGroundM;
-    const sunAlt = position(SkyBody.Sun, new Date(w.time), makeObserver(w.pin, w.pinHeightM)).altitude;
-    return { cam, basis: cameraBasis(cam), aim, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: view?.profile ?? null, eyeM, eyeAboveGroundM, sunAlt };
+    const time = new Date(w.time);
+    const obs = makeObserver(w.pin, w.pinHeightM);
+    const sunAlt = position(SkyBody.Sun, time, obs).altitude;
+    const moon = position(SkyBody.Moon, time, obs);
+    const night = smooth(-4, -14, sunAlt);
+    const moonFactor = night > 0 ? smooth(-2, 8, moon.altitude) * moonInfo(time).illumination : 0;
+    const profile = view?.profile ?? null;
+    if (this.skylineMax.view !== profile) {
+      let max = flatHorizonDeg(eyeAboveGroundM);
+      if (profile) for (let i = 0; i < profile.nAz; i++) max = Math.max(max, profile.skylineDeg[i]);
+      this.skylineMax = { view: profile, max };
+    }
+    return { cam, basis: cameraBasis(cam), aim, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
   }
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
@@ -269,6 +313,31 @@ export class ViewfinderController {
       return [c[0] * shade, c[1] * shade, c[2] * shade];
     };
 
+    // Milky Way: sample the equirectangular J2000 texture along each sky pixel's direction.
+    const comp = compositionStore.getState();
+    const wantMw = comp.showMilkyWay && sc.night > 0;
+    if (wantMw) skyStore.getState().ensure();
+    const tex = wantMw ? skyStore.getState().milkyWay : null;
+    const E = tex ? enuToEqj(sc.time, sc.obs) : null;
+    const mwGain = 0.8 * sc.night * (1 - 0.7 * sc.moonFactor);
+    const skyPixel = (alt: number, vx: number, vy: number, vz: number, len: number) => {
+      const c0 = skyAt(alt);
+      if (!tex || !E) return c0;
+      const e = vx / len;
+      const n = vy / len;
+      const u = vz / len;
+      const qx = E[0] * e + E[1] * n + E[2] * u;
+      const qy = E[3] * e + E[4] * n + E[5] * u;
+      const qz = E[6] * e + E[7] * n + E[8] * u;
+      let fu = 0.5 - Math.atan2(qy, qx) / (2 * Math.PI);
+      fu -= Math.floor(fu);
+      const fv = (Math.PI / 2 - Math.asin(clamp(qz, -1, 1))) / Math.PI;
+      const tx = Math.min(tex.width - 1, (fu * tex.width) | 0);
+      const ty = Math.min(tex.height - 1, (fv * tex.height) | 0);
+      const t = (ty * tex.width + tx) * 4;
+      return [c0[0] + tex.rgba[t] * mwGain, c0[1] + tex.rgba[t + 1] * mwGain, c0[2] + tex.rgba[t + 2] * mwGain];
+    };
+
     const { forward: F, right: R, up: U } = sc.basis;
     const f = sc.cam.focalMm;
     const fallback = flatHorizonDeg(sc.eyeAboveGroundM);
@@ -286,7 +355,7 @@ export class ViewfinderController {
         if (view) {
           const az = Math.atan2(vx, vy) / D2R;
           const col = columnAt(view, az);
-          if (col < 0 || alt > view.skylineDeg[col]) c = skyAt(alt);
+          if (col < 0 || alt > view.skylineDeg[col]) c = skyPixel(alt, vx, vy, vz, len);
           else {
             const m = surfaceAt(view, col, alt);
             if (m < 0) c = groundAt(view.rangeM, 0);
@@ -296,7 +365,7 @@ export class ViewfinderController {
               c = groundAt(view.distM[m], slope);
             }
           }
-        } else c = alt > fallback ? skyAt(alt) : groundAt(clamp(-sc.eyeAboveGroundM / Math.tan(Math.min(-0.001, alt * D2R)), 20, 50_000), 0.3);
+        } else c = alt > fallback ? skyPixel(alt, vx, vy, vz, len) : groundAt(clamp(-sc.eyeAboveGroundM / Math.tan(Math.min(-0.001, alt * D2R)), 20, 50_000), 0.3);
         data[k++] = c[0];
         data[k++] = c[1];
         data[k++] = c[2];
@@ -306,6 +375,251 @@ export class ViewfinderController {
     rctx.putImageData(img, 0, 0);
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.drawImage(this.raster, frame.x, frame.y, frame.w, frame.h);
+  }
+
+  private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {
+    if (!sc.view) return altDeg < flatHorizonDeg(sc.eyeAboveGroundM);
+    const col = columnAt(sc.view, azDeg);
+    return col >= 0 && altDeg < sc.view.skylineDeg[col];
+  }
+
+  /**
+   * Frame position of a local direction. Low directions take the exact path with refraction;
+   * the rest project straight through the camera basis, which is what makes 9k stars cheap.
+   */
+  private placeEnu(sc: Scene, e: number, n: number, u: number, slack: number): Placed | null {
+    const len = Math.hypot(e, n, u);
+    const uz = u / len;
+    if (uz < -0.05) return null;
+    let az = Number.NaN;
+    let alt: number;
+    let p: { x: number; y: number } | null;
+    if (uz < SIN_10_DEG) {
+      const h = horizontalOf(e / len, n / len, uz);
+      az = h.azimuthDeg;
+      alt = h.altitudeDeg;
+      p = this.toPx(sc, az, alt);
+    } else {
+      const { forward: F, right: R, up: U } = sc.basis;
+      const depth = (e * F.x + n * F.y + u * F.z) / len;
+      if (depth <= 1e-6) return null;
+      const xs = ((e * R.x + n * R.y + u * R.z) / len / depth) * sc.cam.focalMm;
+      const ys = ((e * U.x + n * U.y + u * U.z) / len / depth) * sc.cam.focalMm;
+      p = { x: sc.frame.x + sc.frame.w / 2 + xs * sc.frame.pxPerMm, y: sc.frame.y + sc.frame.h / 2 - ys * sc.frame.pxPerMm };
+      alt = Math.asin(uz) / D2R;
+    }
+    if (!this.inFrame(sc, p, slack)) return null;
+    let hidden = false;
+    if (alt < sc.maxSkyline) {
+      if (Number.isNaN(az)) az = Math.atan2(e, n) / D2R;
+      hidden = this.hiddenBySkyline(sc, az, alt);
+    }
+    return { x: p.x, y: p.y, altDeg: alt, hidden };
+  }
+
+  /** Stars bucketed by colour and brightness so the canvas style changes a few dozen times, not 9k. */
+  private groupsFor(cat: StarCatalog): { groups: StarGroup[]; polaris: number } {
+    if (this.starGroups?.cat === cat) return this.starGroups;
+    const map = new Map<string, StarGroup>();
+    let polaris = -1;
+    for (let i = 0; i < cat.n; i++) {
+      const r = cat.rgb[i * 3];
+      const g = cat.rgb[i * 3 + 1];
+      const b = cat.rgb[i * 3 + 2];
+      const m = cat.mag[i];
+      const alpha = m <= 1 ? 1 : m <= 2.5 ? 0.88 : m <= 4 ? 0.7 : m <= 5.2 ? 0.5 : 0.36;
+      const key = `${r >> 4},${g >> 4},${b >> 4},${alpha}`;
+      let grp = map.get(key);
+      if (!grp) {
+        grp = { style: `rgba(${(r >> 4) * 16 + 8},${(g >> 4) * 16 + 8},${(b >> 4) * 16 + 8},${alpha})`, idx: [] };
+        map.set(key, grp);
+      }
+      grp.idx.push(i);
+      if (cat.names.get(i) === 'Polaris') polaris = i;
+    }
+    this.starGroups = { cat, groups: [...map.values()], polaris };
+    return this.starGroups;
+  }
+
+  /** Faintest magnitude worth drawing: wider frames and moonlight both hide the faint end. */
+  private magLimit(sc: Scene): number {
+    return clamp(4.6 + 60 / sc.hfov, 4.5, 6.5) - 1.5 * sc.moonFactor;
+  }
+
+  private drawStars(sc: Scene, M: Mat3, cat: StarCatalog, names: boolean) {
+    const { ctx } = this;
+    const { groups, polaris } = this.groupsFor(cat);
+    const limit = this.magLimit(sc);
+    const out = new Float64Array(3);
+    const labels: { x: number; y: number; name: string }[] = [];
+    ctx.globalAlpha = sc.night;
+    for (const g of groups) {
+      ctx.fillStyle = g.style;
+      for (const i of g.idx) {
+        if (cat.mag[i] > limit) break;
+        apply(M, cat.x[i], cat.y[i], cat.z[i], out);
+        const p = this.placeEnu(sc, out[0], out[1], out[2], 4);
+        if (!p || p.hidden) continue;
+        const r = starRadiusPx(cat.mag[i]);
+        if (r < 1.1) ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
+        else {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (names && (cat.mag[i] <= 1.6 || i === polaris) && cat.names.has(i)) labels.push({ x: p.x, y: p.y, name: cat.names.get(i)! });
+      }
+    }
+    ctx.fillStyle = 'rgba(230,237,243,0.8)';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    for (const l of labels) ctx.fillText(l.name, l.x + 5, l.y - 4);
+    ctx.globalAlpha = 1;
+  }
+
+  private drawConstellations(sc: Scene, M: Mat3, pc: PreparedConstellations) {
+    const { ctx } = this;
+    const a = new Float64Array(3);
+    const b = new Float64Array(3);
+    const seg = pc.segments;
+    ctx.globalAlpha = sc.night;
+    ctx.strokeStyle = 'rgba(160,150,230,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let s = 0; s < seg.length; s += 6) {
+      apply(M, seg[s], seg[s + 1], seg[s + 2], a);
+      apply(M, seg[s + 3], seg[s + 4], seg[s + 5], b);
+      const p = this.placeEnu(sc, a[0], a[1], a[2], 600);
+      const q = this.placeEnu(sc, b[0], b[1], b[2], 600);
+      if (!p || !q || p.hidden || q.hidden) continue;
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(q.x, q.y);
+    }
+    ctx.stroke();
+    if (sc.hfov > 20) {
+      ctx.fillStyle = 'rgba(180,170,240,0.7)';
+      ctx.font = 'italic 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i < pc.ids.length; i++) {
+        apply(M, pc.centres[i * 3], pc.centres[i * 3 + 1], pc.centres[i * 3 + 2], a);
+        const p = this.placeEnu(sc, a[0], a[1], a[2], 0);
+        if (p && !p.hidden) ctx.fillText(pc.names[i], p.x, p.y);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  private drawPole(sc: Scene) {
+    const [e, n, u] = poleEnu(sc.time, sc.obs);
+    const p = this.placeEnu(sc, e, n, u, 0);
+    if (!p || p.hidden) return;
+    const { ctx } = this;
+    ctx.globalAlpha = sc.night;
+    ctx.strokeStyle = 'rgba(230,237,243,0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.moveTo(p.x - 9, p.y);
+    ctx.lineTo(p.x + 9, p.y);
+    ctx.moveTo(p.x, p.y - 9);
+    ctx.lineTo(p.x, p.y + 9);
+    ctx.stroke();
+    // Below the mark: Polaris' own label sits above-right, less than a degree away.
+    ctx.fillStyle = 'rgba(230,237,243,0.7)';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Celestial pole', p.x, p.y + 11);
+    ctx.globalAlpha = 1;
+  }
+
+  /** Trails of the brighter stars over the chosen span, starting at the simulated time. */
+  private drawTrails(sc: Scene, cat: StarCatalog) {
+    const { ctx } = this;
+    const c = compositionStore.getState();
+    const steps = clamp(Math.round(c.trailMinutes / 3), 6, 40);
+    const dtMs = (c.trailMinutes * 60_000) / steps;
+    const mats: Mat3[] = [];
+    for (let k = 0; k <= steps; k++) mats.push(eqjToEnu(new Date(sc.time.getTime() + k * dtMs), sc.obs));
+    const limit = Math.min(4.5, this.magLimit(sc));
+    const out = new Float64Array(3);
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.55 * sc.night;
+    for (let i = 0; i < cat.n && cat.mag[i] <= limit; i++) {
+      ctx.strokeStyle = `rgb(${cat.rgb[i * 3]},${cat.rgb[i * 3 + 1]},${cat.rgb[i * 3 + 2]})`;
+      ctx.lineWidth = Math.max(0.7, starRadiusPx(cat.mag[i]) * 0.9);
+      ctx.beginPath();
+      let started = false;
+      for (const m of mats) {
+        apply(m, cat.x[i], cat.y[i], cat.z[i], out);
+        const p = this.placeEnu(sc, out[0], out[1], out[2], 40);
+        if (!p || p.hidden) {
+          started = false;
+          continue;
+        }
+        if (started) ctx.lineTo(p.x, p.y);
+        else ctx.moveTo(p.x, p.y);
+        started = true;
+      }
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.globalAlpha = 1;
+  }
+
+  private drawRadiants(sc: Scene, M: Mat3) {
+    const t = sc.time.getTime();
+    const day = Math.floor(t / DAY_MS);
+    if (!this.showers || this.showers.day !== day) this.showers = { day, list: activeShowers(t) };
+    if (this.showers.list.length === 0) return;
+    const { ctx } = this;
+    const out = new Float64Array(3);
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 1.2;
+    for (const st of this.showers.list) {
+      const { raDeg, decDeg } = radiantEquatorial({ ...st, daysFromPeak: (t - st.peakMs) / DAY_MS });
+      const [x, y, z] = eqjVector(raDeg, decDeg);
+      apply(M, x, y, z, out);
+      const p = this.placeEnu(sc, out[0], out[1], out[2], 20);
+      if (!p) continue;
+      ctx.globalAlpha = (p.hidden ? 0.35 : 0.9) * sc.night;
+      ctx.strokeStyle = '#ffe08a';
+      ctx.fillStyle = '#ffe08a';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      for (let k = 0; k < 8; k++) {
+        const a = (k * Math.PI) / 4;
+        ctx.moveTo(p.x + 8 * Math.cos(a), p.y + 8 * Math.sin(a));
+        ctx.lineTo(p.x + 13 * Math.cos(a), p.y + 13 * Math.sin(a));
+      }
+      ctx.stroke();
+      ctx.fillText(`${st.shower.name} · ZHR ${st.shower.zhr ?? 'variable'}`, p.x + 16, p.y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Stars, constellation figures, the pole, trails and meteor radiants once the sky is dark enough. */
+  private drawSky(sc: Scene) {
+    const c = compositionStore.getState();
+    if (sc.night <= 0 || !(c.showStars || c.showConstellations || c.showTrails || c.showRadiants)) return;
+    const sky = skyStore.getState();
+    sky.ensure();
+    const { ctx } = this;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.clip();
+    const M = eqjToEnu(sc.time, sc.obs);
+    if (c.showConstellations && sky.constellations) this.drawConstellations(sc, M, sky.constellations);
+    if (c.showTrails && sky.stars) this.drawTrails(sc, sky.stars);
+    if (c.showStars && sky.stars) this.drawStars(sc, M, sky.stars, c.showStarNames);
+    if (c.showStars) this.drawPole(sc);
+    if (c.showRadiants) this.drawRadiants(sc, M);
+    ctx.restore();
   }
 
   private drawRulers(sc: Scene) {
@@ -584,6 +898,8 @@ export class ViewfinderController {
     if (!s.terrain) status = 'Elevation data is off (Settings): flat horizon';
     else if (t.busy.View) status = 'Sweeping terrain…';
     else if (!sc.view) status = 'Waiting for terrain…';
+    else if (skyStore.getState().loading) status = 'Loading sky data…';
+    else if (skyStore.getState().error) status = `Sky data: ${skyStore.getState().error}`;
     else if (t.view?.missing) status = `${t.view.missing} terrain tiles missing`;
     if (status) {
       ctx.textAlign = 'right';
@@ -602,6 +918,7 @@ export class ViewfinderController {
     const s = settingsStore.getState();
     const c = compositionStore.getState();
     this.drawRaster(sc);
+    this.drawSky(sc);
 
     // Horizon (0°) as a faint dashed line.
     ctx.save();
