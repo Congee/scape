@@ -7,15 +7,8 @@ import { defineConfig } from 'vitest/config';
 
 const src = (p: string) => fileURLToPath(new URL(`./src/${p}`, import.meta.url));
 
-const TILE_HOSTS = new Set([
-  'tiles.openfreemap.org',
-  'tile.openstreetmap.org',
-  'a.tile.opentopomap.org',
-  'b.tile.opentopomap.org',
-  'c.tile.opentopomap.org',
-  's3.amazonaws.com',
-  'gibs.earthdata.nasa.gov'
-]);
+// Serialized into the generated worker, so it must be self-contained: no outer references.
+const TILE_URLS = /^https:\/\/(tiles\.openfreemap\.org|tile\.openstreetmap\.org|[abc]\.tile\.opentopomap\.org|s3\.amazonaws\.com|gibs\.earthdata\.nasa\.gov|protomaps\.github\.io)\//;
 
 export default defineConfig({
   plugins: [
@@ -41,7 +34,7 @@ export default defineConfig({
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
-            urlPattern: ({ url }: { url: URL }) => TILE_HOSTS.has(url.hostname),
+            urlPattern: TILE_URLS,
             handler: 'CacheFirst',
             options: {
               cacheName: 'tiles',

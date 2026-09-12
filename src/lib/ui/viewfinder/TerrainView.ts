@@ -1,8 +1,9 @@
 import { LngLat, Map as MaplibreMap } from 'maplibre-gl';
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
+import { ensureDemProtocol } from '@data/demProtocol';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
-import { TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_URL } from '@data/terrainTiles';
+import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
 
 const DEM_SRC = 'terrain-dem';
 const KEEP_LABELS = /peak|mountain|summit/i;
@@ -51,6 +52,7 @@ export class TerrainView {
     this.place(rect);
     parent.prepend(this.el);
     ensurePmtilesProtocol();
+    ensureDemProtocol();
     this.map = new MaplibreMap({
       container: this.el,
       style: styleFor(basemap),
@@ -97,7 +99,7 @@ export class TerrainView {
     // Billboard labels make no sense at eye level; peaks would, if a style had them.
     for (const l of this.map.getStyle().layers) if (l.type === 'symbol' && !KEEP_LABELS.test(l.id)) this.map.removeLayer(l.id);
     if (!this.map.getSource(DEM_SRC)) {
-      this.map.addSource(DEM_SRC, { type: 'raster-dem', tiles: [TERRAIN_TILE_URL], tileSize: 256, encoding: 'terrarium', maxzoom: TERRAIN_MAX_ZOOM, attribution: TERRAIN_ATTRIBUTION });
+      this.map.addSource(DEM_SRC, { type: 'raster-dem', tiles: [DEM_TILE_TEMPLATE], tileSize: 256, encoding: 'terrarium', maxzoom: TERRAIN_MAX_ZOOM, attribution: TERRAIN_ATTRIBUTION });
     }
     this.map.setTerrain({ source: DEM_SRC, exaggeration: 1 });
   }

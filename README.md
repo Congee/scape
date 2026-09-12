@@ -4,7 +4,7 @@ Plan outdoor photography around sunlight, moonlight and the Milky Way. Scape com
 timeline clarity of The Photographer's Ephemeris with the feature depth of PlanIt! Pro, runs
 entirely in the browser, and works offline once installed as a PWA.
 
-Status: Phase 5. Core map, timeline, altitude chart, search, settings, library and PWA shell
+Status: Phase 6. Core map, timeline, altitude chart, search, settings, library and PWA shell
 (Phase 1); terrain: elevation badge, target location with a line-of-sight profile, 360° terrain
 horizon with rise/set behind terrain, hillshade and 3D terrain (Phase 2); composition: gear and
 field-of-view cone, depth of field and panorama, markers with KML/GPX/GeoJSON import and export,
@@ -12,7 +12,8 @@ plans, and a viewfinder that renders the terrain from the camera location (Phase
 field, constellations and the Milky Way in the viewfinder, Milky Way core windows, star-trail
 exposure rules, meteor showers, polar alignment and a night-lights map layer (Phase 4); finders:
 sun, moon and Milky Way search over a date range, saved searches, and shot-alignment, visibility
-and viewshed heat layers on the map (Phase 5).
+and viewshed heat layers on the map (Phase 5); offline data: region downloads into OPFS, offline
+basemaps and terrain, import and export of PMTiles archives, and a bundled place index (Phase 6).
 See `PLAN.md` for the roadmap and `docs/research/` for the competitive inventories.
 
 ## Run
@@ -28,17 +29,19 @@ Other scripts: `bun run check` (tsc), `bun run lint` (oxlint), `bun run test` (v
 ## Stack
 
 React 19 + React Compiler on Vite 8, TanStack Router, Zustand, MapLibre GL JS (deck.gl only where a
-feature needs it), PMTiles, astronomy-engine, IndexedDB via `idb`, Workbox via `vite-plugin-pwa`.
+feature needs it), PMTiles in OPFS, astronomy-engine, GeoNames for offline place search, IndexedDB
+via `idb`, Workbox via `vite-plugin-pwa`.
 
 ## Layout
 
 ```
 src/lib/core      pure TypeScript, unit-tested: astronomy (events, star frames, Milky Way windows, meteor showers, Polaris, the finder search), geodesy (incl. heat grids and landmark solids), optics (FOV, DoF, projection, star-trail rules), terrain (DEM decode, sightline, horizon and view sweeps), alignment and visibility grids, points I/O, time zones
-src/lib/data      basemap catalogue, PMTiles protocol, Terrarium tile cache, geocoder, IndexedDB, camera and lens catalogue
+src/lib/data      basemap catalogue, PMTiles protocol, OPFS archive store and local tile sources, Terrarium tile cache, geocoder and offline gazetteer, IndexedDB, camera and lens catalogue
 public/sky        bundled star catalogue, constellation lines and Milky Way texture (see public/sky/README.md for sources and licences)
-src/lib/state     Zustand stores: world (camera and target locations, clock, tz), settings, composition, gear, markers, plans, searches, day data, terrain, finder and alignment (worker-fed), sky data, library
+public/gazetteer  bundled GeoNames place index for offline search (see public/gazetteer/README.md)
+src/lib/state     Zustand stores: world (camera and target locations, clock, tz), settings, composition, gear, markers, plans, searches, day data, terrain, finder and alignment (worker-fed), sky data, library, offline archives and downloads
 src/lib/ui        React components plus the framework-free Map, Chart, Profile and Viewfinder controllers
-src/lib/workers   ephemeris worker, terrain worker (elevation, profile, horizon, viewfinder wedge, marker ground), finder worker, alignment worker (heat grids)
+src/lib/workers   ephemeris worker, terrain worker (elevation, profile, horizon, viewfinder wedge, marker ground), finder worker, alignment worker (heat grids), region worker (offline downloads and imports)
 src/routes        TanStack file routes: / (map), /viewfinder, /library, /settings
 ```
 
@@ -123,3 +126,35 @@ Elevation data is about 30 m, so confirm the framing in the viewfinder.
 
 A plan (Library or "Save plan" in the Frame tab) stores camera, target, moment and composition. The
 Library also exports and imports everything as one `.scape.json` file.
+
+## Offline
+
+The Offline tab manages the map data kept on the device. Regions live in the browser's private file
+storage (OPFS) as PMTiles archives, one `<id>.pmtiles` with a small JSON sidecar; nothing leaves the
+machine and nothing is uploaded.
+
+Take a region from the current map view or drag a rectangle on the map, name it, then estimate and
+download. A basemap region is cut client-side out of a PMTiles planet build over HTTP range requests,
+so only the tiles inside the box are fetched, up to a chosen zoom (10–15). The default source is the
+Protomaps daily build, which answers cross-origin range requests only from local development origins
+(localhost:5173 and localhost:3000); from any other origin, enter the URL of an archive that allows
+them. A terrain region packs the Terrarium PNG tiles (Mapzen, AWS Open Data) at zoom 6–14,
+about 10 m of ground resolution, exactly as they arrive: they are never re-encoded through a canvas.
+Downloads run in a worker with tile progress and can be cancelled; "Update" re-downloads the same box
+from a fresh build and replaces the old archive.
+
+Saved basemap regions appear in the Layers tab with a " · offline" suffix, and the map and viewfinder
+read terrain from a saved region first, falling back to the network outside it. Any archive can be
+exported as a plain `.pmtiles` file, and any `.pmtiles` file — including a Mapterhorn terrain build —
+can be imported.
+
+Independently of regions, the service worker keeps map tiles, style sprites and glyphs seen while
+online (up to 6,000 entries for 120 days), so recently visited areas often work offline as well.
+
+The tab shows how much of the browser's quota is used and offers to make the storage persistent, so
+the browser will not evict it on its own. Safari can still purge site data after about a week without
+a visit; re-download if regions disappear.
+
+Place search uses Photon (komoot) with a four-second timeout and falls back to a bundled index of
+every place above 5,000 people from GeoNames `cities5000` (CC BY 4.0; see
+`public/gazetteer/README.md`), so search still works with no network.

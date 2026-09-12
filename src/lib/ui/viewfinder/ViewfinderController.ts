@@ -20,7 +20,8 @@ import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById } from '@state/gear';
 import { markersStore } from '@state/markers';
-import { findBasemap, settingsStore } from '@state/settings';
+import { currentBasemap, offlineStore } from '@state/offline';
+import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, profileKeyFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
@@ -165,10 +166,11 @@ export class ViewfinderController {
       skyStore.subscribe(() => this.schedule()),
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
       settingsStore.subscribe(
-        (s) => [s.basemapId, s.customBasemaps] as const,
-        ([id, custom]) => this.view3d?.setBasemap(findBasemap(id, custom)),
+        (s) => [s.basemapId, s.customBasemaps, s.offlineFlavor] as const,
+        () => this.view3d?.setBasemap(currentBasemap()),
         { equalityFn: shallow }
-      )
+      ),
+      offlineStore.subscribe((s) => s.archives, () => this.view3d?.setBasemap(currentBasemap()), { equalityFn: shallow })
     );
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -1130,7 +1132,7 @@ export class ViewfinderController {
       this.view3d = null;
       return false;
     }
-    this.view3d ??= new TerrainView(this.canvas.parentElement!, sc.frame, findBasemap(s.basemapId, s.customBasemaps), () => this.schedule());
+    this.view3d ??= new TerrainView(this.canvas.parentElement!, sc.frame, currentBasemap(), () => this.schedule());
     const w = worldStore.getState();
     const pal = palette(sc.sunAlt);
     this.view3d.update(

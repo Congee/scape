@@ -1,5 +1,6 @@
 import { layers, namedFlavor } from '@protomaps/basemaps';
 import type { StyleSpecification } from 'maplibre-gl';
+import { ArchiveKind, type ArchiveMeta } from '@workers/region.protocol';
 
 // Values are Protomaps flavor names and are persisted with custom basemaps.
 export const PmFlavor = { Light: 'light', Dark: 'dark', White: 'white', Grayscale: 'grayscale', Black: 'black' } as const;
@@ -26,6 +27,17 @@ export interface Basemap {
 const OSM_ATTR = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const ASSETS = 'https://protomaps.github.io/basemaps-assets';
 const GLYPHS = `${ASSETS}/fonts/{fontstack}/{range}.pbf`;
+const GLYPH_FONTS = ['Noto Sans Regular', 'Noto Sans Medium', 'Noto Sans Italic'];
+const GLYPH_RANGES = ['0-255', '256-511'];
+
+/** Sprites and Latin glyphs a Protomaps style fetches; the service worker keeps them for offline maps. */
+export function styleAssetUrls(flavor: PmFlavor): string[] {
+  const sprite = `${ASSETS}/sprites/v4/${flavor}`;
+  return [
+    ...['', '@2x'].flatMap((s) => [`${sprite}${s}.json`, `${sprite}${s}.png`]),
+    ...GLYPH_FONTS.flatMap((f) => GLYPH_RANGES.map((r) => `${ASSETS}/fonts/${encodeURIComponent(f)}/${r}.pbf`))
+  ];
+}
 
 export const BUILTIN_BASEMAPS: Basemap[] = [
   { id: 'ofm-liberty', name: 'OpenFreeMap Liberty', kind: BasemapKind.Style, url: 'https://tiles.openfreemap.org/styles/liberty', builtin: true },
@@ -83,6 +95,20 @@ export function styleFor(b: Basemap): string | StyleSpecification {
     case BasemapKind.Pmtiles:
       return pmtilesStyle(b);
   }
+}
+
+/** Downloaded basemap archives, as basemaps served from OPFS. */
+export function offlineBasemaps(archives: ArchiveMeta[], flavor: PmFlavor): Basemap[] {
+  return archives
+    .filter((m) => m.kind === ArchiveKind.Basemap)
+    .map((m) => ({
+      id: `opfs:${m.id}`,
+      name: m.name,
+      kind: BasemapKind.Pmtiles,
+      url: `opfs/${m.id}.pmtiles`,
+      flavor,
+      attribution: `<a href="https://protomaps.com">Protomaps</a> ${OSM_ATTR}`
+    }));
 }
 
 /** True when the style paints a dark ground, so overlays can pick contrasting colours. */

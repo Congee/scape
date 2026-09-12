@@ -12,21 +12,24 @@ import {
 import { shallow } from 'zustand/shallow';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
+import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
 import { bearingDeg, destination, distanceM, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
 import { depthOfField } from '@core/optics/dof';
 import { circleOfConfusionMm, clampFocalMm, focalForFovMm, fovDeg, frameMm } from '@core/optics/fov';
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
+import { ensureDemProtocol } from '@data/demProtocol';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
-import { TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_URL } from '@data/terrainTiles';
+import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById } from '@state/gear';
 import { mapStatusStore } from '@state/mapStatus';
 import { markersStore } from '@state/markers';
-import { findBasemap, settingsStore } from '@state/settings';
+import { currentBasemap, offlineStore } from '@state/offline';
+import { settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
 import { PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
@@ -39,6 +42,7 @@ const LIVE_SRC = 'sky-live';
 const GEO_SRC = 'geodetic';
 const FOV_SRC = 'fov';
 const MARKERS_SRC = 'markers';
+const REGION_SRC = 'region';
 const HEAT_SRC = 'heat';
 const HEAT_LAYER = 'heat';
 // Stand-in until the first grid arrives; an image source needs a URL up front.
@@ -54,7 +58,16 @@ const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: 
 const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
 const FOV_COLOR = '#5aa9ff';
+const REGION_COLOR = '#5aa9ff';
 const DEFAULT_FOV_RANGE_M = 5_000;
+
+/** Rectangle ring for a draft region; a box crossing the antimeridian runs past +180. */
+function regionFeatures(b: Bbox | null): GeoJSON.FeatureCollection {
+  if (!b) return EMPTY;
+  const east = b.west <= b.east ? b.east : b.east + 360;
+  const ring = [[b.west, b.south], [east, b.south], [east, b.north], [b.west, b.north], [b.west, b.south]];
+  return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } }] };
+}
 
 const samePoint = (a: LngLat | null, b: LngLat | null) => a === b || (!!a && !!b && a.lat === b.lat && a.lng === b.lng);
 const angleDiff = (a: number, b: number) => Math.abs(((a - b + 540) % 360) - 180);
@@ -78,8 +91,11 @@ export class MapController {
   private unsubs: (() => void)[] = [];
   private rayM = 50_000;
   private styleReady = false;
-  private basemapId = '';
+  private basemapKey = '';
   private dragging = false;
+  private drawingRegion = false;
+  private drawStart: LngLat | null = null;
+  private draftBefore: Bbox | null = null;
   private dragging2 = false;
   private draggingFov = false;
 
@@ -87,8 +103,9 @@ export class MapController {
     const w = worldStore.getState();
     const s = settingsStore.getState();
     ensurePmtilesProtocol();
-    const bm = findBasemap(s.basemapId, s.customBasemaps);
-    this.basemapId = bm.id;
+    ensureDemProtocol();
+    const bm = currentBasemap();
+    this.basemapKey = `${bm.id}|${bm.flavor ?? ''}`;
 
     this.map = new MaplibreMap({
       container,
@@ -108,6 +125,7 @@ export class MapController {
     this.syncPin2(w.pin2);
 
     this.map.on('click', (e: MapMouseEvent) => {
+      if (this.drawingRegion) return;
       const p = { lng: e.lngLat.lng, lat: e.lngLat.lat };
       const al = alignStore.getState();
       if ((al.mode === HeatMode.Align || al.mode === HeatMode.Time) && al.result && cellOf(al.result.grid, p)) return al.pick(p);
@@ -120,6 +138,26 @@ export class MapController {
       } else if (e.originalEvent.shiftKey) worldStore.getState().setPin2(p);
       else if (settingsStore.getState().clickMovesPin) worldStore.getState().setPin(p);
     });
+    this.map.on('mousedown', (e: MapMouseEvent) => {
+      if (!this.drawingRegion) return;
+      this.drawStart = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+      offlineStore.getState().setDraft(bboxFromCorners(this.drawStart, this.drawStart));
+    });
+    this.map.on('mousemove', (e: MapMouseEvent) => {
+      if (!this.drawingRegion || !this.drawStart) return;
+      offlineStore.getState().setDraft(bboxFromCorners(this.drawStart, { lng: e.lngLat.lng, lat: e.lngLat.lat }));
+    });
+    this.map.on('mouseup', (e: MapMouseEvent) => {
+      if (!this.drawingRegion || !this.drawStart) return;
+      const bbox = bboxFromCorners(this.drawStart, { lng: e.lngLat.lng, lat: e.lngLat.lat });
+      this.drawStart = null;
+      const o = offlineStore.getState();
+      o.setDraft(bbox);
+      o.setDrawing(false);
+    });
+    window.addEventListener('keydown', this.onKeyDown);
+    this.unsubs.push(() => window.removeEventListener('keydown', this.onKeyDown));
+
     this.map.on('click', 'markers-circle', (e) => {
       const id = e.features?.[0]?.properties?.id as string | undefined;
       if (!id) return;
@@ -187,10 +225,14 @@ export class MapController {
       markersStore.subscribe((st) => [st.markers, st.selectedId] as const, () => this.renderMarkers(), { equalityFn: shallow }),
       markersStore.subscribe((st) => st.placing, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
       settingsStore.subscribe(
-        (st) => [st.basemapId, st.customBasemaps] as const,
-        ([id, custom]) => this.setBasemap(findBasemap(id, custom)),
+        (st) => [st.basemapId, st.customBasemaps, st.offlineFlavor] as const,
+        () => this.setBasemap(currentBasemap()),
         { equalityFn: shallow }
       ),
+      offlineStore.subscribe((st) => st.archives, () => this.setBasemap(currentBasemap()), { equalityFn: shallow }),
+      offlineStore.subscribe((st) => st.draft, () => this.renderRegion()),
+      offlineStore.subscribe((st) => st.drawing, (on) => this.setDrawingRegion(on)),
+      offlineStore.subscribe((st) => st.viewSeq, () => this.draftFromView()),
       settingsStore.subscribe(
         (st) => [st.showEventLines, st.showLiveLines, st.showShadow, st.showGc] as const,
         () => this.renderAll(),
@@ -264,9 +306,35 @@ export class MapController {
     if (!this.dragging2) this.pin2.setLngLat([p.lng, p.lat]);
   }
 
+  /** Escape leaves drawing mode and drops the half-drawn rectangle. */
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || !this.drawingRegion) return;
+    if (this.drawStart) offlineStore.getState().setDraft(this.draftBefore);
+    this.drawStart = null;
+    offlineStore.getState().setDrawing(false);
+  };
+
+  private setDrawingRegion(on: boolean) {
+    this.drawingRegion = on;
+    this.map.getCanvas().style.cursor = on ? 'crosshair' : '';
+    if (on) {
+      this.draftBefore = offlineStore.getState().draft;
+      this.map.dragPan.disable();
+    } else {
+      this.drawStart = null;
+      this.map.dragPan.enable();
+    }
+  }
+
+  private draftFromView() {
+    const b = this.map.getBounds();
+    offlineStore.getState().setDraft(bboxFromCorners({ lng: b.getWest(), lat: b.getSouth() }, { lng: b.getEast(), lat: b.getNorth() }));
+  }
+
   private setBasemap(bm: Basemap) {
-    if (bm.id === this.basemapId) return;
-    this.basemapId = bm.id;
+    const key = `${bm.id}|${bm.flavor ?? ''}`;
+    if (key === this.basemapKey) return;
+    this.basemapKey = key;
     this.styleReady = false;
     this.map.setStyle(styleFor(bm));
   }
@@ -299,6 +367,14 @@ export class MapController {
     this.map.addSource(GEO_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(FOV_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(MARKERS_SRC, { type: 'geojson', data: EMPTY });
+    this.map.addSource(REGION_SRC, { type: 'geojson', data: EMPTY });
+    this.map.addLayer({ id: 'region-fill', type: 'fill', source: REGION_SRC, paint: { 'fill-color': REGION_COLOR, 'fill-opacity': 0.12 } });
+    this.map.addLayer({
+      id: 'region-line',
+      type: 'line',
+      source: REGION_SRC,
+      paint: { 'line-color': REGION_COLOR, 'line-width': 2, 'line-dasharray': [2, 2] }
+    });
     this.map.addLayer({
       id: 'fov-fill',
       type: 'fill',
@@ -410,7 +486,7 @@ export class MapController {
     if (this.map.getSource(id)) return;
     this.map.addSource(id, {
       type: 'raster-dem',
-      tiles: [TERRAIN_TILE_URL],
+      tiles: [DEM_TILE_TEMPLATE],
       tileSize: 256,
       encoding: 'terrarium',
       maxzoom: TERRAIN_MAX_ZOOM,
@@ -465,6 +541,7 @@ export class MapController {
     this.renderFov();
     this.renderMarkers();
     this.renderHeat();
+    this.renderRegion();
   }
 
   private source(id: string): GeoJSONSource | undefined {
@@ -528,6 +605,10 @@ export class MapController {
     const t = terrainStore.getState();
     const fresh = t.profile && t.profileKey === profileKeyFor(w, settingsStore.getState());
     src.setData(geodeticLine(w.pin, w.pin2, fresh ? t.profile!.los.status : 'Unknown'));
+  }
+
+  private renderRegion() {
+    this.source(REGION_SRC)?.setData(regionFeatures(offlineStore.getState().draft));
   }
 
   private renderMarkers() {

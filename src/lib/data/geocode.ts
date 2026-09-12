@@ -1,4 +1,5 @@
 import type { LngLat } from '@core/geo/geodesy';
+import { searchGazetteer } from './gazetteer';
 
 export interface GeocodeHit extends LngLat {
   name: string;
@@ -10,11 +11,13 @@ interface PhotonFeature {
   properties: Record<string, string | undefined>;
 }
 
-/** Online place search via Photon (komoot). Returns [] when offline or on error. */
-export async function geocode(query: string, signal?: AbortSignal): Promise<GeocodeHit[]> {
+const PHOTON_TIMEOUT_MS = 4000;
+
+async function photon(query: string, signal?: AbortSignal): Promise<GeocodeHit[]> {
   const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=7&lang=en`;
+  const timeout = AbortSignal.timeout(PHOTON_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal });
+    const res = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (!res.ok) return [];
     const json = (await res.json()) as { features: PhotonFeature[] };
     return json.features.map((f) => {
@@ -25,4 +28,14 @@ export async function geocode(query: string, signal?: AbortSignal): Promise<Geoc
   } catch {
     return [];
   }
+}
+
+/** Place search via Photon (komoot), falling back to the bundled offline gazetteer. Never throws. */
+export async function geocode(query: string, signal?: AbortSignal): Promise<GeocodeHit[]> {
+  if (navigator.onLine !== false) {
+    const hits = await photon(query, signal);
+    if (hits.length > 0) return hits;
+  }
+  if (signal?.aborted) return [];
+  return searchGazetteer(query);
 }

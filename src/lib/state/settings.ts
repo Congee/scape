@@ -3,7 +3,7 @@ import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { MoonRule } from '@core/astro/milkyWay';
 import { Units } from '@core/format';
 import { CoordFormat } from '@core/geo/coords';
-import { BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, type Basemap } from '@data/basemaps';
+import { BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, PmFlavor, type Basemap } from '@data/basemaps';
 
 export interface Settings {
   units: Units;
@@ -11,6 +11,8 @@ export interface Settings {
   coordFormat: CoordFormat;
   basemapId: string;
   customBasemaps: Basemap[];
+  /** Protomaps flavor used to style downloaded basemap archives. */
+  offlineFlavor: PmFlavor;
   /** Sun altitude bounding the golden hour, degrees. */
   goldenAltitude: number;
   showEventLines: boolean;
@@ -46,6 +48,7 @@ export const DEFAULT_SETTINGS: Settings = {
   coordFormat: CoordFormat.DD,
   basemapId: DEFAULT_BASEMAP_ID,
   customBasemaps: [],
+  offlineFlavor: PmFlavor.Light,
   goldenAltitude: 6,
   showEventLines: true,
   showLiveLines: true,
@@ -92,6 +95,6 @@ export const settingsStore = create<SettingsState>()(
 
 export const useSettings = settingsStore;
 
-export function findBasemap(id: string, custom: Basemap[]): Basemap {
-  return custom.find((b) => b.id === id) ?? BUILTIN_BASEMAPS.find((b) => b.id === id) ?? BUILTIN_BASEMAPS[0];
+export function findBasemap(id: string, custom: Basemap[], offline: Basemap[] = []): Basemap {
+  return custom.find((b) => b.id === id) ?? offline.find((b) => b.id === id) ?? BUILTIN_BASEMAPS.find((b) => b.id === id) ?? BUILTIN_BASEMAPS[0];
 }

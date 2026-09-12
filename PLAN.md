@@ -116,7 +116,8 @@ src/lib/
   state/       Zustand stores: world (time, camera and target, tz), settings, overlays, gear
   ui/          components: Map, DateBar, Timeline, AltitudeChart, panels, Viewfinder
   workers/     horizon sweep, finders, region downloader
-src/routes/    TanStack Router file routes: / (map), /library, /gear, /settings, /offline
+src/routes/    TanStack Router file routes: / (map), /library, /gear, /settings
+               (the offline data manager is the map panel's Offline tab, not a route)
 ```
 
 Rendering: MapLibre owns the map canvas; overlays are GeoJSON sources updated in place
@@ -244,7 +245,20 @@ flat-shaded prisms), a height ruler at the target distance and a sun/moon header
 cross-checked on 2026-09-12 against TPE Web's Visual Search (Zermatt 46.0207 N 7.7491 E, moon, azimuth
 233–237°, altitude 15–19°, one year from 2026-09-11): all 23 TPE passes are reproduced to the minute with
 matching illumination; Scape also lists 2026-10-22 01:14–01:33 CEST (80 %), which TPE omits and JPL
-Horizons confirms (azimuth 233.1→237.3°, altitude 18.6→15.9° over 23:15–23:35 UTC). Phase 6 is next.
+Horizons confirms (azimuth 233.1→237.3°, altitude 18.6→15.9° over 23:15–23:35 UTC).
+Phase 6 shipped on 2026-09-12: offline data. Regions are drawn on the map or taken from the view and
+downloaded in a worker into OPFS as PMTiles archives with a JSON sidecar — basemap tiles cut out of
+the Protomaps daily build over HTTP range requests, terrain packed from the Terrarium PNG tiles —
+with estimates before the download, progress, cancel, update, rename, export and import of any
+`.pmtiles` file. Saved basemap archives join the Layers list; the map and the viewfinder read local
+tiles first and fall back to the network. The Offline tab shows the quota, asks for persistent
+storage and warns about Safari's eviction. Place search keeps Photon first and falls back to a
+bundled GeoNames `cities5000` index (`scripts/build-gazetteer.ts`) when offline or unanswered.
+The service worker's tile cache route, dead since Phase 1 because it referenced a config-time
+variable, now works and also keeps the Protomaps sprites and glyphs. Acceptance was run on
+2026-09-12 against the production build served on localhost:3000 with the browser offline and its
+HTTP cache cleared: the shell, an offline basemap with labels, elevation, terrain events, the
+viewfinder inside the region, and place search all worked; update, export/import and delete too.
 
 ## 8. Risks and decisions taken
 
@@ -294,4 +308,15 @@ Horizons confirms (azimuth 233.1→237.3°, altitude 18.6→15.9° over 23:15–
 - **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
   string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
   objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.
+- **Terrain regions are packed from the AWS Terrarium PNG tiles, not Mapterhorn**: Mapterhorn is WebP
+  and only canvas decoding is available for it, which is lossy for Terrarium; Mapterhorn archives can
+  still be imported for the map's own terrain rendering.
+- **Basemap regions are client-side range extracts of a PMTiles planet build.** The default source is
+  the Protomaps daily build, whose CORS allowlist covers only local development origins
+  (localhost:5173, localhost:3000), so it serves dogfooding but not a deployed origin; the source URL
+  is editable. For deployment the candidate is packing OpenFreeMap's per-tile PBFs (CORS `*`) the way
+  terrain is packed, with the Liberty style, sprites and glyphs cached alongside; that is an open
+  decision.
+- **OPFS is the source of truth for archives** (each `<id>.pmtiles` with an `<id>.json` sidecar);
+  IndexedDB stays for the library.
 - **Name**: "scape" is a placeholder.

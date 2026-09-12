@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { BasemapKind, BUILTIN_BASEMAPS, PmFlavor } from '@data/basemaps';
+import { BasemapKind, BUILTIN_BASEMAPS, offlineBasemaps, PmFlavor } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
 import { useMapStatus } from '@state/mapStatus';
+import { useOffline } from '@state/offline';
 import { settingsStore, useSettings, type Settings } from '@state/settings';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
@@ -9,6 +10,8 @@ const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 export function LayersPanel() {
   const basemapId = useSettings((s) => s.basemapId);
   const custom = useSettings((s) => s.customBasemaps);
+  const offlineFlavor = useSettings((s) => s.offlineFlavor);
+  const archives = useOffline((s) => s.archives);
   const { update, addBasemap, removeBasemap } = settingsStore.getState();
   const [url, setUrl] = useState('');
   const [flavor, setFlavor] = useState<PmFlavor>(PmFlavor.Light);
@@ -30,18 +33,20 @@ export function LayersPanel() {
     addBasemap({ id: `file:${key}`, name: `${file.name} (this session)`, kind: BasemapKind.Pmtiles, url: key, flavor, local: true });
   };
 
+  const offline = offlineBasemaps(archives, offlineFlavor);
+
   return (
     <div className="layers">
       <h3>Basemap</h3>
       {mapError && <p className="error">Basemap problem: {mapError}</p>}
       <ul className="radio-list">
-        {[...BUILTIN_BASEMAPS, ...custom].map((b) => (
+        {[...BUILTIN_BASEMAPS, ...offline, ...custom].map((b) => (
           <li key={b.id}>
             <label>
               <input type="radio" name="basemap" checked={b.id === basemapId} onChange={() => update({ basemapId: b.id })} />
-              <span>{b.name}</span>
+              <span>{b.name}{offline.includes(b) ? ' · offline' : ''}</span>
             </label>
-            {!b.builtin && (
+            {custom.some((c) => c.id === b.id) && (
               <button className="link" onClick={() => removeBasemap(b.id)} title="Remove this basemap">
                 remove
               </button>
@@ -60,11 +65,12 @@ export function LayersPanel() {
         </select>
         <button onClick={addUrl}>Add</button>
       </div>
-      <p className="muted hint">Remote archives must allow cross-origin range requests (CORS). Protomaps' planet builds do not; host your own extract or open a local file.</p>
+      <p className="muted hint">Remote archives must allow cross-origin range requests; Protomaps' daily builds do only for local development origins.</p>
       <label className="file">
         <input type="file" accept=".pmtiles" onChange={(e) => addFile(e.target.files?.[0])} />
-        Open a local .pmtiles file (this session only; persistent storage arrives with the offline manager)
+        Open a local .pmtiles file (this session only)
       </label>
+      <p className="muted hint">Regions for offline use are downloaded and imported in the Offline tab.</p>
 
       <h3>Overlays</h3>
       <Toggle k="showEventLines" label="Rise and set azimuth lines" />

@@ -1051,3 +1051,45 @@ label.file input {
   box-shadow: 0 0 0 2px rgb(255 225 77 / 0.4);
   cursor: pointer;
 }
+
+/* Offline panel */
+.offline .job,
+.offline .archive {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.offline .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.offline .head input {
+  flex: 1;
+  min-width: 0;
+}
+
+.offline .chip {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--fg-3);
+  font-size: 11px;
+}
+
+.offline .progress {
+  margin: 2px 0;
+}
+
+.offline input.url {
+  font-size: 11px;
+}
+
+.offline .actions .muted {
+  align-self: center;
+  font-size: 12px;
+}

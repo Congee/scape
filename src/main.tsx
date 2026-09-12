@@ -10,6 +10,7 @@ import { dayDataStore, startDayDataSync } from '@state/dayData';
 import { finderStore } from '@state/finder';
 import { gearStore } from '@state/gear';
 import { markersStore } from '@state/markers';
+import { offlineStore, startOffline } from '@state/offline';
 import { plansStore } from '@state/plans';
 import { searchesStore } from '@state/searches';
 import { settingsStore } from '@state/settings';
@@ -29,8 +30,10 @@ declare module '@tanstack/react-router' {
 if (import.meta.env.DEV) {
   window.addEventListener('error', (e) => console.error('[scape] error:', e.message, e.filename, e.lineno, e.error?.stack));
   window.addEventListener('unhandledrejection', (e) => console.error('[scape] rejection:', e.reason));
-  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, plans: plansStore, gear: gearStore, sky: skyStore, dayData: dayDataStore, finder: finderStore, align: alignStore, searches: searchesStore };
+  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, plans: plansStore, gear: gearStore, sky: skyStore, dayData: dayDataStore, finder: finderStore, align: alignStore, searches: searchesStore, offline: offlineStore };
 }
+
+await startOffline();
 
 startTerrainSync();
 startAlignSync();

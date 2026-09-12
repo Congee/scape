@@ -1,8 +1,11 @@
 import { decodeTerrarium, type DemSource, type DemTile } from '@core/terrain/dem';
 import { decodePng, UnsupportedPngError } from '@core/terrain/png';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
+import { localTerrain } from './localTiles';
 
 export const TERRAIN_TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
+/** MapLibre reads DEM tiles through our own protocol so downloaded regions win over the network. */
+export const DEM_TILE_TEMPLATE = 'scape-dem://{z}/{x}/{y}';
 export const TERRAIN_MAX_ZOOM = 15;
 export const TERRAIN_ATTRIBUTION =
   'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (Mapzen, AWS Open Data)';
@@ -83,6 +86,13 @@ export class DemCache implements DemSource {
   private async fetchTile(c: TileCoord): Promise<DemTile | null> {
     await this.acquire();
     try {
+      const local = await localTerrain.tile(c.z, c.x, c.y);
+      if (local) {
+        const { size, elev } = await decodeTerrainPng(new Blob([local]));
+        const tile: DemTile = { ...c, size, elev };
+        this.set(c, tile);
+        return tile;
+      }
       const res = await fetch(terrainTileUrl(c.z, c.x, c.y));
       if (res.status === 404 || res.status === 403) {
         this.set(c, null);
