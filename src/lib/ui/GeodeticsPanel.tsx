@@ -1,5 +1,7 @@
-import { compass, degrees, distance, height } from '@core/format';
+import { compass, degrees, distance, height, type Units } from '@core/format';
 import { bearingDeg, destination, distanceM, intermediatePoint } from '@core/geo/geodesy';
+import { LosStatus } from '@core/terrain/los';
+import { TerrainKind } from '@workers/terrain.protocol';
 import { settingsStore, useSettings } from '@state/settings';
 import { EYE_HEIGHT_M, profileKeyFor, horizonKeyFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
@@ -8,15 +10,15 @@ import { ProfileChart } from './ProfileChart';
 
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg)}`;
 
-function losText(p: ProfileResult, units: 'metric' | 'imperial'): string {
+function losText(p: ProfileResult, units: Units): string {
   const l = p.los;
   switch (l.status) {
-    case 'clear':
+    case LosStatus.Clear:
       return `Clear · ${height(l.minClearanceM, units)} above the terrain at the tightest point`;
-    case 'marginal':
+    case LosStatus.Marginal:
       return `Marginal · only ${l.marginDeg.toFixed(2)}° above the terrain`;
-    case 'blocked':
-      return `Blocked · terrain ${distance(l.minClearanceAtM, units)} from pin 1 stands ${height(-l.minClearanceM, units)} in the way`;
+    case LosStatus.Blocked:
+      return `Blocked · terrain ${distance(l.minClearanceAtM, units)} from the camera stands ${height(-l.minClearanceM, units)} in the way`;
   }
 }
 
@@ -29,7 +31,7 @@ export function GeodeticsPanel() {
   const terrain = useSettings((s) => s.terrain);
   const profile = useTerrain((s) => s.profile);
   const profileKey = useTerrain((s) => s.profileKey);
-  const busy = useTerrain((s) => s.busy.profile);
+  const busy = useTerrain((s) => s.busy[TerrainKind.Profile]);
   const ground = useTerrain((s) => s.pinGroundM);
   const ground2 = useTerrain((s) => s.pin2GroundM);
   const error = useTerrain((s) => s.error);
@@ -44,12 +46,12 @@ export function GeodeticsPanel() {
     return (
       <div className="geo">
         <p className="muted">
-          The secondary pin measures a sightline from the primary pin: distance, bearing, elevation angle, an elevation profile and whether terrain blocks the view.
+          The target location measures a sightline from the camera location: distance, bearing, elevation angle, an elevation profile and whether terrain blocks the view.
         </p>
         <div className="actions">
-          <button onClick={place}>Place secondary pin</button>
+          <button onClick={place}>Place target</button>
         </div>
-        <p className="muted hint">Or Shift-click the map. Drag either pin to update everything live.</p>
+        <p className="muted hint">Or Shift-click the map. Drag the camera or the target to update everything live.</p>
         <HorizonStatus />
       </div>
     );
@@ -74,11 +76,11 @@ export function GeodeticsPanel() {
         <b className="v">
           {degrees(brg)} {compass(brg)} <span className="muted">· back {degrees(bearingDeg(pin2, pin))}</span>
         </b>
-        <span className="k">Ground, pin 1</span>
+        <span className="k">Ground, camera</span>
         <b className="v">
           {groundText(ground)} <span className="muted">+ {height(pinH + EYE_HEIGHT_M, units)} camera</span>
         </b>
-        <span className="k">Ground, pin 2</span>
+        <span className="k">Ground, target</span>
         <b className="v">
           {groundText(ground2)}
           <span className="muted"> + </span>
@@ -96,18 +98,18 @@ export function GeodeticsPanel() {
         <span className="k">Elevation angle</span>
         <b className="v">{fresh ? signed(fresh.los.targetAngleDeg) : terrain ? '…' : 'needs elevation data'}</b>
         <span className="k">Line of sight</span>
-        <b className={`v los ${fresh ? fresh.los.status : ''}`}>{fresh ? losText(fresh, units) : busy ? 'computing…' : terrain ? '—' : 'needs elevation data'}</b>
+        <b className={`v los ${fresh ? fresh.los.status.toLowerCase() : ''}`}>{fresh ? losText(fresh, units) : busy ? 'computing…' : terrain ? '—' : 'needs elevation data'}</b>
       </div>
       {terrain && <ProfileChart />}
       <div className="actions">
         <button onClick={() => w.swapPins()} title="Look the other way">
-          Swap pins
+          Swap camera and target
         </button>
-        <button onClick={showBoth} title="Fit both pins on the map">
+        <button onClick={showBoth} title="Fit camera and target on the map">
           Show both
         </button>
         <button className="link" onClick={() => w.setPin2(null)}>
-          Remove pin 2
+          Remove target
         </button>
       </div>
       {fresh && fresh.missing > 0 && <p className="muted hint">{fresh.missing} of {fresh.distM.length} profile samples had no elevation data.</p>}
@@ -124,7 +126,7 @@ function HorizonStatus() {
   const units = useSettings((s) => s.units);
   const horizon = useTerrain((s) => s.horizon);
   const horizonKey = useTerrain((s) => s.horizonKey);
-  const busy = useTerrain((s) => s.busy.horizon);
+  const busy = useTerrain((s) => s.busy[TerrainKind.Horizon]);
   const fresh = horizon && horizonKey === horizonKeyFor(worldStore.getState(), settingsStore.getState());
   let text: string;
   if (!terrain) text = 'Elevation data is off (Settings).';

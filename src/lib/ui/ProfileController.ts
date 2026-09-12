@@ -70,7 +70,7 @@ export class ProfileController {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (!fresh) {
-      ctx.fillText(t.busy.profile ? 'Loading elevation profile…' : 'No profile', w / 2, h / 2);
+      ctx.fillText(t.busy.Profile ? 'Loading elevation profile…' : 'No profile', w / 2, h / 2);
       return;
     }
     this.drawProfile(t.profile!, units);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatLngLat, parseLngLat } from '@core/geo/coords';
+import { CoordFormat, formatLngLat, parseLngLat } from '@core/geo/coords';
 import { geocode, type GeocodeHit } from '@data/geocode';
 import { worldStore } from '@state/world';
 
@@ -31,7 +31,7 @@ export function Search() {
   }, [text, coord]);
 
   const hits: GeocodeHit[] = coord
-    ? [{ ...coord, name: formatLngLat(coord, 'dms'), detail: 'Coordinates' }]
+    ? [{ ...coord, name: formatLngLat(coord, CoordFormat.DMS), detail: 'Coordinates' }]
     : remote.query === text
       ? remote.hits
       : [];

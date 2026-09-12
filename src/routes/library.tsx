@@ -38,7 +38,7 @@ function LibraryPage() {
     <div className="page">
       <h1>Library</h1>
       <section>
-        <h2>Save the current pin</h2>
+        <h2>Save the camera location</h2>
         <div className="field-row">
           <input placeholder={`Name for ${formatLngLat(pin, format)}`} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
           <button onClick={save} disabled={!name.trim()}>
@@ -52,12 +52,12 @@ function LibraryPage() {
         <ul className="list">
           {locations.map((l) => (
             <li key={l.id}>
-              <button className="primary" onClick={() => go(l.lat, l.lng)} title="Move the pin here">
+              <button className="primary" onClick={() => go(l.lat, l.lng)} title="Move the camera here">
                 <span className="name">{l.name}</span>
                 <span className="detail">{formatLngLat(l, format)}</span>
               </button>
-              <button className="link" onClick={() => worldStore.getState().setPin2({ lat: l.lat, lng: l.lng })} title="Use as the secondary pin for geodetics">
-                pin 2
+              <button className="link" onClick={() => worldStore.getState().setPin2({ lat: l.lat, lng: l.lng })} title="Use as the target location">
+                target
               </button>
               <button className="link" onClick={() => libraryStore.getState().remove(l.id)} title="Delete">
                 delete

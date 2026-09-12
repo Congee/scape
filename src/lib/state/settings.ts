@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
-import type { Units } from '@core/format';
-import type { CoordFormat } from '@core/geo/coords';
+import { Units } from '@core/format';
+import { CoordFormat } from '@core/geo/coords';
 import { BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, type Basemap } from '@data/basemaps';
 
 export interface Settings {
@@ -33,9 +33,9 @@ export interface SettingsState extends Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  units: 'metric',
+  units: Units.Metric,
   hour12: true,
-  coordFormat: 'dd',
+  coordFormat: CoordFormat.DD,
   basemapId: DEFAULT_BASEMAP_ID,
   customBasemaps: [],
   goldenAltitude: 6,

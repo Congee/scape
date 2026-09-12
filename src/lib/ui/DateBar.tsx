@@ -52,7 +52,7 @@ export function DateBar() {
         className="tz"
         value={tzAuto ? '' : tz}
         onChange={(e) => setTz(e.target.value || null)}
-        title="Time zone (auto from pin, or override)"
+        title="Time zone (auto from the camera location, or override)"
         aria-label="Time zone"
       >
         <option value="">{`Auto · ${tz} (${offsetLabel(new Date(time), tz)})`}</option>

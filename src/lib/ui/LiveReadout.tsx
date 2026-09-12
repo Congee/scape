@@ -1,4 +1,4 @@
-import { makeObserver } from '@core/astro/bodies';
+import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { moonInfo, position, type HorizontalPos } from '@core/astro/positions';
 import { compass, degrees, percent } from '@core/format';
 import { useSettings } from '@state/settings';
@@ -15,9 +15,9 @@ export function LiveReadout() {
   const moon = moonInfo(date);
   return (
     <div className="readout">
-      <Row cls="sun" label="Sun" pos={position('sun', date, obs)} />
-      <Row cls="moon" label="Moon" pos={position('moon', date, obs)} extra={`${moon.name} · ${percent(moon.illumination, moon.illumination < 0.1 ? 2 : 1)}`} />
-      {showGc && <Row cls="gc" label="Galactic Centre" pos={position('gc', date, obs)} />}
+      <Row cls="sun" label="Sun" pos={position(SkyBody.Sun, date, obs)} />
+      <Row cls="moon" label="Moon" pos={position(SkyBody.Moon, date, obs)} extra={`${moon.name} · ${percent(moon.illumination, moon.illumination < 0.1 ? 2 : 1)}`} />
+      {showGc && <Row cls="gc" label="Galactic Centre" pos={position(SkyBody.Gc, date, obs)} />}
     </div>
   );
 }

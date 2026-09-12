@@ -1,17 +1,17 @@
 import { useState } from 'react';
-import { BUILTIN_BASEMAPS, type PmFlavor } from '@data/basemaps';
+import { BasemapKind, BUILTIN_BASEMAPS, PmFlavor } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
 import { useMapStatus } from '@state/mapStatus';
 import { settingsStore, useSettings, type Settings } from '@state/settings';
 
-const FLAVORS: PmFlavor[] = ['light', 'dark', 'white', 'grayscale', 'black'];
+const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 
 export function LayersPanel() {
   const basemapId = useSettings((s) => s.basemapId);
   const custom = useSettings((s) => s.customBasemaps);
   const { update, addBasemap, removeBasemap } = settingsStore.getState();
   const [url, setUrl] = useState('');
-  const [flavor, setFlavor] = useState<PmFlavor>('light');
+  const [flavor, setFlavor] = useState<PmFlavor>(PmFlavor.Light);
   const mapError = useMapStatus((s) => s.error);
   const terrain = useSettings((s) => s.terrain);
   const rangeKm = useSettings((s) => s.horizonRangeKm);
@@ -20,14 +20,14 @@ export function LayersPanel() {
     const u = url.trim();
     if (!u) return;
     const name = u.split('/').pop()?.replace(/\.pmtiles$/i, '') || 'PMTiles';
-    addBasemap({ id: `pm:${u}`, name, kind: 'pmtiles', url: u, flavor });
+    addBasemap({ id: `pm:${u}`, name, kind: BasemapKind.Pmtiles, url: u, flavor });
     setUrl('');
   };
 
   const addFile = (file: File | undefined) => {
     if (!file) return;
     const key = registerLocalPmtiles(file);
-    addBasemap({ id: `file:${key}`, name: `${file.name} (this session)`, kind: 'pmtiles', url: key, flavor, local: true });
+    addBasemap({ id: `file:${key}`, name: `${file.name} (this session)`, kind: BasemapKind.Pmtiles, url: key, flavor, local: true });
   };
 
   return (
@@ -71,7 +71,7 @@ export function LayersPanel() {
       <Toggle k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
       <Toggle k="showShadow" label="Sun shadow direction" />
       <Toggle k="showGc" label="Galactic Centre" />
-      <Toggle k="clickMovesPin" label="Clicking the map moves the pin" />
+      <Toggle k="clickMovesPin" label="Clicking the map moves the camera" />
 
       <h3>Terrain</h3>
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}

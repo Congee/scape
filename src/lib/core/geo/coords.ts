@@ -1,6 +1,8 @@
 import type { LngLat } from './geodesy';
 
-export type CoordFormat = 'dd' | 'dm' | 'dms';
+// Values are persisted in settings.
+export const CoordFormat = { DD: 'dd', DM: 'dm', DMS: 'dms' } as const;
+export type CoordFormat = (typeof CoordFormat)[keyof typeof CoordFormat];
 
 function pad(n: number, w: number): string {
   return String(n).padStart(w, '0');
@@ -9,16 +11,16 @@ function pad(n: number, w: number): string {
 function fmtOne(value: number, pos: string, neg: string, format: CoordFormat): string {
   const hemi = value < 0 ? neg : pos;
   const v = Math.abs(value);
-  if (format === 'dd') return `${v.toFixed(4)}°${hemi}`;
+  if (format === CoordFormat.DD) return `${v.toFixed(4)}°${hemi}`;
   const d = Math.floor(v);
   const mFloat = (v - d) * 60;
-  if (format === 'dm') return `${d}°${mFloat.toFixed(3)}′${hemi}`;
+  if (format === CoordFormat.DM) return `${d}°${mFloat.toFixed(3)}′${hemi}`;
   const m = Math.floor(mFloat);
   const s = (mFloat - m) * 60;
   return `${d}°${pad(m, 2)}′${pad(Number(s.toFixed(1)), 4)}″${hemi}`;
 }
 
-export function formatLngLat(p: LngLat, format: CoordFormat = 'dd'): string {
+export function formatLngLat(p: LngLat, format: CoordFormat = CoordFormat.DD): string {
   return `${fmtOne(p.lat, 'N', 'S', format)} ${fmtOne(p.lng, 'E', 'W', format)}`;
 }
 

@@ -12,9 +12,9 @@ research with versions and licenses, TPE screenshots).
 
 ## 1. Product principles
 
-1. **Map is the document.** One primary pin drives every number on screen. Drag the pin,
+1. **Map is the document.** One camera location drives every number on screen. Drag the camera,
    scrub time, and everything updates live. No confirm steps, no modes to remember.
-2. **One shared world state.** Simulated date/time, primary pin, secondary pin, gear and
+2. **One shared world state.** Simulated date/time, camera location, target location, gear and
    active overlays feed every module (PlanIt's best architectural idea). The simulated clock
    is visually distinct from "now".
 3. **One consistent colour language.** Sun = amber/orange, Moon = blue, Milky Way = violet,
@@ -26,15 +26,15 @@ research with versions and licenses, TPE screenshots).
    export/import. Map, terrain and sky data are downloadable by region and updated when the
    user says so. The app shell itself is a PWA.
 6. **Fast.** Sub-frame updates while scrubbing. Heavy work (horizon sweeps, searches) in
-   Web Workers. Astronomy calls are memoised per (pin, day).
+   Web Workers. Astronomy calls are memoised per (camera location, day).
 
 ## 2. Feature scope (best of TPE ∪ PlanIt)
 
 Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 
 ### Core (Phase 1)
-- Map with draggable primary pin; coordinates / time zone / elevation badges (T)
-- Date bar: prev/next day, ±week, calendar, "now", typeable date; time zone auto from pin
+- Map with draggable camera location; coordinates / time zone / elevation badges (T)
+- Date bar: prev/next day, ±week, calendar, "now", typeable date; time zone auto from the camera location
   with manual override and confidence hint (T, P)
 - Timeline of the day: astro/nautical/civil twilight, sunrise/set, golden hour bounds,
   sun/moon transit, moonrise/set with phase + illumination, Galactic Centre rise/set (T)
@@ -47,7 +47,7 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 - PWA shell; visited tiles cached automatically
 
 ### Terrain & geodetics (Phase 2)
-- Secondary pin, geodetic line: distance, bearing, elevation angle, elevation profile,
+- Target location, geodetic line: distance, bearing, elevation angle, elevation profile,
   line-of-sight colour (green/yellow/red) (T, P)
 - Elevation from Terrarium DEM tiles, client-side decode, cached (T)
 - 360° terrain horizon profile from DEM (radial sweep in a worker); "true" rise/set behind
@@ -55,14 +55,14 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 - Hillshade / terrain layers; map style variants (grayscale etc.) (T)
 
 ### Plan & composition (Phase 3)
-- Plan model: camera pin + scene pin + date/time + composition (focal length, azimuth,
+- Plan model: camera location + target location + date/time + composition (focal length, azimuth,
   elevation, orientation) (P)
 - Photo gear: cameras (sensor size) + lenses; FOV cone drawn on map as great circles, with
   draggable edges to change azimuth / focal length (T, P)
 - Depth-of-field and panorama calculators drawn on the map (P)
 - Markers with categories, rating, notes, height/width, "show in viewfinder" flag; KML/GPX/
   GeoJSON import/export (P, T)
-- **Viewfinder VR** (Three.js): synthetic view from the camera pin — terrain silhouette from
+- **Viewfinder VR** (Three.js): synthetic view from the camera location — terrain silhouette from
   DEM, markers, sun/moon/GC paths, FOV frame, star field (P, T FPV)
 - Library: locations, plans, searches, lists, favourites; export/import (T)
 
@@ -113,7 +113,7 @@ src/lib/
     search/    constrained ephemeris search engine
   data/        storage & sources: idb library, OPFS tile store, PMTiles sources,
                Terrarium tile fetcher, gazetteer, geocoder
-  state/       Zustand stores: world (time, pins, tz), settings, overlays, gear
+  state/       Zustand stores: world (time, camera and target, tz), settings, overlays, gear
   ui/          components: Map, DateBar, Timeline, AltitudeChart, panels, Viewfinder
   workers/     horizon sweep, finders, region downloader
 src/routes/    TanStack Router file routes: / (map), /library, /gear, /settings, /offline
@@ -129,7 +129,7 @@ pays for deck.gl or Three.js.
 State: Zustand stores living outside React. Components subscribe with selectors, so a time
 scrub re-renders only the readouts whose values changed; the map controller and the chart
 subscribe to the store directly and never go through React. Derived astronomy is memoised per
-(pin, day, tz); heavy sweeps run in workers. URL sync is debounced through the router's typed
+(camera location, day, tz); heavy sweeps run in workers. URL sync is debounced through the router's typed
 search params.
 
 ## 4. Stack (verified 2026-09-11, see docs/research/tech-research.md)
@@ -195,8 +195,8 @@ Everything exportable as one JSON (`.scape.json`) plus KML/GeoJSON for points.
 | Phase | Deliverable | Done when |
 |---|---|---|
 | 0 | Research + this plan | ✔ |
-| 1 | Core map/timeline/chart app, PWA shell | Drag pin anywhere on Earth, events match NOAA/USNO within 1 min, chart scrubs at 60 fps, works after reload with network off |
-| 2 | Terrain & geodetics | Secondary pin profile + LOS colour; horizon curve on chart; rise "behind terrain" times |
+| 1 | Core map/timeline/chart app, PWA shell | Drag the camera anywhere on Earth, events match NOAA/USNO within 1 min, chart scrubs at 60 fps, works after reload with network off |
+| 2 | Terrain & geodetics | Target profile + LOS colour; horizon curve on chart; rise "behind terrain" times |
 | 3 | Plan, gear, FOV, markers, Viewfinder VR, Library | FOV cone matches TPE FOV tool; viewfinder silhouette matches real photo at a known spot |
 | 4 | Night | GC windows match TPE; star field renders 9k stars at 60 fps |
 | 5 | Finders + shot alignment | Full-moon-behind-landmark search reproduces a known TPE result |
@@ -204,7 +204,7 @@ Everything exportable as one JSON (`.scape.json`) plus KML/GeoJSON for points.
 | 7 | Extras | Each calculator cross-checked against PlanIt worked examples |
 
 Phase 1 shipped on 2026-09-11 (the elevation badge moved to Phase 2 alongside the DEM work).
-Phase 2 shipped on 2026-09-11: elevation badge, secondary pin with sightline (distance, bearing,
+Phase 2 shipped on 2026-09-11: elevation badge, target location with sightline (distance, bearing,
 elevation angle, profile chart, clear/marginal/blocked colouring), 360° terrain horizon swept in a
 worker from Terrarium tiles (0.5° azimuth steps, zoom ladder 14→8 out to a configurable range),
 terrain rise/set events for sun, moon and Galactic Centre, skyline on the altitude chart, hillshade
@@ -217,7 +217,7 @@ and 3D terrain toggles. Phase 3 is next.
 - **Terrarium tile licensing** is mixed (mostly PD, some CC BY). Show attribution per region.
 - **Never decode DEM PNGs through a canvas.** Chromium's image pipeline nudges isolated channel
   values by one, and one unit of red is 256 m in Terrarium; the result was 170 m phantom cliffs
-  next to the pin. Tiles are decoded by hand (`core/terrain/png.ts`), canvas is only a fallback.
+  next to the camera location. Tiles are decoded by hand (`core/terrain/png.ts`), canvas is only a fallback.
 - **Water is bathymetry** in Terrarium, so sightlines and the horizon clamp ground to sea level.
   Land below sea level (Death Valley, Dead Sea) is therefore treated as 0 m there.
 - **Safari storage eviction** can purge OPFS after long idle. Warn, and make re-download easy.
@@ -225,4 +225,7 @@ and 3D terrain toggles. Phase 3 is next.
   different. Acceptable for dogfooding; can unify by serving Protomaps offline builds online
   later.
 - **No web compass AR**: deliberately skipped; Viewfinder VR + picture-calibration covers it.
+- **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
+  string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
+  objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.
 - **Name**: "scape" is a placeholder.

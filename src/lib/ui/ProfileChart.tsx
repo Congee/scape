@@ -7,5 +7,5 @@ export function ProfileChart() {
     const c = new ProfileController(ref.current!);
     return () => c.dispose();
   }, []);
-  return <canvas ref={ref} className="profile" aria-label="Elevation profile between the pins with the sight line" />;
+  return <canvas ref={ref} className="profile" aria-label="Elevation profile from the camera to the target with the sight line" />;
 }

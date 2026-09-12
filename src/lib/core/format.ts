@@ -1,4 +1,6 @@
-export type Units = 'metric' | 'imperial';
+// Values double as MapLibre ScaleControl units and persisted settings.
+export const Units = { Metric: 'metric', Imperial: 'imperial' } as const;
+export type Units = (typeof Units)[keyof typeof Units];
 
 export function degrees(n: number, digits = 2): string {
   return `${n.toFixed(digits)}°`;
@@ -15,7 +17,7 @@ export function percent(fraction: number, digits = 1): string {
 }
 
 export function distance(m: number, units: Units): string {
-  if (units === 'imperial') {
+  if (units === Units.Imperial) {
     const ft = m * 3.28084;
     return ft < 1000 ? `${ft.toFixed(0)} ft` : `${(ft / 5280).toFixed(ft < 52800 ? 2 : 1)} mi`;
   }
@@ -23,5 +25,5 @@ export function distance(m: number, units: Units): string {
 }
 
 export function height(m: number, units: Units): string {
-  return units === 'imperial' ? `${(m * 3.28084).toFixed(0)} ft` : `${m.toFixed(0)} m`;
+  return units === Units.Imperial ? `${(m * 3.28084).toFixed(0)} ft` : `${m.toFixed(0)} m`;
 }

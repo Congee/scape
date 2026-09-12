@@ -3,7 +3,8 @@ import { curvatureDropM, EARTH_RADIUS_M, elevationAngleDeg, REFRACTION_K } from 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 
-export type LosStatus = 'clear' | 'marginal' | 'blocked';
+export const LosStatus = { Clear: 'Clear', Marginal: 'Marginal', Blocked: 'Blocked' } as const;
+export type LosStatus = (typeof LosStatus)[keyof typeof LosStatus];
 
 /** Angular margin under which a sightline counts as marginal (DEM error at 10 km is a few tens of metres). */
 export const MARGINAL_DEG = 0.1;
@@ -12,7 +13,7 @@ export interface LosResult {
   status: LosStatus;
   /** Elevation angle from the eye to the target top, degrees. */
   targetAngleDeg: number;
-  /** Highest elevation angle of terrain between the pins, degrees. */
+  /** Highest elevation angle of terrain between camera and target, degrees. */
   maxTerrainAngleDeg: number;
   marginDeg: number;
   /** Smallest vertical gap between the sight line and terrain, metres (negative when blocked). */
@@ -37,7 +38,7 @@ export function flatHorizonDeg(heightM: number): number {
 /**
  * Point-to-point sightline over a terrain profile from A (index 0) to B (last index).
  * `eyeM` and `targetM` are absolute heights. NaN ground samples are unknown and never block.
- * Samples within `edgeSkipM` of either end belong to the pins' own DEM cells and are not obstacles.
+ * Samples within `edgeSkipM` of either end belong to the endpoints' own DEM cells and are not obstacles.
  */
 export function analyzeSightline(distM: Float32Array, groundM: Float32Array, eyeM: number, targetM: number, edgeSkipM = 0): LosResult {
   const n = distM.length;
@@ -67,6 +68,6 @@ export function analyzeSightline(distM: Float32Array, groundM: Float32Array, eye
   }
   visible[n - 1] = targetAngleDeg >= running ? 1 : 0;
   const marginDeg = targetAngleDeg - maxTerrainAngleDeg;
-  const status: LosStatus = marginDeg < 0 ? 'blocked' : marginDeg < MARGINAL_DEG ? 'marginal' : 'clear';
+  const status: LosStatus = marginDeg < 0 ? LosStatus.Blocked : marginDeg < MARGINAL_DEG ? LosStatus.Marginal : LosStatus.Clear;
   return { status, targetAngleDeg, maxTerrainAngleDeg, marginDeg, minClearanceM, minClearanceAtM, visible };
 }

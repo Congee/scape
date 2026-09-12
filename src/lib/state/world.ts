@@ -18,9 +18,9 @@ export interface WorldState {
   pin: LngLat;
   /** Observer height above local ground, metres (horizon dip). */
   pinHeightM: number;
-  /** Secondary pin for geodetics (sightline target); null when off. */
+  /** Target location (sightline target, composition subject); null when off. */
   pin2: LngLat | null;
-  /** Target height above ground at the secondary pin, metres. */
+  /** Target height above ground at the target location, metres. */
   pin2HeightM: number;
   /** Simulated clock, epoch ms. */
   time: number;

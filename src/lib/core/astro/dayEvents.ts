@@ -6,24 +6,26 @@ import {
   type AstroTime,
   type Observer
 } from 'astronomy-engine';
-import { BODY, type SkyBody } from './bodies';
+import { BODY, SkyBody } from './bodies';
 import { moonInfo, position, type MoonInfo } from './positions';
 
-export type EventKind =
-  | 'astroDawn'
-  | 'nauticalDawn'
-  | 'civilDawn'
-  | 'rise'
-  | 'goldenEnd'
-  | 'transit'
-  | 'goldenStart'
-  | 'set'
-  | 'civilDusk'
-  | 'nauticalDusk'
-  | 'astroDusk'
+export const EventKind = {
+  AstroDawn: 'AstroDawn',
+  NauticalDawn: 'NauticalDawn',
+  CivilDawn: 'CivilDawn',
+  Rise: 'Rise',
+  GoldenEnd: 'GoldenEnd',
+  Transit: 'Transit',
+  GoldenStart: 'GoldenStart',
+  Set: 'Set',
+  CivilDusk: 'CivilDusk',
+  NauticalDusk: 'NauticalDusk',
+  AstroDusk: 'AstroDusk',
   /** Upper limb clearing / dropping behind the terrain horizon. */
-  | 'terrainRise'
-  | 'terrainSet';
+  TerrainRise: 'TerrainRise',
+  TerrainSet: 'TerrainSet'
+} as const;
+export type EventKind = (typeof EventKind)[keyof typeof EventKind];
 
 export interface DayEvent {
   body: SkyBody;
@@ -71,7 +73,7 @@ export function dayEvents(
       if (ms >= startMs) {
         const pos = position(body, t.date, obs);
         const ev: DayEvent = { body, kind, time: ms, azimuth: pos.azimuth, altitude: pos.altitude };
-        if (body === 'moon') ev.moon = moonInfo(t.date);
+        if (body === SkyBody.Moon) ev.moon = moonInfo(t.date);
         out.push(ev);
       }
       from = new Date(ms + 60_000);
@@ -87,22 +89,22 @@ export function dayEvents(
     return ev.time.date.getTime() < endMs ? ev.time : null;
   };
 
-  collect('sun', 'astroDawn', altitudeSearch(Body.Sun, 1, -18));
-  collect('sun', 'nauticalDawn', altitudeSearch(Body.Sun, 1, -12));
-  collect('sun', 'civilDawn', altitudeSearch(Body.Sun, 1, -6));
-  collect('sun', 'rise', riseSet(Body.Sun, 1));
-  collect('sun', 'goldenEnd', altitudeSearch(Body.Sun, 1, golden));
-  collect('sun', 'transit', transit(Body.Sun));
-  collect('sun', 'goldenStart', altitudeSearch(Body.Sun, -1, golden));
-  collect('sun', 'set', riseSet(Body.Sun, -1));
-  collect('sun', 'civilDusk', altitudeSearch(Body.Sun, -1, -6));
-  collect('sun', 'nauticalDusk', altitudeSearch(Body.Sun, -1, -12));
-  collect('sun', 'astroDusk', altitudeSearch(Body.Sun, -1, -18));
+  collect(SkyBody.Sun, EventKind.AstroDawn, altitudeSearch(Body.Sun, 1, -18));
+  collect(SkyBody.Sun, EventKind.NauticalDawn, altitudeSearch(Body.Sun, 1, -12));
+  collect(SkyBody.Sun, EventKind.CivilDawn, altitudeSearch(Body.Sun, 1, -6));
+  collect(SkyBody.Sun, EventKind.Rise, riseSet(Body.Sun, 1));
+  collect(SkyBody.Sun, EventKind.GoldenEnd, altitudeSearch(Body.Sun, 1, golden));
+  collect(SkyBody.Sun, EventKind.Transit, transit(Body.Sun));
+  collect(SkyBody.Sun, EventKind.GoldenStart, altitudeSearch(Body.Sun, -1, golden));
+  collect(SkyBody.Sun, EventKind.Set, riseSet(Body.Sun, -1));
+  collect(SkyBody.Sun, EventKind.CivilDusk, altitudeSearch(Body.Sun, -1, -6));
+  collect(SkyBody.Sun, EventKind.NauticalDusk, altitudeSearch(Body.Sun, -1, -12));
+  collect(SkyBody.Sun, EventKind.AstroDusk, altitudeSearch(Body.Sun, -1, -18));
 
-  for (const body of ['moon', 'gc'] as const) {
-    collect(body, 'rise', riseSet(BODY[body], 1));
-    collect(body, 'transit', transit(BODY[body]));
-    collect(body, 'set', riseSet(BODY[body], -1));
+  for (const body of [SkyBody.Moon, SkyBody.Gc]) {
+    collect(body, EventKind.Rise, riseSet(BODY[body], 1));
+    collect(body, EventKind.Transit, transit(BODY[body]));
+    collect(body, EventKind.Set, riseSet(BODY[body], -1));
   }
 
   return out.toSorted((a, b) => a.time - b.time);

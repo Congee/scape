@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatLngLat, parseLngLat } from './coords';
+import { CoordFormat, formatLngLat, parseLngLat } from './coords';
 
 describe('coords', () => {
   it('parses decimal degrees', () => {
@@ -25,6 +25,6 @@ describe('coords', () => {
   it('formats', () => {
     const p = { lat: 40.7463, lng: -74.1553 };
     expect(formatLngLat(p)).toBe('40.7463°N 74.1553°W');
-    expect(formatLngLat(p, 'dms')).toBe('40°44′46.7″N 74°09′19.1″W');
+    expect(formatLngLat(p, CoordFormat.DMS)).toBe('40°44′46.7″N 74°09′19.1″W');
   });
 });

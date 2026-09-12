@@ -8,7 +8,7 @@ import {
   type MapMouseEvent
 } from 'maplibre-gl';
 import { shallow } from 'zustand/shallow';
-import { makeObserver } from '@core/astro/bodies';
+import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import '@data/maplibre';
@@ -20,7 +20,7 @@ import { mapStatusStore } from '@state/mapStatus';
 import { findBasemap, settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
-import { eventLines, geodeticLine, liveLines } from './overlays';
+import { eventLines, geodeticLine, LiveLineKind, liveLines } from './overlays';
 
 const EVENTS_SRC = 'sky-events';
 const LIVE_SRC = 'sky-live';
@@ -228,14 +228,14 @@ export class MapController {
       id: 'sky-shadow-line',
       type: 'line',
       source: LIVE_SRC,
-      filter: ['==', ['get', 'kind'], 'shadow'],
+      filter: ['==', ['get', 'kind'], LiveLineKind.Shadow],
       paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.7, 'line-dasharray': [2, 2] }
     });
     this.map.addLayer({
       id: 'sky-live-line',
       type: 'line',
       source: LIVE_SRC,
-      filter: ['==', ['get', 'kind'], 'live'],
+      filter: ['==', ['get', 'kind'], LiveLineKind.Live],
       layout: { 'line-cap': 'round' },
       paint: { 'line-color': ['get', 'color'], 'line-width': 2 }
     });
@@ -307,7 +307,7 @@ export class MapController {
     const w = worldStore.getState();
     const obs = makeObserver(w.pin, w.pinHeightM);
     const date = new Date(w.time);
-    const pos = { sun: position('sun', date, obs), moon: position('moon', date, obs), gc: position('gc', date, obs) };
+    const pos = { Sun: position(SkyBody.Sun, date, obs), Moon: position(SkyBody.Moon, date, obs), Gc: position(SkyBody.Gc, date, obs) };
     src.setData(liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc }));
   }
 
@@ -319,7 +319,7 @@ export class MapController {
     if (!w.pin2) return src.setData(EMPTY);
     const t = terrainStore.getState();
     const fresh = t.profile && t.profileKey === profileKeyFor(w, settingsStore.getState());
-    src.setData(geodeticLine(w.pin, w.pin2, fresh ? t.profile!.los.status : 'unknown'));
+    src.setData(geodeticLine(w.pin, w.pin2, fresh ? t.profile!.los.status : 'Unknown'));
   }
 
   dispose() {

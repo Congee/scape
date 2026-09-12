@@ -2,16 +2,17 @@ import type { LngLat } from '@core/geo/geodesy';
 import type { HorizonProfile } from '@core/terrain/horizon';
 import type { LosResult } from '@core/terrain/los';
 
-export type TerrainKind = 'elevation' | 'profile' | 'horizon';
+export const TerrainKind = { Elevation: 'Elevation', Profile: 'Profile', Horizon: 'Horizon' } as const;
+export type TerrainKind = (typeof TerrainKind)[keyof typeof TerrainKind];
 
 export interface ElevationRequest {
-  kind: 'elevation';
+  kind: typeof TerrainKind.Elevation;
   id: number;
   points: LngLat[];
 }
 
 export interface ProfileRequest {
-  kind: 'profile';
+  kind: typeof TerrainKind.Profile;
   id: number;
   a: LngLat;
   b: LngLat;
@@ -21,7 +22,7 @@ export interface ProfileRequest {
 }
 
 export interface HorizonRequest {
-  kind: 'horizon';
+  kind: typeof TerrainKind.Horizon;
   id: number;
   pin: LngLat;
   eyeAboveGroundM: number;
@@ -61,7 +62,7 @@ export interface HorizonResult {
 }
 
 export type TerrainResponse =
-  | { kind: 'elevation'; id: number; elevations: number[] }
-  | { kind: 'profile'; id: number; result: ProfileResult }
-  | { kind: 'horizon'; id: number; result: HorizonResult }
-  | { kind: 'error'; id: number; of: TerrainKind; error: string };
+  | { kind: typeof TerrainKind.Elevation; id: number; elevations: number[] }
+  | { kind: typeof TerrainKind.Profile; id: number; result: ProfileResult }
+  | { kind: typeof TerrainKind.Horizon; id: number; result: HorizonResult }
+  | { kind: 'Error'; id: number; of: TerrainKind; error: string };
