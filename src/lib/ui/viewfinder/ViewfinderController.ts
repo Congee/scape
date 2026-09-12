@@ -19,18 +19,22 @@ import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById } from '@state/gear';
 import { markersStore } from '@state/markers';
-import { settingsStore } from '@state/settings';
+import { findBasemap, settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, profileKeyFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { CATEGORY_COLORS } from '../map/overlays';
+import { TerrainView } from './TerrainView';
 
 const D2R = Math.PI / 180;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
 const MARGIN = 26;
 const MAX_COLUMNS = 2400;
+// MapLibre's near plane cuts the 3D ground within a few metres of the eye; the canvas paints that band.
+const NEAR_M = 6;
+const NEAR_FADE_M = 30;
 const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const smooth = (a: number, b: number, x: number) => {
@@ -38,6 +42,34 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 const mix = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const css = (c: number[]) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+
+/** Sky and ground colours for a sun altitude, shared by the raster and the 3D view's sky. */
+function palette(sunAlt: number) {
+  const day = smooth(-12, 4, sunAlt);
+  const dusk = smooth(-10, -3, sunAlt) * (1 - smooth(-1, 6, sunAlt));
+  const zenithDay = [46, 96, 168];
+  const horizonDay = [176, 205, 232];
+  const zenithNight = [6, 9, 18];
+  const horizonNight = [22, 30, 48];
+  const duskGlow = [236, 132, 72];
+  const groundNear = mix([18, 22, 24], [86, 96, 70], day);
+  const groundFar = mix([26, 34, 52], [150, 170, 200], day);
+  const skyAt = (alt: number) => {
+    const t = smooth(0, 60, alt);
+    let c = mix(mix(horizonNight, zenithNight, t), mix(horizonDay, zenithDay, t), day);
+    const glow = dusk * (1 - smooth(0, 18, alt));
+    c = mix(c, duskGlow, glow * 0.6);
+    return c;
+  };
+  const groundAt = (distM: number, slope: number) => {
+    const haze = 1 - Math.exp(-distM / 45_000);
+    const c = mix(groundNear, groundFar, haze);
+    const shade = 0.75 + 0.5 * clamp(slope, 0, 1);
+    return [c[0] * shade, c[1] * shade, c[2] * shade];
+  };
+  return { skyAt, groundAt, groundFar };
+}
 
 interface Frame {
   x: number;
@@ -96,6 +128,9 @@ export class ViewfinderController {
   private starGroups: { cat: StarCatalog; groups: StarGroup[]; polaris: number } | null = null;
   private showers: { day: number; list: ShowerStatus[] } | null = null;
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
+  private view3d: TerrainView | null = null;
+  /** True while the 3D terrain is drawing under the frame, so ground pixels stay transparent. */
+  private live3d = false;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -114,7 +149,12 @@ export class ViewfinderController {
       terrainStore.subscribe(() => this.schedule()),
       dayDataStore.subscribe(() => this.schedule()),
       skyStore.subscribe(() => this.schedule()),
-      markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow })
+      markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
+      settingsStore.subscribe(
+        (s) => [s.basemapId, s.customBasemaps] as const,
+        ([id, custom]) => this.view3d?.setBasemap(findBasemap(id, custom)),
+        { equalityFn: shallow }
+      )
     );
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -142,7 +182,8 @@ export class ViewfinderController {
     this.canvas.width = Math.round(r.width * this.dpr);
     this.canvas.height = Math.round(r.height * this.dpr);
     this.ensureWindow();
-    this.draw();
+    // Not a direct draw: sizing the 3D view inside a ResizeObserver callback trips the loop guard.
+    this.schedule();
   }
 
   /** Frame with the sensor's aspect ratio, centred with room for the tick rulers. */
@@ -281,6 +322,8 @@ export class ViewfinderController {
   /** Sky and layered terrain, one pixel at a time at reduced resolution, then scaled into the frame. */
   private drawRaster(sc: Scene) {
     const { frame, view } = sc;
+    // Until the sweep arrives the 3D terrain draws the whole frame, sky included.
+    if (this.live3d && !view) return;
     const rw = Math.max(2, Math.round(frame.w * this.quality * Math.min(this.dpr, 1.5) * 0.6));
     const rh = Math.max(2, Math.round((rw * frame.h) / frame.w));
     this.raster.width = rw;
@@ -289,29 +332,7 @@ export class ViewfinderController {
     const img = rctx.createImageData(rw, rh);
     const data = img.data;
 
-    const day = smooth(-12, 4, sc.sunAlt);
-    const dusk = smooth(-10, -3, sc.sunAlt) * (1 - smooth(-1, 6, sc.sunAlt));
-    // Sky and ground palettes for this sun altitude.
-    const zenithDay = [46, 96, 168];
-    const horizonDay = [176, 205, 232];
-    const zenithNight = [6, 9, 18];
-    const horizonNight = [22, 30, 48];
-    const duskGlow = [236, 132, 72];
-    const groundNear = mix([18, 22, 24], [86, 96, 70], day);
-    const groundFar = mix([26, 34, 52], [150, 170, 200], day);
-    const skyAt = (alt: number) => {
-      const t = smooth(0, 60, alt);
-      let c = mix(mix(horizonNight, zenithNight, t), mix(horizonDay, zenithDay, t), day);
-      const glow = dusk * (1 - smooth(0, 18, alt));
-      c = mix(c, duskGlow, glow * 0.6);
-      return c;
-    };
-    const groundAt = (distM: number, slope: number) => {
-      const haze = 1 - Math.exp(-distM / 45_000);
-      const c = mix(groundNear, groundFar, haze);
-      const shade = 0.75 + 0.5 * clamp(slope, 0, 1);
-      return [c[0] * shade, c[1] * shade, c[2] * shade];
-    };
+    const { skyAt, groundAt } = palette(sc.sunAlt);
 
     // Milky Way: sample the equirectangular J2000 texture along each sky pixel's direction.
     const comp = compositionStore.getState();
@@ -341,6 +362,7 @@ export class ViewfinderController {
     const { forward: F, right: R, up: U } = sc.basis;
     const f = sc.cam.focalMm;
     const fallback = flatHorizonDeg(sc.eyeAboveGroundM);
+    const through = this.live3d;
     let k = 0;
     for (let py = 0; py < rh; py++) {
       const yMm = ((0.5 - (py + 0.5) / rh) * frame.h) / frame.pxPerMm;
@@ -352,24 +374,28 @@ export class ViewfinderController {
         const len = Math.hypot(vx, vy, vz);
         const alt = Math.asin(vz / len) / D2R;
         let c: number[];
+        let a = 255;
         if (view) {
           const az = Math.atan2(vx, vy) / D2R;
           const col = columnAt(view, az);
           if (col < 0 || alt > view.skylineDeg[col]) c = skyPixel(alt, vx, vy, vz, len);
           else {
             const m = surfaceAt(view, col, alt);
-            if (m < 0) c = groundAt(view.rangeM, 0);
-            else {
+            if (m < 0) {
+              c = groundAt(view.rangeM, 0);
+              if (through) a = 0;
+            } else {
               const prev = m > view.start[col] ? m - 1 : -1;
               const slope = prev >= 0 ? (view.angleDeg[m] - view.angleDeg[prev]) / Math.max(0.02, Math.log(view.distM[m] / Math.max(1, view.distM[prev])) * 8) : 0.4;
               c = groundAt(view.distM[m], slope);
+              if (through) a = Math.round(255 * (1 - smooth(NEAR_M, NEAR_FADE_M, view.distM[m])));
             }
           }
         } else c = alt > fallback ? skyPixel(alt, vx, vy, vz, len) : groundAt(clamp(-sc.eyeAboveGroundM / Math.tan(Math.min(-0.001, alt * D2R)), 20, 50_000), 0.3);
         data[k++] = c[0];
         data[k++] = c[1];
         data[k++] = c[2];
-        data[k++] = 255;
+        data[k++] = a;
       }
     }
     rctx.putImageData(img, 0, 0);
@@ -606,6 +632,8 @@ export class ViewfinderController {
   private drawSky(sc: Scene) {
     const c = compositionStore.getState();
     if (sc.night <= 0 || !(c.showStars || c.showConstellations || c.showTrails || c.showRadiants)) return;
+    // Without the skyline, stars would land on 3D terrain.
+    if (this.live3d && !sc.view) return;
     const sky = skyStore.getState();
     sky.ensure();
     const { ctx } = this;
@@ -917,6 +945,8 @@ export class ViewfinderController {
     const sc = this.scene();
     const s = settingsStore.getState();
     const c = compositionStore.getState();
+    this.live3d = this.syncView3d(sc);
+    if (this.live3d) ctx.clearRect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
     this.drawRaster(sc);
     this.drawSky(sc);
 
@@ -984,7 +1014,27 @@ export class ViewfinderController {
     this.drawHud(sc);
   }
 
+  /** Keeps the textured 3D terrain under the frame in step with the camera; false when off or not drawing yet. */
+  private syncView3d(sc: Scene): boolean {
+    const s = settingsStore.getState();
+    if (!compositionStore.getState().show3d || !s.terrain) {
+      this.view3d?.dispose();
+      this.view3d = null;
+      return false;
+    }
+    this.view3d ??= new TerrainView(this.canvas.parentElement!, sc.frame, findBasemap(s.basemapId, s.customBasemaps), () => this.schedule());
+    const w = worldStore.getState();
+    const pal = palette(sc.sunAlt);
+    this.view3d.update(
+      sc.frame,
+      { lng: w.pin.lng, lat: w.pin.lat, altM: sc.eyeM, eyeAboveGroundM: sc.eyeAboveGroundM, azimuthDeg: sc.aim.azimuthDeg, elevationDeg: sc.aim.elevationDeg, vfovDeg: sc.vfov },
+      { sky: css(pal.skyAt(35)), horizon: css(pal.skyAt(0)), fog: css(pal.groundFar), brightness: 1 - 0.7 * sc.night }
+    );
+    return this.view3d.ready();
+  }
+
   dispose() {
+    this.view3d?.dispose();
     for (const u of this.unsubs) u();
     this.ro.disconnect();
     cancelAnimationFrame(this.raf);

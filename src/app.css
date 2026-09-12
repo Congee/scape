@@ -805,6 +805,16 @@ label.file input {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* The 3D terrain sits under the canvas on the frame rectangle; only its attribution rises above. */
+.vf-area > .vf {
+  z-index: 1;
+}
+
+.vf-area > .vf-3d {
+  position: absolute;
+  overflow: hidden;
+}
+
 @media (max-width: 900px) {
   .vf-page {
     grid-template-columns: minmax(0, 1fr);

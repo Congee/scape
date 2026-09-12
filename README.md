@@ -66,10 +66,13 @@ from the same numbers; the DoF limits are arcs across the cone and the panorama 
 Markers are landmarks (peaks, buildings, trees…) with height, width, rating and notes. Add them by
 Alt-clicking the map or from the Markers tab, import KML, GPX or GeoJSON, and export the same.
 
-The viewfinder (camera icon in the rail) renders what the lens sees: terrain layers swept from the
-DEM at the frame's resolution and shaded by distance, the sky for the simulated time, the sun, moon
-and Galactic Centre with their day paths and hour marks (dimmed where a body is behind the skyline),
-the target, and markers. Drag to aim, scroll to zoom, double-click to centre a point; the compass and
+The viewfinder (camera icon in the rail) renders what the lens sees from the camera location: the
+map's 3D terrain (the current basemap draped over the elevation model) seen from eye height through
+the frame's field of view, under a skyline swept from the DEM at the frame's resolution; the sky for
+the simulated time; the sun, moon and Galactic Centre with their day paths and hour marks (dimmed
+where a body is behind the skyline); the target; and markers. The 3D ground appears as soon as the
+page opens and follows the camera and target as they move on the map; the "3D" chip swaps it for
+shaded terrain layers when tiles are unavailable. Drag to aim, scroll to zoom, double-click to centre a point; the compass and
 altitude rulers run along the frame edges. "← Map" or Esc returns to the map. Placing or moving the
 target location re-aims the frame at it; dragging the frame or the cone tip releases that lock, and
 the "Aim at target" chip shows and restores it.

@@ -149,7 +149,7 @@ search params.
 | Storage | IndexedDB via `idb` (library, settings); OPFS for tile bytes | persist() requested |
 | PWA | `vite-plugin-pwa` 1.3 (Workbox) | precache shell, runtime-cache tiles |
 | Geocoding | Photon public API online; GeoNames cities offline | |
-| 3D viewfinder | 2D canvas over the DEM sweep (Phase 3); Three.js 0.186 reserved for the star field and 3D orbit view | separate canvas |
+| 3D viewfinder | MapLibre terrain under the 2D canvas: camera placed at the eye (`calculateCameraOptionsFromCameraLngLatAltRotation`, pitch to 180°, vertical FOV = frame), DEM sweep for skyline, occlusion and sky | Three.js unused |
 | Sky data | HYG v4.1 (CC BY-SA), NASA SVS Deep Star Maps (PD), d3-celestial lines (BSD-3) | built into `public/sky` by `scripts/build-sky.ts`; sources listed in `public/sky/README.md` |
 | Light pollution | NASA GIBS VIIRS Black Marble raster (PD) | Falchi's atlas and the usual tile sets are CC BY-NC, so night lights stand in for now |
 | Tests | Vitest for core; Playwright later for UI smoke | pure unit tests, no I/O |
@@ -225,6 +225,9 @@ band; 500/NPF rules from the camera's pixel pitch; IMO shower list with peak dat
 longitude; Polaris clock positions; NASA VIIRS night-lights overlay. The Frame tab gained a searchable
 camera and lens catalogue (185 bodies, 346 lenses) that sets sensor, pixel count, focal range and
 aperture. Phase 5 is next.
+Viewfinder 3D (2026-09-11): a second MapLibre instance under the viewfinder canvas shows the map's
+terrain, textured with the current basemap, from the camera location with the frame's exact field of
+view; the canvas leaves the ground transparent and keeps the swept skyline, sky, stars and overlays.
 
 ## 8. Risks and decisions taken
 
@@ -243,13 +246,20 @@ aperture. Phase 5 is next.
 - **No web compass AR**: deliberately skipped; Viewfinder VR + picture-calibration covers it.
 - **Viewfinder without Three.js.** The silhouette precision the acceptance test asks for comes from
   ray-marching the DEM per pixel column (`core/terrain/view.ts`), which a 2D canvas draws exactly; a
-  mesh would only approximate it. Three.js stays on the list for the Phase 4 star field.
+  mesh would only approximate it. The textured ground under that skyline is MapLibre's own terrain.
 - **Star field on the 2D canvas.** 9k stars cost under a millisecond per frame once bucketed by colour
   and brightness; the terrain raster dominates the frame budget. Three.js stays unneeded so far.
 - **Sky texture orientation.** NASA's equatorial maps put RA 0h at the centre with RA increasing to
   the left (viewed from inside); `public/sky/README.md` records it so the lookup is not re-derived.
 - **Aim lock.** Placing or moving the target re-enables "aim at target"; a drag in the viewfinder or of
   the cone tip releases it. Without this the viewfinder looked out of sync with the map after one drag.
+- **3D terrain in the viewfinder.** MapLibre 6.9 places its camera at a lat/lng/altitude with pitch to
+  180° and a chosen vertical FOV, so the viewfinder shows the map's terrain from the eye at once and
+  textured with the basemap, while the DEM sweep keeps the exact skyline, occlusion and sky. Known
+  limits: MapLibre's near plane (about a fiftieth of the frame height, roughly 5 m at eye level) drops
+  the ground at the camera's feet, which the canvas paints and fades in; Mercator has no earth
+  curvature, so ridges beyond ~50 km sit up to 0.4° higher than the sweep, hidden under the canvas sky;
+  the basemap's labels are stripped in the 3D view.
 - **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
   string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
   objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.

@@ -4,6 +4,7 @@ import { useWorld } from '@state/world';
 type BoolKey = { [K in keyof Composition]: Composition[K] extends boolean ? K : never }[keyof Composition];
 
 const CHIPS: [BoolKey, string, string][] = [
+  ['show3d', '3D', 'The map\'s 3D terrain, textured with the basemap, under the frame'],
   ['showPaths', 'Paths', 'Sun, moon and Galactic Centre paths for the day'],
   ['showMarkers', 'Markers', 'Markers flagged for the viewfinder'],
   ['showGrid', 'Grid', 'Rule-of-thirds grid'],
