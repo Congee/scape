@@ -240,7 +240,11 @@ backup). Shot alignment and visibility heat layers come from a second worker ove
 within a tolerance during the time window, sightline checked; picking a cell moves the camera and the
 time), Visible (cells where the body clears the terrain at the moment) and Viewshed (ground seen from
 the camera). The viewfinder gained landmark solids (box, cylinder and spire markers drawn as
-flat-shaded prisms), a height ruler at the target distance and a sun/moon header. Phase 6 is next.
+flat-shaded prisms), a height ruler at the target distance and a sun/moon header. Acceptance
+cross-checked on 2026-09-12 against TPE Web's Visual Search (Zermatt 46.0207 N 7.7491 E, moon, azimuth
+233–237°, altitude 15–19°, one year from 2026-09-11): all 23 TPE passes are reproduced to the minute with
+matching illumination; Scape also lists 2026-10-22 01:14–01:33 CEST (80 %), which TPE omits and JPL
+Horizons confirms (azimuth 233.1→237.3°, altitude 18.6→15.9° over 23:15–23:35 UTC). Phase 6 is next.
 
 ## 8. Risks and decisions taken
 
