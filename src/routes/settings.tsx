@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import type { Units } from '@core/format';
 import type { CoordFormat } from '@core/geo/coords';
+import { GearSettings } from '@ui/GearSettings';
 import { DEFAULT_SETTINGS, settingsStore, useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 
@@ -58,6 +59,7 @@ function SettingsPage() {
         </label>
         <p className="muted">Powers the elevation badge, the sightline profile and the terrain horizon. Water reads as depth in the data; sightlines treat it as sea level.</p>
       </section>
+      <GearSettings />
       <section>
         <h2>Reset</h2>
         <button onClick={() => update({ ...DEFAULT_SETTINGS, customBasemaps: s.customBasemaps })}>Restore default settings</button>

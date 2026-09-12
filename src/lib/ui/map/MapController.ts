@@ -10,35 +10,55 @@ import {
 import { shallow } from 'zustand/shallow';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
-import { distanceM, type LngLat } from '@core/geo/geodesy';
+import { bearingDeg, destination, distanceM, type LngLat } from '@core/geo/geodesy';
+import { depthOfField } from '@core/optics/dof';
+import { circleOfConfusionMm, clampFocalMm, focalForFovMm, fovDeg, frameMm } from '@core/optics/fov';
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_URL } from '@data/terrainTiles';
+import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
+import { gearStore, sensorById } from '@state/gear';
 import { mapStatusStore } from '@state/mapStatus';
+import { markersStore } from '@state/markers';
 import { findBasemap, settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
+import { PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
-import { eventLines, geodeticLine, LiveLineKind, liveLines } from './overlays';
+import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 
 const EVENTS_SRC = 'sky-events';
 const LIVE_SRC = 'sky-live';
 const GEO_SRC = 'geodetic';
+const FOV_SRC = 'fov';
+const MARKERS_SRC = 'markers';
 // MapLibre wants separate DEM sources for hillshade and 3D terrain; same tiles, cached once by the browser.
 const DEM_SRC = 'terrain-dem';
 const HILL_SRC = 'terrain-dem-hillshade';
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
+const FOV_COLOR = '#5aa9ff';
+const DEFAULT_FOV_RANGE_M = 5_000;
 
 const samePoint = (a: LngLat | null, b: LngLat | null) => a === b || (!!a && !!b && a.lat === b.lat && a.lng === b.lng);
+const angleDiff = (a: number, b: number) => Math.abs(((a - b + 540) % 360) - 180);
+
+function handleElement(title: string, cls: string): HTMLElement {
+  const el = document.createElement('div');
+  el.className = `fov-handle ${cls}`;
+  el.title = title;
+  return el;
+}
 
 /** Owns the MapLibre instance and keeps its overlays in sync with the stores. No React inside. */
 export class MapController {
   private map: MaplibreMap;
   private pin: Marker;
   private pin2: Marker | null = null;
+  private fovHandle: Marker | null = null;
+  private fovEdgeHandle: Marker | null = null;
   private scale: ScaleControl;
   private unsubs: (() => void)[] = [];
   private rayM = 50_000;
@@ -46,8 +66,7 @@ export class MapController {
   private basemapId = '';
   private dragging = false;
   private dragging2 = false;
-  private dragRaf = 0;
-  private drag2Raf = 0;
+  private draggingFov = false;
 
   constructor(container: HTMLElement) {
     const w = worldStore.getState();
@@ -70,14 +89,28 @@ export class MapController {
     this.map.addControl(this.scale, 'bottom-left');
     if (import.meta.env.DEV) (window as unknown as { __scapeMap?: MaplibreMap }).__scapeMap = this.map;
 
-    this.pin = this.makeMarker(PIN_COLOR, w.pin, 1, (p) => worldStore.getState().setPin(p), (d) => (this.dragging = d), 'dragRaf');
+    this.pin = this.makeMarker({ at: w.pin, color: PIN_COLOR, scale: 1 }, (p) => worldStore.getState().setPin(p), (d) => (this.dragging = d));
     this.syncPin2(w.pin2);
 
     this.map.on('click', (e: MapMouseEvent) => {
       const p = { lng: e.lngLat.lng, lat: e.lngLat.lat };
-      if (e.originalEvent.shiftKey) worldStore.getState().setPin2(p);
+      if (this.map.getLayer('markers-circle') && this.map.queryRenderedFeatures(e.point, { layers: ['markers-circle'] }).length) return;
+      const ms = markersStore.getState();
+      if (ms.placing || e.originalEvent.altKey) {
+        ms.setPlacing(false);
+        void ms.save(p).then((m) => ms.select(m.id));
+        uiStore.getState().setPanelTab(PanelTab.Markers);
+      } else if (e.originalEvent.shiftKey) worldStore.getState().setPin2(p);
       else if (settingsStore.getState().clickMovesPin) worldStore.getState().setPin(p);
     });
+    this.map.on('click', 'markers-circle', (e) => {
+      const id = e.features?.[0]?.properties?.id as string | undefined;
+      if (!id) return;
+      markersStore.getState().select(id);
+      uiStore.getState().setPanelTab(PanelTab.Markers);
+    });
+    this.map.on('mouseenter', 'markers-circle', () => (this.map.getCanvas().style.cursor = 'pointer'));
+    this.map.on('mouseleave', 'markers-circle', () => (this.map.getCanvas().style.cursor = ''));
     this.map.on('error', (e) => {
       const msg = e.error?.message || 'Map error';
       mapStatusStore.getState().setError(msg);
@@ -105,6 +138,7 @@ export class MapController {
           if (!this.dragging) this.pin.setLngLat([pin.lng, pin.lat]);
           this.renderLive();
           this.renderGeodetic();
+          this.renderFov();
         },
         { equalityFn: samePoint }
       ),
@@ -113,6 +147,7 @@ export class MapController {
         (p) => {
           this.syncPin2(p);
           this.renderGeodetic();
+          this.renderFov();
         },
         { equalityFn: samePoint }
       ),
@@ -129,6 +164,10 @@ export class MapController {
       ),
       dayDataStore.subscribe(() => this.renderEvents()),
       terrainStore.subscribe((st) => st.profile, () => this.renderGeodetic()),
+      compositionStore.subscribe(() => this.renderFov()),
+      gearStore.subscribe(() => this.renderFov()),
+      markersStore.subscribe((st) => [st.markers, st.selectedId] as const, () => this.renderMarkers(), { equalityFn: shallow }),
+      markersStore.subscribe((st) => st.placing, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
       settingsStore.subscribe(
         (st) => [st.basemapId, st.customBasemaps] as const,
         ([id, custom]) => this.setBasemap(findBasemap(id, custom)),
@@ -149,24 +188,28 @@ export class MapController {
   }
 
   /** Draggable marker whose drags reach the store at most once per frame. */
-  private makeMarker(color: string, at: LngLat, scale: number, commit: (p: LngLat) => void, setDragging: (d: boolean) => void, rafKey: 'dragRaf' | 'drag2Raf') {
-    const m = new Marker({ draggable: true, color, scale }).setLngLat([at.lng, at.lat]).addTo(this.map);
+  private makeMarker(opts: { at: LngLat; color?: string; scale?: number; element?: HTMLElement }, commit: (p: LngLat) => void, setDragging: (d: boolean) => void) {
+    const m = new Marker({ draggable: true, color: opts.color, scale: opts.scale, element: opts.element }).setLngLat([opts.at.lng, opts.at.lat]).addTo(this.map);
+    let raf = 0;
     const commitPos = () => {
       const ll = m.getLngLat();
       commit({ lng: ll.lng, lat: ll.lat });
     };
     m.on('dragstart', () => setDragging(true));
     m.on('drag', () => {
-      if (this[rafKey]) return;
-      this[rafKey] = requestAnimationFrame(() => {
-        this[rafKey] = 0;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
         commitPos();
       });
     });
     m.on('dragend', () => {
+      cancelAnimationFrame(raf);
+      raf = 0;
       setDragging(false);
       commitPos();
     });
+    this.unsubs.push(() => cancelAnimationFrame(raf));
     return m;
   }
 
@@ -177,7 +220,7 @@ export class MapController {
       return;
     }
     if (!this.pin2) {
-      this.pin2 = this.makeMarker(PIN2_COLOR, p, 0.9, (q) => worldStore.getState().setPin2(q), (d) => (this.dragging2 = d), 'drag2Raf');
+      this.pin2 = this.makeMarker({ at: p, color: PIN2_COLOR, scale: 0.9 }, (q) => worldStore.getState().setPin2(q), (d) => (this.dragging2 = d));
       return;
     }
     if (!this.dragging2) this.pin2.setLngLat([p.lng, p.lat]);
@@ -190,11 +233,59 @@ export class MapController {
     this.map.setStyle(styleFor(bm));
   }
 
+  /** A font the current style can actually serve; symbol layers fail silently otherwise. */
+  private labelFont(): string[] {
+    for (const l of this.map.getStyle().layers) {
+      if (l.type !== 'symbol') continue;
+      const f = (l.layout as { 'text-font'?: unknown } | undefined)?.['text-font'];
+      if (Array.isArray(f) && f.every((x) => typeof x === 'string')) return f as string[];
+    }
+    return ['Noto Sans Regular'];
+  }
+
   private addOverlayLayers() {
     if (this.map.getSource(EVENTS_SRC)) return;
     this.map.addSource(EVENTS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(LIVE_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(GEO_SRC, { type: 'geojson', data: EMPTY });
+    this.map.addSource(FOV_SRC, { type: 'geojson', data: EMPTY });
+    this.map.addSource(MARKERS_SRC, { type: 'geojson', data: EMPTY });
+    this.map.addLayer({
+      id: 'fov-fill',
+      type: 'fill',
+      source: FOV_SRC,
+      filter: ['==', ['get', 'kind'], FovKind.Fill],
+      paint: { 'fill-color': FOV_COLOR, 'fill-opacity': 0.14 }
+    });
+    this.map.addLayer({
+      id: 'fov-pano',
+      type: 'line',
+      source: FOV_SRC,
+      filter: ['==', ['get', 'kind'], FovKind.Pano],
+      paint: { 'line-color': FOV_COLOR, 'line-width': 1.5, 'line-opacity': 0.7, 'line-dasharray': [3, 3] }
+    });
+    this.map.addLayer({
+      id: 'fov-axis',
+      type: 'line',
+      source: FOV_SRC,
+      filter: ['==', ['get', 'kind'], FovKind.Axis],
+      paint: { 'line-color': FOV_COLOR, 'line-width': 1, 'line-opacity': 0.6, 'line-dasharray': [2, 4] }
+    });
+    this.map.addLayer({
+      id: 'fov-dof',
+      type: 'line',
+      source: FOV_SRC,
+      filter: ['==', ['get', 'kind'], FovKind.Dof],
+      paint: { 'line-color': '#f1c40f', 'line-width': 2, 'line-opacity': 0.9 }
+    });
+    this.map.addLayer({
+      id: 'fov-edge',
+      type: 'line',
+      source: FOV_SRC,
+      filter: ['==', ['get', 'kind'], FovKind.Edge],
+      layout: { 'line-cap': 'round' },
+      paint: { 'line-color': FOV_COLOR, 'line-width': 2 }
+    });
     this.map.addLayer({
       id: 'geodetic-casing',
       type: 'line',
@@ -239,6 +330,31 @@ export class MapController {
       layout: { 'line-cap': 'round' },
       paint: { 'line-color': ['get', 'color'], 'line-width': 2 }
     });
+    this.map.addLayer({
+      id: 'markers-circle',
+      type: 'circle',
+      source: MARKERS_SRC,
+      paint: {
+        'circle-radius': ['case', ['get', 'selected'], 8, 6],
+        'circle-color': ['get', 'color'],
+        'circle-stroke-color': ['case', ['get', 'selected'], '#ffffff', '#0f1216'],
+        'circle-stroke-width': 2
+      }
+    });
+    this.map.addLayer({
+      id: 'markers-label',
+      type: 'symbol',
+      source: MARKERS_SRC,
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': this.labelFont(),
+        'text-size': 11,
+        'text-offset': [0, 1.1],
+        'text-anchor': 'top',
+        'text-optional': true
+      },
+      paint: { 'text-color': '#e6edf3', 'text-halo-color': '#0f1216', 'text-halo-width': 1.2 }
+    });
   }
 
   private ensureDem(id: string) {
@@ -261,7 +377,7 @@ export class MapController {
     const t3d = s.terrain && s.terrain3d;
     if (hill && !this.map.getLayer('hillshade')) {
       this.ensureDem(HILL_SRC);
-      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id ?? 'geodetic-casing';
+      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id ?? 'fov-fill';
       this.map.addLayer(
         { id: 'hillshade', type: 'hillshade', source: HILL_SRC, paint: { 'hillshade-method': 'igor', 'hillshade-exaggeration': 0.6 } },
         before
@@ -285,11 +401,16 @@ export class MapController {
     this.renderEvents();
     this.renderLive();
     this.renderGeodetic();
+    this.renderFov();
+    this.renderMarkers();
+  }
+
+  private source(id: string): GeoJSONSource | undefined {
+    return this.styleReady ? (this.map.getSource(id) as GeoJSONSource | undefined) : undefined;
   }
 
   private renderEvents() {
-    if (!this.styleReady) return;
-    const src = this.map.getSource(EVENTS_SRC) as GeoJSONSource | undefined;
+    const src = this.source(EVENTS_SRC);
     if (!src) return;
     const s = settingsStore.getState();
     if (!s.showEventLines) return src.setData(EMPTY);
@@ -299,8 +420,7 @@ export class MapController {
   }
 
   private renderLive() {
-    if (!this.styleReady) return;
-    const src = this.map.getSource(LIVE_SRC) as GeoJSONSource | undefined;
+    const src = this.source(LIVE_SRC);
     if (!src) return;
     const s = settingsStore.getState();
     if (!s.showLiveLines) return src.setData(EMPTY);
@@ -312,8 +432,7 @@ export class MapController {
   }
 
   private renderGeodetic() {
-    if (!this.styleReady) return;
-    const src = this.map.getSource(GEO_SRC) as GeoJSONSource | undefined;
+    const src = this.source(GEO_SRC);
     if (!src) return;
     const w = worldStore.getState();
     if (!w.pin2) return src.setData(EMPTY);
@@ -322,12 +441,74 @@ export class MapController {
     src.setData(geodeticLine(w.pin, w.pin2, fresh ? t.profile!.los.status : 'Unknown'));
   }
 
+  private renderMarkers() {
+    const src = this.source(MARKERS_SRC);
+    if (!src) return;
+    const { markers, selectedId } = markersStore.getState();
+    src.setData(markerFeatures(markers, selectedId));
+  }
+
+  /** Cone from the camera along the aim, with draggable tip (azimuth, length) and edge (focal length) handles. */
+  private renderFov() {
+    const src = this.source(FOV_SRC);
+    if (!src) return;
+    const w = worldStore.getState();
+    const c = compositionStore.getState();
+    if (!c.showFov) {
+      src.setData(EMPTY);
+      this.fovHandle?.remove();
+      this.fovEdgeHandle?.remove();
+      this.fovHandle = this.fovEdgeHandle = null;
+      return;
+    }
+    const sensor = sensorById(c.sensorId, gearStore.getState().cameras);
+    const frame = frameMm(sensor, c.orientation);
+    const hfov = fovDeg(frame.w, c.focalMm);
+    const aim = aimFor(c, w, null);
+    const targetM = w.pin2 ? distanceM(w.pin, w.pin2) : null;
+    const rangeM = c.fovRangeM ?? targetM ?? DEFAULT_FOV_RANGE_M;
+    const focusM = c.focusDistM ?? targetM;
+    const dof = focusM ? depthOfField(c.focalMm, c.fNumber, circleOfConfusionMm(sensor), focusM) : null;
+    src.setData(fovCone(w.pin, aim.azimuthDeg, hfov, { rangeM, dofNearM: dof?.nearM, dofFarM: dof?.farM, panoDeg: c.panoTotalDeg }));
+
+    if (this.draggingFov) return;
+    const tip = destination(w.pin, aim.azimuthDeg, rangeM);
+    const edge = destination(w.pin, aim.azimuthDeg - hfov / 2, rangeM);
+    if (!this.fovHandle) {
+      this.fovHandle = this.makeMarker(
+        { at: tip, element: handleElement('Drag to aim the camera and set the cone length', 'tip') },
+        (p) => {
+          const cs = compositionStore.getState();
+          const a = aimFor(cs, worldStore.getState(), null);
+          cs.aim(bearingDeg(worldStore.getState().pin, p), a.elevationDeg);
+          cs.update({ fovRangeM: Math.max(50, distanceM(worldStore.getState().pin, p)) });
+        },
+        (d) => (this.draggingFov = d)
+      );
+      this.fovEdgeHandle = this.makeMarker(
+        { at: edge, element: handleElement('Drag to change the focal length', 'edge') },
+        (p) => {
+          const cs = compositionStore.getState();
+          const ws = worldStore.getState();
+          const a = aimFor(cs, ws, null);
+          const half = Math.max(0.5, angleDiff(bearingDeg(ws.pin, p), a.azimuthDeg));
+          const fr = frameMm(sensorById(cs.sensorId, gearStore.getState().cameras), cs.orientation);
+          cs.update({ focalMm: Math.round(clampFocalMm(focalForFovMm(fr.w, half * 2)) * 10) / 10 });
+        },
+        (d) => (this.draggingFov = d)
+      );
+      return;
+    }
+    this.fovHandle.setLngLat([tip.lng, tip.lat]);
+    this.fovEdgeHandle!.setLngLat([edge.lng, edge.lat]);
+  }
+
   dispose() {
     for (const u of this.unsubs) u();
-    cancelAnimationFrame(this.dragRaf);
-    cancelAnimationFrame(this.drag2Raf);
     this.pin.remove();
     this.pin2?.remove();
+    this.fovHandle?.remove();
+    this.fovEdgeHandle?.remove();
     this.map.remove();
   }
 }

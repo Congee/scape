@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { LngLat } from '@core/geo/geodesy';
-import { TerrainKind, type HorizonResult, type ProfileResult, type TerrainRequest, type TerrainResponse } from '@workers/terrain.protocol';
+import { TerrainKind, type HorizonResult, type ProfileResult, type TerrainRequest, type TerrainResponse, type ViewResult } from '@workers/terrain.protocol';
+import { markersStore } from './markers';
 import { settingsStore, type Settings } from './settings';
+import { viewfinderStore, type ViewWindow } from './viewfinder';
 import { worldStore, type WorldState } from './world';
 
 /** Eye height above the camera location's ground, added to the observer height setting. */
@@ -19,6 +21,10 @@ export interface TerrainState {
   profileKey: string;
   horizon: HorizonResult | null;
   horizonKey: string;
+  view: ViewResult | null;
+  viewKey: string;
+  /** Ground under viewfinder markers by marker id. */
+  markerGroundM: Record<string, number>;
   busy: Record<TerrainKind, boolean>;
   error: string | null;
 }
@@ -33,7 +39,10 @@ export const terrainStore = create<TerrainState>()(
     profileKey: '',
     horizon: null,
     horizonKey: '',
-    busy: { Elevation: false, Profile: false, Horizon: false },
+    view: null,
+    viewKey: '',
+    markerGroundM: {},
+    busy: { Elevation: false, Profile: false, Horizon: false, View: false, Points: false },
     error: null
     })
   )
@@ -63,13 +72,19 @@ export function elevationKeyFor(w: W, s: S): string {
   return `${k5(w.pin)}|${w.pin2 ? k5(w.pin2) : '-'}`;
 }
 
+export function viewKeyFor(w: W, s: S, win: ViewWindow | null): string {
+  if (!s.terrain || !win) return '';
+  return `${k4(w.pin)}|${w.pinHeightM + EYE_HEIGHT_M}|${win.azFromDeg.toFixed(2)}|${win.azSpanDeg.toFixed(2)}|${win.azStepDeg.toFixed(4)}|${win.rangeM}|${win.minStepDeg}`;
+}
+
 const setBusy = (kind: TerrainKind, on: boolean) => terrainStore.setState((st) => ({ busy: { ...st.busy, [kind]: on } }));
 
 /** Keeps pin elevations, the sightline profile and the horizon sweep in step with the world. */
 export function startTerrainSync(): () => void {
   const worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' });
-  const seq: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0 };
-  const pending: Record<TerrainKind, string> = { Elevation: '', Profile: '', Horizon: '' };
+  const seq: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0 };
+  const pending: Record<TerrainKind, string> = { Elevation: '', Profile: '', Horizon: '', View: '', Points: '' };
+  let pendingPointIds: string[] = [];
   const timers: Partial<Record<TerrainKind, ReturnType<typeof setTimeout>>> = {};
 
   const post = (req: TerrainRequest) => worker.postMessage(req);
@@ -86,10 +101,16 @@ export function startTerrainSync(): () => void {
     setBusy(res.kind, false);
     if (res.kind === TerrainKind.Elevation) {
       terrainStore.setState({ pinGroundM: res.elevations[0] ?? null, pin2GroundM: res.elevations[1] ?? null, elevationKey: pending.Elevation, error: null });
+    } else if (res.kind === TerrainKind.Points) {
+      const markerGroundM: Record<string, number> = {};
+      pendingPointIds.forEach((id, i) => (markerGroundM[id] = res.elevations[i]));
+      terrainStore.setState({ markerGroundM, error: null });
     } else if (res.kind === TerrainKind.Profile) {
       terrainStore.setState({ profile: res.result, profileKey: pending.Profile, error: null });
-    } else {
+    } else if (res.kind === TerrainKind.Horizon) {
       terrainStore.setState({ horizon: res.result, horizonKey: pending.Horizon, error: null });
+    } else {
+      terrainStore.setState({ view: res.result, viewKey: pending.View, error: null });
     }
   });
 
@@ -145,7 +166,39 @@ export function startTerrainSync(): () => void {
     post({ kind: TerrainKind.Horizon, id: ++seq.Horizon, pin: w.pin, eyeAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, rangeM: s.horizonRangeKm * 1000, azStepDeg: HORIZON_AZ_STEP_DEG });
   };
 
-  // Cheap lookups trail the pin closely; the sweep waits until the pin settles.
+  const syncView = () => {
+    const w = worldStore.getState();
+    const s = settingsStore.getState();
+    const win = viewfinderStore.getState().window;
+    const key = viewKeyFor(w, s, win);
+    if (key === pending.View) return;
+    pending.View = key;
+    if (!key || !win) {
+      terrainStore.setState({ view: null, viewKey: '' });
+      setBusy(TerrainKind.View, false);
+      return;
+    }
+    setBusy(TerrainKind.View, true);
+    post({ kind: TerrainKind.View, id: ++seq.View, pin: w.pin, eyeAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, ...win });
+  };
+
+  const syncPoints = () => {
+    const s = settingsStore.getState();
+    const ms = markersStore.getState().markers.filter((m) => m.showInViewfinder);
+    const key = s.terrain && viewfinderStore.getState().window ? ms.map((m) => `${m.id}@${k5(m)}`).join(';') : '';
+    if (key === pending.Points) return;
+    pending.Points = key;
+    if (!key) {
+      terrainStore.setState({ markerGroundM: {} });
+      setBusy(TerrainKind.Points, false);
+      return;
+    }
+    pendingPointIds = ms.map((m) => m.id);
+    setBusy(TerrainKind.Points, true);
+    post({ kind: TerrainKind.Points, id: ++seq.Points, points: ms.map((m) => ({ lat: m.lat, lng: m.lng })) });
+  };
+
+  // Cheap lookups trail the pin closely; the sweeps wait until the pin settles.
   const schedule = (kind: TerrainKind, fn: () => void, waitMs: number) => {
     clearTimeout(timers[kind]);
     timers[kind] = setTimeout(fn, waitMs);
@@ -154,12 +207,16 @@ export function startTerrainSync(): () => void {
     schedule(TerrainKind.Elevation, syncElevation, 150);
     schedule(TerrainKind.Profile, syncProfile, 150);
     schedule(TerrainKind.Horizon, syncHorizon, 400);
+    schedule(TerrainKind.View, syncView, 250);
+    schedule(TerrainKind.Points, syncPoints, 300);
   };
 
   syncElevation();
   syncProfile();
   syncHorizon();
-  const unsubs = [worldStore.subscribe(onChange), settingsStore.subscribe(onChange)];
+  syncView();
+  syncPoints();
+  const unsubs = [worldStore.subscribe(onChange), settingsStore.subscribe(onChange), viewfinderStore.subscribe(onChange), markersStore.subscribe(onChange)];
   return () => {
     for (const u of unsubs) u();
     for (const t of Object.values(timers)) clearTimeout(t);

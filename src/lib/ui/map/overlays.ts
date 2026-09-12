@@ -1,8 +1,9 @@
-import type { Feature, FeatureCollection, LineString } from 'geojson';
+import type { Feature, FeatureCollection, LineString, Point, Polygon } from 'geojson';
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
 import type { HorizontalPos } from '@core/astro/positions';
-import { geodesicPath, geodesicRay, type LngLat } from '@core/geo/geodesy';
+import { destination, geodesicPath, geodesicRay, type LngLat } from '@core/geo/geodesy';
+import { MarkerCategory, type SavedMarker } from '@core/plan';
 import type { LosStatus } from '@core/terrain/los';
 
 export const LiveLineKind = { Live: 'Live', Shadow: 'Shadow' } as const;
@@ -92,5 +93,83 @@ export function geodeticLine(a: LngLat, b: LngLat, status: LosStatus | 'Unknown'
         geometry: { type: 'LineString', coordinates: geodesicPath(a, b, 64) }
       }
     ]
+  };
+}
+
+export const FovKind = { Fill: 'Fill', Edge: 'Edge', Axis: 'Axis', Dof: 'Dof', Pano: 'Pano' } as const;
+export type FovKind = (typeof FovKind)[keyof typeof FovKind];
+
+export interface FovConeOptions {
+  rangeM: number;
+  /** Depth-of-field limits drawn as arcs across the cone, metres from the camera. */
+  dofNearM?: number | null;
+  dofFarM?: number | null;
+  /** Total panorama angle drawn as a wider dashed outline. */
+  panoDeg?: number | null;
+}
+
+function arc(pin: LngLat, fromDeg: number, toDeg: number, distM: number, segments: number): [number, number][] {
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= segments; i++) {
+    const p = destination(pin, fromDeg + ((toDeg - fromDeg) * i) / segments, distM);
+    pts.push([p.lng, p.lat]);
+  }
+  return pts;
+}
+
+function cone(pin: LngLat, azimuthDeg: number, spanDeg: number, rangeM: number): [number, number][] {
+  const left = geodesicRay(pin, azimuthDeg - spanDeg / 2, rangeM, 16);
+  const right = geodesicRay(pin, azimuthDeg + spanDeg / 2, rangeM, 16);
+  return [...left, ...arc(pin, azimuthDeg - spanDeg / 2, azimuthDeg + spanDeg / 2, rangeM, Math.max(8, Math.ceil(spanDeg / 3))).slice(1, -1), ...right.toReversed()];
+}
+
+/** Field-of-view cone from the camera: filled wedge, edges, axis, depth-of-field arcs and panorama outline. */
+export function fovCone(pin: LngLat, azimuthDeg: number, hfovDeg: number, o: FovConeOptions): FeatureCollection {
+  const features: Feature<Polygon | LineString, { kind: FovKind }>[] = [];
+  const ring = cone(pin, azimuthDeg, hfovDeg, o.rangeM);
+  features.push({ type: 'Feature', properties: { kind: FovKind.Fill }, geometry: { type: 'Polygon', coordinates: [[...ring, ring[0]]] } });
+  for (const side of [-1, 1]) {
+    features.push({ type: 'Feature', properties: { kind: FovKind.Edge }, geometry: { type: 'LineString', coordinates: geodesicRay(pin, azimuthDeg + (side * hfovDeg) / 2, o.rangeM, 16) } });
+  }
+  features.push({ type: 'Feature', properties: { kind: FovKind.Axis }, geometry: { type: 'LineString', coordinates: geodesicRay(pin, azimuthDeg, o.rangeM, 16) } });
+  for (const d of [o.dofNearM, o.dofFarM]) {
+    if (d == null || !Number.isFinite(d) || d <= 0 || d > o.rangeM) continue;
+    features.push({ type: 'Feature', properties: { kind: FovKind.Dof }, geometry: { type: 'LineString', coordinates: arc(pin, azimuthDeg - hfovDeg / 2, azimuthDeg + hfovDeg / 2, d, 12) } });
+  }
+  if (o.panoDeg != null && o.panoDeg > hfovDeg) {
+    const outline = cone(pin, azimuthDeg, Math.min(o.panoDeg, 359), o.rangeM);
+    features.push({ type: 'Feature', properties: { kind: FovKind.Pano }, geometry: { type: 'LineString', coordinates: [...outline, outline[0]] } });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+export const CATEGORY_COLORS: Record<MarkerCategory, string> = {
+  Peak: '#c9a26b',
+  Building: '#9aa7b4',
+  Tree: '#5cb85c',
+  Lighthouse: '#ff6b6b',
+  Bridge: '#7fb3ff',
+  Waterfall: '#4dd0e1',
+  Viewpoint: '#f5a524',
+  Other: '#d0b8ff'
+};
+
+export interface MarkerFeatureProps {
+  id: string;
+  name: string;
+  category: MarkerCategory;
+  color: string;
+  selected: boolean;
+}
+
+export function markerFeatures(markers: SavedMarker[], selectedId: string | null): FeatureCollection<Point, MarkerFeatureProps> {
+  return {
+    type: 'FeatureCollection',
+    features: markers.map((m) => ({
+      type: 'Feature',
+      id: m.id,
+      properties: { id: m.id, name: m.name, category: m.category, color: CATEGORY_COLORS[m.category] ?? CATEGORY_COLORS.Other, selected: m.id === selectedId },
+      geometry: { type: 'Point', coordinates: [m.lng, m.lat] }
+    }))
   };
 }

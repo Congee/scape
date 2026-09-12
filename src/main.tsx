@@ -4,7 +4,10 @@ import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { startClock } from '@state/clock';
+import { compositionStore } from '@state/composition';
 import { startDayDataSync } from '@state/dayData';
+import { markersStore } from '@state/markers';
+import { plansStore } from '@state/plans';
 import { settingsStore } from '@state/settings';
 import { startTerrainSync, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
@@ -21,12 +24,13 @@ declare module '@tanstack/react-router' {
 if (import.meta.env.DEV) {
   window.addEventListener('error', (e) => console.error('[scape] error:', e.message, e.filename, e.lineno, e.error?.stack));
   window.addEventListener('unhandledrejection', (e) => console.error('[scape] rejection:', e.reason));
-  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore };
+  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, plans: plansStore };
 }
 
 startTerrainSync();
 startDayDataSync();
 startClock();
+void markersStore.getState().load();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

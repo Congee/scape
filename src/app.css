@@ -338,11 +338,14 @@ button:focus-visible {
 
 .tabs button {
   flex: 1;
+  min-width: 0;
   background: none;
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
-  padding: 9px 0;
+  padding: 9px 2px;
+  font-size: 12px;
+  white-space: nowrap;
   color: var(--fg-2);
 }
 
@@ -568,8 +571,8 @@ label.file input {
   font-size: 12px;
 }
 
-/* Geodetics */
-.geo .kv {
+/* Key/value grids (Geodetics, Frame, Markers) */
+.kv {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 5px 12px;
@@ -577,16 +580,16 @@ label.file input {
   padding: 6px;
 }
 
-.geo .kv .k {
+.kv .k {
   color: var(--fg-2);
 }
 
-.geo .kv .v {
+.kv .v {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.geo .kv input {
+.kv input {
   width: 76px;
   margin-right: 4px;
 }
@@ -595,7 +598,7 @@ label.file input {
 .geo .los.marginal { color: #f1c40f; }
 .geo .los.blocked { color: var(--danger); }
 
-.geo .actions {
+.actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -614,4 +617,207 @@ label.file input {
 
 .geo p {
   margin: 8px 6px;
+}
+
+/* Frame panel */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 6px;
+}
+
+.chips button {
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.chips button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08111c;
+}
+
+.seg {
+  display: inline-flex;
+}
+
+.seg button {
+  border-radius: 0;
+}
+
+.seg button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.seg button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.kv .v.wide {
+  grid-column: 1 / -1;
+}
+
+.frame h3,
+.markers h3 {
+  margin: 12px 6px 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+
+.frame label.toggle,
+.markers label.toggle {
+  padding: 3px 6px;
+}
+
+/* FOV cone handles on the map */
+.fov-handle {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgb(15 18 22 / 0.85);
+  cursor: grab;
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.35);
+}
+
+.fov-handle.tip {
+  background: var(--accent);
+}
+
+/* Markers */
+.marker-list li {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.marker-list li:hover,
+.marker-list li.selected {
+  background: var(--bg-3);
+}
+
+.marker-list li.selected {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.marker-list .cat {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.marker-list .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marker-list .where {
+  color: var(--fg-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.markers textarea {
+  width: 100%;
+  min-height: 48px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 7px;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+}
+
+.markers .kv input[type='text'] {
+  width: 100%;
+}
+
+.markers .kv select {
+  max-width: 100%;
+}
+
+.stars button {
+  background: none;
+  border: 0;
+  padding: 0 1px;
+  font-size: 15px;
+  color: var(--fg-3);
+}
+
+.stars button.on {
+  color: var(--sun);
+}
+
+.ok {
+  color: var(--terrain);
+}
+
+/* Library page */
+.list li .meta {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+/* Viewfinder page */
+.vf-page {
+  display: grid;
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr) var(--panel);
+  grid-template-rows: auto minmax(0, 1fr) var(--chart);
+  grid-template-areas:
+    'top panel'
+    'view panel'
+    'chart panel';
+}
+
+.vf-area {
+  grid-area: view;
+  position: relative;
+  min-height: 0;
+  background: #07090c;
+}
+
+.vf {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+  touch-action: none;
+  cursor: grab;
+}
+
+.vf:active {
+  cursor: grabbing;
+}
+
+.vf:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+@media (max-width: 900px) {
+  .vf-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) var(--chart) 38vh;
+    grid-template-areas:
+      'top'
+      'view'
+      'chart'
+      'panel';
+  }
+}
+
+.button-link {
+  text-decoration: none;
+  color: inherit;
 }

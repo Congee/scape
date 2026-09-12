@@ -1,0 +1,243 @@
+import { Link } from '@tanstack/react-router';
+import { useState } from 'react';
+import { makeObserver, SkyBody } from '@core/astro/bodies';
+import { position } from '@core/astro/positions';
+import { compass, degrees, distance } from '@core/format';
+import { distanceM } from '@core/geo/geodesy';
+import { depthOfField, panoramaShots } from '@core/optics/dof';
+import { circleOfConfusionMm, clampFocalMm, equivalentFocalMm, F_STOPS, frameFov, Orientation } from '@core/optics/fov';
+import { aimFor, compositionStore, useComposition } from '@state/composition';
+import { allSensors, sensorById, useGear } from '@state/gear';
+import { capturePlan, plansStore } from '@state/plans';
+import { settingsStore, useSettings } from '@state/settings';
+import { profileKeyFor, useTerrain } from '@state/terrain';
+import { useWorld, worldStore } from '@state/world';
+
+const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg)}`;
+const dist = (m: number, units: Parameters<typeof distance>[1]) => (Number.isFinite(m) ? distance(m, units) : '∞');
+
+export function FramePanel() {
+  const c = useComposition();
+  const cameras = useGear((s) => s.cameras);
+  const focals = useGear((s) => s.focalPresets);
+  const pin = useWorld((s) => s.pin);
+  const pin2 = useWorld((s) => s.pin2);
+  const pinHeightM = useWorld((s) => s.pinHeightM);
+  const time = useWorld((s) => s.time);
+  const units = useSettings((s) => s.units);
+  const profile = useTerrain((s) => s.profile);
+  const profileKey = useTerrain((s) => s.profileKey);
+  const [planName, setPlanName] = useState('');
+  const [saved, setSaved] = useState('');
+
+  const fresh = profile && profileKey === profileKeyFor(worldStore.getState(), settingsStore.getState()) ? profile : null;
+  const sensor = sensorById(c.sensorId, cameras);
+  const fov = frameFov(sensor, c.focalMm, c.orientation);
+  const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
+  const targetM = pin2 ? distanceM(pin, pin2) : null;
+  const focusM = c.focusDistM ?? targetM;
+  const coc = circleOfConfusionMm(sensor);
+  const dof = focusM ? depthOfField(c.focalMm, c.fNumber, coc, focusM) : null;
+  const pano = c.panoTotalDeg ? panoramaShots(c.panoTotalDeg, fov.hDeg, c.panoOverlap) : null;
+  const update = compositionStore.getState().update;
+
+  const aimAt = (body: SkyBody) => {
+    const p = position(body, new Date(time), makeObserver(pin, pinHeightM));
+    compositionStore.getState().aim(p.azimuth, Math.max(0, p.altitude));
+  };
+  const setFocal = (v: number) => update({ focalMm: Math.round(clampFocalMm(v) * 10) / 10 });
+  const savePlan = async () => {
+    const plan = capturePlan(planName);
+    await plansStore.getState().save(plan);
+    setSaved(plan.name);
+    setPlanName('');
+  };
+
+  return (
+    <div className="frame">
+      <h3>Camera</h3>
+      <div className="kv">
+        <span className="k">Sensor</span>
+        <b className="v">
+          <select value={c.sensorId} onChange={(e) => update({ sensorId: e.target.value })} aria-label="Sensor format">
+            {allSensors(cameras).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </b>
+        <span className="k">Orientation</span>
+        <b className="v">
+          <span className="seg">
+            {[Orientation.Landscape, Orientation.Portrait].map((o) => (
+              <button key={o} className={c.orientation === o ? 'on' : ''} onClick={() => update({ orientation: o })}>
+                {o}
+              </button>
+            ))}
+          </span>
+        </b>
+        <span className="k">Focal length</span>
+        <b className="v">
+          <input type="number" min={4} max={2400} step={1} value={c.focalMm} onChange={(e) => setFocal(Number(e.target.value) || c.focalMm)} aria-label="Focal length, millimetres" />
+          <span className="muted">mm · {equivalentFocalMm(sensor, c.focalMm).toFixed(0)} mm equiv.</span>
+        </b>
+      </div>
+      <div className="chips" aria-label="Focal length presets">
+        {focals.map((f) => (
+          <button key={f} className={Math.abs(f - c.focalMm) < 0.05 ? 'on' : ''} onClick={() => setFocal(f)}>
+            {f}
+          </button>
+        ))}
+      </div>
+      <div className="kv">
+        <span className="k">Aperture</span>
+        <b className="v">
+          <select value={c.fNumber} onChange={(e) => update({ fNumber: Number(e.target.value) })} aria-label="Aperture">
+            {F_STOPS.map((f) => (
+              <option key={f} value={f}>
+                f/{f}
+              </option>
+            ))}
+          </select>
+        </b>
+        <span className="k">Field of view</span>
+        <b className="v">
+          {fov.hDeg.toFixed(1)}° × {fov.vDeg.toFixed(1)}° <span className="muted">· diagonal {fov.dDeg.toFixed(1)}°</span>
+        </b>
+      </div>
+
+      <h3>Aim</h3>
+      <label className="toggle">
+        <input type="checkbox" checked={c.aimAtTarget} disabled={!pin2} onChange={(e) => update({ aimAtTarget: e.target.checked })} />
+        <span>Aim at the target location{pin2 ? '' : ' (place a target first)'}</span>
+      </label>
+      <div className="kv">
+        <span className="k">Azimuth</span>
+        <b className="v">
+          {aim.locked ? (
+            <>
+              {degrees(aim.azimuthDeg)} {compass(aim.azimuthDeg)}
+            </>
+          ) : (
+            <>
+              <input type="number" min={0} max={360} step={0.5} value={Number(c.azimuthDeg.toFixed(1))} onChange={(e) => compositionStore.getState().aim(Number(e.target.value) || 0, c.elevationDeg)} aria-label="Azimuth, degrees" />
+              <span className="muted">° {compass(c.azimuthDeg)}</span>
+            </>
+          )}
+        </b>
+        <span className="k">Elevation</span>
+        <b className="v">
+          {aim.locked ? (
+            signed(aim.elevationDeg)
+          ) : (
+            <>
+              <input type="number" min={-89} max={89} step={0.5} value={Number(c.elevationDeg.toFixed(1))} onChange={(e) => compositionStore.getState().aim(c.azimuthDeg, Number(e.target.value) || 0)} aria-label="Elevation, degrees" />
+              <span className="muted">°</span>
+            </>
+          )}
+        </b>
+      </div>
+      <div className="actions">
+        <button onClick={() => aimAt(SkyBody.Sun)} title="Point the camera at the sun at the simulated time">
+          Aim at sun
+        </button>
+        <button onClick={() => aimAt(SkyBody.Moon)} title="Point the camera at the moon at the simulated time">
+          Aim at moon
+        </button>
+        <button onClick={() => aimAt(SkyBody.Gc)} title="Point the camera at the Galactic Centre">
+          Aim at GC
+        </button>
+      </div>
+      <label className="toggle">
+        <input type="checkbox" checked={c.showFov} onChange={(e) => update({ showFov: e.target.checked })} />
+        <span>Show the field-of-view cone on the map (drag its tip to aim, its edge to zoom)</span>
+      </label>
+      <div className="kv">
+        <span className="k">Cone length</span>
+        <b className="v">
+          <input
+            type="number"
+            min={50}
+            step={100}
+            value={Math.round(c.fovRangeM ?? targetM ?? 5000)}
+            onChange={(e) => update({ fovRangeM: Math.max(50, Number(e.target.value) || 50) })}
+            aria-label="Cone length, metres"
+          />
+          <span className="muted">m </span>
+          {c.fovRangeM != null && (
+            <button className="link" onClick={() => update({ fovRangeM: null })}>
+              auto
+            </button>
+          )}
+        </b>
+      </div>
+
+      <h3>Depth of field</h3>
+      <div className="kv">
+        <span className="k">Focus at</span>
+        <b className="v">
+          <input
+            type="number"
+            min={0.1}
+            step={1}
+            value={focusM ? Number(focusM.toFixed(focusM < 10 ? 1 : 0)) : ''}
+            placeholder="target"
+            onChange={(e) => update({ focusDistM: e.target.value ? Math.max(0.1, Number(e.target.value)) : null })}
+            aria-label="Focus distance, metres"
+          />
+          <span className="muted">m </span>
+          {c.focusDistM != null && (
+            <button className="link" onClick={() => update({ focusDistM: null })}>
+              target
+            </button>
+          )}
+        </b>
+        <span className="k">Sharp from</span>
+        <b className="v">{dof ? `${dist(dof.nearM, units)} to ${dist(dof.farM, units)}` : 'set a focus distance'}</b>
+        <span className="k">Hyperfocal</span>
+        <b className="v">
+          {dist(dof?.hyperfocalM ?? depthOfField(c.focalMm, c.fNumber, coc, 1).hyperfocalM, units)} <span className="muted">· CoC {coc.toFixed(3)} mm</span>
+        </b>
+      </div>
+
+      <h3>Panorama</h3>
+      <label className="toggle">
+        <input type="checkbox" checked={c.panoTotalDeg != null} onChange={(e) => update({ panoTotalDeg: e.target.checked ? Math.max(fov.hDeg, 120) : null })} />
+        <span>Plan a stitched panorama</span>
+      </label>
+      {pano && c.panoTotalDeg != null && (
+        <div className="kv">
+          <span className="k">Total angle</span>
+          <b className="v">
+            <input type="number" min={1} max={360} step={5} value={Math.round(c.panoTotalDeg)} onChange={(e) => update({ panoTotalDeg: Math.min(360, Math.max(1, Number(e.target.value) || 1)) })} aria-label="Panorama total angle" />
+            <span className="muted">°</span>
+          </b>
+          <span className="k">Overlap</span>
+          <b className="v">
+            <input type="number" min={0} max={80} step={5} value={Math.round(c.panoOverlap * 100)} onChange={(e) => update({ panoOverlap: Math.min(0.8, Math.max(0, Number(e.target.value) / 100)) })} aria-label="Frame overlap, percent" />
+            <span className="muted">%</span>
+          </b>
+          <span className="k">Frames</span>
+          <b className="v">
+            {pano.shots} {c.orientation === Orientation.Portrait ? 'portrait' : 'landscape'} frames, {pano.stepDeg.toFixed(1)}° apart
+          </b>
+        </div>
+      )}
+
+      <h3>Plan</h3>
+      <div className="actions">
+        <Link to="/viewfinder" className="button-link">
+          <button>Open viewfinder</button>
+        </Link>
+      </div>
+      <div className="field-row" style={{ padding: '0 6px' }}>
+        <input placeholder="Plan name" value={planName} onChange={(e) => setPlanName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && planName.trim() && savePlan()} aria-label="Plan name" />
+        <button onClick={savePlan} disabled={!planName.trim()}>
+          Save plan
+        </button>
+      </div>
+      {saved && <p className="muted hint ok">Saved “{saved}” to the Library.</p>}
+    </div>
+  );
+}

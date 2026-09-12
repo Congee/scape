@@ -3,14 +3,15 @@ import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo
 import { elevationAt } from '@core/terrain/dem';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
+import { sweepView } from '@core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, tileKey, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { DemCache, POINT_ZOOM } from '@data/terrainTiles';
-import { TerrainKind, type ElevationRequest, type HorizonRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse } from './terrain.protocol';
+import { TerrainKind, type ElevationRequest, type HorizonRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 const cache = new DemCache(220);
 /** Newest request id per kind; older ones stop before the expensive step. */
-const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0 };
+const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0 };
 
 function tileAt(p: LngLat, z: number): TileCoord {
   const t = lngLatToTilePixel(p.lng, p.lat, z);
@@ -22,9 +23,9 @@ async function groundAt(p: LngLat): Promise<number> {
   return elevationAt(cache, p.lng, p.lat, POINT_ZOOM);
 }
 
-async function elevation(req: ElevationRequest): Promise<TerrainResponse> {
+async function elevation(req: ElevationRequest | PointsRequest): Promise<TerrainResponse> {
   const elevations = await Promise.all(req.points.map(groundAt));
-  return { kind: TerrainKind.Elevation, id: req.id, elevations };
+  return { kind: req.kind, id: req.id, elevations };
 }
 
 async function profile(req: ProfileRequest): Promise<TerrainResponse | null> {
@@ -80,11 +81,38 @@ async function horizon(req: HorizonRequest): Promise<TerrainResponse | null> {
   return { kind: TerrainKind.Horizon, id: req.id, result: { profile: skyline, groundM, eyeM, tiles: tiles.length, missing } };
 }
 
+/** Finer and closer than the horizon sweep: the viewfinder shows the near ground too. */
+async function view(req: ViewRequest): Promise<TerrainResponse | null> {
+  const g = await groundAt(req.pin);
+  const groundM = Number.isNaN(g) ? 0 : g;
+  const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, azFromDeg: req.azFromDeg, azSpanDeg: req.azSpanDeg, minDistM: 20, maxZoom: 15 });
+  const tiles = requiredTiles(plan);
+  await cache.loadAll(tiles);
+  if (latest.View !== req.id) return null;
+  const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+  const layers = sweepView(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
+  const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
+  return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length, missing } };
+}
+
+function dispatch(req: TerrainRequest): Promise<TerrainResponse | null> {
+  switch (req.kind) {
+    case TerrainKind.Elevation:
+    case TerrainKind.Points:
+      return elevation(req);
+    case TerrainKind.Profile:
+      return profile(req);
+    case TerrainKind.Horizon:
+      return horizon(req);
+    case TerrainKind.View:
+      return view(req);
+  }
+}
+
 scope.addEventListener('message', (e: MessageEvent<TerrainRequest>) => {
   const req = e.data;
   latest[req.kind] = req.id;
-  const run = req.kind === TerrainKind.Elevation ? elevation(req) : req.kind === TerrainKind.Profile ? profile(req) : horizon(req);
-  run.then(
+  dispatch(req).then(
     (res) => {
       if (res) scope.postMessage(res);
     },

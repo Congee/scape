@@ -17,6 +17,8 @@ export interface HorizonProfile {
 export interface SweepPlan {
   nAz: number;
   azStepDeg: number;
+  /** Azimuth of column 0; columns run clockwise. */
+  azFromDeg: number;
   /** Samples for azimuth i are [start[i], start[i + 1]). */
   start: Int32Array;
   lng: Float32Array;
@@ -33,11 +35,16 @@ export interface SweepOptions {
   maxZoom?: number;
   /** Sample spacing as a fraction of distance; sets the zoom ladder (0.0045 ≈ 0.15° on a 30° slope). */
   stepFraction?: number;
+  /** Azimuth window; defaults to the full circle. */
+  azFromDeg?: number;
+  azSpanDeg?: number;
 }
 
 export function planSweep(pin: LngLat, rangeM: number, o: SweepOptions = {}): SweepPlan {
   const azStepDeg = o.azStepDeg ?? 0.5;
-  const nAz = Math.round(360 / azStepDeg);
+  const azFromDeg = o.azFromDeg ?? 0;
+  const span = o.azSpanDeg ?? 360;
+  const nAz = span >= 360 ? Math.round(360 / azStepDeg) : Math.floor(span / azStepDeg + 1e-9) + 1;
   const minD = o.minDistM ?? 50;
   const minZ = o.minZoom ?? 8;
   const maxZ = o.maxZoom ?? 14;
@@ -57,6 +64,7 @@ export function planSweep(pin: LngLat, rangeM: number, o: SweepOptions = {}): Sw
   const plan: SweepPlan = {
     nAz,
     azStepDeg,
+    azFromDeg,
     start: new Int32Array(nAz + 1),
     lng: new Float32Array(total),
     lat: new Float32Array(total),
@@ -64,7 +72,7 @@ export function planSweep(pin: LngLat, rangeM: number, o: SweepOptions = {}): Sw
     zoom: new Uint8Array(total)
   };
   for (let i = 0; i < nAz; i++) {
-    const az = i * azStepDeg;
+    const az = azFromDeg + i * azStepDeg;
     const base = i * perAz;
     plan.start[i] = base;
     for (let j = 0; j < perAz; j++) {

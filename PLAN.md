@@ -149,7 +149,7 @@ search params.
 | Storage | IndexedDB via `idb` (library, settings); OPFS for tile bytes | persist() requested |
 | PWA | `vite-plugin-pwa` 1.3 (Workbox) | precache shell, runtime-cache tiles |
 | Geocoding | Photon public API online; GeoNames cities offline | |
-| 3D viewfinder | Three.js 0.186 | separate canvas |
+| 3D viewfinder | 2D canvas over the DEM sweep (Phase 3); Three.js 0.186 reserved for the star field and 3D orbit view | separate canvas |
 | Sky data | HYG v4.1 (CC BY-SA), NASA SVS Deep Star Maps (PD), d3-celestial lines (BSD-3) | |
 | Tests | Vitest for core; Playwright later for UI smoke | pure unit tests, no I/O |
 
@@ -208,7 +208,13 @@ Phase 2 shipped on 2026-09-11: elevation badge, target location with sightline (
 elevation angle, profile chart, clear/marginal/blocked colouring), 360° terrain horizon swept in a
 worker from Terrarium tiles (0.5° azimuth steps, zoom ladder 14→8 out to a configurable range),
 terrain rise/set events for sun, moon and Galactic Centre, skyline on the altitude chart, hillshade
-and 3D terrain toggles. Phase 3 is next.
+and 3D terrain toggles.
+Phase 3 shipped on 2026-09-11: composition store (sensor, focal length, aperture, orientation, aim);
+FOV cone on the map with draggable tip and edge handles, depth-of-field arcs and panorama outline;
+markers with categories, height/width, rating, notes, KML/GPX/GeoJSON import/export; plans and a
+full `.scape.json` backup in the Library; the viewfinder route, a 2D canvas that ray-marches the DEM
+per column (worker `View` request, layered visible ridges, distance haze) and projects sun/moon/GC
+paths, target and markers through a rectilinear camera model. Phase 4 is next.
 
 ## 8. Risks and decisions taken
 
@@ -225,6 +231,9 @@ and 3D terrain toggles. Phase 3 is next.
   different. Acceptable for dogfooding; can unify by serving Protomaps offline builds online
   later.
 - **No web compass AR**: deliberately skipped; Viewfinder VR + picture-calibration covers it.
+- **Viewfinder without Three.js.** The silhouette precision the acceptance test asks for comes from
+  ray-marching the DEM per pixel column (`core/terrain/view.ts`), which a 2D canvas draws exactly; a
+  mesh would only approximate it. Three.js stays on the list for the Phase 4 star field.
 - **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
   string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
   objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.
