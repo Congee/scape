@@ -307,10 +307,18 @@ button:focus-visible {
 
 .search-results li {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
+}
+
+.search-results li .text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
 }
 
 .search-results li:hover {
@@ -924,10 +932,6 @@ label.file input {
   flex: none;
   border-bottom: 1px solid var(--line);
   padding: 6px;
-}
-
-.topbar .exit {
-  white-space: nowrap;
 }
 
 /* Night tab */

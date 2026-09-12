@@ -1,5 +1,7 @@
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
+import { compositionStore } from '@state/composition';
+import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
 import { DateBar } from '@ui/DateBar';
 import { Panel } from '@ui/Panel';
@@ -12,6 +14,11 @@ export const Route = createFileRoute('/viewfinder')({ component: ViewfinderPage 
 
 function ViewfinderPage() {
   const navigate = useNavigate();
+  // Map or viewfinder drags release the aim lock; entering the viewfinder should face the target again.
+  useEffect(() => {
+    if (worldStore.getState().pin2) compositionStore.setState({ aimAtTarget: true });
+    // oxlint-disable-next-line react/exhaustive-deps -- entry-time only
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) void navigate({ to: '/' });
@@ -22,9 +29,6 @@ function ViewfinderPage() {
   return (
     <div className="vf-page">
       <header className="topbar">
-        <Link to="/" className="button-link" title="Back to the map (Esc)">
-          <button className="exit">← Map</button>
-        </Link>
         <DateBar />
         <Badges />
       </header>

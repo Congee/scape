@@ -1,14 +1,14 @@
 import type { LngLat } from './geodesy';
 
 // Values are persisted in settings.
-export const CoordFormat = { DD: 'dd', DM: 'dm', DMS: 'dms' } as const;
+export const CoordFormat = { DD: 'dd', DM: 'dm', DMS: 'dms', Signed: 'signed' } as const;
 export type CoordFormat = (typeof CoordFormat)[keyof typeof CoordFormat];
 
 function pad(n: number, w: number): string {
   return String(n).padStart(w, '0');
 }
 
-function fmtOne(value: number, pos: string, neg: string, format: CoordFormat): string {
+function fmtOne(value: number, pos: string, neg: string, format: Exclude<CoordFormat, typeof CoordFormat.Signed>): string {
   const hemi = value < 0 ? neg : pos;
   const v = Math.abs(value);
   if (format === CoordFormat.DD) return `${v.toFixed(4)}°${hemi}`;
@@ -21,12 +21,21 @@ function fmtOne(value: number, pos: string, neg: string, format: CoordFormat): s
 }
 
 export function formatLngLat(p: LngLat, format: CoordFormat = CoordFormat.DD): string {
+  if (format === CoordFormat.Signed) return formatDecimal(p, 6);
   return `${fmtOne(p.lat, 'N', 'S', format)} ${fmtOne(p.lng, 'E', 'W', format)}`;
 }
 
 /** Decimal degrees with sign, suitable for pasting into other tools. */
 export function formatDecimal(p: LngLat, digits = 5): string {
   return `${p.lat.toFixed(digits)}, ${p.lng.toFixed(digits)}`;
+}
+
+/** Accepts a Google Maps URL or fragment and a trailing zoom suffix. */
+function normalize(text: string): string {
+  let t = text.trim().replace(/[−–]/g, '-');
+  const at = t.lastIndexOf('@');
+  if (at >= 0) t = t.slice(at + 1);
+  return t.replace(/,\s*\d+(?:\.\d+)?z\b.*$/i, '').trim();
 }
 
 const NUM = String.raw`(-?\d+(?:\.\d+)?)`;
@@ -40,7 +49,7 @@ const PAIR = new RegExp(String.raw`^\s*${ONE}\s*[,;/\s]\s*${ONE}\s*$`, 'i');
  * Returns null when the text is not a coordinate pair.
  */
 export function parseLngLat(text: string): LngLat | null {
-  const m = PAIR.exec(text.replace(/[−–]/g, '-'));
+  const m = PAIR.exec(normalize(text));
   if (!m) return null;
   const a = toDeg(m[1], m[2], m[3], m[4], m[5]);
   const b = toDeg(m[6], m[7], m[8], m[9], m[10]);

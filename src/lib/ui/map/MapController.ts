@@ -1,5 +1,6 @@
 import {
   GeolocateControl,
+  LngLatBounds,
   Map as MaplibreMap,
   Marker,
   NavigationControl,
@@ -205,6 +206,23 @@ export class MapController {
       alignStore.subscribe((st) => [st.result, st.opacity] as const, () => this.renderHeat(), { equalityFn: shallow }),
       alignStore.subscribe((st) => st.candidate, (c) => this.syncCandidate(c))
     );
+
+    this.showBothPins();
+  }
+
+  /** Returning from the viewfinder must show the camera and target locations together. */
+  private showBothPins() {
+    const { pin, pin2 } = worldStore.getState();
+    if (!pin2) return;
+    const a: [number, number] = [pin.lng, pin.lat];
+    const b: [number, number] = [pin2.lng, pin2.lat];
+    const view = this.map.getBounds();
+    if (view.contains(a) && view.contains(b)) return;
+    this.map.fitBounds(new LngLatBounds(a, a).extend(b), {
+      padding: { top: 80, right: 80, bottom: 60, left: 60 },
+      maxZoom: 15,
+      duration: 0
+    });
   }
 
   /** Draggable marker whose drags reach the store at most once per frame. */

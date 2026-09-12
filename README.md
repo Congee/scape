@@ -79,9 +79,9 @@ page opens and follows the camera and target as they move on the map; the "3D" c
 shaded terrain layers when tiles are unavailable. Drag to aim, scroll to zoom, double-click to centre a point; the compass and
 altitude rulers run along the frame edges; with a target location set, the left ruler reads heights
 above sea level at the target's distance and a strip above the frame gives the sun, moon and Galactic
-Centre positions and the moon phase. "← Map" or Esc returns to the map. Placing or moving the
-target location re-aims the frame at it; dragging the frame or the cone tip releases that lock, and
-the "Aim at target" chip shows and restores it.
+Centre positions and the moon phase. Esc returns to the map. Entering the viewfinder, or placing or
+moving the target location, re-aims the frame at it; dragging the frame or the cone tip releases that
+lock, and the "Aim at target" chip shows and restores it.
 
 ## Night
 

@@ -36,6 +36,7 @@ function SettingsPage() {
             <option value="dd">Decimal degrees</option>
             <option value="dm">Degrees, minutes</option>
             <option value="dms">Degrees, minutes, seconds</option>
+            <option value="signed">Signed decimal (40.71955, -74.14086)</option>
           </select>
         </label>
       </section>

@@ -158,7 +158,7 @@ search params.
 
 ```
 ┌──────┬───────────────────────────────────────────────┬───────────────┐
-│ nav  │ date bar · search · badges (coords, tz, elev) │ panel tabs    │
+│ nav  │ date bar · search · badges (coords, elev)     │ panel tabs    │
 │ rail │                                               │ Timeline      │
 │      │                    MAP                        │ Layers        │
 │ 56px │                                               │ Geodetics     │
@@ -244,8 +244,8 @@ flat-shaded prisms), a height ruler at the target distance and a sun/moon header
 
 ## 8. Risks and decisions taken
 
-- **Time zone accuracy**: tz-lookup mismatches near borders. Mitigation: show tz badge with
-  "auto" marker, one-click override, and remember overrides per saved location.
+- **Time zone accuracy**: tz-lookup mismatches near borders. Mitigation: the date bar's zone
+  selector shows "Auto · zone" with a one-click override, and remembers overrides per saved location.
 - **Terrarium tile licensing** is mixed (mostly PD, some CC BY). Show attribution per region.
 - **Never decode DEM PNGs through a canvas.** Chromium's image pipeline nudges isolated channel
   values by one, and one unit of red is 256 m in Terrarium; the result was 170 m phantom cliffs

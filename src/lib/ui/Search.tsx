@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { CoordFormat, formatLngLat, parseLngLat } from '@core/geo/coords';
+import { formatLngLat, parseLngLat } from '@core/geo/coords';
 import { geocode, type GeocodeHit } from '@data/geocode';
+import { useSettings } from '@state/settings';
 import { worldStore } from '@state/world';
 
 interface Remote {
@@ -12,6 +13,7 @@ export function Search() {
   const [q, setQ] = useState('');
   const [remote, setRemote] = useState<Remote>({ query: '', hits: [] });
   const [open, setOpen] = useState(false);
+  const format = useSettings((s) => s.coordFormat);
 
   const text = q.trim();
   const coord = text.length >= 3 ? parseLngLat(text) : null;
@@ -31,7 +33,7 @@ export function Search() {
   }, [text, coord]);
 
   const hits: GeocodeHit[] = coord
-    ? [{ ...coord, name: formatLngLat(coord, CoordFormat.DMS), detail: 'Coordinates' }]
+    ? [{ ...coord, name: formatLngLat(coord, format), detail: 'Coordinates' }]
     : remote.query === text
       ? remote.hits
       : [];
@@ -41,6 +43,12 @@ export function Search() {
     const p = { lat: h.lat, lng: h.lng };
     w.setPin(p);
     w.flyTo(p, Math.max(w.view.zoom, 11));
+    setQ('');
+    setOpen(false);
+  };
+
+  const setTarget = (h: GeocodeHit) => {
+    worldStore.getState().setPin2({ lat: h.lat, lng: h.lng });
     setQ('');
     setOpen(false);
   };
@@ -67,8 +75,21 @@ export function Search() {
         <ul className="search-results" role="listbox">
           {hits.map((h) => (
             <li key={`${h.name}|${h.lat}|${h.lng}`} role="option" aria-selected={false} onMouseDown={() => pick(h)}>
-              <span className="name">{h.name}</span>
-              {h.detail && <span className="detail">{h.detail}</span>}
+              <div className="text">
+                <span className="name">{h.name}</span>
+                {h.detail && <span className="detail">{h.detail}</span>}
+              </div>
+              <button
+                className="link"
+                title="Set as the target location"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setTarget(h);
+                }}
+              >
+                Target
+              </button>
             </li>
           ))}
         </ul>

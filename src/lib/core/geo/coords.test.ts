@@ -16,6 +16,20 @@ describe('coords', () => {
     expect(q.lng).toBeCloseTo(-74.1553, 3);
   });
 
+  it('parses a Google Maps URL or fragment', () => {
+    expect(parseLngLat('https://www.google.com/maps/@40.7195497,-74.1408596,17z')).toEqual({ lat: 40.7195497, lng: -74.1408596 });
+    expect(parseLngLat('@40.7195497,-74.1408596')).toEqual({ lat: 40.7195497, lng: -74.1408596 });
+  });
+
+  it('parses a trailing zoom suffix', () => {
+    expect(parseLngLat('40.7195497,-74.1408596,17z')).toEqual({ lat: 40.7195497, lng: -74.1408596 });
+    expect(parseLngLat('40.7195497, -74.1408596, 17.5z')).toEqual({ lat: 40.7195497, lng: -74.1408596 });
+  });
+
+  it('parses plain signed decimals', () => {
+    expect(parseLngLat('40.7195497,-74.1408596')).toEqual({ lat: 40.7195497, lng: -74.1408596 });
+  });
+
   it('rejects non-coordinates', () => {
     expect(parseLngLat('Yosemite')).toBeNull();
     expect(parseLngLat('95, 10')).toBeNull();
@@ -26,5 +40,9 @@ describe('coords', () => {
     const p = { lat: 40.7463, lng: -74.1553 };
     expect(formatLngLat(p)).toBe('40.7463°N 74.1553°W');
     expect(formatLngLat(p, CoordFormat.DMS)).toBe('40°44′46.7″N 74°09′19.1″W');
+  });
+
+  it('formats signed decimal', () => {
+    expect(formatLngLat({ lat: 40.7195497, lng: -74.1408596 }, CoordFormat.Signed)).toBe('40.719550, -74.140860');
   });
 });
