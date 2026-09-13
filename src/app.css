@@ -337,24 +337,17 @@ button:focus-visible {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  /* without this the max-content tab strip widens the panel past its grid column */
+  /* without this wide tab-body content widens the panel past its grid column */
   min-width: 0;
 }
 
 .tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
   border-bottom: 1px solid var(--line);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.tabs::-webkit-scrollbar {
-  display: none;
 }
 
 .tabs button {
-  flex: 1;
-  min-width: max-content;
   background: none;
   border: 0;
   border-bottom: 2px solid transparent;

@@ -41,6 +41,15 @@ describe('depth of field', () => {
     expect(d.farM).toBeCloseTo(9.53, 2);
   });
 
+  it('matches the PlanIt 400 mm f/8 worked example', () => {
+    const MI = 1609.344;
+    const d = depthOfField(400, 8, 0.0088, 1.31 * MI);
+    expect(d.nearM / MI).toBeCloseTo(0.68, 2);
+    // PlanIt's far limit of 16.72 mi needs a CoC near 0.00875 mm; its displayed CoC and distance are rounded.
+    expect(d.farM / MI).toBeGreaterThan(15.5);
+    expect(d.farM / MI).toBeLessThan(18.5);
+  });
+
   it('reaches infinity at and beyond the hyperfocal distance', () => {
     expect(depthOfField(50, 8, 0.03, 11).farM).toBe(Infinity);
     expect(depthOfField(50, 8, 0.03, 11).nearM).toBeCloseTo(5.36, 2);
