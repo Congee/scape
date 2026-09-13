@@ -5,8 +5,7 @@ import type { PreparedConstellations } from '@core/astro/constellations';
 import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
 import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
-import { moonInfo, position } from '@core/astro/positions';
-import { SEMIDIAMETER_DEG } from '@core/astro/terrainEvents';
+import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
 import { compass, degrees, distance, height, Units } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
@@ -815,8 +814,9 @@ export class ViewfinderController {
     const { ctx } = this;
     const col = sc.view ? columnAt(sc.view, pos.azimuth) : -1;
     const skyline = col >= 0 && sc.view ? sc.view.skylineDeg[col] : flatHorizonDeg(sc.eyeAboveGroundM);
-    const hidden = pos.altitude + SEMIDIAMETER_DEG[body] < skyline;
-    const r = Math.max(3, discRadiusMm(sc.cam, SEMIDIAMETER_DEG[body]) * sc.frame.pxPerMm);
+    const semi = semidiameterDeg(body, date, sc.obs);
+    const hidden = pos.altitude + semi < skyline;
+    const r = Math.max(3, discRadiusMm(sc.cam, semi) * sc.frame.pxPerMm);
     ctx.save();
     ctx.beginPath();
     ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
@@ -853,13 +853,11 @@ export class ViewfinderController {
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
       // Lit fraction as a lens shape; the bright limb faces the sun, i.e. west when waxing (northern view).
-      const lit = info.illumination;
-      const westSide = info.waxing ? 1 : -1;
+      const term = moonTerminator(info.illumination, info.waxing);
       ctx.fillStyle = '#e8eef5';
       ctx.beginPath();
-      ctx.arc(p.x, p.y, r, -Math.PI / 2, Math.PI / 2, westSide < 0);
-      const rx = Math.abs(2 * lit - 1) * r;
-      ctx.ellipse(p.x, p.y, Math.max(0.01, rx), r, 0, Math.PI / 2, -Math.PI / 2, (lit < 0.5) === westSide < 0);
+      ctx.arc(p.x, p.y, r, -Math.PI / 2, Math.PI / 2, term.litSide < 0);
+      ctx.ellipse(p.x, p.y, Math.max(0.01, term.rx * r), r, 0, Math.PI / 2, -Math.PI / 2, term.gibbous === (term.litSide < 0));
       ctx.fill();
     }
     ctx.font = '11px system-ui, sans-serif';

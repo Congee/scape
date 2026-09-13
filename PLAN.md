@@ -301,7 +301,12 @@ viewfinder inside the region, and place search all worked; update, export/import
   minute after nautical dusk. Cross-checked on 2026-09-12 against PlanIt Pro 10.7.29 (camera at Castle
   Point, Hoboken, 2026-10-26 evening): azimuths and the moon's altitude agree within 0.1°; PlanIt's
   Galactic Centre azimuth sits 0.35° east of Scape's and matches J2000 coordinates used without
-  precession, so that one is PlanIt's error; its moon illumination reads 0.2 % high.
+  precession, so that one is PlanIt's error; its moon illumination reads 0.2 % high. The full
+  record, including the one-year moon finder run (34 of 36 passes shared; PlanIt's extra row is a
+  window-corner false positive, Scape's extra row a pass PlanIt misses) and the viewfinder match,
+  is `docs/research/planit-crosscheck.md`. The check exposed two viewfinder bugs, both fixed: the
+  moon's terminator was drawn inverted (a full moon painted as a sliver) and the sun and moon discs
+  used a fixed mean semidiameter instead of the instant's topocentric one (5 % small at perigee).
 - **Heat grids live in normalised Mercator.** Cells are square on the ground, the image source maps
   onto the map without resampling, and one topocentric RA/Dec per time sample plus per-cell trig
   (`core/astro/fastHorizon.ts`) keeps a 64 × 64 × 240 grid under a second; the error stays below 0.02°
