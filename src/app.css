@@ -832,6 +832,10 @@ label.file input {
   margin-right: 4px;
 }
 
+.kv .nowrap {
+  white-space: nowrap;
+}
+
 .geo .los.clear { color: #2ecc71; }
 .geo .los.marginal { color: #f1c40f; }
 .geo .los.blocked { color: var(--danger); }

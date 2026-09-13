@@ -264,8 +264,10 @@ UI iteration on 2026-09-12 from the user's review after the PlanIt cross-check: 
 viewfinder stay in step across browser tabs (`state/crossTab.ts` — persisted stores announce their
 writes on a BroadcastChannel and the other tabs rehydrate; the "viewfinder shows Zermatt" report was
 a second tab keeping its own in-memory stores); compact share URLs on both routes
-(`state/urlState.ts`); the viewfinder HUD names the camera location and the target's distance and
-bearing; the bottom chart scrubs with a horizontal trackpad swipe; the side panel collapses; the
+(`state/urlState.ts`); the viewfinder is the picture alone — the user cut the coordinate, distance
+and bearing readouts, the tick rulers and the time label the next day ("completely unusable" on a
+phone), leaving one line under the frame for focal length, field of view and load status, and the
+Frame tab's Open viewfinder button went with them; the bottom chart scrubs with a horizontal trackpad swipe; the side panel collapses; the
 basemap list is a tree, collapsed; the Timeline shows TPE's rows with a Details toggle; the Night
 tab is grouped by topic with `core/astro/night.ts` giving the night and moon-free windows; the Frame
 tab lists camera bodies apart from sensor formats, hides the controls a body or a prime fixes, and
@@ -274,6 +276,19 @@ calendar marks principal moon phases and eclipses visible from the camera locati
 (`core/astro/calendar.ts`); the sun shadow has its true length at the camera and target locations.
 Found in passing: offline terrain tiles at low zoom were skipped because only the tile centre was
 tested against the region; the footprint is tested now.
+
+Later the same day, against a PlanIt screenshot of the full moon rising behind 30 Hudson Yards
+from Hoboken at 400 mm, the user said ours "looks like nothing". The causes were not missing
+models: the viewfinder's raster pass painted the sky opaque over the MapLibre canvas, hiding the
+building extrusions that were already there; the night dim on that canvas turned what did show
+near-black; the target had no height, so the aim framed the shoreline; and the Milky Way texture,
+sampled nearest-neighbour, showed as a diamond hatch across a 5° field. Now the sky is transparent
+in 3D mode, extrusions are painted light and opaque (over raster basemaps too), the night dim has a
+floor, placing the target on the map takes the building's height for the aim and the target label,
+the texture is sampled bilinearly, and the terrain mesh is dropped while the frame is entirely
+above the horizon because MapLibre renders nothing once the mesh leaves the frustum. Still open:
+no buildings at wide focal lengths (z14-only heights, see §8), and the phone layout still gives
+the viewfinder canvas about a quarter of the viewport.
 
 ## 8. Risks and decisions taken
 
@@ -345,7 +360,17 @@ tested against the region; the footprint is tested now.
   projection and per-column terrain occlusion, no new dependency; deck.gl's ScenegraphLayer is
   the alternative already allowed as a lazy load); (C) in-app modelling — footprint polygon plus
   height and roof, extending the solids, exportable as GeoJSON or glTF for sharing.
-  Recommendation: A, then B on the canvas, then C.
+  Recommendation: A, then B on the canvas, then C. Taken 2026-09-13 (user: the viewfinder "shall
+  be able to replicate PlanIt viewfinder, though without precise 3D building models"): A is the
+  baseline — the 3D view repaints the style's OpenStreetMap `building` extrusions light and opaque,
+  adds them over raster basemaps from the OpenFreeMap vector source when online, and placing the
+  target on the map fills its height from the building underneath (`core/geo/buildingHeight.ts`,
+  `render_height`; 395 m for 30 Hudson Yards against the 387 m architectural height, kept as the
+  data says). B and C remain the user's decision. Limit of A: OpenFreeMap carries building heights
+  only in z14 tiles (z13 holds one untagged merged footprint per tile), and MapLibre picks the tile
+  zoom from the camera, so wide lenses (about 125 mm full-frame and wider at street level) draw no
+  buildings. Fixing that means fetching the z14 tiles ourselves into a GeoJSON source, which needs
+  a PBF decoder (a small dependency or hand-rolled) — a stack decision for the user.
 - **Accuracy over agreement with the reference apps** (user, 2026-09-12: "there's no reason to
   copy PlanIt's number… what we want is accuracy"). Where Scape and TPE or PlanIt differ, Scape
   keeps the physically defined convention and records the difference; no "match PlanIt"
@@ -363,7 +388,9 @@ tested against the region; the footprint is tested now.
   control). The side panel collapses; the basemap list is a tree, collapsed; the Timeline shows
   TPE's rows (twilights, sunrise and sunset, moonrise and moonset) with a Details toggle for
   transits, golden hour, terrain and Galactic Centre rows; the Night tab is grouped by topic
-  (Sun, Moon, Milky Way, Stars, Meteor showers), each a one-line summary until opened.
+  (Sun, Moon, Milky Way, Stars, Meteor showers), each a one-line summary until opened. The
+  viewfinder frame carries no rulers, time or coordinate readouts (user, 2026-09-13); PlanIt's
+  azimuth and height rulers are deliberately not replicated.
 - **The calendar marks only what matters**: principal moon phases and eclipses visible from the
   camera location (`core/astro/calendar.ts`), not every day's phase.
 - **The sun shadow has a length**: `h / tan(altitude)` for an object of settable height at the

@@ -6,7 +6,7 @@ import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro
 import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
-import { distance } from '@core/format';
+import { distance, height } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
 import { frameFov, frameMm } from '@core/optics/fov';
@@ -359,10 +359,22 @@ export class ViewfinderController {
       let fu = 0.5 - Math.atan2(qy, qx) / (2 * Math.PI);
       fu -= Math.floor(fu);
       const fv = (Math.PI / 2 - Math.asin(clamp(qz, -1, 1))) / Math.PI;
-      const tx = Math.min(tex.width - 1, (fu * tex.width) | 0);
-      const ty = Math.min(tex.height - 1, (fv * tex.height) | 0);
-      const t = (ty * tex.width + tx) * 4;
-      return [c0[0] + tex.rgba[t] * mwGain, c0[1] + tex.rgba[t + 1] * mwGain, c0[2] + tex.rgba[t + 2] * mwGain];
+      const x = fu * tex.width - 0.5;
+      const y = clamp(fv * tex.height - 0.5, 0, tex.height - 1);
+      const x0 = Math.floor(x);
+      const y0 = Math.floor(y);
+      const dx = x - x0;
+      const dy = y - y0;
+      const cx0 = ((x0 % tex.width) + tex.width) % tex.width;
+      const cx1 = (cx0 + 1) % tex.width;
+      const cy0 = Math.min(tex.height - 1, Math.max(0, y0));
+      const cy1 = Math.min(tex.height - 1, cy0 + 1);
+      const i00 = (cy0 * tex.width + cx0) * 4;
+      const i10 = (cy0 * tex.width + cx1) * 4;
+      const i01 = (cy1 * tex.width + cx0) * 4;
+      const i11 = (cy1 * tex.width + cx1) * 4;
+      const texel = (k: number) => (tex.rgba[i00 + k] * (1 - dx) + tex.rgba[i10 + k] * dx) * (1 - dy) + (tex.rgba[i01 + k] * (1 - dx) + tex.rgba[i11 + k] * dx) * dy;
+      return [c0[0] + texel(0) * mwGain, c0[1] + texel(1) * mwGain, c0[2] + texel(2) * mwGain];
     };
 
     const { forward: F, right: R, up: U } = sc.basis;
@@ -384,8 +396,14 @@ export class ViewfinderController {
         if (view) {
           const az = Math.atan2(vx, vy) / D2R;
           const col = columnAt(view, az);
-          if (col < 0 || alt > view.skylineDeg[col]) c = skyPixel(alt, vx, vy, vz, len);
-          else {
+          if (col < 0 || alt > view.skylineDeg[col]) {
+            c = skyPixel(alt, vx, vy, vz, len);
+            // The 3D map paints the same sky and the buildings standing in it, so only the Milky Way glow stays on our canvas.
+            if (through) {
+              const base = skyAt(alt);
+              a = clamp(Math.round(4 * Math.max(c[0] - base[0], c[1] - base[1], c[2] - base[2])), 0, 255);
+            }
+          } else {
             const m = surfaceAt(view, col, alt);
             if (m < 0) {
               c = groundAt(view.rangeM, 0);
@@ -793,10 +811,12 @@ export class ViewfinderController {
     ctx.closePath();
     ctx.stroke();
     ctx.font = '11px system-ui, sans-serif';
-    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = ctx.strokeStyle;
-    ctx.fillText(`Target · ${distance(d, s.units)}${blocked ? ' · behind terrain' : ''}`, p.x + 13, p.y);
+    const label = `Target · ${distance(d, s.units)}${w.pin2HeightM > 0 ? ` · ${height(w.pin2HeightM, s.units)}` : ''}${blocked ? ' · behind terrain' : ''}`;
+    const spills = p.x + 13 + ctx.measureText(label).width > sc.frame.x + sc.frame.w;
+    ctx.textAlign = spills ? 'right' : 'left';
+    ctx.fillText(label, spills ? p.x - 13 : p.x + 13, p.y);
     ctx.restore();
   }
 
@@ -1026,7 +1046,8 @@ export class ViewfinderController {
     const pose = { lng: w.pin.lng, lat: w.pin.lat, altM: sc.eyeM, eyeAboveGroundM: sc.eyeAboveGroundM, azimuthDeg: sc.aim.azimuthDeg, elevationDeg: sc.aim.elevationDeg, vfovDeg: sc.vfov };
     this.view3d ??= new TerrainView(this.canvas.parentElement!, sc.frame, currentBasemap(), pose, () => this.schedule());
     const pal = palette(sc.sunAlt);
-    this.view3d.update(sc.frame, pose, { sky: css(pal.skyAt(35)), horizon: css(pal.skyAt(0)), fog: css(pal.groundFar), brightness: 1 - 0.7 * sc.night });
+    // The dim floors at 0.7: buildings have to stay readable against a night sky.
+    this.view3d.update(sc.frame, pose, { sky: css(pal.skyAt(35)), horizon: css(pal.skyAt(0)), fog: css(pal.groundFar), brightness: 1 - 0.3 * sc.night });
     return this.view3d.ready();
   }
 

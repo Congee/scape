@@ -13,6 +13,7 @@ import { shallow } from 'zustand/shallow';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
+import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { bearingDeg, destination, distanceM, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
 import { depthOfField } from '@core/optics/dof';
@@ -135,7 +136,7 @@ export class MapController {
         ms.setPlacing(false);
         void ms.save(p).then((m) => ms.select(m.id));
         uiStore.getState().setPanelTab(PanelTab.Markers);
-      } else if (e.originalEvent.shiftKey) worldStore.getState().setPin2(p);
+      } else if (e.originalEvent.shiftKey) this.setTargetFromMap(p);
       else if (settingsStore.getState().clickMovesPin) worldStore.getState().setPin(p);
     });
     this.map.on('mousedown', (e: MapMouseEvent) => {
@@ -271,26 +272,26 @@ export class MapController {
   }
 
   /** Draggable marker whose drags reach the store at most once per frame. */
-  private makeMarker(opts: { at: LngLat; color?: string; scale?: number; element?: HTMLElement }, commit: (p: LngLat) => void, setDragging: (d: boolean) => void) {
+  private makeMarker(opts: { at: LngLat; color?: string; scale?: number; element?: HTMLElement }, commit: (p: LngLat, final: boolean) => void, setDragging: (d: boolean) => void) {
     const m = new Marker({ draggable: true, color: opts.color, scale: opts.scale, element: opts.element }).setLngLat([opts.at.lng, opts.at.lat]).addTo(this.map);
     let raf = 0;
-    const commitPos = () => {
+    const commitPos = (final: boolean) => {
       const ll = m.getLngLat();
-      commit({ lng: ll.lng, lat: ll.lat });
+      commit({ lng: ll.lng, lat: ll.lat }, final);
     };
     m.on('dragstart', () => setDragging(true));
     m.on('drag', () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        commitPos();
+        commitPos(false);
       });
     });
     m.on('dragend', () => {
       cancelAnimationFrame(raf);
       raf = 0;
       setDragging(false);
-      commitPos();
+      commitPos(true);
     });
     this.unsubs.push(() => cancelAnimationFrame(raf));
     return m;
@@ -303,10 +304,44 @@ export class MapController {
       return;
     }
     if (!this.pin2) {
-      this.pin2 = this.makeMarker({ at: p, color: PIN2_COLOR, scale: 0.9 }, (q) => worldStore.getState().setPin2(q), (d) => (this.dragging2 = d));
+      this.pin2 = this.makeMarker(
+        { at: p, color: PIN2_COLOR, scale: 0.9 },
+        (q, final) => (final ? this.setTargetFromMap(q) : worldStore.getState().setPin2(q)),
+        (d) => (this.dragging2 = d)
+      );
       return;
     }
     if (!this.dragging2) this.pin2.setLngLat([p.lng, p.lat]);
+  }
+
+  /** A target placed through the map also picks up the height of the building under it. */
+  private setTargetFromMap(p: LngLat) {
+    worldStore.getState().setPin2(p);
+    this.applyBuildingHeight(p, true);
+  }
+
+  /** Leaves a height the user typed alone; a height the map filled follows the new target. */
+  private applyBuildingHeight(p: LngLat, retry: boolean) {
+    const w = worldStore.getState();
+    if (!w.pin2HeightAuto && w.pin2HeightM > 0) return;
+    const h = this.buildingHeightAt(p);
+    if (h == null) {
+      // The building layer may not be rendered yet; look again once the tiles have landed.
+      if (retry) {
+        this.map.once('idle', () => {
+          if (samePoint(worldStore.getState().pin2, p)) this.applyBuildingHeight(p, false);
+        });
+      }
+      else if (w.pin2HeightAuto) w.setPin2Height(0, false);
+      return;
+    }
+    w.setPin2Height(Math.round(h), true);
+  }
+
+  private buildingHeightAt(p: LngLat): number | null {
+    const layers = buildingLayerIds(this.map.getStyle()?.layers).filter((id) => this.map.getLayer(id));
+    if (!layers.length) return null;
+    return heightFromFeatures(this.map.queryRenderedFeatures(this.map.project([p.lng, p.lat]), { layers }));
   }
 
   /** Escape leaves drawing mode and drops the half-drawn rectangle. */
