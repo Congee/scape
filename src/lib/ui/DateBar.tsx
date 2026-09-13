@@ -2,6 +2,7 @@ import { formatTime } from '@core/time/format';
 import { isoDate, localParts, offsetLabel, withLocalTime } from '@core/time/localDay';
 import { useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
+import { Calendar } from './Calendar';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const ZONES: string[] = Intl.supportedValuesOf('timeZone');
@@ -27,6 +28,7 @@ export function DateBar() {
         ‹
       </button>
       <input type="date" value={iso} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Date" />
+      <Calendar />
       <button onClick={() => addDays(1)} title="Next day">
         ›
       </button>
