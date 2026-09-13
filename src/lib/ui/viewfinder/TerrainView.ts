@@ -10,6 +10,8 @@ const KEEP_LABELS = /peak|mountain|summit/i;
 /** Lifts the eye when MapLibre's mesh sits above the DEM sample, so the camera never starts underground. */
 const MESH_ZOOMS = [14, 13, 12, 11];
 
+const finite = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback);
+
 export interface Rect {
   x: number;
   y: number;
@@ -47,7 +49,7 @@ export class TerrainView {
   private lastSky = '';
   private atmosphere: Atmosphere | null = null;
 
-  constructor(parent: HTMLElement, rect: Rect, basemap: Basemap, private onChange: () => void) {
+  constructor(parent: HTMLElement, rect: Rect, basemap: Basemap, pose: CameraPose, private onChange: () => void) {
     this.el.className = 'vf-3d';
     this.place(rect);
     parent.prepend(this.el);
@@ -60,6 +62,10 @@ export class TerrainView {
       attributionControl: { compact: true },
       maxPitch: 180,
       maxZoom: 24,
+      // An explicit pose: without one the style's own centre would show until the first jumpTo lands.
+      center: [finite(pose.lng, 0), finite(pose.lat, 0)],
+      zoom: 14,
+      bearing: finite(pose.azimuthDeg, 0),
       pitch: 90,
       fadeDuration: 0,
       renderWorldCopies: false
@@ -91,6 +97,8 @@ export class TerrainView {
 
   setBasemap(b: Basemap) {
     this.styleReady = false;
+    // A new style may reset the transform, so the next update must re-apply the camera.
+    this.lastPose = '';
     this.map.setStyle(styleFor(b));
     this.onChange();
   }
@@ -127,16 +135,20 @@ export class TerrainView {
 
   update(rect: Rect, pose: CameraPose, atmosphere: Atmosphere) {
     if (this.place(rect)) this.map.resize();
-    if (pose.vfovDeg !== this.lastFov) {
+    if (Number.isFinite(pose.vfovDeg) && pose.vfovDeg !== this.lastFov) {
       this.lastFov = pose.vfovDeg;
       this.map.setVerticalFieldOfView(pose.vfovDeg);
     }
-    const at = new LngLat(pose.lng, pose.lat);
-    const altM = Math.max(pose.altM, this.meshGroundM(at) + pose.eyeAboveGroundM) + 0.5;
-    const key = `${pose.lng.toFixed(6)}|${pose.lat.toFixed(6)}|${altM.toFixed(1)}|${pose.azimuthDeg.toFixed(3)}|${pose.elevationDeg.toFixed(3)}`;
-    if (key !== this.lastPose) {
+    const at = new LngLat(finite(pose.lng, 0), finite(pose.lat, 0));
+    const altM = Math.max(finite(pose.altM, 0), this.meshGroundM(at) + finite(pose.eyeAboveGroundM, 0)) + 0.5;
+    const az = finite(pose.azimuthDeg, 0);
+    const el = finite(pose.elevationDeg, 0);
+    // A NaN would leave MapLibre on its previous camera, showing another place entirely; the key is only
+    // recorded once the jump lands, so a throw here cannot mark a pose as applied.
+    const key = Number.isFinite(pose.lng) && Number.isFinite(pose.lat) && Number.isFinite(altM) ? `${at.lng.toFixed(6)}|${at.lat.toFixed(6)}|${altM.toFixed(1)}|${az.toFixed(3)}|${el.toFixed(3)}` : '';
+    if (key && key !== this.lastPose) {
+      this.map.jumpTo(this.map.calculateCameraOptionsFromCameraLngLatAltRotation(at, altM, az, 90 + el, 0));
       this.lastPose = key;
-      this.map.jumpTo(this.map.calculateCameraOptionsFromCameraLngLatAltRotation(at, altM, pose.azimuthDeg, 90 + pose.elevationDeg, 0));
     }
     this.atmosphere = atmosphere;
     if (this.styleReady) this.applyAtmosphere(atmosphere);

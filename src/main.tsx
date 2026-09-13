@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { alignStore, startAlignSync } from '@state/align';
 import { startClock } from '@state/clock';
 import { compositionStore } from '@state/composition';
+import { startCrossTabSync } from '@state/crossTab';
 import { dayDataStore, startDayDataSync } from '@state/dayData';
 import { finderStore } from '@state/finder';
 import { gearStore } from '@state/gear';
@@ -35,6 +36,7 @@ if (import.meta.env.DEV) {
 
 await startOffline();
 
+startCrossTabSync();
 startTerrainSync();
 startAlignSync();
 startDayDataSync();

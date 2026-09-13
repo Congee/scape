@@ -87,7 +87,8 @@ export const worldStore = create<WorldState>()(
       }),
       {
         name: 'scape.world',
-        partialize: (s) => ({ pin: s.pin, pinHeightM: s.pinHeightM, pin2: s.pin2, pin2HeightM: s.pin2HeightM, tz: s.tz, tzAuto: s.tzAuto, view: s.view })
+        // A live clock needs no stored instant; leaving it out also keeps the per-second tick from waking the other tabs.
+        partialize: (s) => ({ pin: s.pin, pinHeightM: s.pinHeightM, pin2: s.pin2, pin2HeightM: s.pin2HeightM, tz: s.tz, tzAuto: s.tzAuto, view: s.view, live: s.live, ...(s.live ? {} : { time: s.time }) })
       }
     )
   )

@@ -1,24 +1,65 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { compositionStore } from '@state/composition';
+import { orientationFor, parseInstant, parsePoint, validateScene, viewfinderSearchFor, type SceneSearch } from '@state/urlState';
 import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
 import { DateBar } from '@ui/DateBar';
-import { Panel } from '@ui/Panel';
+import { Panel, PanelExpand, usePanelClass } from '@ui/Panel';
 import { AltitudeChart } from '@ui/chart/AltitudeChart';
 import { BodyStrip } from '@ui/viewfinder/BodyStrip';
 import { Viewfinder } from '@ui/viewfinder/Viewfinder';
 import { ViewTools } from '@ui/viewfinder/ViewTools';
 
-export const Route = createFileRoute('/viewfinder')({ component: ViewfinderPage });
+export const Route = createFileRoute('/viewfinder')({
+  validateSearch: (raw: Record<string, unknown>): SceneSearch => validateScene(raw),
+  component: ViewfinderPage
+});
 
 function ViewfinderPage() {
   const navigate = useNavigate();
-  // Map or viewfinder drags release the aim lock; entering the viewfinder should face the target again.
+  const search = Route.useSearch();
+
+  // URL → stores, once on entry.
   useEffect(() => {
+    const w = worldStore.getState();
+    const camera = parsePoint(search.camera);
+    // No map here, so move the stored view instead of flying: the map opens on the camera location later.
+    if (camera) {
+      w.setPin(camera);
+      w.setView({ center: camera, zoom: w.view.zoom });
+    }
+    const target = parsePoint(search.target);
+    if (target) w.setPin2(target);
+    if (search.tz) w.setTz(search.tz);
+    const ms = parseInstant(search.t);
+    if (ms != null) w.setTime(ms);
+    // An in-app visit carries no framing, so it must not reset the orientation.
+    if (search.f != null || search.camera) compositionStore.getState().update({ ...(search.f != null && { focalMm: search.f }), orientation: orientationFor(search.o) });
+    // Map or viewfinder drags release the aim lock; entering the viewfinder should face the target again.
     if (worldStore.getState().pin2) compositionStore.setState({ aimAtTarget: true });
     // oxlint-disable-next-line react/exhaustive-deps -- entry-time only
   }, []);
+
+  // stores → URL, debounced; replaces history so scrubbing does not spam it.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const push = () => {
+      void navigate({ to: '/viewfinder', replace: true, search: viewfinderSearchFor(worldStore.getState(), compositionStore.getState()) });
+    };
+    const bump = () => {
+      clearTimeout(timer);
+      timer = setTimeout(push, 500);
+    };
+    const unsubs = [worldStore.subscribe(bump), compositionStore.subscribe(bump)];
+    // An in-app visit arrives without params; write them so the address bar is always shareable.
+    bump();
+    return () => {
+      for (const u of unsubs) u();
+      clearTimeout(timer);
+    };
+  }, [navigate]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) void navigate({ to: '/' });
@@ -27,7 +68,7 @@ function ViewfinderPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [navigate]);
   return (
-    <div className="vf-page">
+    <div className={usePanelClass('vf-page')}>
       <header className="topbar">
         <DateBar />
         <Badges />
@@ -35,6 +76,7 @@ function ViewfinderPage() {
       <BodyStrip />
       <div className="vf-area">
         <Viewfinder />
+        <PanelExpand />
       </div>
       <div className="chart-wrap">
         <AltitudeChart />

@@ -92,10 +92,11 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 ### Extras (Phase 7)
 - Exposure: EV100 calculator, scene mode from world state, ND calculator (P)
 - Time-lapse / sequence calculator and simulation in the viewfinder (P)
-- Light & shadow: object shadow length, light-reach on terrain, auto light-source switch (P)
+- Light & shadow: object shadow length (✔ 2026-09-12), light-reach on terrain, auto light-source switch (P)
 - Rainbow geometry (42° antisolar), cloud-distance calculator (P)
 - Tides: NOAA harmonic constituents + offline prediction for US stations (P)
-- Eclipses (astronomy-engine), 3D terrain orbit view (MapLibre terrain), Moon simulator (T)
+- Eclipses (✔ calendar marks 2026-09-12; local circumstances later), 3D terrain orbit view (MapLibre
+  terrain), Moon simulator (T)
 
 Explicitly out of scope: accounts/sync server, AR camera overlay (no reliable web compass),
 Google Street View / photorealistic tiles (paid, non-relightable).
@@ -259,6 +260,20 @@ variable, now works and also keeps the Protomaps sprites and glyphs. Acceptance 
 2026-09-12 against the production build served on localhost:3000 with the browser offline and its
 HTTP cache cleared: the shell, an offline basemap with labels, elevation, terrain events, the
 viewfinder inside the region, and place search all worked; update, export/import and delete too.
+UI iteration on 2026-09-12 from the user's review after the PlanIt cross-check: the map and the
+viewfinder stay in step across browser tabs (`state/crossTab.ts` — persisted stores announce their
+writes on a BroadcastChannel and the other tabs rehydrate; the "viewfinder shows Zermatt" report was
+a second tab keeping its own in-memory stores); compact share URLs on both routes
+(`state/urlState.ts`); the viewfinder HUD names the camera location and the target's distance and
+bearing; the bottom chart scrubs with a horizontal trackpad swipe; the side panel collapses; the
+basemap list is a tree, collapsed; the Timeline shows TPE's rows with a Details toggle; the Night
+tab is grouped by topic with `core/astro/night.ts` giving the night and moon-free windows; the Frame
+tab lists camera bodies apart from sensor formats, hides the controls a body or a prime fixes, and
+saves kits; gear search splits letters from digits ("z8" finds the Nikon Z 8); the date bar's
+calendar marks principal moon phases and eclipses visible from the camera location
+(`core/astro/calendar.ts`); the sun shadow has its true length at the camera and target locations.
+Found in passing: offline terrain tiles at low zoom were skipped because only the tile centre was
+tested against the region; the footprint is tested now.
 
 ## 8. Risks and decisions taken
 
@@ -315,8 +330,45 @@ viewfinder inside the region, and place search all worked; update, export/import
   and EU-DEM and is fetched per tile. Its ~30 m ground resolution bounds alignment precision, which is
   why the Align mode has a tolerance and the panel says to confirm the framing in the viewfinder.
 - **Landmark solids before 3D models.** Box, cylinder and spire markers give exact angular geometry
-  from height, width, depth and rotation on the existing canvas. glTF/OBJ model import and OSM
-  building extrusion are possible follow-ups; both are stack decisions left to the user.
+  from height, width, depth and rotation on the existing canvas. What comes next is the open
+  decision below.
+- **3D building models — open decision** (user, 2026-09-12: "I absolutely need the precise 3D
+  model"; it is why they left TPE for PlanIt). Facts: SRTM `.hgt` and Terrarium are both
+  terrain-only height grids (Terrarium merges SRTM with 3DEP and EU-DEM); neither contains a
+  building. PlanIt's models are meshes made by users, uploaded to PlanIt's server and downloaded
+  on demand under a separate subscription (the shared "30 Hudson Yards" landmark: 327 vertices,
+  13 KB, submitted by a user); no export function was found in the app or its documentation.
+  Options: (A) footprints and heights from the OpenStreetMap `building` layer already in our
+  vector tiles, extruded as prisms — automatic, worldwide, offline-capable, flat-roof accuracy;
+  (B) user models imported from glTF/OBJ, anchored at latitude, longitude, ground altitude and
+  heading, drawn on the existing viewfinder canvas by a small software rasteriser (exact
+  projection and per-column terrain occlusion, no new dependency; deck.gl's ScenegraphLayer is
+  the alternative already allowed as a lazy load); (C) in-app modelling — footprint polygon plus
+  height and roof, extending the solids, exportable as GeoJSON or glTF for sharing.
+  Recommendation: A, then B on the canvas, then C.
+- **Accuracy over agreement with the reference apps** (user, 2026-09-12: "there's no reason to
+  copy PlanIt's number… what we want is accuracy"). Where Scape and TPE or PlanIt differ, Scape
+  keeps the physically defined convention and records the difference; no "match PlanIt"
+  switches. Moon rise and set stay on the upper limb (USNO); PlanIt's centre rule sits 2–3 min
+  away. A blue-hour band is not adopted from PlanIt's −4…−8°, which has no physical definition;
+  the chart's twilight shading already shows that range.
+- **Share URLs are compact**: `?camera=lat,lng&target=lat,lng&z=13.34&t=2026-10-26T23:01Z&tz=…`;
+  the viewfinder route carries `f=` (focal mm) and `o=p` (portrait) instead of `z`. Never
+  `lat=/lng=/lat2=/lng2=`.
+- **Cameras are bodies, not sensors.** The Frame tab lists the user's camera bodies (catalogue or
+  custom) and, separately, generic sensor formats; a body fixes the sensor, a prime lens fixes
+  the focal length and a zoom bounds it, so those controls disappear once a kit (body + lens
+  preset in the gear store) is chosen — TPE's model.
+- **Concise by default, depth one click away** (user: TPE's UI is concise, PlanIt's is out of
+  control). The side panel collapses; the basemap list is a tree, collapsed; the Timeline shows
+  TPE's rows (twilights, sunrise and sunset, moonrise and moonset) with a Details toggle for
+  transits, golden hour, terrain and Galactic Centre rows; the Night tab is grouped by topic
+  (Sun, Moon, Milky Way, Stars, Meteor showers), each a one-line summary until opened.
+- **The calendar marks only what matters**: principal moon phases and eclipses visible from the
+  camera location (`core/astro/calendar.ts`), not every day's phase.
+- **The sun shadow has a length**: `h / tan(altitude)` for an object of settable height at the
+  camera location and for the target's own height at the target location, capped at 50 km; the
+  readout gives the ratio (TPE's feature).
 - **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
   string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
   objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.

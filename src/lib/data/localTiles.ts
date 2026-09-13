@@ -1,7 +1,7 @@
 /** Terrain tiles served from downloaded OPFS archives, before any network. Worker-safe. */
 
 import { PMTiles } from 'pmtiles';
-import { bboxContains } from '@core/geo/bbox';
+import { bboxFromCorners, bboxIntersects } from '@core/geo/bbox';
 import { tilePixelToLngLat, TILE_SIZE } from '@core/terrain/tiles';
 import { ArchiveKind, type ArchiveMeta } from '@workers/region.protocol';
 import { ARCHIVES_CHANNEL, listArchives, opfsSupported, OpfsSource } from './opfs';
@@ -36,9 +36,10 @@ export class LocalTerrain {
     if (!opfsSupported()) return null;
     const archives = await this.list();
     if (!archives.length) return null;
-    const centre = tilePixelToLngLat(z, x, y, TILE_SIZE / 2, TILE_SIZE / 2);
+    // The tile's own footprint, not just its centre: a low-zoom tile covering the region is still the region's.
+    const footprint = bboxFromCorners(tilePixelToLngLat(z, x, y, 0, 0), tilePixelToLngLat(z, x, y, TILE_SIZE, TILE_SIZE));
     for (const a of archives) {
-      if (z < a.meta.minZoom || z > a.meta.maxZoom || !bboxContains(a.meta.bbox, centre)) continue;
+      if (z < a.meta.minZoom || z > a.meta.maxZoom || !bboxIntersects(a.meta.bbox, footprint)) continue;
       // oxlint-disable-next-line no-await-in-loop -- first archive that has the tile wins
       const res = await a.pm.getZxy(z, x, y).catch(() => undefined);
       if (res) return res.data;

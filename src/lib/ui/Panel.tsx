@@ -11,6 +11,22 @@ import { PanelTab, uiStore, useUi } from '@state/ui';
 
 const TABS: PanelTab[] = [PanelTab.Timeline, PanelTab.Geodetics, PanelTab.Frame, PanelTab.Night, PanelTab.Find, PanelTab.Markers, PanelTab.Layers, PanelTab.Offline];
 
+/** Page roots take this class so the grid drops the panel column. */
+export function usePanelClass(base: string): string {
+  return useUi((s) => (s.panelCollapsed ? `${base} panel-collapsed` : base));
+}
+
+/** Floating handle that brings the collapsed panel back; lives in the map/viewfinder area. */
+export function PanelExpand() {
+  const collapsed = useUi((s) => s.panelCollapsed);
+  if (!collapsed) return null;
+  return (
+    <button className="panel-expand" title="Show panel" aria-label="Show panel" onClick={() => uiStore.getState().setPanelCollapsed(false)}>
+      «
+    </button>
+  );
+}
+
 export function Panel() {
   const tab = useUi((s) => s.panelTab);
   return (
@@ -21,6 +37,9 @@ export function Panel() {
             {t}
           </button>
         ))}
+        <button className="tabs-collapse" title="Hide panel" aria-label="Hide panel" onClick={() => uiStore.getState().setPanelCollapsed(true)}>
+          »
+        </button>
       </div>
       <div className="tab-body">
         {tab === PanelTab.Timeline && (

@@ -63,6 +63,7 @@ export class ChartController {
     canvas.addEventListener('pointerup', this.onUp);
     canvas.addEventListener('pointercancel', this.onUp);
     canvas.addEventListener('keydown', this.onKey);
+    canvas.addEventListener('wheel', this.onWheel, { passive: false });
   }
 
   private schedule() {
@@ -111,6 +112,19 @@ export class ChartController {
 
   private onUp = () => {
     this.dragging = false;
+  };
+
+  /** Trackpad swipe scrubs time; a plain vertical wheel still scrolls the page. */
+  private onWheel = (e: WheelEvent) => {
+    const px = e.shiftKey ? e.deltaY : e.deltaX;
+    if (!px) return;
+    const { dayStart, dayEnd } = dayDataStore.getState();
+    const span = this.w - PAD.l - PAD.r;
+    if (dayEnd <= dayStart || span < 1) return;
+    // deltaMode 1 counts lines, not pixels.
+    const lines = e.deltaMode === 1 ? 16 : 1;
+    worldStore.getState().nudgeTime((px * lines * (dayEnd - dayStart)) / span);
+    e.preventDefault();
   };
 
   private onKey = (e: KeyboardEvent) => {
@@ -320,5 +334,6 @@ export class ChartController {
     this.canvas.removeEventListener('pointerup', this.onUp);
     this.canvas.removeEventListener('pointercancel', this.onUp);
     this.canvas.removeEventListener('keydown', this.onKey);
+    this.canvas.removeEventListener('wheel', this.onWheel);
   }
 }

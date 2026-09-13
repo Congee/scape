@@ -7,6 +7,7 @@ import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@co
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
 import { compass, degrees, distance, height, Units } from '@core/format';
+import { formatDecimal, formatLngLat } from '@core/geo/coords';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
 import { frameFov, frameMm } from '@core/optics/fov';
@@ -32,6 +33,8 @@ const D2R = Math.PI / 180;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
 const MARGIN = 26;
+// Room under the frame for the readouts, which stack into three lines on a narrow frame.
+const MARGIN_BOTTOM = 56;
 // Wide enough for the side rulers' labels ("-1410 ft").
 const MARGIN_X = 46;
 const MAX_COLUMNS = 2400;
@@ -201,14 +204,14 @@ export class ViewfinderController {
     this.schedule();
   }
 
-  /** Frame with the sensor's aspect ratio, centred with room for the tick rulers. */
+  /** Frame with the sensor's aspect ratio, centred with room for the tick rulers and the readouts below. */
   private frameRect(frameWmm: number, frameHmm: number): Frame {
     const availW = Math.max(40, this.w - 2 * MARGIN_X);
-    const availH = Math.max(40, this.h - 2 * MARGIN);
+    const availH = Math.max(40, this.h - MARGIN - MARGIN_BOTTOM);
     const scale = Math.min(availW / frameWmm, availH / frameHmm);
     const w = frameWmm * scale;
     const h = frameHmm * scale;
-    return { x: (this.w - w) / 2, y: (this.h - h) / 2, w, h, pxPerMm: scale };
+    return { x: (this.w - w) / 2, y: MARGIN + (availH - h) / 2, w, h, pxPerMm: scale };
   }
 
   private scene(): Scene {
@@ -1028,6 +1031,12 @@ export class ViewfinderController {
     ctx.textAlign = narrow ? 'left' : 'right';
     ctx.fillText(aimText, narrow ? sc.frame.x : sc.frame.x + sc.frame.w, narrow ? y + 15 : y);
     ctx.textAlign = 'left';
+    // The scene actually being drawn, so a camera or target from somewhere else is obvious at a glance.
+    const camText = `Camera ${formatLngLat(w.pin, s.coordFormat)}`;
+    const sceneText = w.pin2 ? `${camText} · Target ${distance(distanceM(w.pin, w.pin2), s.units)} at ${degrees(bearingDeg(w.pin, w.pin2), 1)}` : camText;
+    // Narrow frames drop the target, then the labels, rather than spilling past the frame.
+    const fits = (text: string) => ctx.measureText(text).width <= sc.frame.w;
+    ctx.fillText(fits(sceneText) ? sceneText : fits(camText) ? camText : formatDecimal(w.pin, 4), sc.frame.x, y + (narrow ? 30 : 15));
     ctx.textBaseline = 'bottom';
     ctx.fillText(formatTime(w.time, w.tz, s.hour12), sc.frame.x + 6, sc.frame.y - 14 > 12 ? sc.frame.y - 14 : 12);
     let status = '';
@@ -1130,14 +1139,11 @@ export class ViewfinderController {
       this.view3d = null;
       return false;
     }
-    this.view3d ??= new TerrainView(this.canvas.parentElement!, sc.frame, currentBasemap(), () => this.schedule());
     const w = worldStore.getState();
+    const pose = { lng: w.pin.lng, lat: w.pin.lat, altM: sc.eyeM, eyeAboveGroundM: sc.eyeAboveGroundM, azimuthDeg: sc.aim.azimuthDeg, elevationDeg: sc.aim.elevationDeg, vfovDeg: sc.vfov };
+    this.view3d ??= new TerrainView(this.canvas.parentElement!, sc.frame, currentBasemap(), pose, () => this.schedule());
     const pal = palette(sc.sunAlt);
-    this.view3d.update(
-      sc.frame,
-      { lng: w.pin.lng, lat: w.pin.lat, altM: sc.eyeM, eyeAboveGroundM: sc.eyeAboveGroundM, azimuthDeg: sc.aim.azimuthDeg, elevationDeg: sc.aim.elevationDeg, vfovDeg: sc.vfov },
-      { sky: css(pal.skyAt(35)), horizon: css(pal.skyAt(0)), fog: css(pal.groundFar), brightness: 1 - 0.7 * sc.night }
-    );
+    this.view3d.update(sc.frame, pose, { sky: css(pal.skyAt(35)), horizon: css(pal.skyAt(0)), fog: css(pal.groundFar), brightness: 1 - 0.7 * sc.night });
     return this.view3d.ready();
   }
 
