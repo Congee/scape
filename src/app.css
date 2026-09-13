@@ -174,6 +174,49 @@ select {
   display: flex;
 }
 
+.map-page.panel-collapsed,
+.vf-page.panel-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+
+.panel-collapsed > .panel {
+  display: none;
+}
+
+.panel-expand {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  padding: 10px 4px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+@media (max-width: 900px) {
+  /* The bottom sheet collapses away with its grid row. */
+  .map-page.panel-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) var(--chart) 0;
+  }
+  .vf-page.panel-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) var(--chart) 0;
+  }
+  .panel-expand {
+    top: auto;
+    /* clear of the map attribution bar in the same corner */
+    bottom: 34px;
+    right: 10px;
+    border-right: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+}
+
 @media (max-width: 900px) {
   :root {
     --panel: 0px;
@@ -261,6 +304,121 @@ button:focus-visible {
 
 .datebar .tz {
   max-width: min(260px, 40vw);
+}
+
+/* Calendar */
+.cal {
+  position: relative;
+}
+
+.cal-toggle {
+  display: grid;
+  place-items: center;
+  padding: 4px 6px;
+}
+
+/* Fixed, not absolute: the shell clips overflow, and top/left come from the button's rect. */
+.cal-pop {
+  position: fixed;
+  z-index: 30;
+  width: 268px;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.cal-head strong {
+  flex: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.cal-wd {
+  padding-bottom: 2px;
+  color: var(--fg-3);
+  text-align: center;
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 3px 0 2px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cal-day:hover {
+  background: var(--bg-3);
+}
+
+.cal-day.out {
+  color: var(--fg-3);
+}
+
+.cal-day.today {
+  border-color: var(--line);
+  color: var(--terrain);
+}
+
+.cal-day.sel {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b1620;
+}
+
+/* Reserve the glyph row so day numbers stay on one baseline. */
+.cal-day .marks {
+  display: flex;
+  gap: 1px;
+  height: 11px;
+}
+
+.cal-glyph .lit {
+  fill: var(--fg);
+}
+
+.cal-glyph .dark {
+  fill: var(--bg);
+  stroke: var(--fg-2);
+  stroke-width: 1;
+}
+
+.cal-glyph .ring {
+  fill: none;
+  stroke: var(--sun);
+  stroke-width: 2.2;
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
 }
 
 /* Badges */
@@ -363,6 +521,21 @@ button:focus-visible {
   border-bottom-color: var(--accent);
 }
 
+/* The collapse handle sits in a gutter the tab grid leaves free. */
+.tabs {
+  position: relative;
+  padding-right: 24px;
+}
+
+.tabs-collapse {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 24px;
+  padding: 9px 0;
+  color: var(--fg-3);
+}
+
 .tab-body {
   flex: 1;
   min-height: 0;
@@ -434,6 +607,28 @@ button:focus-visible {
 .timeline .az { grid-area: az; min-width: 56px; text-align: right; color: var(--fg-2); }
 .timeline .extra { grid-area: extra; color: var(--fg-3); font-size: 12px; }
 
+.timeline .head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 6px;
+}
+
+.timeline .head .toggle {
+  font-size: 12px;
+  color: var(--fg-3);
+  gap: 6px;
+}
+
+.timeline li.detail .label,
+.timeline li.detail .time,
+.timeline li.detail .az {
+  color: var(--fg-3);
+}
+
+.timeline li.detail .dot {
+  opacity: 0.55;
+}
+
 /* Layers */
 .layers h3,
 .page h2 {
@@ -442,6 +637,39 @@ button:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--fg-3);
+}
+
+.tree summary {
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--fg-2);
+}
+
+.tree summary:hover {
+  background: var(--bg-3);
+}
+
+.tree details > *:not(summary) {
+  margin-left: 10px;
+}
+
+.tree .dot.active {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.layers .field-row {
+  align-items: center;
+}
+
+.layers .field-row .num {
+  flex: 0 0 68px;
 }
 
 .radio-list,
@@ -919,6 +1147,38 @@ label.file input {
   margin-left: 4px;
 }
 
+/* Kits (Frame tab) */
+.chips.kits {
+  align-items: center;
+}
+
+.chips.kits .k {
+  color: var(--fg-2);
+  margin-right: 2px;
+}
+
+/* Kit names run long; the chip keeps one line and the title attribute holds the rest. */
+.chips.kits button {
+  max-width: 22ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kit-name {
+  padding: 0 6px;
+}
+
+.kv input.zoom {
+  width: 100%;
+  margin: 0;
+}
+
+/* Long catalogue names must not widen the panel's grid column. */
+.frame .kv select {
+  max-width: 100%;
+}
+
 /* Viewfinder page: layer chips above the shared panel */
 .vf-panel {
   flex-direction: column;
@@ -950,6 +1210,58 @@ label.file input {
 
 .night label.toggle input[type='number'] {
   margin: 0 4px;
+}
+
+.night details {
+  border-bottom: 1px solid var(--line);
+}
+
+/* A block, not a flex row, so an over-long summary can ellipsize. */
+.night details > summary {
+  display: block;
+  list-style: none;
+  padding: 7px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.night details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.night details > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 12px;
+  color: var(--fg-3);
+}
+
+.night details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.night details > summary:hover {
+  background: var(--bg-3);
+}
+
+/* The verdict colouring carries over to the Milky Way summary; its own margin would break the row. */
+.night details > summary.verdict {
+  margin: 0;
+  border-radius: 0;
+}
+
+.night details[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.night details h3 {
+  margin: 10px 6px 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
 }
 
 /* Find tab */

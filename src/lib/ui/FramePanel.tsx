@@ -5,9 +5,9 @@ import { position } from '@core/astro/positions';
 import { compass, degrees, distance } from '@core/format';
 import { distanceM } from '@core/geo/geodesy';
 import { depthOfField, panoramaShots } from '@core/optics/dof';
-import { aperturesFor, clampFocalMm, cocMm, CocRule, equivalentFocalMm, frameFov, lensFocals, Orientation, sensorPixels } from '@core/optics/fov';
+import { aperturesFor, clampFocalMm, cocMm, CocRule, equivalentFocalMm, fitToLens, frameFov, isCameraBody, lensFocals, Orientation, SENSORS, sensorPixels, type SensorFormat } from '@core/optics/fov';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
-import { allSensors, lensById, sensorById, useGear } from '@state/gear';
+import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, useGear } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
 import { settingsStore, useSettings } from '@state/settings';
 import { profileKeyFor, useTerrain } from '@state/terrain';
@@ -15,6 +15,10 @@ import { useWorld, worldStore } from '@state/world';
 import { GearSearch } from './GearSearch';
 
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg)}`;
+const megapixels = (s: SensorFormat) => {
+  const p = sensorPixels(s);
+  return p ? `${Math.round(p / 1e5) / 10} MP` : null;
+};
 const dist = (m: number, units: Parameters<typeof distance>[1]) => (Number.isFinite(m) ? distance(m, units) : '∞');
 
 export function FramePanel() {
@@ -22,6 +26,7 @@ export function FramePanel() {
   const cameras = useGear((s) => s.cameras);
   const focals = useGear((s) => s.focalPresets);
   const lenses = useGear((s) => s.lenses);
+  const kits = useGear((s) => s.kits);
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const pinHeightM = useWorld((s) => s.pinHeightM);
@@ -30,12 +35,15 @@ export function FramePanel() {
   const cocRule = useSettings((s) => s.cocRule);
   const profile = useTerrain((s) => s.profile);
   const profileKey = useTerrain((s) => s.profileKey);
+  const [kitName, setKitName] = useState<string | null>(null);
   const [planName, setPlanName] = useState('');
   const [saved, setSaved] = useState('');
 
   const fresh = profile && profileKey === profileKeyFor(worldStore.getState(), settingsStore.getState()) ? profile : null;
   const sensor = sensorById(c.sensorId, cameras);
   const lens = lensById(c.lensId, lenses);
+  const prime = lens !== null && lens.minMm === lens.maxMm;
+  const isBody = isCameraBody(sensor.id);
   const fov = frameFov(sensor, c.focalMm, c.orientation);
   const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
   const targetM = pin2 ? distanceM(pin, pin2) : null;
@@ -55,7 +63,11 @@ export function FramePanel() {
   const setFocal = (v: number) => update({ focalMm: Math.round(clampFocalMm(clampLens(v)) * 10) / 10 });
   const selectLens = (id: string) => {
     const l = lensById(id || null, lenses);
-    update(l ? { lensId: l.id, focalMm: Math.round(Math.min(l.maxMm, Math.max(l.minMm, c.focalMm)) * 10) / 10, fNumber: Math.max(c.fNumber, l.maxAperture) } : { lensId: null });
+    update(l ? { lensId: l.id, ...fitToLens(l, c.focalMm, c.fNumber) } : { lensId: null });
+  };
+  const saveKit = () => {
+    if (kitName?.trim()) gearStore.getState().saveKit(kitName.trim(), c.sensorId, c.lensId);
+    setKitName(null);
   };
   const savePlan = async () => {
     const plan = capturePlan(planName);
@@ -67,18 +79,63 @@ export function FramePanel() {
   return (
     <div className="frame">
       <h3>Camera</h3>
+      {(kits.length > 0 || isBody) && (
+        <div className="chips kits" aria-label="Kits">
+          <span className="k">Kits</span>
+          {kits.map((k) => (
+            <button key={k.id} className={kitMatches(k, c) ? 'on' : ''} title={k.name} onClick={() => applyKit(k)}>
+              {k.name}
+            </button>
+          ))}
+          {isBody && kitName === null && !kits.some((k) => kitMatches(k, c)) && (
+            <button onClick={() => setKitName(defaultKitName(sensor.name, lens?.name ?? null))}>+ Save kit</button>
+          )}
+        </div>
+      )}
+      {kitName !== null && (
+        <div className="field-row kit-name">
+          <input
+            autoFocus
+            value={kitName}
+            onChange={(e) => setKitName(e.target.value)}
+            onKeyDown={(e) => (e.key === 'Enter' ? saveKit() : e.key === 'Escape' ? setKitName(null) : undefined)}
+            aria-label="Kit name"
+          />
+          <button onClick={saveKit} disabled={!kitName.trim()}>
+            Save
+          </button>
+        </div>
+      )}
       <GearSearch />
       <div className="kv">
-        <span className="k">Sensor</span>
+        <span className="k">Camera</span>
         <b className="v">
-          <select value={c.sensorId} onChange={(e) => update({ sensorId: e.target.value })} aria-label="Sensor format">
-            {allSensors(cameras).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
+          <select value={sensor.id} onChange={(e) => update({ sensorId: e.target.value })} aria-label="Camera or sensor format">
+            {cameras.length > 0 && (
+              <optgroup label="My cameras">
+                {cameras.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {megapixels(s) ? ` · ${megapixels(s)}` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Sensor formats">
+              {SENSORS.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </b>
+        {isBody && (
+          <b className="v wide muted">
+            {sensor.widthMm} × {sensor.heightMm} mm{megapixels(sensor) ? ` · ${megapixels(sensor)}` : ''}
+            {sensor.mount ? ` · ${sensor.mount === 'fixed' ? 'fixed lens' : `${sensor.mount} mount`}` : ''}
+          </b>
+        )}
         <span className="k">Lens</span>
         <b className="v">
           <select value={lens?.id ?? ''} onChange={(e) => selectLens(e.target.value)} aria-label="Lens">
@@ -101,18 +158,40 @@ export function FramePanel() {
           </span>
         </b>
         <span className="k">Focal length</span>
-        <b className="v">
-          <input type="number" min={lens?.minMm ?? 4} max={lens?.maxMm ?? 2400} step={1} value={c.focalMm} onChange={(e) => setFocal(Number(e.target.value) || c.focalMm)} aria-label="Focal length, millimetres" />
-          <span className="muted">mm · {equivalentFocalMm(sensor, c.focalMm).toFixed(0)} mm equiv.</span>
-        </b>
+        {prime ? (
+          <b className="v">
+            {lens.minMm} mm <span className="muted">· {equivalentFocalMm(sensor, lens.minMm).toFixed(0)} mm equiv.</span>
+          </b>
+        ) : (
+          <b className="v">
+            <input type="number" min={lens?.minMm ?? 4} max={lens?.maxMm ?? 2400} step={1} value={c.focalMm} onChange={(e) => setFocal(Number(e.target.value) || c.focalMm)} aria-label="Focal length, millimetres" />
+            <span className="muted">mm · {equivalentFocalMm(sensor, c.focalMm).toFixed(0)} mm equiv.</span>
+          </b>
+        )}
+        {lens && !prime && (
+          <b className="v wide">
+            <input
+              type="range"
+              className="zoom"
+              min={lens.minMm}
+              max={lens.maxMm}
+              step={1}
+              value={c.focalMm}
+              onChange={(e) => setFocal(Number(e.target.value))}
+              aria-label="Zoom, millimetres"
+            />
+          </b>
+        )}
       </div>
-      <div className="chips" aria-label="Focal length presets">
-        {(lens ? lensFocals(lens, focals) : focals).map((f) => (
-          <button key={f} className={Math.abs(f - c.focalMm) < 0.05 ? 'on' : ''} onClick={() => setFocal(f)}>
-            {f}
-          </button>
-        ))}
-      </div>
+      {!prime && (
+        <div className="chips" aria-label="Focal length presets">
+          {(lens ? lensFocals(lens, focals) : focals).map((f) => (
+            <button key={f} className={Math.abs(f - c.focalMm) < 0.05 ? 'on' : ''} onClick={() => setFocal(f)}>
+              {f}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="kv">
         <span className="k">Aperture</span>
         <b className="v">

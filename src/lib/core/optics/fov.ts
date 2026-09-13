@@ -32,6 +32,17 @@ export function lensFocals(lens: LensSpec, presets: number[]): number[] {
   return [...new Set([lens.minMm, ...presets.filter((f) => f > lens.minMm && f < lens.maxMm), lens.maxMm])].toSorted((a, b) => a - b);
 }
 
+/** True for a specific camera body (a catalogue pick or a custom one), false for a generic sensor format. */
+export function isCameraBody(sensorId: string): boolean {
+  return sensorId.startsWith('cat:') || sensorId.startsWith('custom:');
+}
+
+/** Focal length and aperture pulled inside what the lens can do. */
+export function fitToLens(lens: LensSpec | null, focalMm: number, fNumber: number): { focalMm: number; fNumber: number } {
+  if (!lens) return { focalMm, fNumber };
+  return { focalMm: Math.round(Math.min(lens.maxMm, Math.max(lens.minMm, focalMm)) * 10) / 10, fNumber: Math.max(fNumber, lens.maxAperture) };
+}
+
 /** Standard stops the lens can reach, starting at its widest aperture. */
 export function aperturesFor(lens: LensSpec | null, stops: readonly number[] = F_STOPS): number[] {
   if (!lens) return [...stops];

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { SENSORS } from '@core/optics/fov';
-import { DEFAULT_FOCALS, gearStore, useGear } from '@state/gear';
+import { DEFAULT_FOCALS, gearStore, lensById, useGear } from '@state/gear';
 
 /** Custom sensor formats and the focal-length quick picks. */
 export function GearSettings() {
   const cameras = useGear((s) => s.cameras);
   const lenses = useGear((s) => s.lenses);
   const focals = useGear((s) => s.focalPresets);
+  const kits = useGear((s) => s.kits);
   const [name, setName] = useState('');
   const [w, setW] = useState('');
   const [h, setH] = useState('');
@@ -75,6 +76,28 @@ export function GearSettings() {
             </button>
           </li>
         ))}
+      </ul>
+      <h3>Kits</h3>
+      {kits.length === 0 && <p className="muted">No kits yet; save a camera and lens pairing from the Frame tab.</p>}
+      <ul className="list">
+        {kits.map((k) => {
+          const cam = cameras.find((x) => x.id === k.cameraId);
+          const lens = lensById(k.lensId, lenses);
+          return (
+            <li key={k.id}>
+              <span>
+                <input value={k.name} onChange={(e) => gearStore.getState().renameKit(k.id, e.target.value)} aria-label="Kit name" style={{ flex: 1 }} />{' '}
+                <span className="meta">
+                  {cam?.name ?? 'camera removed'}
+                  {lens ? ` · ${lens.name}` : ''}
+                </span>
+              </span>
+              <button className="link" onClick={() => gearStore.getState().removeKit(k.id)}>
+                remove
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <label className="field">
         <span>Focal length quick picks (mm)</span>
