@@ -21,7 +21,11 @@ export interface Settings {
   showEventLines: boolean;
   showLiveLines: boolean;
   showShadow: boolean;
+  /** Height of the object whose sun shadow is drawn, metres. */
+  shadowObjectHeightM: number;
   showGc: boolean;
+  /** Show transits, golden hour, terrain and Galactic Centre rows in the timeline. */
+  timelineDetail: boolean;
   clickMovesPin: boolean;
   /** Fetch elevation data at all (Terrain Tiles). */
   terrain: boolean;
@@ -57,7 +61,9 @@ export const DEFAULT_SETTINGS: Settings = {
   showEventLines: true,
   showLiveLines: true,
   showShadow: true,
+  shadowObjectHeightM: 1.8,
   showGc: true,
+  timelineDetail: false,
   clickMovesPin: true,
   terrain: true,
   terrainHorizon: true,

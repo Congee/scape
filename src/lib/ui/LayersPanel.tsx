@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { BasemapKind, BUILTIN_BASEMAPS, offlineBasemaps, PmFlavor } from '@data/basemaps';
+import { basemapGroup, BasemapGroup, BasemapKind, BUILTIN_BASEMAPS, offlineBasemaps, PmFlavor, type Basemap } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
 import { useMapStatus } from '@state/mapStatus';
 import { useOffline } from '@state/offline';
 import { settingsStore, useSettings, type Settings } from '@state/settings';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
+const GROUPS: BasemapGroup[] = [BasemapGroup.Vector, BasemapGroup.Raster, BasemapGroup.Downloaded, BasemapGroup.Custom];
 
 export function LayersPanel() {
   const basemapId = useSettings((s) => s.basemapId);
@@ -18,6 +19,8 @@ export function LayersPanel() {
   const mapError = useMapStatus((s) => s.error);
   const terrain = useSettings((s) => s.terrain);
   const rangeKm = useSettings((s) => s.horizonRangeKm);
+  const showShadow = useSettings((s) => s.showShadow);
+  const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
 
   const addUrl = () => {
     const u = url.trim();
@@ -34,48 +37,87 @@ export function LayersPanel() {
   };
 
   const offline = offlineBasemaps(archives, offlineFlavor);
+  const all = [...BUILTIN_BASEMAPS, ...offline, ...custom];
+  const current = all.find((b) => b.id === basemapId);
 
   return (
     <div className="layers">
-      <h3>Basemap</h3>
+      <h3>Basemap · {current?.name ?? 'none'}</h3>
       {mapError && <p className="error">Basemap problem: {mapError}</p>}
-      <ul className="radio-list">
-        {[...BUILTIN_BASEMAPS, ...offline, ...custom].map((b) => (
-          <li key={b.id}>
-            <label>
-              <input type="radio" name="basemap" checked={b.id === basemapId} onChange={() => update({ basemapId: b.id })} />
-              <span>{b.name}{offline.includes(b) ? ' · offline' : ''}</span>
-            </label>
-            {custom.some((c) => c.id === b.id) && (
-              <button className="link" onClick={() => removeBasemap(b.id)} title="Remove this basemap">
-                remove
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      <h3>Add PMTiles</h3>
-      <div className="field-row">
-        <input type="url" placeholder="https://…/region.pmtiles" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addUrl()} />
-        <select value={flavor} onChange={(e) => setFlavor(e.target.value as PmFlavor)} title="Protomaps style flavor">
-          {FLAVORS.map((f) => (
-            <option key={f}>{f}</option>
-          ))}
-        </select>
-        <button onClick={addUrl}>Add</button>
+      <div className="tree">
+        {GROUPS.map((g) => {
+          const items = all.filter((b) => basemapGroup(b) === g);
+          if (!items.length) return null;
+          return (
+            <details key={g}>
+              <summary>
+                {g}
+                {items.some((b) => b.id === basemapId) && <span className="dot active" aria-hidden="true" />}
+              </summary>
+              {g === BasemapGroup.Downloaded && (
+                <label className="toggle">
+                  <span>Style</span>
+                  <select value={offlineFlavor} onChange={(e) => update({ offlineFlavor: e.target.value as PmFlavor })} title="Protomaps style flavor for downloaded archives">
+                    {FLAVORS.map((f) => (
+                      <option key={f}>{f}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <ul className="radio-list">
+                {items.map((b) => (
+                  <li key={b.id}>
+                    <label>
+                      <input type="radio" name="basemap" checked={b.id === basemapId} onChange={() => update({ basemapId: b.id })} />
+                      <span>{shortName(b, g)}</span>
+                    </label>
+                    {g === BasemapGroup.Custom && (
+                      <button className="link" onClick={() => removeBasemap(b.id)} title="Remove this basemap">
+                        remove
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          );
+        })}
+        <details>
+          <summary>Add a basemap…</summary>
+          <div className="field-row">
+            <input type="url" placeholder="https://…/region.pmtiles" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addUrl()} />
+            <select value={flavor} onChange={(e) => setFlavor(e.target.value as PmFlavor)} title="Protomaps style flavor">
+              {FLAVORS.map((f) => (
+                <option key={f}>{f}</option>
+              ))}
+            </select>
+            <button onClick={addUrl}>Add</button>
+          </div>
+          <p className="muted hint">Remote archives must allow cross-origin range requests; Protomaps' daily builds do only for local development origins.</p>
+          <label className="file">
+            <input type="file" accept=".pmtiles" onChange={(e) => addFile(e.target.files?.[0])} />
+            Open a local .pmtiles file (this session only)
+          </label>
+          <p className="muted hint">Regions for offline use are downloaded and imported in the Offline tab.</p>
+        </details>
       </div>
-      <p className="muted hint">Remote archives must allow cross-origin range requests; Protomaps' daily builds do only for local development origins.</p>
-      <label className="file">
-        <input type="file" accept=".pmtiles" onChange={(e) => addFile(e.target.files?.[0])} />
-        Open a local .pmtiles file (this session only)
-      </label>
-      <p className="muted hint">Regions for offline use are downloaded and imported in the Offline tab.</p>
 
       <h3>Overlays</h3>
       <Toggle k="showEventLines" label="Rise and set azimuth lines" />
       <Toggle k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
-      <Toggle k="showShadow" label="Sun shadow direction" />
+      <div className="field-row">
+        <Toggle k="showShadow" label="Sun shadow (direction and length)" />
+        <input
+          type="number"
+          className="num"
+          min={0.1}
+          step={0.1}
+          value={shadowHeight}
+          disabled={!showShadow}
+          onChange={(e) => Number(e.target.value) > 0 && update({ shadowObjectHeightM: Number(e.target.value) })}
+          title="Height of the object casting the shadow, metres"
+        />
+      </div>
       <Toggle k="showGc" label="Galactic Centre" />
       <Toggle k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
       <Toggle k="clickMovesPin" label="Clicking the map moves the camera" />
@@ -98,6 +140,13 @@ export function LayersPanel() {
       <p className="muted hint">Elevation from Terrain Tiles (Mapzen, AWS Open Data), fetched per tile as needed and cached by the browser.</p>
     </div>
   );
+}
+
+/** The group name already says the family, so the entries drop it. */
+function shortName(b: Basemap, g: BasemapGroup): string {
+  if (g === BasemapGroup.Vector) return b.name.replace(/^OpenFreeMap /, '');
+  if (g === BasemapGroup.Raster) return b.name.replace(/ \(raster\)$/, '');
+  return b.name;
 }
 
 type BoolKey = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];

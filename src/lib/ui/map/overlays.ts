@@ -2,6 +2,7 @@ import type { Feature, FeatureCollection, LineString, Point, Polygon } from 'geo
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
 import type { HorizontalPos } from '@core/astro/positions';
+import { shadowLengthM } from '@core/astro/shadow';
 import { destination, geodesicPath, geodesicRay, type LngLat } from '@core/geo/geodesy';
 import { MarkerCategory, type SavedMarker } from '@core/plan';
 import type { LosStatus } from '@core/terrain/los';
@@ -64,7 +65,15 @@ export function eventLines(pin: LngLat, events: DayEvent[], lengthM: number, o: 
 export interface LiveLineOptions {
   showShadow: boolean;
   showGc: boolean;
+  /** Height of the object casting the shadow at the camera, metres. */
+  shadowHeightM: number;
+  /** Target location and its height, for a second shadow cast there. */
+  pin2?: LngLat | null;
+  pin2HeightM?: number;
 }
+
+/** Near the horizon the true shadow runs off any useful map, so the drawn ray stops here. */
+const MAX_SHADOW_M = 50_000;
 
 export function liveLines(
   pin: LngLat,
@@ -77,8 +86,16 @@ export function liveLines(
   if (pos.Sun.altitude > -0.833) features.push(ray(pin, pos.Sun.azimuth, lengthM, { color: LIVE_COLORS.Sun, body: SkyBody.Sun, kind: LiveLineKind.Live }));
   if (pos.Moon.altitude > -0.833) features.push(ray(pin, pos.Moon.azimuth, lengthM, { color: LIVE_COLORS.Moon, body: SkyBody.Moon, kind: LiveLineKind.Live }));
   if (o.showGc && pos.Gc.altitude > 0) features.push(ray(pin, pos.Gc.azimuth, lengthM, { color: LIVE_COLORS.Gc, body: SkyBody.Gc, kind: LiveLineKind.Live }));
-  if (o.showShadow && pos.Sun.altitude > 0)
-    features.push(ray(pin, pos.Sun.azimuth + 180, lengthM, { color: LIVE_COLORS.Shadow, body: SkyBody.Sun, kind: LiveLineKind.Shadow }));
+  if (o.showShadow) {
+    const away = pos.Sun.azimuth + 180;
+    const shadow = (at: LngLat, heightM: number) => {
+      const len = shadowLengthM(heightM, pos.Sun.altitude);
+      if (len == null) return;
+      features.push(ray(at, away, Math.min(len, MAX_SHADOW_M), { color: LIVE_COLORS.Shadow, body: SkyBody.Sun, kind: LiveLineKind.Shadow }));
+    };
+    shadow(pin, o.shadowHeightM);
+    if (o.pin2 && (o.pin2HeightM ?? 0) > 0) shadow(o.pin2, o.pin2HeightM!);
+  }
   return { type: 'FeatureCollection', features };
 }
 

@@ -111,6 +111,16 @@ export function offlineBasemaps(archives: ArchiveMeta[], flavor: PmFlavor): Base
     }));
 }
 
+export const BasemapGroup = { Vector: 'OpenFreeMap', Raster: 'Raster', Downloaded: 'Downloaded', Custom: 'Custom' } as const;
+export type BasemapGroup = (typeof BasemapGroup)[keyof typeof BasemapGroup];
+
+/** Which section of the basemap tree a basemap belongs to. */
+export function basemapGroup(b: Basemap): BasemapGroup {
+  if (b.id.startsWith('opfs:')) return BasemapGroup.Downloaded;
+  if (!b.builtin) return BasemapGroup.Custom;
+  return b.kind === BasemapKind.Raster ? BasemapGroup.Raster : BasemapGroup.Vector;
+}
+
 /** True when the style paints a dark ground, so overlays can pick contrasting colours. */
 export function isDarkBasemap(b: Basemap): boolean {
   return b.id === 'ofm-dark' || b.id === 'ofm-fiord' || b.flavor === PmFlavor.Dark || b.flavor === PmFlavor.Black;

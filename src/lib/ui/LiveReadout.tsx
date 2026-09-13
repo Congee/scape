@@ -1,6 +1,7 @@
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { moonInfo, position, type HorizontalPos } from '@core/astro/positions';
-import { compass, degrees, percent } from '@core/format';
+import { shadowLengthM } from '@core/astro/shadow';
+import { compass, degrees, distance, percent, Units } from '@core/format';
 import { useSettings } from '@state/settings';
 import { useWorld } from '@state/world';
 
@@ -10,12 +11,18 @@ export function LiveReadout() {
   const pin = useWorld((s) => s.pin);
   const agl = useWorld((s) => s.pinHeightM);
   const showGc = useSettings((s) => s.showGc);
+  const units = useSettings((s) => s.units);
+  const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
   const obs = makeObserver(pin, agl);
   const date = new Date(time);
   const moon = moonInfo(date);
+  const sun = position(SkyBody.Sun, date, obs);
+  const shadow = shadowLengthM(shadowHeight, sun.altitude);
+  // The object height is set in metres, so metric echoes it rather than rounding it to whole metres.
+  const heightText = units === Units.Imperial ? distance(shadowHeight, units) : `${shadowHeight} m`;
   return (
     <div className="readout">
-      <Row cls="sun" label="Sun" pos={position(SkyBody.Sun, date, obs)} />
+      <Row cls="sun" label="Sun" pos={sun} extra={shadow == null ? undefined : `shadow ×${(shadow / shadowHeight).toFixed(1)} · ${heightText} → ${distance(shadow, units)}`} />
       <Row cls="moon" label="Moon" pos={position(SkyBody.Moon, date, obs)} extra={`${moon.name} · ${percent(moon.illumination, moon.illumination < 0.1 ? 2 : 1)}`} />
       {showGc && <Row cls="gc" label="Galactic Centre" pos={position(SkyBody.Gc, date, obs)} />}
     </div>

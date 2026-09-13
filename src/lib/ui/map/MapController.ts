@@ -202,6 +202,7 @@ export class MapController {
         (st) => st.pin2,
         (p) => {
           this.syncPin2(p);
+          this.renderLive();
           this.renderGeodetic();
           this.renderFov();
         },
@@ -209,6 +210,7 @@ export class MapController {
       ),
       worldStore.subscribe((st) => st.time, () => this.renderLive()),
       worldStore.subscribe((st) => st.pinHeightM, () => this.renderLive()),
+      worldStore.subscribe((st) => st.pin2HeightM, () => this.renderLive()),
       worldStore.subscribe(
         (st) => st.fly,
         (f) => {
@@ -234,7 +236,7 @@ export class MapController {
       offlineStore.subscribe((st) => st.drawing, (on) => this.setDrawingRegion(on)),
       offlineStore.subscribe((st) => st.viewSeq, () => this.draftFromView()),
       settingsStore.subscribe(
-        (st) => [st.showEventLines, st.showLiveLines, st.showShadow, st.showGc] as const,
+        (st) => [st.showEventLines, st.showLiveLines, st.showShadow, st.showGc, st.shadowObjectHeightM] as const,
         () => this.renderAll(),
         { equalityFn: shallow }
       ),
@@ -595,7 +597,7 @@ export class MapController {
     const obs = makeObserver(w.pin, w.pinHeightM);
     const date = new Date(w.time);
     const pos = { Sun: position(SkyBody.Sun, date, obs), Moon: position(SkyBody.Moon, date, obs), Gc: position(SkyBody.Gc, date, obs) };
-    src.setData(liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc }));
+    src.setData(liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc, shadowHeightM: s.shadowObjectHeightM, pin2: w.pin2, pin2HeightM: w.pin2HeightM }));
   }
 
   private renderGeodetic() {
