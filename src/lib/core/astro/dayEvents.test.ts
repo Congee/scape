@@ -56,8 +56,8 @@ describe('dayCurve', () => {
     const c = dayCurve(obs, day.start.getTime(), day.end.getTime(), 60_000);
     expect(c.n).toBe(1441);
     const i = Math.round((edt(6, 33) - c.startMs) / c.stepMs);
-    // Apparent (refracted) centre altitude at upper-limb rise is about -0.27 degrees.
-    expect(c.altitude.Sun[i]).toBeGreaterThan(-0.6);
+    // Below the horizon the centre altitude is geometric: about -0.92 degrees a minute before upper-limb rise.
+    expect(c.altitude.Sun[i]).toBeGreaterThan(-1);
     expect(c.altitude.Sun[i]).toBeLessThan(0);
     expect(c.altitude.Sun[i + 60]).toBeGreaterThan(c.altitude.Sun[i]);
   });

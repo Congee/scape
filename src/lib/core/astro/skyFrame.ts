@@ -1,4 +1,5 @@
-import { Refraction, Rotation_EQD_HOR, Rotation_EQJ_HOR, Rotation_HOR_EQJ, type Observer, type RotationMatrix } from 'astronomy-engine';
+import { Rotation_EQD_HOR, Rotation_EQJ_HOR, Rotation_HOR_EQJ, type Observer, type RotationMatrix } from 'astronomy-engine';
+import { apparentAltitude } from './refraction';
 
 const R2D = 180 / Math.PI;
 
@@ -45,5 +46,5 @@ export interface AzAlt {
 export function horizontalOf(e: number, n: number, u: number, refract = true): AzAlt {
   const az = Math.atan2(e, n) * R2D;
   const alt = Math.asin(Math.max(-1, Math.min(1, u))) * R2D;
-  return { azimuthDeg: ((az % 360) + 360) % 360, altitudeDeg: refract ? alt + Refraction('normal', alt) : alt };
+  return { azimuthDeg: ((az % 360) + 360) % 360, altitudeDeg: refract ? apparentAltitude(alt) : alt };
 }

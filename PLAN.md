@@ -295,6 +295,13 @@ viewfinder inside the region, and place search all worked; update, export/import
   search (refined by bisection, because that search ignores refraction while positions include it),
   azimuth is stepped no further than the sidereal rate allows at that altitude, and edges are bisected
   to the second. A brute-force 30 s scan is the unit-test oracle.
+- **Altitudes are apparent while a body is up and geometric below the horizon**
+  (`core/astro/refraction.ts`), PlanIt's convention: twilight thresholds are defined on geometric
+  altitude, and astronomy-engine's tapered refraction below the horizon showed the sun at −11.7° a
+  minute after nautical dusk. Cross-checked on 2026-09-12 against PlanIt Pro 10.7.29 (camera at Castle
+  Point, Hoboken, 2026-10-26 evening): azimuths and the moon's altitude agree within 0.1°; PlanIt's
+  Galactic Centre azimuth sits 0.35° east of Scape's and matches J2000 coordinates used without
+  precession, so that one is PlanIt's error; its moon illumination reads 0.2 % high.
 - **Heat grids live in normalised Mercator.** Cells are square on the ground, the image source maps
   onto the map without resampling, and one topocentric RA/Dec per time sample plus per-cell trig
   (`core/astro/fastHorizon.ts`) keeps a 64 × 64 × 240 grid under a second; the error stays below 0.02°
@@ -316,7 +323,7 @@ viewfinder inside the region, and place search all worked; update, export/import
   (localhost:5173, localhost:3000), so it serves dogfooding but not a deployed origin; the source URL
   is editable. For deployment the candidate is packing OpenFreeMap's per-tile PBFs (CORS `*`) the way
   terrain is packed, with the Liberty style, sprites and glyphs cached alongside; that is an open
-  decision.
+  decision, deferred by the user on 2026-09-12.
 - **OPFS is the source of truth for archives** (each `<id>.pmtiles` with an `<id>.json` sidecar);
   IndexedDB stays for the library.
 - **Name**: "scape" is a placeholder.

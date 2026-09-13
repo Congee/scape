@@ -1,5 +1,6 @@
 import { Body, Equator, Horizon, Illumination, MoonPhase, type Observer } from 'astronomy-engine';
 import { BODY, type SkyBody } from './bodies';
+import { apparentAltitude } from './refraction';
 
 export interface HorizontalPos {
   /** Degrees clockwise from true north. */
@@ -10,8 +11,8 @@ export interface HorizontalPos {
 
 export function position(body: SkyBody, date: Date, obs: Observer): HorizontalPos {
   const eq = Equator(BODY[body], date, obs, true, true);
-  const hor = Horizon(date, obs, eq.ra, eq.dec, 'normal');
-  return { azimuth: hor.azimuth, altitude: hor.altitude };
+  const hor = Horizon(date, obs, eq.ra, eq.dec, '');
+  return { azimuth: hor.azimuth, altitude: apparentAltitude(hor.altitude) };
 }
 
 export interface MoonInfo {

@@ -1,6 +1,7 @@
-import { Equator, Refraction, SiderealTime, type Observer } from 'astronomy-engine';
+import { Equator, SiderealTime, type Observer } from 'astronomy-engine';
 import { normalizeBearing } from '@core/geo/geodesy';
 import { BODY, type SkyBody } from './bodies';
+import { apparentAltitude } from './refraction';
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
@@ -38,7 +39,7 @@ export function horizontalFast(s: SkySample, latDeg: number, lngDeg: number, ref
   const cosH = Math.cos(H);
   let altitude = Math.asin(Math.max(-1, Math.min(1, sinφ * sinδ + cosφ * cosδ * cosH))) * R2D;
   const azimuth = normalizeBearing(Math.atan2(-Math.sin(H) * cosδ, sinδ * cosφ - cosδ * sinφ * cosH) * R2D);
-  if (refract) altitude += Refraction('normal', altitude);
+  if (refract) altitude = apparentAltitude(altitude);
   return { azimuth, altitude };
 }
 

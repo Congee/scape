@@ -1,5 +1,6 @@
 import { Equator, Horizon, HourAngle, type Observer } from 'astronomy-engine';
 import { POLARIS_BODY } from './bodies';
+import { apparentAltitude } from './refraction';
 
 export interface PolarisAid {
   /** Observer in the northern hemisphere, where Polaris serves. */
@@ -27,7 +28,7 @@ const toClock = (h: number) => {
 /** Where Polaris sits relative to the pole, for polar alignment; hour angle grows westward, so the sky clock runs backwards. */
 export function polarisAid(time: Date, obs: Observer): PolarisAid {
   const eq = Equator(POLARIS_BODY, time, obs, true, true);
-  const hor = Horizon(time, obs, eq.ra, eq.dec, 'normal');
+  const hor = Horizon(time, obs, eq.ra, eq.dec, '');
   const ha = HourAngle(POLARIS_BODY, time, obs);
   const clockSky = toClock(12 - ha / 2);
   return {
@@ -35,7 +36,7 @@ export function polarisAid(time: Date, obs: Observer): PolarisAid {
     poleAltDeg: Math.abs(obs.latitude),
     poleAzDeg: obs.latitude >= 0 ? 0 : 180,
     polarisAzDeg: hor.azimuth,
-    polarisAltDeg: hor.altitude,
+    polarisAltDeg: apparentAltitude(hor.altitude),
     separationDeg: 90 - eq.dec,
     hourAngleH: ha,
     clockSky,
