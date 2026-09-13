@@ -33,8 +33,8 @@ export interface Composition {
   showTrails: boolean;
   trailMinutes: number;
   showRadiants: boolean;
-  /** The map's 3D terrain, textured with the basemap, under the frame. */
-  show3d: boolean;
+  /** OpenStreetMap building volumes rasterised into the frame. */
+  showBuildings: boolean;
   /** Lens from the gear list constraining focal length and aperture; null for free values. */
   lensId: string | null;
 }
@@ -68,7 +68,7 @@ export const DEFAULT_COMPOSITION: Composition = {
   showTrails: false,
   trailMinutes: 30,
   showRadiants: true,
-  show3d: true,
+  showBuildings: true,
   lensId: null
 };
 

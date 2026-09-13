@@ -282,13 +282,13 @@ from Hoboken at 400 mm, the user said ours "looks like nothing". The causes were
 models: the viewfinder's raster pass painted the sky opaque over the MapLibre canvas, hiding the
 building extrusions that were already there; the night dim on that canvas turned what did show
 near-black; the target had no height, so the aim framed the shoreline; and the Milky Way texture,
-sampled nearest-neighbour, showed as a diamond hatch across a 5° field. Now the sky is transparent
-in 3D mode, extrusions are painted light and opaque (over raster basemaps too), the night dim has a
-floor, placing the target on the map takes the building's height for the aim and the target label,
-the texture is sampled bilinearly, and the terrain mesh is dropped while the frame is entirely
-above the horizon because MapLibre renders nothing once the mesh leaves the frustum. Still open:
-no buildings at wide focal lengths (z14-only heights, see §8), and the phone layout still gives
-the viewfinder canvas about a quarter of the viewport.
+sampled nearest-neighbour, showed as a diamond hatch across a 5° field. A first fix patched the
+MapLibre view (transparent sky, light extrusions, a floor on the night dim), and the user's next
+zoom to 300 mm showed floating overzoomed slabs: MapLibre's camera model fails at pitch ≥ 90° (§8).
+The MapLibre view was removed the same day and replaced by Scape's own building rasteriser fed by
+z14 OpenStreetMap tiles (§8), the target takes the building's height for the aim and its label, and
+the texture is sampled bilinearly. Still open: the phone layout gives the viewfinder canvas about a
+quarter of the viewport.
 
 ## 8. Risks and decisions taken
 
@@ -361,16 +361,26 @@ the viewfinder canvas about a quarter of the viewport.
   the alternative already allowed as a lazy load); (C) in-app modelling — footprint polygon plus
   height and roof, extending the solids, exportable as GeoJSON or glTF for sharing.
   Recommendation: A, then B on the canvas, then C. Taken 2026-09-13 (user: the viewfinder "shall
-  be able to replicate PlanIt viewfinder, though without precise 3D building models"): A is the
-  baseline — the 3D view repaints the style's OpenStreetMap `building` extrusions light and opaque,
-  adds them over raster basemaps from the OpenFreeMap vector source when online, and placing the
-  target on the map fills its height from the building underneath (`core/geo/buildingHeight.ts`,
-  `render_height`; 395 m for 30 Hudson Yards against the 387 m architectural height, kept as the
-  data says). B and C remain the user's decision. Limit of A: OpenFreeMap carries building heights
-  only in z14 tiles (z13 holds one untagged merged footprint per tile), and MapLibre picks the tile
-  zoom from the camera, so wide lenses (about 125 mm full-frame and wider at street level) draw no
-  buildings. Fixing that means fetching the z14 tiles ourselves into a GeoJSON source, which needs
-  a PBF decoder (a small dependency or hand-rolled) — a stack decision for the user.
+  be able to replicate PlanIt viewfinder, though without precise 3D building models"; later "glTF
+  or in-app modelling, I don't care. I only care about usability and precision"): A is the
+  baseline, rendered by Scape itself. A worker fetches the z14 OpenFreeMap tiles for the wedge the
+  frame looks into (`@mapbox/vector-tile` + `pbf`, approved by the user; heights exist only at z14,
+  z13 holds one untagged footprint per tile), decodes the `building` layer and reads the DEM under
+  each footprint; the viewfinder extrudes the footprints to prisms and rasterises them with the
+  frame's own pinhole projection, depth-tested per pixel against the terrain sweep, at every focal
+  length (`core/geo/prismRaster.ts`). Limits of A: footprints without a height tag draw at
+  OpenMapTiles' 5 m default; the ground under a footprint is the DEM at its centroid, so houses on
+  steep slopes sink partly into the terrain raster; building tiles are fetched live and are not yet
+  part of the offline regions. Placing the target on the map fills its height from the
+  building underneath (`core/geo/buildingHeight.ts`, `render_height`; 395 m for 30 Hudson Yards
+  against the 387 m architectural height, kept as the data says). The precise-model step is C, in-app
+  modelling on the same rasteriser, with B as an import path; the user has delegated that choice.
+- **MapLibre is not a first-person renderer.** The textured 3D terrain under the frame
+  (`TerrainView.ts`, Phase 6) was removed on 2026-09-13. At pitch ≥ 90° — the frame aimed at or
+  above the horizon, exactly the long-lens-at-a-tower case — MapLibre's camera model degenerates:
+  the zoom jumps to 21, only the tiles under the camera load (the user saw the buildings beside the
+  camera as floating slabs at 300 mm), terrain draws a garbage plane or nothing, and the building
+  layer exists only at map zoom ≥ 14. Everything in the frame is drawn by the canvas rasterisers.
 - **Accuracy over agreement with the reference apps** (user, 2026-09-12: "there's no reason to
   copy PlanIt's number… what we want is accuracy"). Where Scape and TPE or PlanIt differ, Scape
   keeps the physically defined convention and records the difference; no "match PlanIt"

@@ -8,6 +8,7 @@ import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
 import { distance, height } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
+import { buildPrisms, makePrismTarget, rasterisePrisms, type PrismTarget, type PrismTile } from '@core/geo/prismRaster';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
 import { frameFov, frameMm } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
@@ -15,41 +16,48 @@ import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
 import { columnAt, occluded, surfaceAt, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
+import { buildingsStore, requestBuildings } from '@state/buildings';
 import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById } from '@state/gear';
 import { markersStore } from '@state/markers';
-import { currentBasemap, offlineStore } from '@state/offline';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, profileKeyFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { CATEGORY_COLORS } from '../map/overlays';
-import { TerrainView } from './TerrainView';
 
 const D2R = Math.PI / 180;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
 const MAX_COLUMNS = 2400;
-// MapLibre's near plane cuts the 3D ground within a few metres of the eye; the canvas paints that band.
-const NEAR_M = 6;
-const NEAR_FADE_M = 30;
+/** Buildings are only worth fetching and drawing this far out. */
+const BUILDING_RANGE_M = 20_000;
 const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
+/** Text inside the picture: a dark outline keeps it readable over sun-lit white towers. */
+const haloText = (ctx: CanvasRenderingContext2D, text: string, x: number, y: number) => {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.strokeText(text, x, y);
+  ctx.restore();
+  ctx.fillText(text, x, y);
+};
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const smooth = (a: number, b: number, x: number) => {
   const t = clamp((x - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
 };
 const mix = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-const css = (c: number[]) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
 /** Hex colour multiplied by a flat shade factor. */
 const shaded = (hex: string, k: number) => {
   const n = Number.parseInt(hex.slice(1), 16);
   return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`;
 };
 
-/** Sky and ground colours for a sun altitude, shared by the raster and the 3D view's sky. */
+/** Sky and ground colours for a sun altitude, shared by the terrain raster and the building haze. */
 function palette(sunAlt: number) {
   const day = smooth(-12, 4, sunAlt);
   const dusk = smooth(-10, -3, sunAlt) * (1 - smooth(-1, 6, sunAlt));
@@ -113,6 +121,14 @@ interface Placed {
   hidden: boolean;
 }
 
+interface BodyLabel {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  alpha: number;
+}
+
 interface StarGroup {
   style: string;
   idx: number[];
@@ -133,9 +149,14 @@ export class ViewfinderController {
   private starGroups: { cat: StarCatalog; groups: StarGroup[]; polaris: number } | null = null;
   private showers: { day: number; list: ShowerStatus[] } | null = null;
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
-  private view3d: TerrainView | null = null;
-  /** True while the 3D terrain is drawing under the frame, so ground pixels stay transparent. */
-  private live3d = false;
+  /** Eye-relative prisms per tile, rebuilt when the camera location moves. */
+  private prisms = new Map<string, PrismTile>();
+  private prismKey = '';
+  private prismTarget: PrismTarget | null = null;
+  private prismMs = 0;
+  /** Building pixels alone, drawn back over the sun and moon so a tower can hide a disc. */
+  private mask = document.createElement('canvas');
+  private maskLive = false;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -155,12 +176,7 @@ export class ViewfinderController {
       dayDataStore.subscribe(() => this.schedule()),
       skyStore.subscribe(() => this.schedule()),
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
-      settingsStore.subscribe(
-        (s) => [s.basemapId, s.customBasemaps, s.offlineFlavor] as const,
-        () => this.view3d?.setBasemap(currentBasemap()),
-        { equalityFn: shallow }
-      ),
-      offlineStore.subscribe((s) => s.archives, () => this.view3d?.setBasemap(currentBasemap()), { equalityFn: shallow })
+      buildingsStore.subscribe((s) => s.version, () => this.schedule())
     );
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -250,7 +266,10 @@ export class ViewfinderController {
     if (cur && cur.rangeM === rangeM && cur.minStepDeg === minStepDeg && cur.azStepDeg <= stepForSpan * 1.3 && cur.azStepDeg >= stepForSpan / 3) {
       const rel = (a: number) => (((a - cur.azFromDeg) % 360) + 360) % 360;
       const covered = cur.azSpanDeg >= 360 || (rel(needFrom) <= cur.azSpanDeg && rel(needTo) <= cur.azSpanDeg && rel(needFrom) <= rel(needTo));
-      if (covered) return;
+      if (covered) {
+        this.askBuildings(cur);
+        return;
+      }
     }
     const win: ViewWindow = {
       azFromDeg: (((sc.aim.azimuthDeg - wantSpan / 2) % 360) + 360) % 360,
@@ -260,9 +279,18 @@ export class ViewfinderController {
       minStepDeg
     };
     viewfinderStore.getState().setWindow(win);
+    this.askBuildings(win);
+  }
+
+  /** Building volumes for the same wedge the terrain sweep covers, so small pans need no new fetch. */
+  private askBuildings(win: ViewWindow) {
+    if (!compositionStore.getState().showBuildings) return;
+    requestBuildings(worldStore.getState().pin, win.azFromDeg, win.azSpanDeg, Math.min(win.rangeM, BUILDING_RANGE_M));
   }
 
   private onDown = (e: PointerEvent) => {
+    // Otherwise a drag from the canvas selects the toolbar text behind it.
+    e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
     this.canvas.focus();
     const sc = this.scene();
@@ -325,11 +353,45 @@ export class ViewfinderController {
     return !!p && p.x >= sc.frame.x - slack && p.x <= sc.frame.x + sc.frame.w + slack && p.y >= sc.frame.y - slack && p.y <= sc.frame.y + sc.frame.h + slack;
   }
 
+  /**
+   * Prisms for the tiles in the store, in eye-relative metres. The conversion only depends on the
+   * camera location, so it survives every pan and zoom until the pin or the eye height moves.
+   */
+  private prismTiles(sc: Scene): Map<string, PrismTile> {
+    const w = worldStore.getState();
+    const key = `${w.pin.lat.toFixed(6)},${w.pin.lng.toFixed(6)}|${sc.eyeM.toFixed(2)}`;
+    if (key !== this.prismKey) {
+      this.prismKey = key;
+      this.prisms.clear();
+    }
+    const { tiles } = buildingsStore.getState();
+    for (const k of this.prisms.keys()) if (!tiles.has(k)) this.prisms.delete(k);
+    for (const [k, batch] of tiles) if (!this.prisms.has(k)) this.prisms.set(k, buildPrisms(batch, w.pin, sc.eyeM));
+    return this.prisms;
+  }
+
+  /** Building volumes at the raster's resolution, or null when they are off or nothing has arrived. */
+  private rasterBuildings(sc: Scene, rw: number, rh: number, hazeRgb: number[]): PrismTarget | null {
+    if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
+    const tiles = this.prismTiles(sc);
+    if (tiles.size === 0) return null;
+    if (this.prismTarget?.rw !== rw || this.prismTarget.rh !== rh) this.prismTarget = makePrismTarget(rw, rh);
+    // Flat shading follows the sun by day and a fixed key light behind the camera's left at night.
+    const lightAzDeg = sc.sunAlt > 0 ? position(SkyBody.Sun, sc.time, sc.obs).azimuth : sc.aim.azimuthDeg + 135;
+    const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
+    const t0 = performance.now();
+    const drawn = rasterisePrisms(this.prismTarget, sc.cam, sc.basis, tiles.values(), { lightAzDeg, hazeRgb, night: sc.night, rangeM });
+    this.prismMs = performance.now() - t0;
+    if (import.meta.env.DEV) {
+      const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
+      if (dev) dev.prism = { ms: this.prismMs, buildings: drawn, tiles: tiles.size, rw, rh };
+    }
+    return this.prismTarget;
+  }
+
   /** Sky and layered terrain, one pixel at a time at reduced resolution, then scaled into the frame. */
   private drawRaster(sc: Scene) {
     const { frame, view } = sc;
-    // Until the sweep arrives the 3D terrain draws the whole frame, sky included.
-    if (this.live3d && !view) return;
     const rw = Math.max(2, Math.round(frame.w * this.quality * Math.min(this.dpr, 1.5) * 0.6));
     const rh = Math.max(2, Math.round((rw * frame.h) / frame.w));
     this.raster.width = rw;
@@ -338,7 +400,11 @@ export class ViewfinderController {
     const img = rctx.createImageData(rw, rh);
     const data = img.data;
 
-    const { skyAt, groundAt } = palette(sc.sunAlt);
+    const { skyAt, groundAt, groundFar } = palette(sc.sunAlt);
+    const bld = this.rasterBuildings(sc, rw, rh, groundFar);
+    const mctx = bld ? this.maskContext(rw, rh) : null;
+    const mask = mctx ? mctx.createImageData(rw, rh) : null;
+    this.maskLive = false;
 
     // Milky Way: sample the equirectangular J2000 texture along each sky pixel's direction.
     const comp = compositionStore.getState();
@@ -380,7 +446,6 @@ export class ViewfinderController {
     const { forward: F, right: R, up: U } = sc.basis;
     const f = sc.cam.focalMm;
     const fallback = flatHorizonDeg(sc.eyeAboveGroundM);
-    const through = this.live3d;
     let k = 0;
     for (let py = 0; py < rh; py++) {
       const yMm = ((0.5 - (py + 0.5) / rh) * frame.h) / frame.pxPerMm;
@@ -392,39 +457,64 @@ export class ViewfinderController {
         const len = Math.hypot(vx, vy, vz);
         const alt = Math.asin(vz / len) / D2R;
         let c: number[];
-        let a = 255;
+        // Distance of whatever the sweep puts here; a building nearer than it stands in front.
+        let surfaceM = Infinity;
         if (view) {
           const az = Math.atan2(vx, vy) / D2R;
           const col = columnAt(view, az);
-          if (col < 0 || alt > view.skylineDeg[col]) {
-            c = skyPixel(alt, vx, vy, vz, len);
-            // The 3D map paints the same sky and the buildings standing in it, so only the Milky Way glow stays on our canvas.
-            if (through) {
-              const base = skyAt(alt);
-              a = clamp(Math.round(4 * Math.max(c[0] - base[0], c[1] - base[1], c[2] - base[2])), 0, 255);
-            }
-          } else {
+          if (col < 0 || alt > view.skylineDeg[col]) c = skyPixel(alt, vx, vy, vz, len);
+          else {
             const m = surfaceAt(view, col, alt);
             if (m < 0) {
               c = groundAt(view.rangeM, 0);
-              if (through) a = 0;
+              surfaceM = view.rangeM;
             } else {
               const prev = m > view.start[col] ? m - 1 : -1;
               const slope = prev >= 0 ? (view.angleDeg[m] - view.angleDeg[prev]) / Math.max(0.02, Math.log(view.distM[m] / Math.max(1, view.distM[prev])) * 8) : 0.4;
               c = groundAt(view.distM[m], slope);
-              if (through) a = Math.round(255 * (1 - smooth(NEAR_M, NEAR_FADE_M, view.distM[m])));
+              surfaceM = view.distM[m];
             }
           }
-        } else c = alt > fallback ? skyPixel(alt, vx, vy, vz, len) : groundAt(clamp(-sc.eyeAboveGroundM / Math.tan(Math.min(-0.001, alt * D2R)), 20, 50_000), 0.3);
+        } else if (alt > fallback) c = skyPixel(alt, vx, vy, vz, len);
+        else {
+          surfaceM = clamp(-sc.eyeAboveGroundM / Math.tan(Math.min(-0.001, alt * D2R)), 20, 50_000);
+          c = groundAt(surfaceM, 0.3);
+        }
+        const i = py * rw + px;
+        if (bld && bld.depth[i] < surfaceM) {
+          const rgb = bld.color[i];
+          c = [(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255];
+          if (mask) {
+            mask.data[k] = c[0];
+            mask.data[k + 1] = c[1];
+            mask.data[k + 2] = c[2];
+            mask.data[k + 3] = 255;
+            this.maskLive = true;
+          }
+        }
         data[k++] = c[0];
         data[k++] = c[1];
         data[k++] = c[2];
-        data[k++] = a;
+        data[k++] = 255;
       }
     }
     rctx.putImageData(img, 0, 0);
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.drawImage(this.raster, frame.x, frame.y, frame.w, frame.h);
+    if (mctx && mask) mctx.putImageData(mask, 0, 0);
+  }
+
+  private maskContext(rw: number, rh: number): CanvasRenderingContext2D {
+    this.mask.width = rw;
+    this.mask.height = rh;
+    return this.mask.getContext('2d')!;
+  }
+
+  /** Buildings only, painted back over the sun and moon so a disc behind a tower shows its visible part. */
+  private drawBuildingMask(sc: Scene) {
+    if (!this.maskLive) return;
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.drawImage(this.mask, sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
   }
 
   private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {
@@ -524,7 +614,7 @@ export class ViewfinderController {
     ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
-    for (const l of labels) ctx.fillText(l.name, l.x + 5, l.y - 4);
+    for (const l of labels) haloText(ctx, l.name, l.x + 5, l.y - 4);
     ctx.globalAlpha = 1;
   }
 
@@ -555,7 +645,7 @@ export class ViewfinderController {
       for (let i = 0; i < pc.ids.length; i++) {
         apply(M, pc.centres[i * 3], pc.centres[i * 3 + 1], pc.centres[i * 3 + 2], a);
         const p = this.placeEnu(sc, a[0], a[1], a[2], 0);
-        if (p && !p.hidden) ctx.fillText(pc.names[i], p.x, p.y);
+        if (p && !p.hidden) haloText(ctx, pc.names[i], p.x, p.y);
       }
     }
     ctx.globalAlpha = 1;
@@ -581,7 +671,7 @@ export class ViewfinderController {
     ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText('Celestial pole', p.x, p.y + 11);
+    haloText(ctx, 'Celestial pole', p.x, p.y + 11);
     ctx.globalAlpha = 1;
   }
 
@@ -647,7 +737,7 @@ export class ViewfinderController {
         ctx.lineTo(p.x + 13 * Math.cos(a), p.y + 13 * Math.sin(a));
       }
       ctx.stroke();
-      ctx.fillText(`${st.shower.name} · ZHR ${st.shower.zhr ?? 'variable'}`, p.x + 16, p.y);
+      haloText(ctx, `${st.shower.name} · ZHR ${st.shower.zhr ?? 'variable'}`, p.x + 16, p.y);
     }
     ctx.globalAlpha = 1;
   }
@@ -656,8 +746,6 @@ export class ViewfinderController {
   private drawSky(sc: Scene) {
     const c = compositionStore.getState();
     if (sc.night <= 0 || !(c.showStars || c.showConstellations || c.showTrails || c.showRadiants)) return;
-    // Without the skyline, stars would land on 3D terrain.
-    if (this.live3d && !sc.view) return;
     const sky = skyStore.getState();
     sky.ensure();
     const { ctx } = this;
@@ -712,7 +800,7 @@ export class ViewfinderController {
         ctx.font = '10px system-ui, sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(label, p.x + 4, p.y - 3);
+        haloText(ctx, label, p.x + 4, p.y - 3);
       }
       prev = p;
       prevHidden = hidden;
@@ -721,11 +809,11 @@ export class ViewfinderController {
     ctx.setLineDash([]);
   }
 
-  private drawBody(sc: Scene, body: SkyBody, date: Date) {
+  private drawBody(sc: Scene, body: SkyBody, date: Date): BodyLabel | null {
     const w = worldStore.getState();
     const pos = position(body, date, makeObserver(w.pin, w.pinHeightM));
     const p = this.toPx(sc, pos.azimuth, pos.altitude);
-    if (!this.inFrame(sc, p, 60)) return;
+    if (!this.inFrame(sc, p, 60)) return null;
     const { ctx } = this;
     const col = sc.view ? columnAt(sc.view, pos.azimuth) : -1;
     const skyline = col >= 0 && sc.view ? sc.view.skylineDeg[col] : flatHorizonDeg(sc.eyeAboveGroundM);
@@ -775,11 +863,27 @@ export class ViewfinderController {
       ctx.ellipse(p.x, p.y, Math.max(0.01, term.rx * r), r, 0, Math.PI / 2, -Math.PI / 2, term.gibbous === (term.litSide < 0));
       ctx.fill();
     }
+    ctx.restore();
+    return { x: p.x, y: p.y + r + 4, text: body === SkyBody.Gc ? 'Galactic Centre' : body === SkyBody.Sun ? 'Sun' : 'Moon', color: BODY_COLOR[body], alpha: hidden ? 0.35 : 1 };
+  }
+
+  /** Body names, drawn after the building mask so a tower never swallows a label. */
+  private drawBodyLabels(sc: Scene, labels: BodyLabel[]) {
+    if (labels.length === 0) return;
+    const { ctx } = this;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.clip();
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = BODY_COLOR[body];
-    ctx.fillText(body === SkyBody.Gc ? 'Galactic Centre' : body === SkyBody.Sun ? 'Sun' : 'Moon', p.x, p.y + r + 4);
+    for (const l of labels) {
+      ctx.globalAlpha = l.alpha;
+      ctx.fillStyle = l.color;
+      haloText(ctx, l.text, l.x, l.y);
+    }
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 
@@ -816,7 +920,7 @@ export class ViewfinderController {
     const label = `Target · ${distance(d, s.units)}${w.pin2HeightM > 0 ? ` · ${height(w.pin2HeightM, s.units)}` : ''}${blocked ? ' · behind terrain' : ''}`;
     const spills = p.x + 13 + ctx.measureText(label).width > sc.frame.x + sc.frame.w;
     ctx.textAlign = spills ? 'right' : 'left';
-    ctx.fillText(label, spills ? p.x - 13 : p.x + 13, p.y);
+    haloText(ctx, label, spills ? p.x - 13 : p.x + 13, p.y);
     ctx.restore();
   }
 
@@ -874,7 +978,7 @@ export class ViewfinderController {
       ctx.beginPath();
       ctx.arc(top.x, top.y - 17, 3.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillText(`${m.name} · ${distance(d, s.units)}`, top.x, top.y - 22);
+      haloText(ctx, `${m.name} · ${distance(d, s.units)}`, top.x, top.y - 22);
     }
     ctx.restore();
   }
@@ -940,6 +1044,7 @@ export class ViewfinderController {
     if (!s.terrain) status = 'Elevation data is off (Settings): flat horizon';
     else if (t.busy.View) status = 'Sweeping terrain…';
     else if (!sc.view) status = 'Waiting for terrain…';
+    else if (c.showBuildings && buildingsStore.getState().busy) status = 'Loading buildings…';
     else if (skyStore.getState().loading) status = 'Loading sky data…';
     else if (skyStore.getState().error) status = `Sky data: ${skyStore.getState().error}`;
     else if (t.view?.missing) status = `${t.view.missing} terrain tiles missing`;
@@ -966,10 +1071,17 @@ export class ViewfinderController {
     const sc = this.scene();
     const s = settingsStore.getState();
     const c = compositionStore.getState();
-    this.live3d = this.syncView3d(sc);
-    if (this.live3d) ctx.clearRect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
     this.drawRaster(sc);
     this.drawSky(sc);
+
+    const date = new Date(worldStore.getState().time);
+    const labels: BodyLabel[] = [];
+    for (const b of BODIES) {
+      if (b === SkyBody.Gc && !s.showGc) continue;
+      const l = this.drawBody(sc, b, date);
+      if (l) labels.push(l);
+    }
+    this.drawBuildingMask(sc);
 
     // Horizon (0°) as a faint dashed line.
     ctx.save();
@@ -999,11 +1111,7 @@ export class ViewfinderController {
     }
     ctx.restore();
 
-    const date = new Date(worldStore.getState().time);
-    for (const b of BODIES) {
-      if (b === SkyBody.Gc && !s.showGc) continue;
-      this.drawBody(sc, b, date);
-    }
+    this.drawBodyLabels(sc, labels);
     this.drawMarkers(sc);
     this.drawTarget(sc);
 
@@ -1034,25 +1142,7 @@ export class ViewfinderController {
     this.drawHud(sc);
   }
 
-  /** Keeps the textured 3D terrain under the frame in step with the camera; false when off or not drawing yet. */
-  private syncView3d(sc: Scene): boolean {
-    const s = settingsStore.getState();
-    if (!compositionStore.getState().show3d || !s.terrain) {
-      this.view3d?.dispose();
-      this.view3d = null;
-      return false;
-    }
-    const w = worldStore.getState();
-    const pose = { lng: w.pin.lng, lat: w.pin.lat, altM: sc.eyeM, eyeAboveGroundM: sc.eyeAboveGroundM, azimuthDeg: sc.aim.azimuthDeg, elevationDeg: sc.aim.elevationDeg, vfovDeg: sc.vfov };
-    this.view3d ??= new TerrainView(this.canvas.parentElement!, sc.frame, currentBasemap(), pose, () => this.schedule());
-    const pal = palette(sc.sunAlt);
-    // The dim floors at 0.7: buildings have to stay readable against a night sky.
-    this.view3d.update(sc.frame, pose, { sky: css(pal.skyAt(35)), horizon: css(pal.skyAt(0)), fog: css(pal.groundFar), brightness: 1 - 0.3 * sc.night });
-    return this.view3d.ready();
-  }
-
   dispose() {
-    this.view3d?.dispose();
     for (const u of this.unsubs) u();
     this.ro.disconnect();
     cancelAnimationFrame(this.raf);
