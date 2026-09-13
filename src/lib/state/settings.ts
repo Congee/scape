@@ -3,6 +3,7 @@ import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { MoonRule } from '@core/astro/milkyWay';
 import { Units } from '@core/format';
 import { CoordFormat } from '@core/geo/coords';
+import { CocRule } from '@core/optics/fov';
 import { BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, PmFlavor, type Basemap } from '@data/basemaps';
 
 export interface Settings {
@@ -15,6 +16,8 @@ export interface Settings {
   offlineFlavor: PmFlavor;
   /** Sun altitude bounding the golden hour, degrees. */
   goldenAltitude: number;
+  /** Circle-of-confusion rule behind the depth-of-field numbers. */
+  cocRule: CocRule;
   showEventLines: boolean;
   showLiveLines: boolean;
   showShadow: boolean;
@@ -50,6 +53,7 @@ export const DEFAULT_SETTINGS: Settings = {
   customBasemaps: [],
   offlineFlavor: PmFlavor.Light,
   goldenAltitude: 6,
+  cocRule: CocRule.Standard,
   showEventLines: true,
   showLiveLines: true,
   showShadow: true,

@@ -70,6 +70,23 @@ export function circleOfConfusionMm(s: SensorFormat): number {
   return 0.03 / cropFactor(s);
 }
 
+export const CocRule = { Standard: 'standard', PixelPitch: 'pixel-pitch' } as const;
+export type CocRule = (typeof CocRule)[keyof typeof CocRule];
+
+/** Total pixels on a sensor, from the long-side count and square pixels. */
+export function sensorPixels(s: SensorFormat): number | null {
+  return s.pixelsWide ? (s.pixelsWide * s.pixelsWide * s.heightMm) / s.widthMm : null;
+}
+
+/**
+ * Circle of confusion, mm. The pixel-pitch rule (PlanIt's “Large prints”) is twice the pitch
+ * √(area / pixels); without a pixel count it falls back to the standard value.
+ */
+export function cocMm(s: SensorFormat, pixels: number | null | undefined, rule: CocRule): number {
+  if (rule === CocRule.PixelPitch && pixels && pixels > 0) return 2 * Math.sqrt((s.widthMm * s.heightMm) / pixels);
+  return circleOfConfusionMm(s);
+}
+
 export function equivalentFocalMm(s: SensorFormat, focalMm: number): number {
   return focalMm * cropFactor(s);
 }

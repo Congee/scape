@@ -5,7 +5,7 @@ import { position } from '@core/astro/positions';
 import { compass, degrees, distance } from '@core/format';
 import { distanceM } from '@core/geo/geodesy';
 import { depthOfField, panoramaShots } from '@core/optics/dof';
-import { aperturesFor, circleOfConfusionMm, clampFocalMm, equivalentFocalMm, frameFov, lensFocals, Orientation } from '@core/optics/fov';
+import { aperturesFor, clampFocalMm, cocMm, CocRule, equivalentFocalMm, frameFov, lensFocals, Orientation, sensorPixels } from '@core/optics/fov';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { allSensors, lensById, sensorById, useGear } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
@@ -27,6 +27,7 @@ export function FramePanel() {
   const pinHeightM = useWorld((s) => s.pinHeightM);
   const time = useWorld((s) => s.time);
   const units = useSettings((s) => s.units);
+  const cocRule = useSettings((s) => s.cocRule);
   const profile = useTerrain((s) => s.profile);
   const profileKey = useTerrain((s) => s.profileKey);
   const [planName, setPlanName] = useState('');
@@ -39,10 +40,12 @@ export function FramePanel() {
   const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
   const targetM = pin2 ? distanceM(pin, pin2) : null;
   const focusM = c.focusDistM ?? targetM;
-  const coc = circleOfConfusionMm(sensor);
+  const pixels = sensorPixels(sensor);
+  const coc = cocMm(sensor, pixels, cocRule);
   const dof = focusM ? depthOfField(c.focalMm, c.fNumber, coc, focusM) : null;
   const pano = c.panoTotalDeg ? panoramaShots(c.panoTotalDeg, fov.hDeg, c.panoOverlap) : null;
   const update = compositionStore.getState().update;
+  const setSetting = settingsStore.getState().update;
 
   const aimAt = (body: SkyBody) => {
     const p = position(body, new Date(time), makeObserver(pin, pinHeightM));
@@ -217,7 +220,21 @@ export function FramePanel() {
         <b className="v">{dof ? `${dist(dof.nearM, units)} to ${dist(dof.farM, units)}` : 'set a focus distance'}</b>
         <span className="k">Hyperfocal</span>
         <b className="v">
-          {dist(dof?.hyperfocalM ?? depthOfField(c.focalMm, c.fNumber, coc, 1).hyperfocalM, units)} <span className="muted">· CoC {coc.toFixed(3)} mm</span>
+          {dist(dof?.hyperfocalM ?? depthOfField(c.focalMm, c.fNumber, coc, 1).hyperfocalM, units)}{' '}
+          <span className="muted">
+            · CoC {coc.toFixed(3)} mm{cocRule === CocRule.PixelPitch && (pixels ? ' · pixel pitch' : ' · needs the pixel count')}
+          </span>
+        </b>
+        <span className="k">CoC rule</span>
+        <b className="v">
+          <span className="seg">
+            <button className={cocRule === CocRule.Standard ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.Standard })} title="Zeiss 0.03 mm scaled by the crop factor">
+              Standard
+            </button>
+            <button className={cocRule === CocRule.PixelPitch ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.PixelPitch })} title="Twice the pixel pitch, for large prints">
+              Pixel pitch
+            </button>
+          </span>
         </b>
       </div>
 

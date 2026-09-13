@@ -16,7 +16,7 @@ import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
 import { bearingDeg, destination, distanceM, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
 import { depthOfField } from '@core/optics/dof';
-import { circleOfConfusionMm, clampFocalMm, focalForFovMm, fovDeg, frameMm } from '@core/optics/fov';
+import { clampFocalMm, cocMm, focalForFovMm, fovDeg, frameMm, sensorPixels } from '@core/optics/fov';
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
 import { ensureDemProtocol } from '@data/demProtocol';
@@ -243,6 +243,7 @@ export class MapController {
         () => this.applyTerrain(),
         { equalityFn: shallow }
       ),
+      settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
       settingsStore.subscribe((st) => st.showLightPollution, () => this.applyNightLights()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
       alignStore.subscribe((st) => [st.result, st.opacity] as const, () => this.renderHeat(), { equalityFn: shallow }),
@@ -638,7 +639,7 @@ export class MapController {
     const targetM = w.pin2 ? distanceM(w.pin, w.pin2) : null;
     const rangeM = c.fovRangeM ?? targetM ?? DEFAULT_FOV_RANGE_M;
     const focusM = c.focusDistM ?? targetM;
-    const dof = focusM ? depthOfField(c.focalMm, c.fNumber, circleOfConfusionMm(sensor), focusM) : null;
+    const dof = focusM ? depthOfField(c.focalMm, c.fNumber, cocMm(sensor, sensorPixels(sensor), settingsStore.getState().cocRule), focusM) : null;
     src.setData(fovCone(w.pin, aim.azimuthDeg, hfov, { rangeM, dofNearM: dof?.nearM, dofFarM: dof?.farM, panoDeg: c.panoTotalDeg }));
 
     if (this.draggingFov) return;

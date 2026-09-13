@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { depthOfField, hyperfocalM, panoramaCoverageDeg, panoramaShots } from './dof';
-import { circleOfConfusionMm, cropFactor, focalForFovMm, fovDeg, frameFov, Orientation, SENSORS } from './fov';
+import { circleOfConfusionMm, CocRule, cocMm, cropFactor, focalForFovMm, fovDeg, frameFov, Orientation, SENSORS } from './fov';
 import { cameraBasis, discRadiusMm, inFrame, project, unproject, type Camera } from './projection';
 
 const ff = SENSORS[0];
@@ -31,6 +31,12 @@ describe('field of view', () => {
     expect(cropFactor(mft)).toBeCloseTo(2.0, 1);
     expect(circleOfConfusionMm(mft)).toBeCloseTo(0.015, 3);
   });
+
+  it('takes twice the pixel pitch under the pixel-pitch rule', () => {
+    expect(cocMm(ff, 45_000_000, CocRule.PixelPitch)).toBeCloseTo(0.0088, 4);
+    expect(cocMm(ff, null, CocRule.PixelPitch)).toBeCloseTo(0.03, 9);
+    expect(cocMm(ff, 45_000_000, CocRule.Standard)).toBeCloseTo(0.03, 9);
+  });
 });
 
 describe('depth of field', () => {
@@ -43,11 +49,11 @@ describe('depth of field', () => {
 
   it('matches the PlanIt 400 mm f/8 worked example', () => {
     const MI = 1609.344;
-    const d = depthOfField(400, 8, 0.0088, 1.31 * MI);
+    const d = depthOfField(400, 8, cocMm(ff, 45_000_000, CocRule.PixelPitch), 1.31 * MI);
     expect(d.nearM / MI).toBeCloseTo(0.68, 2);
     // PlanIt's far limit of 16.72 mi needs a CoC near 0.00875 mm; its displayed CoC and distance are rounded.
-    expect(d.farM / MI).toBeGreaterThan(15.5);
-    expect(d.farM / MI).toBeLessThan(18.5);
+    expect(d.farM / MI).toBeGreaterThan(16);
+    expect(d.farM / MI).toBeLessThan(17.5);
   });
 
   it('reaches infinity at and beyond the hyperfocal distance', () => {
