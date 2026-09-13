@@ -6,8 +6,7 @@ import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro
 import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
-import { compass, degrees, distance, height, Units } from '@core/format';
-import { formatDecimal, formatLngLat } from '@core/geo/coords';
+import { distance } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
 import { frameFov, frameMm } from '@core/optics/fov';
@@ -32,11 +31,6 @@ import { TerrainView } from './TerrainView';
 const D2R = Math.PI / 180;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
-const MARGIN = 26;
-// Room under the frame for the readouts, which stack into three lines on a narrow frame.
-const MARGIN_BOTTOM = 56;
-// Wide enough for the side rulers' labels ("-1410 ft").
-const MARGIN_X = 46;
 const MAX_COLUMNS = 2400;
 // MapLibre's near plane cuts the 3D ground within a few metres of the eye; the canvas paints that band.
 const NEAR_M = 6;
@@ -49,12 +43,6 @@ const smooth = (a: number, b: number, x: number) => {
 };
 const mix = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const css = (c: number[]) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
-/** Round 1/2/5 × 10ⁿ step at or above `raw`, for ruler ticks. */
-const niceStep = (raw: number) => {
-  const pow = 10 ** Math.floor(Math.log10(raw));
-  const f = raw / pow;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
-};
 /** Hex colour multiplied by a flat shade factor. */
 const shaded = (hex: string, k: number) => {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -204,14 +192,14 @@ export class ViewfinderController {
     this.schedule();
   }
 
-  /** Frame with the sensor's aspect ratio, centred with room for the tick rulers and the readouts below. */
+  /** Frame with the sensor's aspect ratio, centred, filling the canvas but for the readout line below. */
   private frameRect(frameWmm: number, frameHmm: number): Frame {
-    const availW = Math.max(40, this.w - 2 * MARGIN_X);
-    const availH = Math.max(40, this.h - MARGIN - MARGIN_BOTTOM);
+    const availW = Math.max(40, this.w - 16);
+    const availH = Math.max(40, this.h - 30);
     const scale = Math.min(availW / frameWmm, availH / frameHmm);
     const w = frameWmm * scale;
     const h = frameHmm * scale;
-    return { x: (this.w - w) / 2, y: MARGIN + (availH - h) / 2, w, h, pxPerMm: scale };
+    return { x: (this.w - w) / 2, y: 8 + (availH - h) / 2, w, h, pxPerMm: scale };
   }
 
   private scene(): Scene {
@@ -668,100 +656,6 @@ export class ViewfinderController {
     ctx.restore();
   }
 
-  private drawRulers(sc: Scene) {
-    const { ctx } = this;
-    const { frame } = sc;
-    ctx.font = '10px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.strokeStyle = 'rgba(230,237,243,0.7)';
-    ctx.fillStyle = 'rgba(230,237,243,0.85)';
-    ctx.lineWidth = 1;
-    const fine = sc.hfov < 12 ? 0.5 : sc.hfov < 40 ? 1 : 5;
-    const labelEvery = sc.hfov < 12 ? 2 : sc.hfov < 40 ? 5 : 15;
-    const from = Math.floor((sc.aim.azimuthDeg - sc.hfov) / fine) * fine;
-    for (let az = from; az <= sc.aim.azimuthDeg + sc.hfov; az += fine) {
-      const p = this.toPx(sc, az, sc.aim.elevationDeg);
-      if (!p || p.x < frame.x || p.x > frame.x + frame.w) continue;
-      const major = Math.abs(az / labelEvery - Math.round(az / labelEvery)) < 1e-6;
-      const x = Math.round(p.x) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x, frame.y);
-      ctx.lineTo(x, frame.y + (major ? 10 : 5));
-      ctx.stroke();
-      if (major) {
-        const norm = ((az % 360) + 360) % 360;
-        const cardinal = norm % 45 === 0 ? compass(norm) : '';
-        ctx.fillText(cardinal || `${Math.round(norm)}°`, x, frame.y - 3);
-      }
-    }
-    ctx.textBaseline = 'middle';
-    // PlanIt puts heights at the subject distance on the left and degrees on the right.
-    const refM = this.rulerDistanceM();
-    if (refM == null || !this.drawHeightRuler(sc, refM)) this.drawDegreeRuler(sc, true);
-    this.drawDegreeRuler(sc, false);
-  }
-
-  /** Distance the left ruler reads heights at: the target, else the composed aim distance. */
-  private rulerDistanceM(): number | null {
-    const w = worldStore.getState();
-    if (w.pin2) return distanceM(w.pin, w.pin2);
-    const c = compositionStore.getState();
-    const d = c.focusDistM ?? c.fovRangeM;
-    return d != null && d > 0 ? d : null;
-  }
-
-  private drawDegreeRuler(sc: Scene, left: boolean) {
-    const { ctx } = this;
-    const { frame } = sc;
-    const x0 = left ? frame.x : frame.x + frame.w;
-    const dir = left ? 1 : -1;
-    ctx.textAlign = left ? 'right' : 'left';
-    const altStep = sc.vfov < 10 ? 1 : sc.vfov < 30 ? 5 : 10;
-    for (let alt = -80; alt <= 80; alt += altStep) {
-      const p = this.toPx(sc, sc.aim.azimuthDeg, alt);
-      if (!p || p.y < frame.y || p.y > frame.y + frame.h) continue;
-      const y = Math.round(p.y) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x0, y);
-      ctx.lineTo(x0 + dir * (alt === 0 ? 12 : 6), y);
-      ctx.stroke();
-      ctx.fillText(`${alt > 0 ? '+' : ''}${alt}°`, x0 - dir * 3, y);
-    }
-  }
-
-  /** Heights above sea level read at `refM`; false when the span is unusable so degrees stay. */
-  private drawHeightRuler(sc: Scene, refM: number): boolean {
-    const { ctx } = this;
-    const { frame } = sc;
-    const units = settingsStore.getState().units;
-    const perM = units === Units.Imperial ? 3.28084 : 1;
-    const altAt = (yMm: number) => clamp(unproject(sc.cam, sc.basis, 0, yMm).altitudeDeg, -80, 80);
-    const lo = heightAtAngle(sc.eyeM, refM, altAt(-sc.cam.frameHmm / 2)) * perM;
-    const hi = heightAtAngle(sc.eyeM, refM, altAt(sc.cam.frameHmm / 2)) * perM;
-    const span = hi - lo;
-    if (!Number.isFinite(span) || span <= 0) return false;
-    const step = niceStep(span / 8);
-    if (!Number.isFinite(step) || step <= 0 || span / step > 200) return false;
-    ctx.textAlign = 'right';
-    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
-      const m = v / perM;
-      const p = this.toPx(sc, sc.aim.azimuthDeg, elevationAngleDeg(refM, m - sc.eyeM));
-      if (!p || p.y < frame.y || p.y > frame.y + frame.h) continue;
-      const y = Math.round(p.y) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(frame.x, y);
-      ctx.lineTo(frame.x + 6, y);
-      ctx.stroke();
-      ctx.fillText(height(m, units), frame.x - 3, y);
-    }
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(`at ${distance(refM, units)}`, 2, frame.y - 3);
-    ctx.textBaseline = 'middle';
-    return true;
-  }
-
   private drawPath(sc: Scene, body: SkyBody, color: string) {
     const { curve } = dayDataStore.getState();
     if (!curve) return;
@@ -1012,33 +906,16 @@ export class ViewfinderController {
     return sc.view.start[col] === sc.view.start[col + 1] ? null : sc.view.angleDeg[best];
   }
 
+  /** One line under the frame: the lens on the left, whatever the view is waiting on to the right. */
   private drawHud(sc: Scene) {
     const { ctx } = this;
-    const w = worldStore.getState();
     const c = compositionStore.getState();
     const s = settingsStore.getState();
     const t = terrainStore.getState();
-    const sensor = sensorById(c.sensorId, gearStore.getState().cameras);
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(230,237,243,0.9)';
+    ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'top';
-    ctx.textAlign = 'left';
     const y = sc.frame.y + sc.frame.h + 6;
-    const narrow = sc.frame.w < 620;
-    ctx.fillText(`${sensor.name} · ${c.focalMm} mm f/${c.fNumber} · ${sc.hfov.toFixed(1)}° × ${sc.vfov.toFixed(1)}°`, sc.frame.x, y);
-    const aimText = `${degrees(sc.aim.azimuthDeg, 1)} ${compass(sc.aim.azimuthDeg)} · ${sc.aim.elevationDeg >= 0 ? '+' : ''}${degrees(sc.aim.elevationDeg, 1)}${sc.aim.locked ? ' · aimed at target' : ''}`;
-    // Narrow frames stack the two readouts instead of letting them collide.
-    ctx.textAlign = narrow ? 'left' : 'right';
-    ctx.fillText(aimText, narrow ? sc.frame.x : sc.frame.x + sc.frame.w, narrow ? y + 15 : y);
-    ctx.textAlign = 'left';
-    // The scene actually being drawn, so a camera or target from somewhere else is obvious at a glance.
-    const camText = `Camera ${formatLngLat(w.pin, s.coordFormat)}`;
-    const sceneText = w.pin2 ? `${camText} · Target ${distance(distanceM(w.pin, w.pin2), s.units)} at ${degrees(bearingDeg(w.pin, w.pin2), 1)}` : camText;
-    // Narrow frames drop the target, then the labels, rather than spilling past the frame.
-    const fits = (text: string) => ctx.measureText(text).width <= sc.frame.w;
-    ctx.fillText(fits(sceneText) ? sceneText : fits(camText) ? camText : formatDecimal(w.pin, 4), sc.frame.x, y + (narrow ? 30 : 15));
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(formatTime(w.time, w.tz, s.hour12), sc.frame.x + 6, sc.frame.y - 14 > 12 ? sc.frame.y - 14 : 12);
+    const lens = `${c.focalMm} mm · ${sc.hfov.toFixed(1)}° × ${sc.vfov.toFixed(1)}°`;
     let status = '';
     if (!s.terrain) status = 'Elevation data is off (Settings): flat horizon';
     else if (t.busy.View) status = 'Sweeping terrain…';
@@ -1046,10 +923,17 @@ export class ViewfinderController {
     else if (skyStore.getState().loading) status = 'Loading sky data…';
     else if (skyStore.getState().error) status = `Sky data: ${skyStore.getState().error}`;
     else if (t.view?.missing) status = `${t.view.missing} terrain tiles missing`;
+    // Too narrow for both: the status is the one that changes, so it wins.
+    const both = !status || ctx.measureText(lens).width + ctx.measureText(status).width + 12 <= sc.frame.w;
+    if (both) {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(230,237,243,0.9)';
+      ctx.fillText(lens, sc.frame.x, y);
+    }
     if (status) {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(230,237,243,0.7)';
-      ctx.fillText(status, sc.frame.x + sc.frame.w - 6, sc.frame.y - 14 > 12 ? sc.frame.y - 14 : 12);
+      ctx.fillText(status, sc.frame.x + sc.frame.w, y);
     }
   }
 
@@ -1127,7 +1011,6 @@ export class ViewfinderController {
     ctx.moveTo(cx, cy - 8);
     ctx.lineTo(cx, cy + 8);
     ctx.stroke();
-    this.drawRulers(sc);
     this.drawHud(sc);
   }
 

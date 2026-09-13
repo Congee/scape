@@ -1084,11 +1084,6 @@ label.file input {
   }
 }
 
-.button-link {
-  text-decoration: none;
-  color: inherit;
-}
-
 /* Gear search (Frame tab) */
 .gear-search {
   position: relative;

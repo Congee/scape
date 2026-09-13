@@ -1,4 +1,3 @@
-import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
@@ -342,11 +341,6 @@ export function FramePanel() {
       )}
 
       <h3>Plan</h3>
-      <div className="actions">
-        <Link to="/viewfinder" className="button-link">
-          <button>Open viewfinder</button>
-        </Link>
-      </div>
       <div className="field-row" style={{ padding: '0 6px' }}>
         <input placeholder="Plan name" value={planName} onChange={(e) => setPlanName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && planName.trim() && savePlan()} aria-label="Plan name" />
         <button onClick={savePlan} disabled={!planName.trim()}>
