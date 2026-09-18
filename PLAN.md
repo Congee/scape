@@ -466,9 +466,10 @@ quarter of the viewport.
 ## 9. Open work (2026-09-18)
 
 Numbered items below are a register, not a queue; most are landed and kept for the measurements in
-them. **Nothing is left that does not need the user**: **14** was measured and closed unfixed, **15**
-is landed, **8** is a watch rather than a task, and **2**'s last step turned out to be a picture
-decision rather than a constant, so it joins **18–20** as blocked on the user.
+them. **14** was measured and closed unfixed, **15** is landed, **8** is a watch rather than a task,
+and **2**'s last step is a picture decision, so it joins **18–20** as blocked on the user. What is
+actually left is **21**, which came out of 2's reference render: most of the mesh serves nothing, on
+shipped master, and two of its three reductions need no decision from anyone.
 
 **Precision**
 
@@ -777,8 +778,9 @@ decision rather than a constant, so it joins **18–20** as blocked on the user.
     was 78–85% of it, and the cost was building the leaf-map keys, not the fixpoint.
 
     Two changes, both inside the leaf map. `blockKey` packs `(level, ix, iy)` into one small integer
-    instead of a template string — the widest root square is 1024 blocks across at level 0 under a
-    level-8 root, so the ±1024 field is injective. And `balance()` skips the upward scan when a
+    instead of a template string; the field width is derived from `MAX_LEVELS` by shift, so a deeper
+    tree cannot fold keys onto their neighbours and the constant stays a smi — computing it with `**`
+    boxes it as a double and costs 2× on the whole selection. And `balance()` skips the upward scan when a
     same-level neighbour is already in the map: the leaves tile the root square, so that neighbour
     *is* the covering leaf and the old scan to the root could only come back empty.
 
@@ -819,6 +821,59 @@ decision rather than a constant, so it joins **18–20** as blocked on the user.
     `profile`, `horizon`, `view` and the mesh's two — now wraps its await in `retain`/`release`, not
     just the mesh.
 18. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
+21. **Most of the mesh serves nothing, and that is true on shipped master** (2026-09-18). Every
+    selected block was classified against the renderer's own `sphereVisible` and `boxCastsInto`
+    calls — not a reimplementation — and cross-checked: the audit's drawn totals match
+    `__scape.prism.terrain.blocks` exactly. Zermatt village to the Matterhorn, warm:
+
+    | master, 3 M cap | blocks | drawn | drawn or casting | neither | warm build |
+    |---|---|---|---|---|---|
+    | 600 mm | 394 | 21 | 113 | **71%** | 1.04 s |
+    | 1200 mm | 475 | 24 | 116 | **76%** | 1.28 s |
+    | 2400 mm | 436 | 19 | 74 | **83%** | 1.19 s |
+    | 24 mm portrait | 499 | 217 | 475 | 5% | 1.34 s |
+
+    The fine config of 2 (0.5 m, 12 M) has the same shape at three times the size — 1 189 blocks and
+    82% waste at 2400 mm — so the reference render does not create this, it makes an existing problem
+    expensive enough to feel. `selMs` is 3–125 ms after 15, so selection is not the cost; `buildMs` is
+    the warm cost and `fetchMs` is the whole cold-to-warm variance, swinging 10×.
+
+    **The cause is `balance`'s gradation, not `COARSE_TARGET_RAD`.** Classifying each unserved coarse
+    block by how many rungs coarser the pure coarse rule would have allowed: only 13% sit at the rung
+    the coarse target asks for. The other 87% are finer than needed by up to 8 levels — 256× — and
+    exist only because `balance` walks the ten-level step from the fine wedge out to the 512 m coarse
+    field one rung at a time, nesting a ring per level around the wedge. At 24 mm, where the wedge
+    covers the frame and there is no step, the over-refined population is 3 blocks. It is concentrated
+    near the camera because the rings nest around the wedge and the wedge crosses the near field on
+    its way to the subject: at 2400 mm, 364 of 700 unserved coarse blocks sit within 2 km.
+
+    Also established: `reachM` does not bound the mesh's extent at all. `descend` walks every root
+    block and each one becomes a leaf or splits, so the mesh always covers the full ±49 152 m root
+    square in every direction; `reachM` only gates whether a block may use `fineRad`. The outer field
+    is cheap in blocks (levels 8–10: 51 blocks at 2400 mm) but not in cold latency — z7–z9 cost
+    ~800 ms of fetch at 600 mm for blocks that are neither drawn nor casting.
+
+    Caster reach is set exactly by the last shadow cascade's far plane: ~10 km at long focal, where it
+    is `lensFar`, and the whole mesh at 24 mm, where it clamps to `scene.halfM`.
+
+    Three reductions, in the order they are worth doing:
+
+    - **Cap the mesh's extent** where nothing can be served. Must be the union of what the frustum can
+      reach and the last cascade's far plane, fed back from `fitCascades` — *not* a distance constant
+      and *not* the cascade plane alone: at this site the furthest drawn block is 9.2 km only because
+      the subject is, and a frame containing a 40 km peak must still build it. Worth ~50 blocks and
+      the z7–z9 cold fetch. The only one that is visually free by construction.
+    - **Let `balance` take a two-level step**, with the skirt deepened to cover a 4-cell crack.
+      Attacks the 87% directly — an estimated ~300 blocks and ~820 ms at 2400 mm in the fine config.
+      Needs a picture check, not a number: the failure modes are sky through a seam and a skirt flange
+      hanging below a convex rim. **Being measured now.**
+    - **Bounding the fine region to the subject** — 2's parked decision — is worth more than either,
+      and now has a second reason: shrinking the wedge-to-coarse level gap collapses the gradation
+      ring that the two-level step attacks from the other side. A wedge bottoming out at level 4
+      outside the subject's range cuts the step from ten rungs to six.
+
+    Raising the triangle cap is not on this list: at long focal it is already slack (2.18 M of 3 M at
+    2400 mm), and where it binds, these reductions are the cheaper answer.
 
 **Awaiting the user**
 
