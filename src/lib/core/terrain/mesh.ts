@@ -127,7 +127,11 @@ export interface Selection {
 }
 
 const wrapPi = (a: number): number => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
-const blockKey = (level: number, ix: number, iy: number): string => `${level}/${ix}/${iy}`;
+/** Half the widest root square, in blocks: level 0 under a level-8 root is 1024 across. */
+const KEY_HALF = 1024;
+const KEY_SIDE = 2 * KEY_HALF;
+/** Packs a block into one small integer; building string keys cost more than the balance fixpoint. */
+const blockKey = (level: number, ix: number, iy: number): number => (level * KEY_SIDE + iy + KEY_HALF) * KEY_SIDE + ix + KEY_HALF;
 
 /** Distance from the eye to the nearest point of a block, metres; 0 when the eye is inside it. */
 function nearestDistM(e0: number, n0: number, e1: number, n1: number): number {
@@ -187,7 +191,7 @@ const inRoot = (rootLevel: number, level: number, ix: number, iy: number): boole
 };
 
 /** One descent, with no budget check; exported for tests that want a fixed target. */
-function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineRad: number, reachM: number): Map<string, BlockId> {
+function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineRad: number, reachM: number): Map<number, BlockId> {
   const view = opts.view;
   const viewMid = view ? view.azimuthDeg * D2R : 0;
   const azPad = view ? meshAzPadDeg(view.hfovDeg) : 0;
@@ -198,7 +202,7 @@ function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineR
   const elPad = view ? meshElPadDeg(2 * view.elHalfDeg) : 0;
   const elLo = view ? (view.pitchDeg - view.elHalfDeg - MESH_EL_DOWN_PAD * elPad) * D2R : 0;
   const elHi = view ? (view.pitchDeg + view.elHalfDeg + elPad) * D2R : 0;
-  const leaves = new Map<string, BlockId>();
+  const leaves = new Map<number, BlockId>();
   const stack = rootBlocks(rootLevel);
   while (stack.length) {
     const b = stack.pop()!;
@@ -235,7 +239,7 @@ function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineR
  * `6 * cellM`, which only covers the step to a neighbour of the next level up; a raw selection can
  * put a 4 m leaf beside a 512 m one where the frame's wedge ends.
  */
-function balance(leaves: Map<string, BlockId>, rootLevel: number): void {
+function balance(leaves: Map<number, BlockId>, rootLevel: number): void {
   const queue = [...leaves.values()];
   const dirs = [
     [1, 0],
@@ -250,6 +254,8 @@ function balance(leaves: Map<string, BlockId>, rootLevel: number): void {
       const nx = n.ix + dx;
       const ny = n.iy + dy;
       if (!inRoot(rootLevel, n.level, nx, ny)) continue;
+      // The leaves tile the root square, so a same-level neighbour is the covering leaf: none is coarser.
+      if (leaves.has(blockKey(n.level, nx, ny))) continue;
       // Walk up until the leaf covering the neighbour cell turns up, splitting it while it is too coarse.
       for (;;) {
         let hit: BlockId | undefined;
@@ -295,7 +301,7 @@ export function selectBlocks(opts: SelectOptions): Selection {
     balance(l, rootLevel);
     return l;
   };
-  const fits = (l: Map<string, BlockId>) => l.size * TRIANGLES_PER_BLOCK <= budget;
+  const fits = (l: Map<number, BlockId>) => l.size * TRIANGLES_PER_BLOCK <= budget;
   let targetRad = opts.view ? Math.min(opts.view.targetRad, COARSE_TARGET_RAD) : COARSE_TARGET_RAD;
   let reachM = opts.rangeM;
   let leaves = walk(reachM, targetRad, minLevel);

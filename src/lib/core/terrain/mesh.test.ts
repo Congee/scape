@@ -168,6 +168,49 @@ describe('selectBlocks', () => {
       }
   });
 
+  it('the leaves stay one partition of the root square, over a sweep of options', () => {
+    // What the packed block key and the balance shortcut both lean on: one leaf covers each point,
+    // so a same-level neighbour in the map rules out a coarser one, and no two blocks share a key.
+    let seed = 12345;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let i = 0; i < 60; i++) {
+      const focalMm = [0, 14, 24, 50, 135, 400, 1200, 2400][Math.floor(rnd() * 8)];
+      const rangeM = 500 + rnd() * 120_000;
+      const sel = selectBlocks({
+        rangeM,
+        demCellM: [0, 0.4148, 3.3, 12, 30][Math.floor(rnd() * 5)],
+        view: focalMm ? view(focalMm, 36, 24, (rnd() - 0.5) * 90) : null,
+        maxTriangles: rnd() < 0.3 ? 100_000 + rnd() * 4_000_000 : undefined
+      });
+      const root = levelsForRange(rangeM) - 1;
+      const at = new Map(allBlocks(sel).map((b) => [`${b.level}/${b.ix}/${b.iy}`, b.level]));
+      const where = `${Math.round(rangeM)} m, ${focalMm} mm`;
+      expect(at.size, where).toBe(sel.blocks);
+      const area = allBlocks(sel).reduce((a, b) => a + blockSideM(b.level) ** 2, 0);
+      expect(area / (BLOCKS_PER_SIDE * blockSideM(root)) ** 2, where).toBeCloseTo(1, 9);
+      for (const b of allBlocks(sel))
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1]
+        ]) {
+          const nx = b.ix + dx;
+          const ny = b.iy + dy;
+          const h = (BLOCKS_PER_SIDE / 2) * 2 ** (root - b.level);
+          if (nx < -h || nx >= h || ny < -h || ny >= h) continue;
+          // Exactly one level carries the leaf over that cell, and it is within one of this one.
+          const covers = [];
+          for (let m = b.level; m <= root; m++) {
+            const t = 2 ** (m - b.level);
+            if (at.has(`${m}/${Math.floor(nx / t)}/${Math.floor(ny / t)}`)) covers.push(m);
+          }
+          expect(covers.length, `${where} at ${b.level}/${b.ix}/${b.iy}`).toBeLessThanOrEqual(1);
+          if (covers.length === 1) expect(covers[0] - b.level, where).toBeLessThanOrEqual(1);
+        }
+    }
+  });
+
   it('holds the screen-space cell size inside the frame, at every focal length', () => {
     for (const focalMm of [24, 135, 600, 1200, 2400]) {
       const v = view(focalMm);
