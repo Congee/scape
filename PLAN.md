@@ -569,8 +569,13 @@ quarter of the viewport.
    error does not reach the answer. The sweeps also cap at the same zoom the mesh actually uses today
    (the 4 m floor keeps the mesh at z14 everywhere), so there is no zoom mismatch either. Revisit only
    if the mesh floor drops far enough that the mesh reads z16 or z17 near the subject.
-6. **`buildings.worker.ts` `fillFrameTerrain`** fills one shadow-mask height grid from two disagreeing
-   surfaces (bilinear grid, cubic roof bases). It is a 2D mask, so nothing visibly floats.
+6. **The shadow mask's two disagreeing terrain surfaces — measured, and not worth unifying.**
+   `fillFrameTerrain` fills the grid row-wise and bilinear at the mask's own zoom (z13, 7–9 m posts in a
+   city), while `groundOf` puts roof bases on a cubic read at `BUILDING_GROUND_ZOOM` (z15, ~1.8 m). Over
+   1.6 km squares the two agree to 0.05 m at the median and 1.9 m at worst in Manhattan, 0.06 / 2.3 m in
+   San Francisco — 0.3 m of shadow length at the median and 13 m at worst with the sun at 10°, against a
+   4–8 m mask cell. Zermatt reaches 30 m on a cliff face, but cliffs carry no footprints. The row-wise
+   bilinear read is what keeps a 1024² grid affordable, so the mismatch stays.
 7. **The alignment path reads bilinear where the mesh draws cubic — measured; the kernel is not worth
    fixing, but the grid's own zoom is the real error.** At the zoom single points actually use
    (`POINT_ZOOM`, 6.6 m posts at Zermatt) the two kernels agree to 0.06 m at the median, 0.67 m at p95
@@ -586,7 +591,9 @@ quarter of the viewport.
    so this blurs the band's edge rather than lying outright, and a 625 m cell genuinely has no single
    ground height. Two candidate fixes: round `zoomForResolution` up rather than to nearest so a caller
    never samples coarser than it asked, or give the grid a min/max ground per cell instead of one post.
-   The first is four characters but changes every caller (mesh, sweeps, ladders); measure those first.
+   The first looks like four characters but is not: the mesh asks for power-of-two cells, so whether
+   `log2` lands above or below .5 is fixed by latitude alone — identical to `round` at Zermatt, a whole
+   extra zoom (4× the tiles) at the equator. Any fix belongs at the align call site, not in `tiles.ts`.
 8. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
    survive. Seen 1- and 2-row bands so far; widen the neighbourhood if a 4-row band appears. No bad
    post has yet been found in Mapterhorn; the filter stays as a safety net over whichever source runs.
