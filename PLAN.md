@@ -466,9 +466,9 @@ quarter of the viewport.
 ## 9. Open work (2026-09-18)
 
 Numbered items below are a register, not a queue; most are landed and kept for the measurements in
-them. What is actually left, in order: **14** (cancel a superseded request's queued tile fetches),
-then **15** (`selectBlocks` cost). **8** is a watch, not a task. **2**'s last step turned out to be a
-picture decision rather than a constant, so it joins **18–20** as blocked on the user.
+them. **Nothing is left that does not need the user**: **14** was measured and closed unfixed, **15**
+is landed, **8** is a watch rather than a task, and **2**'s last step turned out to be a picture
+decision rather than a constant, so it joins **18–20** as blocked on the user.
 
 **Precision**
 
@@ -708,10 +708,50 @@ picture decision rather than a constant, so it joins **18–20** as blocked on t
     p99 10.4 ms, max 10.6 ms against an 8.33 ms vsync — the viewfinder is display-locked, not
     compute-bound. Still worth re-running at 2400 mm with a mesh rebuild in flight, which is the real
     stress case; `gpuMs` remains the only figure the app itself reports.
-14. Cancelling a superseded request's queued tile fetches in `DemCache`. Priority lanes were the
-    first framing, but the mesh already rebuilds from scratch on every aim change, so the queue's
-    problem is work nobody is waiting for rather than work in the wrong order.
-15. `selectBlocks` cost.
+14. **Cancelling a superseded request's queued tile fetches** — measured, then closed unfixed. The
+    framing assumed a drag posts many mesh requests; `syncMesh` is on a 250 ms trailing debounce, so
+    a continuous drag posts *one*. Twenty aims at 200 ms produced 2 requests, 1 supersede and 2%
+    wasted bytes. Supersedes need a stepwise "nudge, look, nudge" pattern where each pause clears the
+    debounce but the next nudge lands inside the 1.5–5 s build.
+
+    Even then the cancellable half is the smaller half. Half to two-thirds of a stale working set is
+    tiles a *later* request also wants — prefetch, not waste — and of the genuine waste, more is
+    already past `acquire()` than still queued: 335 KiB of 5.21 MiB (6%) on a realistic 900 ms nudge
+    scrub, 2.4 MiB of 10.3 MiB on an artificially stepwise one, nothing at all on a real drag.
+    Recovering the running half would need `AbortController` on the shared in-flight fetch, which
+    saves only the untransferred remainder and thrashes connections. Head-of-line delay recoverable
+    by cancelling is bounded by the waste entries ahead in the FIFO — about 2 of 12 slots, ≈0.1 s of
+    a 1.5 s first post. It does not compound either: a superseded request stops issuing at its next
+    `latest.Mesh !== req.id` check, so it contributes at most one level's tiles and the stale set
+    stays near one working set (peak 14 seen).
+
+    What the fix would have cost: per-key waiter refcounting threaded through `load`/`loadAll` and
+    the `fetchTile` parent recursion, plus a liveness set so Elevation/Profile/Horizon/View/Points
+    tiles stay uncancellable — because `inflight` shares one promise per tile, and dropping one a
+    live caller awaits turns that tile into sea level with no error (see 17's silent-failure mode).
+    Not worth it for 6% of bytes on a pattern the debounce mostly prevents.
+15. **`selectBlocks` cost** — landed, 3.7–5.4× faster. Nobody had measured it: the budget ladder
+    throws away its leaf map and rebuilds from the roots at every rung, and the worker-shaped case
+    (600 mm, 100 km range, 0.41 m posts, height bound) took 17 ms over 8 walks, the worst table case
+    24 ms. That is pure latency before the first tile fetch starts, on every aim change. `balance()`
+    was 78–85% of it, and the cost was building the leaf-map keys, not the fixpoint.
+
+    Two changes, both inside the leaf map. `blockKey` packs `(level, ix, iy)` into one small integer
+    instead of a template string — the widest root square is 1024 blocks across at level 0 under a
+    level-8 root, so the ±1024 field is injective. And `balance()` skips the upward scan when a
+    same-level neighbour is already in the map: the leaves tile the root square, so that neighbour
+    *is* the covering leaf and the old scan to the root could only come back empty.
+
+    Bit-identical by construction — same descent predicate, same fixpoint, same insertion order — and
+    checked as such over 1 633 cases (the `EXPECTED` shapes, long-lens and wide-angle frames, the
+    worker-shaped case, and 1 600 randomised option sets across range, DEM post, focal, pitch,
+    azimuth, triangle budget and synthetic ridge bounds): zero mismatches. The invariant both changes
+    lean on is now a test — the leaves stay one partition of the root square, so no two blocks share
+    a key and at most one level carries the leaf over any edge neighbour's cell.
+
+    Not attempted: reusing the previous rung's leaf map, and predicting the reach instead of halving
+    to it. Both hinge on the balanced leaf count being monotone in `reachM`, which only held
+    empirically, and both would have to reproduce the exact rung sequence to keep the same `reachM`.
 16. **Terrain shadows no longer ride on the buildings gate** — landed. The mask was always terrain plus
     roofs, but `requestShadows` bailed on `!showBuildings` and the raster layer lived and died inside
     `applyBuildings`, so ground shadows vanished with the roofs and nothing drew below `BLD_MIN_ZOOM`.
