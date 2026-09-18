@@ -571,8 +571,22 @@ quarter of the viewport.
    if the mesh floor drops far enough that the mesh reads z16 or z17 near the subject.
 6. **`buildings.worker.ts` `fillFrameTerrain`** fills one shadow-mask height grid from two disagreeing
    surfaces (bilinear grid, cubic roof bases). It is a 2D mask, so nothing visibly floats.
-7. `align.worker.ts`, `core/align/alignment.ts`, `core/align/visibility.ts` read bilinear at their own
-   plan zoom. Self-consistent, like `profile()`; lower priority.
+7. **The alignment path reads bilinear where the mesh draws cubic — measured; the kernel is not worth
+   fixing, but the grid's own zoom is the real error.** At the zoom single points actually use
+   (`POINT_ZOOM`, 6.6 m posts at Zermatt) the two kernels agree to 0.06 m at the median, 0.67 m at p95
+   and 1.22 m at worst over a 64-point sample — 0.0002° to 0.0039° of the angle to the Matterhorn,
+   against a 0.53° solar disc and the 1° default tolerance. Same verdict as item 5: leave it bilinear.
+   The worker is also already careful where it matters, reading the landmark top at `POINT_ZOOM` rather
+   than the grid zoom (`pointZoomFor`), which costs only 6.2 m against a z17 cubic read.
+   What does reach the answer is `alignGrid` reading every candidate's ground at the *grid* zoom. A
+   default 20 km / 64-cell grid asks for 312 m posts and `zoomForResolution` rounds to z7, 425 m posts —
+   coarser than asked. Against a z17 reference those grounds are off by 39 m at the median and 150 m at
+   worst, moving the landmark angle 0.15° at the median, 0.46° at p95 and 0.77° at worst: most of a 1°
+   tolerance band. The heat layer is only a screen — `pick` re-evaluates the chosen point at `POINT_ZOOM` —
+   so this blurs the band's edge rather than lying outright, and a 625 m cell genuinely has no single
+   ground height. Two candidate fixes: round `zoomForResolution` up rather than to nearest so a caller
+   never samples coarser than it asked, or give the grid a min/max ground per cell instead of one post.
+   The first is four characters but changes every caller (mesh, sweeps, ladders); measure those first.
 8. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
    survive. Seen 1- and 2-row bands so far; widen the neighbourhood if a 4-row band appears. No bad
    post has yet been found in Mapterhorn; the filter stays as a safety net over whichever source runs.
@@ -633,7 +647,15 @@ quarter of the viewport.
     stress case; `gpuMs` remains the only figure the app itself reports.
 14. Priority lanes in the DEM and Overture fetch queues, so the aimed-at tiles land first.
 15. `selectBlocks` cost.
-16. `BLD_MIN_ZOOM` / `showBuildings` gate on terrain shadows at `MapController.ts:686` — not started.
+16. **Terrain shadows no longer ride on the buildings gate** — landed. The mask was always terrain plus
+    roofs, but `requestShadows` bailed on `!showBuildings` and the raster layer lived and died inside
+    `applyBuildings`, so ground shadows vanished with the roofs and nothing drew below `BLD_MIN_ZOOM`.
+    `applyShadows()` now owns `sun-shadow` on `showSunShadows` alone and inserts under the extrusions
+    whichever went up first; the buildings flag rides in `MaskRequest` *and* both dedupe keys, so a
+    toggle cannot be served a stale roofed mask; `shadowBounds` takes a terrain pad pair (3 km at 40 km
+    reach) since a wall throws far further than a 600 m tower. A new `SHADOW_MIN_ZOOM = 8` replaces the
+    old floor: the mask's DEM load is uncapped, and two zooms below that the cell outgrows the coarsest
+    DEM zoom and the tile count runs 12 → 108 → 1645, with `maskRect` finally returning a negative width.
 17. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
 
 **Awaiting the user**
