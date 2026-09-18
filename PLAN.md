@@ -901,12 +901,18 @@ need no decision from anyone.
       but unconfirmed, and it is the first sighting of anything like the worst 3.72× seam overrun the
       balance audit found on master. Only shows once a focal reaches the 2 m cell, which the step now
       makes happen at 600 mm rather than 1200 mm.
-    - **Persisted composition state leaks across a pin change.** Loading a viewfinder URL for a new
-      camera can keep the previous aim, so the mesh window and the rendered aim disagree and the canvas
-      comes back empty with a correct mesh behind it — right eye, right wedge, 35 blocks drawn, nothing
-      in frame. The same URL and focal gave zoom 15 / 2 m / reach 100 km on one load and zoom 14 / 4 m /
-      reach 23 km on another. User-visible on any shared link, and it makes an unguarded capture script
-      untrustworthy, so `shot4.sh` and `shot1f.sh` now print the aim beside the configuration.
+    - **A viewfinder URL for a fresh camera can render an empty canvas**, with a correct mesh behind
+      it: right eye (1606.5 m), mesh-window azimuth 234.7° matching the aim, 35 blocks and 174 720
+      triangles reported drawn, fresh profile, no missing tiles, no error — and nothing in frame but
+      the target marker, which itself projects to a plausible spot. Reproduced on master, so it is not
+      the two-level step. Mechanism NOT established: the composition store held a stale `azimuthDeg`
+      15 / `elevationDeg` −70 from a previous pin, but `aimFor` overrides both when `aimAtTarget` is
+      set, and the mesh key's azimuth proves the window followed the override — so the stale store
+      values are a symptom to chase, not a demonstrated cause. `meshWindow.pitchDeg` was never read and
+      is the first thing to check. Separately and definitely real: the same URL and focal gave
+      zoom 15 / 2 m / reach 100 km on one load and zoom 14 / 4 m / reach 23 km on another, so an
+      unguarded capture script cannot be trusted — `shot4.sh` and `shot1f.sh` now print the aim beside
+      the configuration.
 
 **Awaiting the user**
 
