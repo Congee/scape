@@ -16,6 +16,7 @@ import {
   levelsForRange,
   MAX_LEVELS,
   MAX_MESH_TRIANGLES,
+  MESH_MIN_CELL_M,
   MESH_PX_PER_CELL,
   samplePoint,
   selectBlocks,
@@ -91,6 +92,24 @@ describe('selectBlocks', () => {
     const sel = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: null });
     expect(levelCellM(sel.levels[0].level)).toBeGreaterThanOrEqual(DEM);
     expect(sel.levels[0].blocks).toHaveLength(BLOCKS_PER_SIDE ** 2);
+  });
+
+  it('keeps its resolution ladder when the DEM posts get finer', () => {
+    // Mapterhorn's 512 px z17 posts are sub-metre; unfloored they halve the cell and the budget
+    // pays for it out of reach, which is where a long-focal subject lives.
+    const finer = Math.max(MESH_MIN_CELL_M, metersPerPixel(PIN.lat, 17, 512));
+    for (const rangeM of [20_000, RANGE])
+      for (const focalMm of [70, 600, 2400]) {
+        const before = selectBlocks({ rangeM, demCellM: DEM, view: view(focalMm) });
+        const after = selectBlocks({ rangeM, demCellM: finer, view: view(focalMm) });
+        expect(levelCellM(after.levels[0].level)).toBe(levelCellM(before.levels[0].level));
+        expect(after.reachM).toBeCloseTo(before.reachM, 3);
+        expect(after.targetRad).toBe(before.targetRad);
+      }
+    // The pre-change values a 600 mm frame at Zermatt gets today.
+    const sel = selectBlocks({ rangeM: 20_000, demCellM: finer, view: view(600) });
+    expect(levelCellM(sel.levels[0].level)).toBe(4);
+    expect(sel.reachM).toBeCloseTo(10_000, 0);
   });
 
   it('takes the cap from the DEM, not from the level floor, when the posts are coarse', () => {

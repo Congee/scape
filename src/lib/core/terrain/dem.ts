@@ -165,6 +165,12 @@ function fillBad(elev: Float32Array, size: number, bad: Uint8Array) {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** Ancestor of `c` at zoom `z`, which covers the same ground at a coarser resolution. */
+export function ancestorTile(c: TileCoord, z: number): TileCoord {
+  const d = c.z - z;
+  return { z, x: c.x >> d, y: c.y >> d };
+}
+
 /** Bilinear sample at fractional pixel coordinates; pixel centres sit at +0.5, edges clamp. */
 export function sampleTile(t: DemTile, px: number, py: number): number {
   const s = t.size;
@@ -191,6 +197,25 @@ const catmullRom = (p0: number, p1: number, p2: number, p3: number, t: number): 
   const v = p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
   return Math.min(Math.max(v, Math.min(p0, p1, p2, p3)), Math.max(p0, p1, p2, p3));
 };
+
+/**
+ * Tile `c` resampled from the sub-rect of an ancestor that covers it, at the ancestor's own
+ * post count. Source coverage bottoms out at a different zoom in every region, so a deeper
+ * request is answered from the deepest tile that exists rather than left as a hole.
+ */
+export function overzoomTile(parent: DemTile, c: TileCoord): DemTile {
+  const size = parent.size;
+  const scale = 2 ** (c.z - parent.z);
+  const span = size / scale;
+  const ox = (c.x - parent.x * scale) * span;
+  const oy = (c.y - parent.y * scale) * span;
+  const elev = new Float32Array(size * size);
+  for (let py = 0; py < size; py++) {
+    const sy = oy + (py + 0.5) / scale;
+    for (let px = 0; px < size; px++) elev[py * size + px] = sampleTile(parent, ox + (px + 0.5) / scale, sy);
+  }
+  return { ...c, size, elev, repaired: parent.repaired };
+}
 
 // One stencil touches at most four tiles, and a DemSource's get is not free; resolve each once.
 const stencilKey = new Float64Array(4);

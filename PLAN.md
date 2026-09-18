@@ -467,27 +467,46 @@ quarter of the viewport.
 
 **Precision**
 
-1. **Mapterhorn terrain source** — swap the DEM to `tiles.mapterhorn.com/{z}/{x}/{y}.webp`: 512 px
-   tiles, WebCodecs `ImageDecoder` (never canvas), overzoom past each region's max zoom, DEM cache
-   entry counts cut 4× for equal memory, "© Mapterhorn" plus per-source attribution, AWS as fallback.
-2. **Ridge sweeps still read the old surface** — `horizon.ts`, `view.ts` and `los.ts` sample bilinear
+1. **Mapterhorn terrain source** — landed. `tiles.mapterhorn.com/{z}/{x}/{y}.webp`, 512 px, decoded
+   with WebCodecs `ImageDecoder` (never canvas), overzoom past each region's max zoom, decode
+   dispatched on container magic so archives written by either source still read, "© Mapterhorn"
+   attribution, AWS as the fallback when `ImageDecoder` is absent. The mesh floor deliberately stays
+   at 4 m; see 2.
+2. **The triangle budget is spent nearest-first, which is backwards for a landscape camera.**
+   `selectBlocks` reads `minLevel` off the DEM post size (mesh.ts:219), then shrinks `reachM` all the
+   way to `MIN_MESH_REACH_M` before it will coarsen `targetRad` at all (mesh.ts:231). So letting the
+   0.41 m Mapterhorn post unlock the 2 m cell bought near-field detail by collapsing reach: at 600 mm
+   from Zermatt village the Matterhorn at 9.5 km went from 4 m cells to 64 m, and reach from 11.25 km
+   to 5.6 km — 16× worse on the subject of the photograph, in exchange for finer ground at the
+   photographer's feet that a frame pitched up at a summit does not contain. `MESH_MIN_CELL_M` pins
+   the floor at 4 m until the mesh can tell what is in the frame.
+3. **Frame-pitch culling — the unlock for actually using the finer DEM.** The mesh wedge is
+   azimuth-only. A 600 mm frame pitched 16.7° up at the Matterhorn still meshes the valley floor
+   below it at full resolution. Culling blocks that fall under the frame's lower ray would free most
+   of the budget and let the floor drop to 1 m or 0.5 m where the picture needs it. Wants a
+   conservative per-block height bound at selection time, before the heights are fetched.
+4. **Ridge sweeps still read the old surface** — `horizon.ts`, `view.ts` and `los.ts` sample bilinear
    at their own zooms while the mesh draws cubic at max zoom, so a computed skyline can disagree with
    the drawn one.
-3. **`buildings.worker.ts` `fillFrameTerrain`** fills one shadow-mask height grid from two disagreeing
+5. **`buildings.worker.ts` `fillFrameTerrain`** fills one shadow-mask height grid from two disagreeing
    surfaces (bilinear grid, cubic roof bases). It is a 2D mask, so nothing visibly floats.
-4. `align.worker.ts`, `core/align/alignment.ts`, `core/align/visibility.ts` read bilinear at their own
+6. `align.worker.ts`, `core/align/alignment.ts`, `core/align/visibility.ts` read bilinear at their own
    plan zoom. Self-consistent, like `profile()`; lower priority.
-5. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
-   survive. Seen 1- and 2-row bands so far; widen the neighbourhood if a 4-row band appears.
+7. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
+   survive. Seen 1- and 2-row bands so far; widen the neighbourhood if a 4-row band appears. No bad
+   post has yet been found in Mapterhorn; the filter stays as a safety net over whichever source runs.
+8. **Hillshade is capped at `demZoom(15)`**, not `TERRAIN_MAX_ZOOM`: MapLibre's raster-dem source has
+   no overzoom and `demProtocol.ts` throws on 404, so pointing it deeper would hole every region whose
+   coverage stops early. Needs its own crop-and-rescale overzoom to reach full Mapterhorn detail.
 
 **Performance**
 
-6. Frame time measured end to end; only `gpuMs` is observed today.
-7. Priority lanes in the DEM and Overture fetch queues, so the aimed-at tiles land first.
-8. `selectBlocks` cost.
-9. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
+9. Frame time measured end to end; only `gpuMs` is observed today.
+10. Priority lanes in the DEM and Overture fetch queues, so the aimed-at tiles land first.
+11. `selectBlocks` cost.
+12. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
 
 **Awaiting the user**
 
-10. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
-11. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)
+13. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
+14. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)

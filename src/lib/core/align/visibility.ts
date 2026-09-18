@@ -4,7 +4,7 @@ import { cellCentre, cellOf, type HeatGrid } from '@core/geo/grid';
 import { elevationAt, type DemSource } from '@core/terrain/dem';
 import type { SweepPlan } from '@core/terrain/horizon';
 import { flatHorizonDeg } from '@core/terrain/los';
-import { metersPerPixel, zoomForResolution } from '@core/terrain/tiles';
+import { metersPerPixel, TILE_SIZE, zoomForResolution } from '@core/terrain/tiles';
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
@@ -21,6 +21,8 @@ export interface LadderOptions {
   minDistM?: number;
   minZoom: number;
   maxZoom: number;
+  /** Post count of the DEM tiles the zooms refer to; the ladder's ground steps depend on it. */
+  tileSize?: number;
   /** Step as a fraction of the distance once the finest zoom is left behind. */
   stepFraction: number;
 }
@@ -28,11 +30,12 @@ export interface LadderOptions {
 export function rayLadder(latDeg: number, rangeM: number, o: LadderOptions): RayLadder {
   const dists: number[] = [];
   const zooms: number[] = [];
+  const size = o.tileSize ?? TILE_SIZE;
   for (let d = o.minDistM ?? 40; d <= rangeM; ) {
-    const z = zoomForResolution(latDeg, o.stepFraction * d, o.minZoom, o.maxZoom);
+    const z = zoomForResolution(latDeg, o.stepFraction * d, o.minZoom, o.maxZoom, size);
     dists.push(d);
     zooms.push(z);
-    d += Math.max(metersPerPixel(latDeg, z), o.stepFraction * d);
+    d += Math.max(metersPerPixel(latDeg, z, size), o.stepFraction * d);
   }
   return { distM: Float64Array.from(dists), zoom: Uint8Array.from(zooms) };
 }

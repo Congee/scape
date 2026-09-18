@@ -8,20 +8,20 @@ import { cellSizeM, gridAround, gridBounds, type HeatGrid } from '@core/geo/grid
 import { elevationAt } from '@core/terrain/dem';
 import { planSweep, requiredTiles } from '@core/terrain/horizon';
 import { lngLatToTilePixel, metersPerPixel, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
-import { DemCache, POINT_ZOOM } from '@data/terrainTiles';
+import { demCacheTiles, demZoom, DemCache, POINT_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { AlignRequestKind, AlignResponseKind, HeatMode, type AlignRequest, type AlignResponse, type HeatParams, type HeatRequest, type HeatResult, type PickRequest } from './align.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** Grids of a few thousand cells read far more tiles than a single sweep does. */
-const cache = new DemCache(400, 8);
+const cache = new DemCache(demCacheTiles(400), 8);
 /** Newest request id per kind; a pick must not cancel a running heat. */
 const latest: Record<AlignRequestKind, number> = { Heat: 0, Pick: 0 };
 
 /** Ray range for the Visible mode; beyond this no terrain can hide a body above the skyline. */
 const VISIBLE_RANGE_M = 50_000;
 /** Coarsest and finest tile zoom a heat grid reads. */
-const MIN_ZOOM = 8;
-const MAX_ZOOM = 13;
+const MIN_ZOOM = demZoom(8);
+const MAX_ZOOM = demZoom(13);
 const SAMPLE_MIN_STEP_MS = 10_000;
 const MAX_SAMPLES = 240;
 
@@ -40,7 +40,7 @@ interface Plan {
 function planFor(p: HeatParams): Plan {
   const grid = gridAround(p.centre, p.rangeM, p.cells);
   const cellM = cellSizeM(grid);
-  const zoom = zoomForResolution(p.centre.lat, cellM / 2, MIN_ZOOM, MAX_ZOOM);
+  const zoom = zoomForResolution(p.centre.lat, cellM / 2, MIN_ZOOM, MAX_ZOOM, TERRAIN_TILE_SIZE);
   const ref = makeObserver(p.centre, 0);
   const halfMs = p.windowMin * 60_000;
   const step = Math.max(SAMPLE_MIN_STEP_MS, (2 * halfMs) / MAX_SAMPLES);
@@ -91,7 +91,7 @@ async function heat(req: HeatRequest): Promise<AlignResponse | null> {
   }
 
   if (req.mode === HeatMode.Visible) {
-    const ladder = rayLadder(req.centre.lat, VISIBLE_RANGE_M, { minZoom: MIN_ZOOM, maxZoom: Math.min(12, zoom), stepFraction: 0.02 });
+    const ladder = rayLadder(req.centre.lat, VISIBLE_RANGE_M, { minZoom: MIN_ZOOM, maxZoom: Math.min(demZoom(12), zoom), tileSize: TERRAIN_TILE_SIZE, stepFraction: 0.02 });
     const tiles: TileCoord[] = [];
     for (const z of new Set(ladder.zoom)) tiles.push(...tilesInBounds(gridBounds(grid, ladderReachM(ladder, z)), z));
     await cache.loadAll(tiles);
@@ -101,7 +101,7 @@ async function heat(req: HeatRequest): Promise<AlignResponse | null> {
   }
 
   // The sweep has to reach the grid corners.
-  const sweep = planSweep(req.centre, req.rangeM * Math.SQRT2, { azStepDeg: 360 / (6 * req.cells), minDistM: 30, maxZoom: zoom, stepFraction: 0.01 });
+  const sweep = planSweep(req.centre, req.rangeM * Math.SQRT2, { azStepDeg: 360 / (6 * req.cells), minDistM: 30, minZoom: MIN_ZOOM, maxZoom: zoom, tileSize: TERRAIN_TILE_SIZE, stepFraction: 0.01 });
   await cache.loadAll([...requiredTiles(sweep), tileAt(req.centre, zoom)]);
   if (!fresh()) return null;
   const g = elevationAt(cache, req.centre.lng, req.centre.lat, zoom);

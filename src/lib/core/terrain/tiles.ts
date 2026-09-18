@@ -29,9 +29,13 @@ export function metersPerPixel(lat: number, z: number, size = TILE_SIZE): number
   return (EARTH_CIRCUMFERENCE_M * Math.cos(lat * D2R)) / (size * 2 ** z);
 }
 
-/** Integer zoom whose pixels are closest to `metersPerPx` at `lat`, clamped to [minZ, maxZ]. */
-export function zoomForResolution(lat: number, metersPerPx: number, minZ: number, maxZ: number): number {
-  const z = Math.log2((EARTH_CIRCUMFERENCE_M * Math.cos(lat * D2R)) / (TILE_SIZE * metersPerPx));
+/**
+ * Integer zoom whose pixels are closest to `metersPerPx` at `lat`, clamped to [minZ, maxZ].
+ * `size` is the tile's post count, and the answer depends on it: 512 px tiles reach a given
+ * ground resolution one zoom lower than 256 px ones.
+ */
+export function zoomForResolution(lat: number, metersPerPx: number, minZ: number, maxZ: number, size = TILE_SIZE): number {
+  const z = Math.log2((EARTH_CIRCUMFERENCE_M * Math.cos(lat * D2R)) / (size * metersPerPx));
   return clamp(Math.round(z), minZ, maxZ);
 }
 

@@ -5,16 +5,14 @@ import { planExtract } from '@core/tiles/extract';
 import { ArchiveBuilder, coalesceRanges, tileCountInBounds, tileIdsInBounds, type TileSink } from '@core/tiles/pmtiles';
 import { announceArchives, archiveName, archivesDir, metaFromHeader, readHeader, writeMeta } from '@data/opfs';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
-import { terrainTileUrl } from '@data/terrainTiles';
+import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
-/** Fixed for terrain: the app's own PNG decoder reads these tiles online and offline alike. */
-const TERRAIN_MIN_ZOOM = 6;
-const TERRAIN_MAX_ZOOM = 14;
-/** Rough mean size of a Terrarium PNG tile; terrain estimates are never exact. */
-const TERRAIN_TILE_BYTES = 60_000;
+/** Fixed for terrain: the app's own decoder reads these tiles online and offline alike. */
+const TERRAIN_MIN_ZOOM = demZoom(6);
+const TERRAIN_MAX_ZOOM = demZoom(14);
 const MAX_GAP = 65_536;
 const MAX_CHUNK = 4 * 1024 * 1024;
 const COPY_CHUNK = 8 * 1024 * 1024;
@@ -258,13 +256,13 @@ async function downloadTerrain(id: string, spec: RegionSpec, signal: AbortSignal
     if (!builder.count) throw new Error('No terrain tiles were available for that area');
 
     const prefix = await builder.finish({
-      tileType: TileType.Png,
+      tileType: TERRAIN_TILE_MIME === 'image/webp' ? TileType.Webp : TileType.Png,
       tileCompression: Compression.None,
       minZoom: TERRAIN_MIN_ZOOM,
       maxZoom: TERRAIN_MAX_ZOOM,
       bounds: spec.bbox,
       centre: { ...bboxCentre(spec.bbox), zoom: TERRAIN_MIN_ZOOM },
-      metadata: { name: spec.name, attribution: 'Terrain Tiles (Mapzen, AWS Open Data)' }
+      metadata: { name: spec.name, attribution: TERRAIN_ATTRIBUTION }
     });
     signal.throwIfAborted();
     const bytes = await assemble(dir, id, prefix, tmp);

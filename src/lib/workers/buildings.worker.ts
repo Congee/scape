@@ -6,19 +6,21 @@ import { stampFootprint, sunCeiling, type HeightGrid } from '@core/geo/sunCeilin
 import { cubicStencilTiles, demRowAt, elevationAtCubic } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
-import { DemCache, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
+import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type TilesRequest } from './buildings.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** The map's mask runs in a second instance of this module, so its caches are sized for the map rect. */
 const isMask = scope.name === MASK_WORKER_NAME;
-const dem = new DemCache(isMask ? 320 : 512);
+const dem = new DemCache(demCacheTiles(isMask ? 320 : 512));
 if (isMask) setBuildingTileCacheSize(96);
 /** Zoom of the buildings archive; `tilesForWedge` enumerates the same level. */
 const BUILDINGS_ZOOM = 14;
+/** Ground under one building: short of the source's finest, which would quadruple the tiles for sub-metre posts a footprint cannot use. */
+const BUILDING_GROUND_ZOOM = demZoom(16);
 /** Coarsest and finest DEM zoom the map's shadow mask reads. */
-const CEILING_MIN_ZOOM = 8;
-const CEILING_MAX_ZOOM = 14;
+const CEILING_MIN_ZOOM = demZoom(8);
+const CEILING_MAX_ZOOM = demZoom(14);
 /** The map rect covers far more ground than the wedge at its coarsest. */
 const MASK_TILE_MAX = 256;
 let latest = 0;
@@ -58,12 +60,12 @@ async function groundOf(decoded: DecodedBuildings): Promise<Float32Array> {
   if (decoded.count === 0) return new Float32Array(0);
   const need = new Map<string, TileCoord>();
   const want = (lng: number, lat: number) => {
-    for (const t of cubicStencilTiles(lng, lat, TERRAIN_MAX_ZOOM)) need.set(tileKey(t.z, t.x, t.y), t);
+    for (const t of cubicStencilTiles(lng, lat, BUILDING_GROUND_ZOOM, TERRAIN_TILE_SIZE)) need.set(tileKey(t.z, t.x, t.y), t);
   };
   for (let i = 0; i < decoded.count; i++) want(decoded.cLng[i], decoded.cLat[i]);
   for (let i = 0; i < decoded.lng.length; i++) want(decoded.lng[i], decoded.lat[i]);
   await dem.loadAll([...need.values()]);
-  return groundForRows(decoded, (lng, lat) => elevationAtCubic(dem, lng, lat, TERRAIN_MAX_ZOOM));
+  return groundForRows(decoded, (lng, lat) => elevationAtCubic(dem, lng, lat, BUILDING_GROUND_ZOOM));
 }
 
 async function run(req: TilesRequest): Promise<void> {
@@ -153,7 +155,7 @@ async function maskFor(req: MaskRequest): Promise<Uint8Array | null> {
   if (!grid || !frame) {
     frame = maskFrame(req.centre);
     grid = { cellM: req.cellM, nx: req.nx, ny: req.ny, originE: req.originE, originN: req.originN, h: new Float32Array(req.nx * req.ny) };
-    const zoom = zoomForResolution(req.centre.lat, req.cellM, CEILING_MIN_ZOOM, CEILING_MAX_ZOOM);
+    const zoom = zoomForResolution(req.centre.lat, req.cellM, CEILING_MIN_ZOOM, CEILING_MAX_ZOOM, TERRAIN_TILE_SIZE);
     await dem.loadAll(tilesInBounds(frameBounds(frame, grid), zoom));
     if (latestMask !== req.id) return null;
     const complete = fillFrameTerrain(grid, frame, zoom);

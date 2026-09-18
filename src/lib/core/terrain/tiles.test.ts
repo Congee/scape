@@ -27,4 +27,14 @@ describe('tiles', () => {
     expect(zoomForResolution(0, 4.78, 0, 20)).toBe(15);
     expect(zoomForResolution(0, 1, 8, 14)).toBe(14);
   });
+
+  it('reads a 512 px tile one zoom shallower than a 256 px one', () => {
+    const lat = 46.0;
+    for (const z of [8, 12, 15]) {
+      expect(metersPerPixel(lat, z, 512)).toBeCloseTo(metersPerPixel(lat, z + 1, 256), 9);
+      expect(zoomForResolution(lat, metersPerPixel(lat, z, 512), 0, 20, 512)).toBe(z);
+      // The same target resolution, so the 512 px answer must be one zoom shallower.
+      expect(zoomForResolution(lat, metersPerPixel(lat, z + 1, 256), 0, 20, 256)).toBe(z + 1);
+    }
+  });
 });

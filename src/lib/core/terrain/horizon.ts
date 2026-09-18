@@ -1,7 +1,7 @@
 import { destination, elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
 import { elevationAt, type DemSource } from './dem';
 import { flatHorizonDeg } from './los';
-import { lngLatToTilePixel, metersPerPixel, zoomForResolution, type TileCoord } from './tiles';
+import { lngLatToTilePixel, metersPerPixel, TILE_SIZE, zoomForResolution, type TileCoord } from './tiles';
 
 /** Terrain horizon around an observer: elevation angle of the skyline per azimuth. */
 export interface HorizonProfile {
@@ -33,6 +33,8 @@ export interface SweepOptions {
   minDistM?: number;
   minZoom?: number;
   maxZoom?: number;
+  /** Post count of the DEM tiles the zooms refer to; the ladder's ground steps depend on it. */
+  tileSize?: number;
   /** Sample spacing as a fraction of distance; sets the zoom ladder (0.0045 ≈ 0.15° on a 30° slope). */
   stepFraction?: number;
   /** Azimuth window; defaults to the full circle. */
@@ -49,15 +51,16 @@ export function planSweep(pin: LngLat, rangeM: number, o: SweepOptions = {}): Sw
   const minZ = o.minZoom ?? 8;
   const maxZ = o.maxZoom ?? 14;
   const frac = o.stepFraction ?? 0.0045;
+  const size = o.tileSize ?? TILE_SIZE;
 
   // One distance ladder for every azimuth: steps grow with distance as coarser zooms take over.
   const dists: number[] = [];
   const zooms: number[] = [];
   for (let d = minD; d <= rangeM; ) {
-    const z = zoomForResolution(pin.lat, frac * d, minZ, maxZ);
+    const z = zoomForResolution(pin.lat, frac * d, minZ, maxZ, size);
     dists.push(d);
     zooms.push(z);
-    d += metersPerPixel(pin.lat, z);
+    d += metersPerPixel(pin.lat, z, size);
   }
   const perAz = dists.length;
   const total = nAz * perAz;

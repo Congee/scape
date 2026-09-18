@@ -5,15 +5,15 @@ import { distanceM } from '@core/geo/geodesy';
 import { bytes } from '@core/format';
 import { PmFlavor } from '@data/basemaps';
 import { PROTOMAPS_BUILD } from '@data/protomaps';
-import { TERRAIN_TILE_URL } from '@data/terrainTiles';
+import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
 import { defaultBasemapSourceUrl, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
 import { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 
 const BASEMAP_ZOOMS = [10, 11, 12, 13, 14, 15];
 const DEFAULT_MAX_ZOOM = 14;
-const TERRAIN_MIN_ZOOM = 6;
-const TERRAIN_MAX_ZOOM = 14;
+const TERRAIN_MIN_ZOOM = demZoom(6);
+const TERRAIN_MAX_ZOOM = demZoom(14);
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 
 const KIND_LABEL: Record<ArchiveKind, string> = { [ArchiveKind.Basemap]: 'Basemap', [ArchiveKind.Terrain]: 'Terrain' };

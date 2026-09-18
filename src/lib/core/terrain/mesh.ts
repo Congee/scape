@@ -62,6 +62,12 @@ export const MAX_MESH_TRIANGLES = 3_000_000;
 export const MESH_PX_PER_CELL = 4;
 /** The budget is spent by pulling the screen-space target in towards the eye, down to this reach. */
 export const MIN_MESH_REACH_M = 1000;
+/**
+ * Floor for `demCellM`, so a finer DEM cannot pull `minLevel` down on its own. The budget cannot
+ * hold a 2 m floor and still reach a 10 km subject: the near field would eat it and the mountain
+ * being photographed would coarsen. Lowering this needs frame-pitch culling first.
+ */
+export const MESH_MIN_CELL_M = 4;
 
 /** How far the aim may wander before the frame leaves the wedge that was selected for it. */
 export const meshAzPadDeg = (hfovDeg: number): number => Math.max(MESH_AZ_MIN_PAD_DEG, MESH_AZ_PAD * hfovDeg);

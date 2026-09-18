@@ -1,16 +1,16 @@
 /// <reference lib="webworker" />
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
 import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
-import { blockUnitBounds, buildLevel, levelCellM, selectBlocks } from '@core/terrain/mesh';
+import { blockUnitBounds, buildLevel, levelCellM, MESH_MIN_CELL_M, selectBlocks } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { sweepView } from '@core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, tileKey, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
-import { DemCache, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
+import { demCacheTiles, demZoom, DemCache, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-const cache = new DemCache(220);
+const cache = new DemCache(demCacheTiles(220));
 /** Newest request id per kind; older ones stop before the expensive step. */
 const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
 
@@ -21,13 +21,13 @@ function tileAt(p: LngLat, z: number): TileCoord {
 
 /** The surface the mesh draws, so the eye and anything standing on the ground share it. */
 async function groundAt(p: LngLat): Promise<number> {
-  await cache.loadAll(cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM));
+  await cache.loadAll(cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE));
   return elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM);
 }
 
 async function elevation(req: ElevationRequest | PointsRequest): Promise<TerrainResponse> {
   const tiles = new Map<string, TileCoord>();
-  for (const p of req.points) for (const t of cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM)) tiles.set(tileKey(t.z, t.x, t.y), t);
+  for (const p of req.points) for (const t of cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE)) tiles.set(tileKey(t.z, t.x, t.y), t);
   await cache.loadAll([...tiles.values()]);
   const elevations = req.points.map((p) => elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM));
   return { kind: req.kind, id: req.id, elevations };
@@ -36,7 +36,7 @@ async function elevation(req: ElevationRequest | PointsRequest): Promise<Terrain
 async function profile(req: ProfileRequest): Promise<TerrainResponse | null> {
   const { a, b, samples: n } = req;
   const totalM = distanceM(a, b);
-  const zoom = zoomForResolution((a.lat + b.lat) / 2, Math.max(1, totalM / n), 6, 14);
+  const zoom = zoomForResolution((a.lat + b.lat) / 2, Math.max(1, totalM / n), demZoom(6), demZoom(14), TERRAIN_TILE_SIZE);
   const lng = new Float32Array(n);
   const lat = new Float32Array(n);
   const distM = new Float32Array(n);
@@ -76,7 +76,7 @@ async function profile(req: ProfileRequest): Promise<TerrainResponse | null> {
 async function horizon(req: HorizonRequest): Promise<TerrainResponse | null> {
   const g = await groundAt(req.pin);
   const groundM = Number.isNaN(g) ? 0 : g;
-  const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg });
+  const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, minZoom: demZoom(8), maxZoom: demZoom(14), tileSize: TERRAIN_TILE_SIZE });
   const tiles = requiredTiles(plan);
   await cache.loadAll(tiles);
   if (latest.Horizon !== req.id) return null;
@@ -90,7 +90,7 @@ async function horizon(req: HorizonRequest): Promise<TerrainResponse | null> {
 async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   const g = await groundAt(req.pin);
   const groundM = Number.isNaN(g) ? 0 : g;
-  const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, azFromDeg: req.azFromDeg, azSpanDeg: req.azSpanDeg, minDistM: 20, maxZoom: 15 });
+  const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, azFromDeg: req.azFromDeg, azSpanDeg: req.azSpanDeg, minDistM: 20, minZoom: demZoom(8), maxZoom: demZoom(15), tileSize: TERRAIN_TILE_SIZE });
   const tiles = requiredTiles(plan);
   await cache.loadAll(tiles);
   if (latest.View !== req.id) return null;
@@ -107,13 +107,13 @@ async function mesh(req: MeshRequest): Promise<null> {
   if (latest.Mesh !== req.id) return null;
   const groundM = Number.isNaN(g) ? 0 : g;
   const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
-  const sel = selectBlocks({ rangeM: req.rangeM, demCellM: metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM), view: req.view });
+  const sel = selectBlocks({ rangeM: req.rangeM, demCellM: Math.max(MESH_MIN_CELL_M, metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE)), view: req.view });
   for (const { level, blocks } of sel.levels) {
-    const zoom = zoomForResolution(req.pin.lat, levelCellM(level), 8, TERRAIN_MAX_ZOOM);
-    // Only the selected blocks: a level-1 leaf 10 km out would drag in thousands of z15 tiles otherwise.
+    const zoom = zoomForResolution(req.pin.lat, levelCellM(level), demZoom(8), TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);
+    // Only the selected blocks: a level-1 leaf 10 km out would drag in thousands of the finest tiles otherwise.
     const tiles = new Map<string, TileCoord>();
     // The halo covers the cubic stencil's two posts past the block, or its edge would fall back to bilinear.
-    const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom);
+    const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom, TERRAIN_TILE_SIZE);
     for (const b of blocks) for (const t of tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom)) tiles.set(tileKey(t.z, t.x, t.y), t);
     // oxlint-disable-next-line no-await-in-loop -- a level is posted before the next one is fetched
     await cache.loadAll([...tiles.values()]);

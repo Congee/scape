@@ -25,7 +25,7 @@ import { isDarkBasemap, styleFor, type Basemap } from '@data/basemaps';
 import { BUILDINGS_ATTRIBUTION, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
 import { ensureDemProtocol } from '@data/demProtocol';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
-import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
+import { demZoom, DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
 import { buildingsStore, buildingHeightAt, requestShadowMask } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
@@ -586,9 +586,11 @@ export class MapController {
     this.map.addSource(id, {
       type: 'raster-dem',
       tiles: [DEM_TILE_TEMPLATE],
-      tileSize: 256,
+      tileSize: TERRAIN_TILE_SIZE,
       encoding: 'terrarium',
-      maxzoom: TERRAIN_MAX_ZOOM,
+      // Short of the source's own maximum: MapLibre has no overzoom of its own, and coverage
+      // past this ends at a different zoom in every region.
+      maxzoom: demZoom(15),
       attribution: TERRAIN_ATTRIBUTION
     });
   }

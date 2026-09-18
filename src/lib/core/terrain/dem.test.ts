@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, sampleGridCubic, sampleTile, type DemSource, type DemTile } from './dem';
+import { ancestorTile, cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, overzoomTile, sampleGridCubic, sampleTile, type DemSource, type DemTile } from './dem';
 
 describe('decodeTerrarium', () => {
   it('decodes known triplets', () => {
@@ -345,5 +345,44 @@ describe('neighbourhood outlier posts', () => {
     const { elev, repaired } = repair(e, size);
     expect(repaired).toBe(1);
     expect(elev[3 * size + 4]).toBeCloseTo(40, 3);
+  });
+});
+
+// A plane, so the bilinear resample is exact and only the coordinate mapping is under test.
+const plane = (x: number, y: number) => 100 + x + 10 * y;
+
+describe('overzoomTile', () => {
+  const size = 16;
+  const elev = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) elev[y * size + x] = plane(x, y);
+  const parent: DemTile = { z: 14, x: 8567, y: 5837, size, elev };
+
+  it('names the ancestor that covers a tile', () => {
+    expect(ancestorTile({ z: 17, x: 68536, y: 46698 }, 14)).toEqual({ z: 14, x: 8567, y: 5837 });
+    expect(ancestorTile({ z: 17, x: 68536, y: 46698 }, 17)).toEqual({ z: 17, x: 68536, y: 46698 });
+  });
+
+  it('resamples the child sub-rect of its ancestor', () => {
+    const child = { z: 17, x: 8567 * 8 + 5, y: 5837 * 8 + 2 };
+    const t = overzoomTile(parent, child);
+    expect(t).toMatchObject({ ...child, size });
+    // The sub-rect is span = size / 8 parent posts wide, at parent pixel (5 * span, 2 * span).
+    const span = size / 8;
+    for (const [px, py] of [
+      [0, 0],
+      [7, 3],
+      [size - 1, size - 1]
+    ])
+      expect(t.elev[py * size + px]).toBeCloseTo(plane(5 * span + (px + 0.5) / 8 - 0.5, 2 * span + (py + 0.5) / 8 - 0.5), 4);
+  });
+
+  it('splits the parent between its four children', () => {
+    const kids = [0, 1, 2, 3].map((i) => overzoomTile(parent, { z: 15, x: parent.x * 2 + (i & 1), y: parent.y * 2 + (i >> 1) }));
+    // The four together span the parent's whole post range; the outermost samples clamp to its edge posts.
+    const all = kids.flatMap((k) => [...k.elev]);
+    expect(Math.min(...all)).toBeCloseTo(plane(0, 0), 4);
+    expect(Math.max(...all)).toBeCloseTo(plane(size - 1, size - 1), 4);
+    // The right-hand child starts where the left-hand one left off, half a parent post further on.
+    expect(kids[1].elev[0] - kids[0].elev[size - 1]).toBeCloseTo(0.5, 4);
   });
 });
