@@ -64,9 +64,11 @@ const LIGHTS_ATTRIBUTION = 'Night lights: <a href="https://earthdata.nasa.gov/gi
 const BLD_SRC = 'overture-buildings';
 const BLD_LAYER = 'overture-building';
 const BLD_PART_LAYER = 'overture-building-part';
-const BLD_SHADOW_SRC = 'building-shadow';
-const BLD_SHADOW_LAYER = 'building-shadow';
+const SHADOW_SRC = 'sun-shadow';
+const SHADOW_LAYER = 'sun-shadow';
 const BLD_MIN_ZOOM = 14;
+/** Below this the mask's cell outgrows the coarsest DEM zoom and its tile count runs away: 12 tiles here, 108 two zooms out. */
+const SHADOW_MIN_ZOOM = 8;
 const SHADOW_OPACITY = 0.35;
 /** Shadow edges ramp over this depth below the ceiling; the sun's own width is about this soft. */
 const SHADOW_SOFT_M = 5;
@@ -77,6 +79,9 @@ const M_PER_DEG_LAT = (EARTH_RADIUS_M * Math.PI) / 180;
 /** Upper bounds on a shadow's reach, sizing the mask rect past the viewport edge. */
 const TALLEST_BUILDING_M = 600;
 const SHADOW_MAX_LENGTH_M = 5_000;
+/** Relief that can throw a shadow into the view from outside it — an Alpine wall, not Everest. */
+const TALLEST_TERRAIN_M = 3_000;
+const SHADOW_MAX_TERRAIN_M = 40_000;
 const BLD_HEIGHT: ExpressionSpecification = ['coalesce', ['get', 'height'], ['*', ['get', 'num_floors'], 3], 5];
 const BLD_BASE: ExpressionSpecification = ['coalesce', ['get', 'min_height'], 0];
 const NOT_UNDERGROUND: ExpressionSpecification = ['!=', ['get', 'is_underground'], true];
@@ -214,6 +219,7 @@ export class MapController {
       this.applyTerrain();
       this.applyNightLights();
       this.applyBuildings();
+      this.applyShadows();
       this.updateRay();
       this.renderAll();
     });
@@ -289,11 +295,8 @@ export class MapController {
         () => this.applyTerrain(),
         { equalityFn: shallow }
       ),
-      settingsStore.subscribe(
-        (st) => [st.showBuildings, st.showSunShadows] as const,
-        () => this.applyBuildings(),
-        { equalityFn: shallow }
-      ),
+      settingsStore.subscribe((st) => st.showBuildings, () => this.applyBuildings()),
+      settingsStore.subscribe((st) => st.showSunShadows, () => this.applyShadows()),
       settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
       settingsStore.subscribe((st) => st.showLightPollution, () => this.applyNightLights()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
@@ -619,26 +622,39 @@ export class MapController {
     this.map.setTerrain(t3d ? { source: DEM_SRC, exaggeration: 1 } : null);
   }
 
-  /** Our extrusions sit under the labels, over their own shadows, and in place of the basemap's buildings. */
-  private applyBuildings() {
+  /** The mask covers terrain as well as roofs, so it lives and dies with its own setting. */
+  private applyShadows() {
     if (!this.styleReady) return;
-    const on = settingsStore.getState().showBuildings;
-    if (on && !this.map.getLayer(BLD_LAYER)) {
-      if (!this.map.getSource(BLD_SRC)) this.map.addSource(BLD_SRC, { type: 'vector', url: `pmtiles://${OVERTURE_BUILDINGS_URL}`, attribution: BUILDINGS_ATTRIBUTION });
-      if (!this.map.getSource(BLD_SHADOW_SRC)) this.map.addSource(BLD_SHADOW_SRC, { type: 'image', url: BLANK_PNG, coordinates: [[-1, 1], [1, 1], [1, -1], [-1, -1]] });
-      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
-      const dark = isDarkBasemap(currentBasemap());
+    const on = settingsStore.getState().showSunShadows;
+    if (on && !this.map.getLayer(SHADOW_LAYER)) {
+      if (!this.map.getSource(SHADOW_SRC)) this.map.addSource(SHADOW_SRC, { type: 'image', url: BLANK_PNG, coordinates: [[-1, 1], [1, 1], [1, -1], [-1, -1]] });
+      // Under the extrusions, whichever of the two went up first.
+      const before = this.map.getLayer(BLD_LAYER) ? BLD_LAYER : this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
       this.map.addLayer(
         {
-          id: BLD_SHADOW_LAYER,
+          id: SHADOW_LAYER,
           type: 'raster',
-          source: BLD_SHADOW_SRC,
+          source: SHADOW_SRC,
           layout: { visibility: 'none' },
           // A cross-fade would flicker on every rebuild; one raster composite cannot compound.
           paint: { 'raster-opacity': SHADOW_OPACITY, 'raster-fade-duration': 0 }
         },
         before
       );
+    } else if (!on && this.map.getLayer(SHADOW_LAYER)) {
+      this.map.removeLayer(SHADOW_LAYER);
+    }
+    this.scheduleShadows();
+  }
+
+  /** Our extrusions sit under the labels, over the shadow mask, and in place of the basemap's buildings. */
+  private applyBuildings() {
+    if (!this.styleReady) return;
+    const on = settingsStore.getState().showBuildings;
+    if (on && !this.map.getLayer(BLD_LAYER)) {
+      if (!this.map.getSource(BLD_SRC)) this.map.addSource(BLD_SRC, { type: 'vector', url: `pmtiles://${OVERTURE_BUILDINGS_URL}`, attribution: BUILDINGS_ATTRIBUTION });
+      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
+      const dark = isDarkBasemap(currentBasemap());
       const paint = {
         'fill-extrusion-color': dark ? '#5a6472' : '#c9ced6',
         'fill-extrusion-height': BLD_HEIGHT,
@@ -664,7 +680,7 @@ export class MapController {
         before
       );
     } else if (!on) {
-      for (const id of [BLD_LAYER, BLD_PART_LAYER, BLD_SHADOW_LAYER]) if (this.map.getLayer(id)) this.map.removeLayer(id);
+      for (const id of [BLD_LAYER, BLD_PART_LAYER]) if (this.map.getLayer(id)) this.map.removeLayer(id);
     }
     this.setBasemapBuildings(!on);
     this.scheduleShadows();
@@ -685,18 +701,19 @@ export class MapController {
   }
 
   private requestShadows() {
-    if (!this.styleReady || !this.map.getLayer(BLD_SHADOW_LAYER)) return;
+    if (!this.styleReady || !this.map.getLayer(SHADOW_LAYER)) return;
     const s = settingsStore.getState();
-    if (!s.showBuildings || !s.showSunShadows || this.map.getZoom() < BLD_MIN_ZOOM) return this.hideShadows();
+    if (!s.showSunShadows || this.map.getZoom() < SHADOW_MIN_ZOOM) return this.hideShadows();
     const w = worldStore.getState();
     const sun = position(SkyBody.Sun, new Date(w.time), makeObserver(w.pin, w.pinHeightM));
     if (!(sun.altitude > 0)) return this.hideShadows();
-    const b = this.shadowBounds(sun.altitude, sun.azimuth);
+    const buildings = s.showBuildings && this.map.getZoom() >= BLD_MIN_ZOOM;
+    const b = this.shadowBounds(sun.altitude, sun.azimuth, buildings);
     const c = this.map.getCenter();
     // Sized against the true centre, then rebuilt around a snapped one so a small pan reuses the grid.
     const rough = this.shadowRect({ lng: c.lng, lat: c.lat }, b);
     const centre = snapPoint({ lng: c.lng, lat: c.lat }, rough.cellM * 16);
-    requestShadowMask(centre, this.shadowRect(centre, b), sun.azimuth, sun.altitude, SHADOW_SOFT_M);
+    requestShadowMask(centre, this.shadowRect(centre, b), sun.azimuth, sun.altitude, SHADOW_SOFT_M, buildings);
     // A toggle back on finds the store unchanged; the mask already in hand goes back up.
     this.paintShadowMask();
   }
@@ -709,22 +726,27 @@ export class MapController {
   }
 
   private hideShadows() {
-    if (this.map.getLayer(BLD_SHADOW_LAYER)) this.map.setLayoutProperty(BLD_SHADOW_LAYER, 'visibility', 'none');
+    if (this.map.getLayer(SHADOW_LAYER)) this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'none');
   }
 
   /** Keeps the previous image on screen until the worker answers. */
   private paintShadowMask() {
     const m = buildingsStore.getState().shadowMask;
-    const src = this.styleReady ? (this.map.getSource(BLD_SHADOW_SRC) as ImageSource | undefined) : undefined;
-    if (!m || !src || !this.map.getLayer(BLD_SHADOW_LAYER)) return;
+    const src = this.styleReady ? (this.map.getSource(SHADOW_SRC) as ImageSource | undefined) : undefined;
+    if (!m || !src || !this.map.getLayer(SHADOW_LAYER)) return;
     src.updateImage({ image: new ImageData(maskPixels(m.mask, m.nx, m.ny), m.nx, m.ny), coordinates: maskCorners(m.centre, m) });
-    this.map.setLayoutProperty(BLD_SHADOW_LAYER, 'visibility', 'visible');
+    this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'visible');
   }
 
-  /** The viewport grown up-sun by the longest shadow anything out there could cast into it. */
-  private shadowBounds(altDeg: number, azDeg: number): { west: number; east: number; south: number; north: number } {
+  /**
+   * The viewport grown up-sun by the longest shadow the caster in play could throw into it. One
+   * 1024 px mask cannot hold a roof-sized cell and terrain's reach at once, so the pad follows the caster.
+   */
+  private shadowBounds(altDeg: number, azDeg: number, buildings: boolean): { west: number; east: number; south: number; north: number } {
     const b = this.map.getBounds();
-    const padM = Math.min(TALLEST_BUILDING_M / Math.tan(altDeg * D2R), SHADOW_MAX_LENGTH_M);
+    const tallest = buildings ? TALLEST_BUILDING_M : TALLEST_TERRAIN_M;
+    const longest = buildings ? SHADOW_MAX_LENGTH_M : SHADOW_MAX_TERRAIN_M;
+    const padM = Math.min(tallest / Math.tan(altDeg * D2R), longest);
     const north = Math.max(0, Math.cos(azDeg * D2R)) * padM;
     const south = Math.max(0, -Math.cos(azDeg * D2R)) * padM;
     const east = Math.max(0, Math.sin(azDeg * D2R)) * padM;

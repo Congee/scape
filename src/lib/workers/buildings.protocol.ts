@@ -37,6 +37,8 @@ export interface MaskRequest {
   cellM: number;
   sunAzDeg: number;
   sunAltDeg: number;
+  /** Stamp roofs into the grid; off below the buildings' minzoom, where the rect is far wider than they resolve. */
+  buildings: boolean;
   /** Shadow ramps from lit to full over this depth below the ceiling, metres. */
   softM: number;
 }

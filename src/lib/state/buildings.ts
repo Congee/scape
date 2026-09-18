@@ -134,14 +134,14 @@ export function requestBuildings(pin: LngLat, azFromDeg: number, azSpanDeg: numb
 const quantise = (deg: number) => Math.round(deg / SUN_QUANTUM_DEG) * SUN_QUANTUM_DEG;
 
 /** Builds the map's ground-shadow mask; an identical consecutive request is ignored. */
-export function requestShadowMask(centre: LngLat, rect: MaskRect, sunAzDeg: number, sunAltDeg: number, softM: number): void {
+export function requestShadowMask(centre: LngLat, rect: MaskRect, sunAzDeg: number, sunAltDeg: number, softM: number, buildings: boolean): void {
   const az = quantise(sunAzDeg);
   const alt = quantise(sunAltDeg);
-  const key = `${centre.lat.toFixed(6)},${centre.lng.toFixed(6)}|${rect.originE}|${rect.originN}|${rect.nx}|${rect.ny}|${rect.cellM}|${az}|${alt}|${softM}`;
+  const key = `${centre.lat.toFixed(6)},${centre.lng.toFixed(6)}|${rect.originE}|${rect.originN}|${rect.nx}|${rect.ny}|${rect.cellM}|${az}|${alt}|${softM}|${buildings}`;
   if (key === maskKey) return;
   maskKey = key;
   maskId = ++seq;
-  const req: MaskRequest = { kind: BuildingsKind.Mask, id: maskId, centre, ...rect, sunAzDeg: az, sunAltDeg: alt, softM };
+  const req: MaskRequest = { kind: BuildingsKind.Mask, id: maskId, centre, ...rect, sunAzDeg: az, sunAltDeg: alt, softM, buildings };
   ensureMaskWorker().postMessage(req);
 }
 

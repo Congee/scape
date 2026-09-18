@@ -149,7 +149,7 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
 
 /** Null when a newer mask request has superseded this one. */
 async function maskFor(req: MaskRequest): Promise<Uint8Array | null> {
-  const key = `${req.centre.lat.toFixed(6)},${req.centre.lng.toFixed(6)}|${req.originE}|${req.originN}|${req.nx}|${req.ny}|${req.cellM}`;
+  const key = `${req.centre.lat.toFixed(6)},${req.centre.lng.toFixed(6)}|${req.originE}|${req.originN}|${req.nx}|${req.ny}|${req.cellM}|${req.buildings}`;
   let grid = cachedMask?.key === key ? cachedMask.grid : null;
   let frame = cachedMask?.key === key ? cachedMask.frame : null;
   if (!grid || !frame) {
@@ -161,7 +161,7 @@ async function maskFor(req: MaskRequest): Promise<Uint8Array | null> {
     const complete = fillFrameTerrain(grid, frame, zoom);
     // An absent building tile is far more often an empty one than a failure, and letting it veto
     // the cache would refetch every tile on each sun change.
-    await stampFrameBuildings(grid, frame);
+    if (req.buildings) await stampFrameBuildings(grid, frame);
     if (latestMask !== req.id) return null;
     cachedMask = complete ? { key, frame, grid } : null;
   }
