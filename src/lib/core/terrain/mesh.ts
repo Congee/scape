@@ -127,8 +127,8 @@ export interface Selection {
 }
 
 const wrapPi = (a: number): number => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
-/** Half the widest root square, in blocks: level 0 under a level-8 root is 1024 across. */
-const KEY_HALF = 1024;
+/** Half the widest root square, in blocks. Derived so a deeper tree cannot collide keys; shifted rather than `**` so it stays a smi and the keys do not box. */
+const KEY_HALF = (BLOCKS_PER_SIDE / 2) << (MAX_LEVELS - 1);
 const KEY_SIDE = 2 * KEY_HALF;
 /** Packs a block into one small integer; building string keys cost more than the balance fixpoint. */
 const blockKey = (level: number, ix: number, iy: number): number => (level * KEY_SIDE + iy + KEY_HALF) * KEY_SIDE + ix + KEY_HALF;
