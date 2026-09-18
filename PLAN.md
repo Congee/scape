@@ -908,8 +908,10 @@ need no decision from anyone.
       the two-level step. Mechanism NOT established: the composition store held a stale `azimuthDeg`
       15 / `elevationDeg` −70 from a previous pin, but `aimFor` overrides both when `aimAtTarget` is
       set, and the mesh key's azimuth proves the window followed the override — so the stale store
-      values are a symptom to chase, not a demonstrated cause. `meshWindow.pitchDeg` was never read and
-      is the first thing to check. Separately and definitely real: the same URL and focal gave
+      values are a symptom to chase, not a demonstrated cause. `ensureMeshWindow` takes both its
+      azimuth and its pitch from `sc.aim`, the effective aim, so the window cannot disagree with the
+      camera that way; the GL side is what is left unexamined. Separately and definitely real: the
+      same URL and focal gave
       zoom 15 / 2 m / reach 100 km on one load and zoom 14 / 4 m / reach 23 km on another, so an
       unguarded capture script cannot be trusted — `shot4.sh` and `shot1f.sh` now print the aim beside
       the configuration.
