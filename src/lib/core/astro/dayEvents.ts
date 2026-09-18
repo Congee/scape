@@ -13,11 +13,13 @@ export const EventKind = {
   AstroDawn: 'AstroDawn',
   NauticalDawn: 'NauticalDawn',
   CivilDawn: 'CivilDawn',
+  BlueEnd: 'BlueEnd',
   Rise: 'Rise',
   GoldenEnd: 'GoldenEnd',
   Transit: 'Transit',
   GoldenStart: 'GoldenStart',
   Set: 'Set',
+  BlueStart: 'BlueStart',
   CivilDusk: 'CivilDusk',
   NauticalDusk: 'NauticalDusk',
   AstroDusk: 'AstroDusk',
@@ -40,6 +42,8 @@ export interface DayEvent {
 export interface DayEventOptions {
   /** Sun altitude that bounds the golden hour, degrees. */
   goldenAltitude?: number;
+  /** Sun altitude that bounds the blue hour on the daylight side, degrees; civil dawn/dusk bounds the other. */
+  blueAltitude?: number;
   /** Observer height above local ground, metres; lowers the apparent horizon. */
   heightAboveGroundM?: number;
 }
@@ -57,6 +61,7 @@ export function dayEvents(
   opts: DayEventOptions = {}
 ): DayEvent[] {
   const golden = opts.goldenAltitude ?? 6;
+  const blue = opts.blueAltitude ?? -4;
   const agl = opts.heightAboveGroundM ?? 0;
   const out: DayEvent[] = [];
 
@@ -92,11 +97,13 @@ export function dayEvents(
   collect(SkyBody.Sun, EventKind.AstroDawn, altitudeSearch(Body.Sun, 1, -18));
   collect(SkyBody.Sun, EventKind.NauticalDawn, altitudeSearch(Body.Sun, 1, -12));
   collect(SkyBody.Sun, EventKind.CivilDawn, altitudeSearch(Body.Sun, 1, -6));
+  collect(SkyBody.Sun, EventKind.BlueEnd, altitudeSearch(Body.Sun, 1, blue));
   collect(SkyBody.Sun, EventKind.Rise, riseSet(Body.Sun, 1));
   collect(SkyBody.Sun, EventKind.GoldenEnd, altitudeSearch(Body.Sun, 1, golden));
   collect(SkyBody.Sun, EventKind.Transit, transit(Body.Sun));
   collect(SkyBody.Sun, EventKind.GoldenStart, altitudeSearch(Body.Sun, -1, golden));
   collect(SkyBody.Sun, EventKind.Set, riseSet(Body.Sun, -1));
+  collect(SkyBody.Sun, EventKind.BlueStart, altitudeSearch(Body.Sun, -1, blue));
   collect(SkyBody.Sun, EventKind.CivilDusk, altitudeSearch(Body.Sun, -1, -6));
   collect(SkyBody.Sun, EventKind.NauticalDusk, altitudeSearch(Body.Sun, -1, -12));
   collect(SkyBody.Sun, EventKind.AstroDusk, altitudeSearch(Body.Sun, -1, -18));

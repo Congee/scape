@@ -1,6 +1,6 @@
 import type { FinderSettings } from './astro/finder';
 import type { LngLat } from './geo/geodesy';
-import type { Orientation } from './optics/fov';
+import { effectiveOptics, type Orientation, type Teleconverter } from './optics/fov';
 
 export interface SavedLocation {
   id: string;
@@ -62,10 +62,25 @@ export interface PlanComposition {
   sensorId: string;
   focalMm: number;
   fNumber: number;
+  /** Absent in plans saved before teleconverter support. */
+  teleconverters?: readonly Teleconverter[];
+  /** The single teleconverter of plans saved before they could stack. */
+  teleconverter?: Teleconverter;
   orientation: Orientation;
   azimuthDeg: number;
   elevationDeg: number;
   aimAtTarget: boolean;
+}
+
+/** Teleconverter stack of a saved plan, from the array or the older scalar. */
+export function planTeleconverters(c: PlanComposition): readonly Teleconverter[] {
+  if (c.teleconverters) return c.teleconverters;
+  return c.teleconverter && c.teleconverter > 1 ? [c.teleconverter] : [];
+}
+
+/** Focal and aperture a saved plan actually shoots at. */
+export function planOptics(c: PlanComposition): { focalMm: number; fNumber: number } {
+  return effectiveOptics({ focalMm: c.focalMm, fNumber: c.fNumber, teleconverters: planTeleconverters(c) });
 }
 
 export interface PlanPoint {

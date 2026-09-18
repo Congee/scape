@@ -13,6 +13,13 @@ export const BODY: Record<SkyBody, Body> = { Sun: Body.Sun, Moon: Body.Moon, Gc:
 
 export const BODIES: SkyBody[] = [SkyBody.Sun, SkyBody.Moon, SkyBody.Gc];
 
+/** Master switch per body, shared by the disc, label and path passes. */
+export function bodyVisible(b: SkyBody, c: { showSun: boolean; showMoon: boolean }, s: { showGc: boolean }): boolean {
+  if (b === SkyBody.Sun) return c.showSun;
+  if (b === SkyBody.Moon) return c.showMoon;
+  return s.showGc;
+}
+
 export function makeObserver(p: LngLat, heightM = 0): Observer {
   return new Observer(p.lat, p.lng, heightM);
 }

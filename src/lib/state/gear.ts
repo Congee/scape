@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { fitToLens, SENSORS, type LensSpec, type SensorFormat } from '@core/optics/fov';
-import { compositionStore } from './composition';
+import { clampFocalMm, fitToLens, maxApertureAt, SENSORS, tcFactor, type LensSpec, type SensorFormat } from '@core/optics/fov';
+import { longApertureOf } from '@core/optics/gearSearch';
+import { compositionStore, type Composition } from './composition';
 
-export const DEFAULT_FOCALS = [14, 16, 20, 24, 28, 35, 50, 70, 85, 100, 135, 200, 300, 400, 600];
+export const DEFAULT_FOCALS = [14, 16, 20, 24, 28, 35, 50, 70, 85, 100, 135, 200, 300, 400, 600, 900, 1200];
 
 /** A saved camera + lens pairing, applied in one click from the Frame tab. */
 export interface Kit {
@@ -34,6 +35,49 @@ export interface GearState {
   renameKit(id: string, name: string): void;
 }
 
+/** The slice of {@link GearState} written to storage. */
+type PersistedGear = Pick<GearState, 'cameras' | 'lenses' | 'focalPresets' | 'kits'>;
+
+export const GEAR_VERSION = 2;
+
+const sortedFocals = (list: number[]): number[] => [...new Set(list.filter((f) => f > 0))].toSorted((a, b) => a - b);
+
+/** Re-derives the long-end aperture from the model name a saved lens already carries. */
+function withLongAperture(lens: LensSpec): LensSpec {
+  if (!lens || typeof lens.name !== 'string' || !(lens.maxAperture > 0)) return lens;
+  const long = longApertureOf(lens.name);
+  return long && long > lens.maxAperture ? { ...lens, maxApertureLong: long } : lens;
+}
+
+/**
+ * v0 -> v1: unions the stored focal presets with the shipped defaults, so a profile written before a
+ * default was added still sees it. Nothing records a preset the user deleted, so a deletion cannot be
+ * told apart from "never existed": the union re-adds deleted defaults, but the alternatives would either
+ * drop the user's own presets or hide every newly shipped one.
+ *
+ * v1 -> v2: fills in `maxApertureLong` on lenses saved before variable apertures existed. The two steps
+ * are gated separately so reaching v2 does not re-run the preset union over a v1 profile.
+ */
+export function migrateGear(persisted: unknown, version: number): PersistedGear {
+  const s = (persisted ?? {}) as Partial<PersistedGear>;
+  const stored = Array.isArray(s.focalPresets) ? s.focalPresets : [];
+  const lenses = Array.isArray(s.lenses) ? s.lenses : [];
+  return {
+    cameras: s.cameras ?? [],
+    lenses: version >= 2 ? lenses : lenses.map(withLongAperture),
+    kits: s.kits ?? [],
+    focalPresets: version >= 1 ? sortedFocals(stored) : sortedFocals([...stored, ...DEFAULT_FOCALS])
+  };
+}
+
+/** Exported so a test can check the store is wired to the migration, which storage-less Node hides. */
+export const GEAR_PERSIST = {
+  name: 'scape.gear',
+  version: GEAR_VERSION,
+  migrate: migrateGear,
+  partialize: ({ cameras, lenses, focalPresets, kits }: GearState): PersistedGear => ({ cameras, lenses, focalPresets, kits })
+};
+
 export const gearStore = create<GearState>()(
   persist(
     (set) => ({
@@ -53,7 +97,7 @@ export const gearStore = create<GearState>()(
         return id;
       },
       removeLens: (id) => set((s) => ({ lenses: s.lenses.filter((l) => l.id !== id) })),
-      setFocalPresets: (list) => set({ focalPresets: [...new Set(list.filter((f) => f > 0))].toSorted((a, b) => a - b) }),
+      setFocalPresets: (list) => set({ focalPresets: sortedFocals(list) }),
       saveKit: (name, cameraId, lensId) => {
         const id = crypto.randomUUID();
         set((s) => ({ kits: [...s.kits.filter((k) => !(k.cameraId === cameraId && k.lensId === lensId)), { id, name, cameraId, lensId }] }));
@@ -62,7 +106,7 @@ export const gearStore = create<GearState>()(
       removeKit: (id) => set((s) => ({ kits: s.kits.filter((k) => k.id !== id) })),
       renameKit: (id, name) => set((s) => ({ kits: s.kits.map((k) => (k.id === id ? { ...k, name } : k)) }))
     }),
-    { name: 'scape.gear', partialize: ({ cameras, lenses, focalPresets, kits }) => ({ cameras, lenses, focalPresets, kits }) }
+    GEAR_PERSIST
   )
 );
 
@@ -89,6 +133,13 @@ export function defaultKitName(cameraName: string, lensName: string | null): str
 
 export function kitMatches(kit: Kit, c: { sensorId: string; lensId: string | null }): boolean {
   return kit.cameraId === c.sensorId && kit.lensId === c.lensId;
+}
+
+/** Zoom gestures: the focal inside the mounted lens's range, with the aperture still reachable there. */
+export function zoomPatch(c: Composition, focalMm: number): { focalMm: number; fNumber: number } {
+  const lens = lensById(c.lensId, gearStore.getState().lenses);
+  const f = clampFocalMm(focalMm, lens, tcFactor(c.teleconverters));
+  return { focalMm: f, fNumber: lens ? Math.max(c.fNumber, maxApertureAt(lens, f)) : c.fNumber };
 }
 
 /** Selects the kit's camera and lens, fitting the focal length and aperture to the lens. */

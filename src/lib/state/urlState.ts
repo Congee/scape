@@ -1,7 +1,7 @@
 /** Compact search params shared by the map and the viewfinder. Pure: no store access. */
 
 import type { LngLat } from '@core/geo/geodesy';
-import { Orientation } from '@core/optics/fov';
+import { Orientation, Teleconverter } from '@core/optics/fov';
 
 export interface SceneSearch {
   /** Camera location, `lat,lng`. */
@@ -18,9 +18,24 @@ export interface SceneSearch {
   f?: number;
   /** `p` for portrait; absent for landscape. */
   o?: string;
+  /** Mounted teleconverter factors, comma-separated (`1.4,2`); absent for none. */
+  tc?: string;
 }
 
 const PORTRAIT = 'p';
+
+const isTeleconverter = (n: number | null): n is Teleconverter => n === Teleconverter.X14 || n === Teleconverter.X20;
+
+/** Unknown factors are dropped, so a single `tc=2` from before stacking still reads as one converter. */
+function teleconverterList(v: unknown): Teleconverter[] {
+  const parts = typeof v === 'number' ? [v] : typeof v === 'string' ? v.split(',') : [];
+  return parts.map((p) => parseNumber(p, 1, 2)).filter(isTeleconverter);
+}
+
+/** Missing or unknown means no teleconverter, so links made before the key still load. */
+export function teleconvertersFor(tc: string | undefined): readonly Teleconverter[] {
+  return teleconverterList(tc);
+}
 
 const round = (n: number, digits: number) => Number(n.toFixed(digits));
 
@@ -68,7 +83,8 @@ export function validateScene(raw: Record<string, unknown>): SceneSearch {
     t: parseInstant(raw.t) != null ? String(raw.t) : undefined,
     tz: parseText(raw.tz),
     f: parseNumber(raw.f, 1, 10000) ?? undefined,
-    o: raw.o === PORTRAIT ? PORTRAIT : undefined
+    o: raw.o === PORTRAIT ? PORTRAIT : undefined,
+    tc: teleconverterList(raw.tc).join(',') || undefined
   };
 }
 
@@ -94,8 +110,8 @@ export function mapSearchFor(w: SceneWorld, zoom: number): SceneSearch {
   return { ...common(w), z: round(zoom, 2) };
 }
 
-export function viewfinderSearchFor(w: SceneWorld, c: { focalMm: number; orientation: Orientation }): SceneSearch {
-  return { ...common(w), f: round(c.focalMm, 1), o: c.orientation === Orientation.Portrait ? PORTRAIT : undefined };
+export function viewfinderSearchFor(w: SceneWorld, c: { focalMm: number; orientation: Orientation; teleconverters: readonly Teleconverter[] }): SceneSearch {
+  return { ...common(w), f: round(c.focalMm, 1), o: c.orientation === Orientation.Portrait ? PORTRAIT : undefined, tc: c.teleconverters.join(',') || undefined };
 }
 
 export function orientationFor(o: string | undefined): Orientation {

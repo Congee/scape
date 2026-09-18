@@ -43,7 +43,7 @@ describe('decodePng', () => {
 
   it('feeds Terrarium decoding without an alpha channel', async () => {
     const png = await decodePng(encodePng(2, 1, [128, 0, 0, 132, 184, 64], [4]));
-    const e = decodeTerrarium(png.data, 2, png.channels);
+    const { elev: e } = decodeTerrarium(png.data, 2, png.channels);
     expect(e[0]).toBe(0);
     expect(e[1]).toBeCloseTo(1208.25, 6);
   });

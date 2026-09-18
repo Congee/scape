@@ -24,6 +24,10 @@ export interface Settings {
   /** Height of the object whose sun shadow is drawn, metres. */
   shadowObjectHeightM: number;
   showGc: boolean;
+  /** Scape's own Overture building extrusions, from zoom 14. */
+  showBuildings: boolean;
+  /** Ground shadows those buildings cast at the timeline time. */
+  showSunShadows: boolean;
   /** Show transits, golden hour, terrain and Galactic Centre rows in the timeline. */
   timelineDetail: boolean;
   clickMovesPin: boolean;
@@ -63,6 +67,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showShadow: true,
   shadowObjectHeightM: 1.8,
   showGc: true,
+  showBuildings: true,
+  showSunShadows: true,
   timelineDetail: false,
   clickMovesPin: true,
   terrain: true,

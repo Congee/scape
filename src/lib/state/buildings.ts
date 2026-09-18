@@ -2,12 +2,15 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
-import { BuildingsKind, type BuildingBatch, type BuildingsResponse, type HeightAtRequest, type TilesRequest } from '@workers/buildings.protocol';
+import type { MaskRect } from '@core/geo/shadowMask';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type TilesRequest } from '@workers/buildings.protocol';
 
 /** Decoded tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
 /** A height lookup that never comes back resolves null rather than leaving the caller hanging. */
 const HEIGHT_TIMEOUT_MS = 15_000;
+/** Sun angles are rounded to this before they become a key, so scrubbing the clock rebuilds far less. */
+const SUN_QUANTUM_DEG = 0.25;
 
 export interface BuildingsState {
   /** Decoded tiles by "14/x/y". */
@@ -17,7 +20,17 @@ export interface BuildingsState {
   busy: boolean;
   /** Tiles the last request could not fetch (offline or 404). */
   missing: number;
+  /** Ground-shadow mask for the map, or null while none has been built. */
+  shadowMask: ShadowMaskField | null;
+  /** Worker time for the last mask, milliseconds. */
+  shadowMaskMs: number;
   error: string | null;
+}
+
+/** A built ground-shadow mask and the rect it covers; row 0 of `mask` is the southernmost. */
+export interface ShadowMaskField extends MaskRect {
+  centre: LngLat;
+  mask: Uint8Array;
 }
 
 export const buildingsStore = create<BuildingsState>()(
@@ -27,6 +40,8 @@ export const buildingsStore = create<BuildingsState>()(
       version: 0,
       busy: false,
       missing: 0,
+      shadowMask: null,
+      shadowMaskMs: 0,
       error: null
     })
   )
@@ -35,11 +50,16 @@ export const buildingsStore = create<BuildingsState>()(
 export const useBuildings = buildingsStore;
 
 let worker: Worker | null = null;
+/** The map's mask has its own worker, so a multi-second map build cannot stall the viewfinder. */
+let maskWorker: Worker | null = null;
 let seq = 0;
 /** Id of the wedge request whose responses the store still wants. */
 let tilesId = 0;
 let lastKey = '';
 let lastPin: LngLat = { lat: 0, lng: 0 };
+/** The map's mask keeps its own id, so a pan never cancels the viewfinder's shadow build. */
+let maskId = 0;
+let maskKey = '';
 
 /** Centre of a "z/x/y" key, for distance-based eviction. */
 function tileCentre(key: string): LngLat {
@@ -77,11 +97,26 @@ function ensureWorker(): Worker {
       });
     } else if (res.kind === BuildingsKind.Done) {
       buildingsStore.setState((st) => ({ busy: false, missing: res.missing, version: st.version + 1, error: null }));
-    } else {
+    } else if (res.kind === BuildingsKind.Error) {
       buildingsStore.setState((st) => ({ busy: false, version: st.version + 1, error: res.error }));
     }
   });
   return worker;
+}
+
+function ensureMaskWorker(): Worker {
+  if (maskWorker) return maskWorker;
+  maskWorker = new Worker(new URL('../workers/buildings.worker.ts', import.meta.url), { type: 'module', name: MASK_WORKER_NAME });
+  maskWorker.addEventListener('message', (e: MessageEvent<BuildingsResponse>) => {
+    const res = e.data;
+    if (res.kind === BuildingsKind.Shade) {
+      const { centre, originE, originN, nx, ny, cellM, mask } = res;
+      if (res.id === maskId) buildingsStore.setState({ shadowMask: { centre, originE, originN, nx, ny, cellM, mask }, shadowMaskMs: res.ms });
+    } else if (res.kind === BuildingsKind.Error) {
+      buildingsStore.setState({ error: res.error });
+    }
+  });
+  return maskWorker;
 }
 
 /** Streams the wedge's tiles into the store; identical consecutive requests are ignored, a new wedge supersedes the old one. */
@@ -94,6 +129,20 @@ export function requestBuildings(pin: LngLat, azFromDeg: number, azSpanDeg: numb
   buildingsStore.setState({ busy: true, error: null });
   const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, azFromDeg, azSpanDeg, rangeM };
   ensureWorker().postMessage(req);
+}
+
+const quantise = (deg: number) => Math.round(deg / SUN_QUANTUM_DEG) * SUN_QUANTUM_DEG;
+
+/** Builds the map's ground-shadow mask; an identical consecutive request is ignored. */
+export function requestShadowMask(centre: LngLat, rect: MaskRect, sunAzDeg: number, sunAltDeg: number, softM: number): void {
+  const az = quantise(sunAzDeg);
+  const alt = quantise(sunAltDeg);
+  const key = `${centre.lat.toFixed(6)},${centre.lng.toFixed(6)}|${rect.originE}|${rect.originN}|${rect.nx}|${rect.ny}|${rect.cellM}|${az}|${alt}|${softM}`;
+  if (key === maskKey) return;
+  maskKey = key;
+  maskId = ++seq;
+  const req: MaskRequest = { kind: BuildingsKind.Mask, id: maskId, centre, ...rect, sunAzDeg: az, sunAltDeg: alt, softM };
+  ensureMaskWorker().postMessage(req);
 }
 
 interface HeightWaiter {

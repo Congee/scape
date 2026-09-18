@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { fitToLens } from '@core/optics/fov';
-import { gearTokens, searchGear } from '@core/optics/gearSearch';
+import { fitToLens, type LensSpec } from '@core/optics/fov';
+import { gearTokens, longApertureOf, searchGear } from '@core/optics/gearSearch';
 import type { CameraRow, LensRow } from '@data/gearCatalog';
 import { compositionStore, useComposition } from '@state/composition';
 import { gearStore, sensorById, useGear } from '@state/gear';
@@ -15,6 +15,13 @@ const loadCatalog = () => (catalog ??= import('@data/gearCatalog').then((m) => (
 
 export const cameraId = (r: CameraRow) => `cat:${r[0]} ${r[1]}`;
 export const lensId = (r: LensRow) => `cat:${r[0]} ${r[1]} (${r[5]})`;
+
+/** The catalogue carries only the short-end aperture; the long end is spelled out in the model name. */
+export function lensSpecOf(r: LensRow): LensSpec {
+  const long = longApertureOf(r[1]);
+  const spec: LensSpec = { id: lensId(r), name: `${r[0]} ${r[1]}`, minMm: r[2], maxMm: r[3], maxAperture: r[4], mount: r[5] };
+  return long && long > r[4] ? { ...spec, maxApertureLong: long } : spec;
+}
 
 export function GearSearch() {
   const [q, setQ] = useState('');
@@ -50,7 +57,7 @@ export function GearSearch() {
     setQ('');
   };
   const pickLens = (r: LensRow) => {
-    const spec = { id: lensId(r), name: `${r[0]} ${r[1]}`, minMm: r[2], maxMm: r[3], maxAperture: r[4], mount: r[5] };
+    const spec = lensSpecOf(r);
     const id = gearStore.getState().addLens(spec);
     const c = compositionStore.getState();
     c.update({ lensId: id, ...fitToLens(spec, c.focalMm, c.fNumber) });
@@ -96,7 +103,8 @@ export function GearSearch() {
             <button key={lensId(r)} role="option" aria-selected={false} onClick={() => pickLens(r)}>
               {r[0]} {r[1]}
               <span className="meta">
-                {r[2] === r[3] ? `${r[2]} mm` : `${r[2]}–${r[3]} mm`} · f/{r[4]} · {r[5] === 'fixed' ? 'fixed' : `${r[5]} mount`}
+                {r[2] === r[3] ? `${r[2]} mm` : `${r[2]}–${r[3]} mm`} · f/{r[4]}
+                {lensSpecOf(r).maxApertureLong ? `–${lensSpecOf(r).maxApertureLong}` : ''} · {r[5] === 'fixed' ? 'fixed' : `${r[5]} mount`}
               </span>
             </button>
           ))}

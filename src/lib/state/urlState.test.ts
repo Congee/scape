@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Orientation } from '@core/optics/fov';
-import { formatInstant, formatPoint, mapSearchFor, orientationFor, parseInstant, parseNumber, parsePoint, validateScene, viewfinderSearchFor, type SceneWorld } from './urlState';
+import { Orientation, Teleconverter } from '@core/optics/fov';
+import { formatInstant, formatPoint, mapSearchFor, orientationFor, parseInstant, parseNumber, parsePoint, teleconvertersFor, validateScene, viewfinderSearchFor, type SceneWorld } from './urlState';
 
 const HOBOKEN = { lat: 40.747952, lng: -74.023685 };
 const EDGE = { lat: 40.753918, lng: -74.000996 };
@@ -54,14 +54,29 @@ describe('urlState', () => {
   });
 
   it('round-trips the viewfinder search', () => {
-    const s = viewfinderSearchFor(world(), { focalMm: 135.25, orientation: Orientation.Portrait });
+    const s = viewfinderSearchFor(world(), { focalMm: 135.25, orientation: Orientation.Portrait, teleconverters: [] });
     expect(s.f).toBe(135.3);
     expect(s.o).toBe('p');
     expect(s.z).toBeUndefined();
     expect(orientationFor(validateScene(s as Record<string, unknown>).o)).toBe(Orientation.Portrait);
-    const land = viewfinderSearchFor(world(), { focalMm: 35, orientation: Orientation.Landscape });
+    const land = viewfinderSearchFor(world(), { focalMm: 35, orientation: Orientation.Landscape, teleconverters: [] });
     expect(land.o).toBeUndefined();
     expect(orientationFor(undefined)).toBe(Orientation.Landscape);
+  });
+
+  it('round-trips a teleconverter stack and reads a link made before it existed', () => {
+    const s = viewfinderSearchFor(world(), { focalMm: 600, orientation: Orientation.Landscape, teleconverters: [Teleconverter.X14, Teleconverter.X20] });
+    expect(s.tc).toBe('1.4,2');
+    expect(teleconvertersFor(validateScene(s as Record<string, unknown>).tc)).toEqual([Teleconverter.X14, Teleconverter.X20]);
+    // A link from before stacking carried one bare number.
+    expect(teleconvertersFor(validateScene({ tc: 2 }).tc)).toEqual([Teleconverter.X20]);
+    expect(teleconvertersFor(validateScene({ tc: '1.4' }).tc)).toEqual([Teleconverter.X14]);
+    expect(teleconvertersFor(validateScene({ f: '600' }).tc)).toEqual([]);
+    // Absent for none, so the common case stays out of the URL.
+    expect(viewfinderSearchFor(world(), { focalMm: 600, orientation: Orientation.Landscape, teleconverters: [] }).tc).toBeUndefined();
+    for (const junk of ['3', 1.7, 0, 'x', null]) expect(teleconvertersFor(validateScene({ tc: junk }).tc)).toEqual([]);
+    // Junk inside a stack is dropped, the rest still mounts.
+    expect(teleconvertersFor(validateScene({ tc: '1.4,9' }).tc)).toEqual([Teleconverter.X14]);
   });
 
   it('drops junk fields silently', () => {
@@ -72,7 +87,8 @@ describe('urlState', () => {
       t: undefined,
       tz: undefined,
       f: undefined,
-      o: undefined
+      o: undefined,
+      tc: undefined
     });
   });
 });

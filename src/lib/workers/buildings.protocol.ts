@@ -1,6 +1,6 @@
 import type { LngLat } from '@core/geo/geodesy';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height',  Mask: 'Mask', Shade: 'Shade' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** OSM Simple 3D Buildings roof families the rasteriser draws; Other renders flat at the apex. */
@@ -24,7 +24,27 @@ export interface HeightAtRequest {
   point: LngLat;
 }
 
-export type BuildingsRequest = TilesRequest | HeightAtRequest;
+/** Ground-shadow mask for the map viewport; the caller sizes the grid, the worker fills it. */
+export interface MaskRequest {
+  kind: typeof BuildingsKind.Mask;
+  id: number;
+  centre: LngLat;
+  /** Metres east/north of `centre` to the grid's first cell, in the centre's local Mercator frame. */
+  originE: number;
+  originN: number;
+  nx: number;
+  ny: number;
+  cellM: number;
+  sunAzDeg: number;
+  sunAltDeg: number;
+  /** Shadow ramps from lit to full over this depth below the ceiling, metres. */
+  softM: number;
+}
+
+export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest;
+
+/** Worker name the map's mask instance runs under; it sizes its caches for the map rect. */
+export const MASK_WORKER_NAME = 'buildings-mask';
 
 /**
  * One z14 tile of extruded footprints, flat typed arrays so a batch transfers without copying.
@@ -61,4 +81,5 @@ export type BuildingsResponse =
   | { kind: typeof BuildingsKind.Tiles; id: number; batch: BuildingBatch }
   | { kind: typeof BuildingsKind.Done; id: number; tiles: number; missing: number }
   | { kind: typeof BuildingsKind.Height; id: number; heightM: number | null }
+  | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; ms: number }
   | { kind: typeof BuildingsKind.Error; id: number; error: string };

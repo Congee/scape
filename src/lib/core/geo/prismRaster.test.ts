@@ -2,11 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { cameraBasis, type Camera } from '@core/optics/projection';
 import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
 import { destination, type LngLat } from './geodesy';
-import { buildPrisms, makePrismTarget, rasterisePrisms, type PrismShading } from './prismRaster';
+import { buildPrisms, sphereVisible, type PrismTile } from './prismRaster';
 
 const PIN: LngLat = { lng: -74, lat: 40.75 };
-const SHADE: PrismShading = { lightAzDeg: 180, hazeRgb: [150, 170, 200], night: 0, rangeM: 20_000 };
-const R2D = 180 / Math.PI;
 
 /** Local east/north metres to lng/lat around the pin. */
 const at = (e: number, n: number) => destination(PIN, (Math.atan2(e, n) * 180) / Math.PI, Math.hypot(e, n));
@@ -81,257 +79,83 @@ const rect = (cE: number, cN: number, we: number, dn: number): [number, number][
   [cE - we / 2, cN + dn / 2]
 ];
 
-const camera = (azimuthDeg: number, elevationDeg: number, focalMm = 50): Camera => ({ azimuthDeg, elevationDeg, focalMm, frameWmm: 36, frameHmm: 24 });
+const prisms = (boxes: Box[], eyeM = 0) => buildPrisms(batchOf(boxes), PIN, eyeM);
 
-function render(boxes: Box[], cam: Camera, rw = 120, rh = 80, eyeM = 0, shade = SHADE) {
-  const tile = buildPrisms(batchOf(boxes), PIN, eyeM);
-  const t = makePrismTarget(rw, rh);
-  const drawn = rasterisePrisms(t, cam, cameraBasis(cam), [tile], shade);
-  return { t, drawn };
+/** Walls kept for building i, as outward normals. */
+function walls(tile: PrismTile, i = 0): { nx: number; ny: number }[] {
+  const out: { nx: number; ny: number }[] = [];
+  for (let a = tile.ringStart[i]; a < tile.ringStart[i + 1]; a++) if (tile.wOk[a]) out.push({ nx: tile.wNx[a], ny: tile.wNy[a] });
+  return out;
 }
 
-/** Columns and rows holding at least one drawn pixel. */
-function extent(t: { rw: number; rh: number; depth: Float32Array }) {
-  let x0 = Infinity;
-  let x1 = -Infinity;
-  let y0 = Infinity;
-  let y1 = -Infinity;
-  let filled = 0;
-  for (let y = 0; y < t.rh; y++) {
-    for (let x = 0; x < t.rw; x++) {
-      if (!Number.isFinite(t.depth[y * t.rw + x])) continue;
-      filled++;
-      x0 = Math.min(x0, x);
-      x1 = Math.max(x1, x);
-      y0 = Math.min(y0, y);
-      y1 = Math.max(y1, y);
-    }
-  }
-  return { x0, x1, y0, y1, filled, widthPx: x1 - x0 + 1, heightPx: y1 - y0 + 1 };
+/** What the GPU mesh triangulates out of a tile: two triangles per wall quad, a fan per roof face. */
+function casterTriangles(tile: PrismTile) {
+  let wall = 0;
+  for (let i = 0; i < tile.count; i++) for (let a = tile.ringStart[i]; a < tile.ringStart[i + 1]; a++) if (tile.wOk[a]) wall += 2;
+  let roof = 0;
+  for (let q = 0; q < tile.faceStart[tile.count]; q++) roof += tile.faceVert[q + 1] - tile.faceVert[q] - 2;
+  return { wall, roof, total: wall + roof };
 }
 
-// -- Skyline probes, for a camera looking due north --------------------------------------------
-
-const ROOF_W = 480;
-const ROOF_H = 480;
-
-/** Raster column a point at `e` metres east and `n` metres north falls in, at elevation 0. */
-const colOf = (e: number, n: number, cam: Camera) => Math.round(((e / n) * cam.focalMm * ROOF_W) / cam.frameWmm + ROOF_W / 2 - 0.5);
-
-/** Elevation angle of a pixel row's centre; the camera turns about the east axis, so this is exact. */
-const rowAngleDeg = (cam: Camera, py: number) => cam.elevationDeg + Math.atan((((ROOF_H / 2 - 0.5 - py) * cam.frameHmm) / ROOF_H) / cam.focalMm) * R2D;
-
-function edgeRow(t: { rw: number; rh: number; depth: Float32Array }, x: number, from: 'top' | 'bottom'): number {
-  const ys = from === 'top' ? [...Array.from({ length: t.rh }).keys()] : [...Array.from({ length: t.rh }).keys()].toReversed();
-  for (const y of ys) if (Number.isFinite(t.depth[y * t.rw + x])) return y;
-  return NaN;
-}
-
-/** Height above the eye of the topmost drawn pixel in a column, for something `d` metres away. */
-const topM = (t: { rw: number; rh: number; depth: Float32Array }, cam: Camera, x: number, d: number, eyeM = 0) => eyeM + d * Math.tan(rowAngleDeg(cam, edgeRow(t, x, 'top')) / R2D);
-const bottomM = (t: { rw: number; rh: number; depth: Float32Array }, cam: Camera, x: number, d: number, eyeM = 0) => eyeM + d * Math.tan(rowAngleDeg(cam, edgeRow(t, x, 'bottom')) / R2D);
-
-describe('prismRaster', () => {
-  it('covers the projected span of a 20 m box whose near face is 200 m ahead, at depth 200', () => {
-    // 20 m cube centred 210 m north: the silhouette is its near face, 20 m wide at 200 m.
-    const { t } = render([{ ring: square(0, 210, 20), heightM: 20 }], camera(0, 0), 120, 80, 10);
-    const ex = extent(t);
-    const span = (50 * (20 / 200) * 120) / 36;
-    expect(ex.widthPx).toBeGreaterThan(span - 1.5);
-    expect(ex.widthPx).toBeLessThan(span + 1.5);
-    // The eye is level with the middle of the near wall, so the frame centre row lands on it.
-    const centre = t.depth[Math.floor(t.rh / 2) * t.rw + Math.floor(t.rw / 2)];
-    expect(centre).toBeGreaterThan(199);
-    expect(centre).toBeLessThan(201);
+describe('buildPrisms', () => {
+  it('keeps all four walls of a box, including the one facing away from the eye', () => {
+    const tile = prisms([{ ring: square(0, 300, 60), heightM: 60 }]);
+    const w = walls(tile);
+    expect(w).toHaveLength(4);
+    // The far wall's normal points north, straight away from the eye at the origin.
+    expect(w.filter((q) => q.ny > 0.99)).toHaveLength(1);
+    expect(w.filter((q) => q.ny < -0.99)).toHaveLength(1);
+    for (const q of w) expect(Math.hypot(q.nx, q.ny)).toBeCloseTo(1, 6);
   });
 
-  it('lets a near box hide a far one behind it', () => {
-    const far = { ring: square(0, 600, 40), heightM: 60 };
-    const near = { ring: square(0, 200, 40), heightM: 60 };
-    const cam = camera(0, 0);
-    const alone = render([far], cam, 120, 80, 30).t;
-    const both = render([far, near], cam, 120, 80, 30).t;
-    const i = Math.floor(both.rh / 2) * both.rw + Math.floor(both.rw / 2);
-    expect(alone.depth[i]).toBeGreaterThan(500);
-    expect(both.depth[i]).toBeGreaterThan(179);
-    expect(both.depth[i]).toBeLessThan(181);
-    let hidden = 0;
-    for (let k = 0; k < both.depth.length; k++) if (Number.isFinite(alone.depth[k]) && both.depth[k] < 300) hidden++;
-    expect(hidden).toBeGreaterThan(100);
+  it('builds the same walls whichever side of the building the eye stands on', () => {
+    const north = walls(prisms([{ ring: square(0, 300, 60), heightM: 60 }]));
+    const south = walls(prisms([{ ring: square(0, -300, 60), heightM: 60 }]));
+    expect(south).toHaveLength(north.length);
+    for (const q of north) expect(south.some((p) => Math.abs(p.nx - q.nx) < 1e-3 && Math.abs(p.ny - q.ny) < 1e-3)).toBe(true);
   });
 
-  it('fills an L-shaped roof by even-odd, leaving the notch empty', () => {
-    // 80 m square with the north-east quadrant cut out, seen from 400 m straight above.
-    const ring: [number, number][] = [
-      [-40, -40],
-      [40, -40],
-      [40, 0],
-      [0, 0],
-      [0, 40],
-      [-40, 40]
-    ];
-    const cam = camera(0, -90, 20);
-    const { t } = render([{ ring, heightM: 20 }], cam, 200, 200, 400);
-    const ex = extent(t);
-    expect(ex.filled).toBeGreaterThan(300);
-    // Notch centre, 20 m from either cut edge, and a mirrored point inside the solid leg.
-    const px = (e: number, n: number) => {
-      const u = 20 - 400;
-      const x = Math.round(((e / -u) * cam.focalMm * 200) / 36 + 100 - 0.5);
-      const y = Math.round(100 - 0.5 - ((n / -u) * cam.focalMm * 200) / 24);
-      return t.depth[y * 200 + x];
-    };
-    expect(px(20, 20)).toBe(Infinity);
-    expect(Number.isFinite(px(-20, -20))).toBe(true);
-    expect(Number.isFinite(px(-20, 20))).toBe(true);
-  });
-
-  it('writes nothing for a box behind the camera', () => {
-    const { t, drawn } = render([{ ring: square(0, -200, 40), heightM: 60 }], camera(0, 0));
-    expect(drawn).toBe(0);
-    expect(extent(t).filled).toBe(0);
-  });
-
-  it('produces only finite positive depths for a box straddling the near plane', () => {
-    // 40 m box abreast of the eye: its west wall runs from behind the camera to well in front of it.
-    const { t } = render([{ ring: square(30, 5, 40), heightM: 30 }], camera(0, 0, 14));
-    const ex = extent(t);
-    expect(ex.filled).toBeGreaterThan(0);
-    for (const d of t.depth) expect(d === Infinity || (Number.isFinite(d) && d > 0)).toBe(true);
-  });
-
-  it('draws the same prism whichever way its ring winds', () => {
+  it('winds walls outward whichever way the footprint ring winds', () => {
     const ring = square(0, 300, 60);
-    const cam = camera(0, 0);
-    const ccw = render([{ ring, heightM: 60 }], cam, 120, 80, 30).t;
-    const cw = render([{ ring: ring.toReversed(), heightM: 60 }], cam, 120, 80, 30).t;
-    expect([...cw.depth]).toEqual([...ccw.depth]);
-    expect([...cw.color]).toEqual([...ccw.color]);
-    expect(extent(ccw).filled).toBeGreaterThan(0);
+    const ccw = walls(prisms([{ ring, heightM: 60 }]));
+    const cw = walls(prisms([{ ring: ring.toReversed(), heightM: 60 }]));
+    expect(cw).toHaveLength(4);
+    for (const q of ccw) expect(cw.some((p) => Math.abs(p.nx - q.nx) < 1e-3 && Math.abs(p.ny - q.ny) < 1e-3)).toBe(true);
   });
 
-  it('culls buildings smaller than a pixel and beyond the range', () => {
-    const tiny = render([{ ring: square(0, 20_000, 2), heightM: 2, groundM: 0 }], camera(0, 0), 120, 80, 0, { ...SHADE, rangeM: 40_000 });
-    expect(tiny.drawn).toBe(0);
-    const far = render([{ ring: square(0, 30_000, 200), heightM: 300 }], camera(0, 0), 120, 80, 0, { ...SHADE, rangeM: 20_000 });
-    expect(far.drawn).toBe(0);
+  it('keeps a roof plane that sits above the eye, where the camera sees only its underside', () => {
+    const tile = prisms([{ ring: square(0, 300, 60), heightM: 60 }]);
+    expect(tile.faceStart[1] - tile.faceStart[0]).toBe(1);
+    // N·P = fPc with N up: a roof 60 m over the eye is on the far side of the eye's own plane.
+    expect(tile.fPc[0]).toBeGreaterThan(55);
+    expect(tile.fNz[0]).toBeCloseTo(1, 6);
   });
 
-  it('shades walls by the light azimuth and hazes distant buildings toward the ground colour', () => {
-    const box = { ring: square(0, 300, 60), heightM: 60 };
-    const cam = camera(0, 0);
-    const lit = render([box], cam, 120, 80, 30, { ...SHADE, lightAzDeg: 180 }).t;
-    const dark = render([box], cam, 120, 80, 30, { ...SHADE, lightAzDeg: 0 }).t;
-    const i = Math.floor(dark.rh / 2) * dark.rw + Math.floor(dark.rw / 2);
-    // The wall faces south (bearing 180), so a light from the south is full strength.
-    expect(lit.color[i] >> 16).toBeGreaterThan(dark.color[i] >> 16);
-    const night = render([box], cam, 120, 80, 30, { ...SHADE, lightAzDeg: 180, night: 1 }).t;
-    expect(night.color[i] >> 16).toBeLessThan(lit.color[i] >> 16);
-    expect(night.color[i] >> 16).toBeGreaterThan(100);
+  it('drops the curvature of the earth out of every vertex', () => {
+    const near = prisms([{ ring: square(0, 300, 60), heightM: 60 }]);
+    const far = prisms([{ ring: square(0, 20_000, 60), heightM: 60 }]);
+    expect(near.uTop[0]).toBeCloseTo(60, 1);
+    // ~31 m of drop at 20 km, so the same 60 m building tops out well below the eye's horizontal.
+    expect(far.uTop[0]).toBeLessThan(35);
+    expect(far.uTop[0]).toBeGreaterThan(25);
   });
 
-  it('tilts a skillion down toward roof:direction', () => {
-    const cam = camera(0, 0);
-    const box: Box = { ring: square(0, 300, 60), heightM: 60, roofShape: RoofShape.Skillion, roofHeightM: 20, roofDirDeg: 90 };
-    const west = colOf(-25, 270, cam);
-    const east = colOf(25, 270, cam);
-    // Down toward the east: the apex edge is the west one, at the full 60 m.
-    const down = render([box], cam, ROOF_W, ROOF_H).t;
-    expect(topM(down, cam, west, 270)).toBeCloseTo(58.3, 0);
-    expect(topM(down, cam, east, 270)).toBeCloseTo(41.7, 0);
-    const up = render([{ ...box, roofDirDeg: 270 }], cam, ROOF_W, ROOF_H).t;
-    expect(topM(up, cam, west, 270)).toBeCloseTo(41.7, 0);
-    expect(topM(up, cam, east, 270)).toBeCloseTo(58.3, 0);
+  it('floats a building_part on its min_height', () => {
+    const tile = prisms([{ ring: square(0, 300, 60), heightM: 140, minHeightM: 100 }]);
+    expect(tile.uBase[0]).toBeCloseTo(100, 0);
+    expect(tile.uTop[0]).toBeCloseTo(140, 0);
   });
 
-  it('raises a pyramidal roof to its apex over the centroid and to the roof base at the corners', () => {
-    // Eye between the roof base and the apex, so the near roof face is the one facing us.
-    const cam = camera(0, 0);
-    const { t } = render([{ ring: square(0, 300, 60), heightM: 60, roofShape: RoofShape.Pyramidal, roofHeightM: 20 }], cam, ROOF_W, ROOF_H, 50);
-    const apex = topM(t, cam, colOf(0, 300, cam), 300, 50);
-    const corner = topM(t, cam, colOf(-30, 300, cam), 300, 50);
-    expect(apex).toBeGreaterThan(58.5);
-    expect(apex).toBeLessThan(61.5);
-    expect(corner).toBeGreaterThan(38);
-    expect(corner).toBeLessThan(45);
-  });
-
-  it('runs a gabled ridge along the long side, and across it with roof:orientation', () => {
-    const cam = camera(0, 0);
-    const box: Box = { ring: rect(0, 300, 80, 40), heightM: 60, roofShape: RoofShape.Gabled, roofHeightM: 20 };
-    const mid = colOf(0, 280, cam);
-    const off = colOf(-30, 280, cam);
-    // Ridge east-west: the skyline is the ridge, the same height right across the footprint.
-    const along = render([box], cam, ROOF_W, ROOF_H).t;
-    expect(rowAngleDeg(cam, edgeRow(along, mid, 'top'))).toBeCloseTo(rowAngleDeg(cam, edgeRow(along, off, 'top')), 1);
-    // Ridge north-south: the gable end faces us, peaked over the centre and dropping to the eaves.
-    const across = render([{ ...box, roofAcross: 1 }], cam, ROOF_W, ROOF_H).t;
-    expect(topM(across, cam, mid, 280)).toBeCloseTo(60, 0);
-    expect(topM(across, cam, off, 280)).toBeLessThan(50);
-  });
-
-  it('keeps a hipped roof inside the gabled silhouette', () => {
-    const cam = camera(0, 0);
-    const box: Box = { ring: rect(0, 300, 80, 40), heightM: 60, roofHeightM: 20 };
-    const gab = render([{ ...box, roofShape: RoofShape.Gabled }], cam, ROOF_W, ROOF_H).t;
-    const hip = render([{ ...box, roofShape: RoofShape.Hipped }], cam, ROOF_W, ROOF_H).t;
-    let lower = 0;
-    for (let x = 0; x < ROOF_W; x++) {
-      const g = edgeRow(gab, x, 'top');
-      const h = edgeRow(hip, x, 'top');
-      if (Number.isNaN(g)) continue;
-      expect(Number.isNaN(h) || h >= g).toBe(true);
-      if (!Number.isNaN(h) && h > g) lower++;
-    }
-    // The hips cut the ridge back by half the width at each end, so the ends really do drop.
-    expect(lower).toBeGreaterThan(20);
-  });
-
-  it('domes up to the roof height over the centroid', () => {
-    const cam = camera(0, 0);
-    const { t } = render([{ ring: square(0, 300, 60), heightM: 60, roofShape: RoofShape.Dome, roofHeightM: 20 }], cam, ROOF_W, ROOF_H, 55);
-    expect(topM(t, cam, colOf(0, 300, cam), 300, 55)).toBeCloseTo(60, 0);
-  });
-
-  it('floats a building_part on its min_height, drawing nothing below the base', () => {
-    const cam = camera(0, 24);
-    const ring = square(0, 300, 60);
-    const mid = colOf(0, 270, cam);
-    const part = render([{ ring, heightM: 140, minHeightM: 100 }], cam, ROOF_W, ROOF_H).t;
-    expect(bottomM(part, cam, mid, 270)).toBeCloseTo(100, 0);
-    const solid = render([{ ring, heightM: 140 }], cam, ROOF_W, ROOF_H).t;
-    expect(bottomM(solid, cam, mid, 270)).toBeLessThan(60);
-  });
-
-  it('picks a default roof height when roof:height is missing', () => {
-    const cam = camera(0, 0);
-    const ring = square(0, 300, 60);
-    const off = colOf(-25, 270, cam);
-    const flat = render([{ ring, heightM: 60 }], cam, ROOF_W, ROOF_H).t;
-    expect(topM(flat, cam, off, 270)).toBeCloseTo(60, 0);
-    // 30° pitch over the 30 m half-width, under the 0.4 × rise ceiling: a 17.3 m roof.
-    const gabled = render([{ ring, heightM: 60, roofShape: RoofShape.Gabled, roofAcross: 1 }], cam, ROOF_W, ROOF_H).t;
-    expect(topM(gabled, cam, colOf(0, 270, cam), 270)).toBeCloseTo(60, 0);
-    expect(topM(gabled, cam, off, 270)).toBeCloseTo(45.6, 0);
-  });
-
-  it('degrades a degenerate or over-tall roof to a flat prism instead of throwing', () => {
-    const cam = camera(0, 0);
-    const bad: Box[] = [
+  it('gives a degenerate footprint no walls and no roof faces instead of throwing', () => {
+    const tile = prisms([
       { ring: [[-10, 290], [10, 290]], heightM: 40, roofShape: RoofShape.Gabled, roofHeightM: 10 },
       { ring: [[NaN, NaN], [10, 290], [0, 310]], heightM: 40, roofShape: RoofShape.Hipped },
       { ring: square(100, 300, 0), heightM: 40, roofShape: RoofShape.Dome, roofHeightM: 10 }
-    ];
-    expect(render(bad, cam, ROOF_W, ROOF_H).drawn).toBe(0);
-    // A roof taller than the walls is clamped, not inverted.
-    const tall = render([{ ring: square(0, 300, 60), heightM: 20, roofShape: RoofShape.Gabled, roofHeightM: 30, roofAcross: 1 }], cam, ROOF_W, ROOF_H).t;
-    expect(topM(tall, cam, colOf(0, 270, cam), 270)).toBeCloseTo(20, 0);
-    let odd = 0;
-    for (const d of tall.depth) if (!(d === Infinity || d > 0)) odd++;
-    expect(odd).toBe(0);
+    ]);
+    expect(casterTriangles(tile).total).toBe(0);
   });
 
-  it('rasterises a dense tile of mixed roofs well inside the frame budget', () => {
+  it('counts the casters a dense tile of mixed roofs contributes', () => {
     const shapes = [RoofShape.Flat, RoofShape.Skillion, RoofShape.Gabled, RoofShape.Hipped, RoofShape.Pyramidal, RoofShape.Dome];
     const boxes: Box[] = [];
     for (let i = 0; i < 3000; i++) {
@@ -340,16 +164,25 @@ describe('prismRaster', () => {
       const n = 300 + ((i * 457) % 1700);
       boxes.push({ ring: rect(e, n, 20 + (i % 40), 16 + (i % 25)), heightM: 20 + (i % 180), roofShape: shapes[i % shapes.length], roofHeightM: i % 3 === 0 ? 0 : 5 + (i % 12), roofDirDeg: i % 4 === 0 ? NaN : (i * 37) % 360, roofAcross: i % 5 === 0 ? 1 : 0 });
     }
-    const cam = camera(0, 5, 24);
     const tile = buildPrisms(batchOf(boxes), PIN, 20);
-    const t = makePrismTarget(521, 347);
-    const basis = cameraBasis(cam);
-    rasterisePrisms(t, cam, basis, [tile], SHADE);
-    const t0 = performance.now();
-    for (let k = 0; k < 5; k++) rasterisePrisms(t, cam, basis, [tile], SHADE);
-    const ms = (performance.now() - t0) / 5;
-    console.log(`rasterisePrisms: ${ms.toFixed(1)} ms for 3000 mixed-roof rows at 521x347`);
-    expect(ms).toBeLessThan(200);
-    expect(extent(t).filled).toBeGreaterThan(10_000);
+    const t = casterTriangles(tile);
+    // Every ring edge is a wall now, gable peaks included, and nothing drops it.
+    expect(t.wall).toBe(2 * tile.ringStart[tile.count]);
+    expect(t.roof).toBeGreaterThan(3000);
+  });
+});
+
+describe('sphereVisible', () => {
+  const cam: Camera = { azimuthDeg: 0, elevationDeg: 0, focalMm: 50, frameWmm: 36, frameHmm: 24 };
+  const basis = cameraBasis(cam);
+  const coneDeg = (Math.atan(Math.hypot(36, 24) / 2 / 50) * 180) / Math.PI;
+  const visible = (e: number, n: number, u: number, r: number) => sphereVisible(e, n, u, r, basis, 50, 36, 24, coneDeg);
+
+  it('keeps what is in the frame and drops what is behind or beside it', () => {
+    expect(visible(0, 300, 0, 10)).toBe(true);
+    expect(visible(0, -300, 0, 10)).toBe(false);
+    expect(visible(300, 10, 0, 10)).toBe(false);
+    // Straddling the near plane: the diagonal cone test, which a sphere round the eye passes.
+    expect(visible(0, 5, 0, 50)).toBe(true);
   });
 });

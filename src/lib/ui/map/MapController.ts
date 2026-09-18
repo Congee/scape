@@ -6,6 +6,7 @@ import {
   NavigationControl,
   ScaleControl,
   type GeoJSONSource,
+  type ExpressionSpecification,
   type ImageSource,
   type MapMouseEvent
 } from 'maplibre-gl';
@@ -14,20 +15,22 @@ import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
-import { bearingDeg, destination, distanceM, type LngLat } from '@core/geo/geodesy';
+import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
+import { frameOf, maskCorners, maskFrame, maskPixels, maskRect, type MaskRect } from '@core/geo/shadowMask';
 import { depthOfField } from '@core/optics/dof';
-import { clampFocalMm, cocMm, focalForFovMm, fovDeg, frameMm, sensorPixels } from '@core/optics/fov';
+import { cocMm, effectiveOptics, focalForFovMm, fovDeg, frameMm, sensorPixels, tcFactor } from '@core/optics/fov';
 import '@data/maplibre';
-import { styleFor, type Basemap } from '@data/basemaps';
+import { isDarkBasemap, styleFor, type Basemap } from '@data/basemaps';
+import { BUILDINGS_ATTRIBUTION, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
 import { ensureDemProtocol } from '@data/demProtocol';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
-import { buildingHeightAt } from '@state/buildings';
+import { buildingsStore, buildingHeightAt, requestShadowMask } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
-import { gearStore, sensorById } from '@state/gear';
+import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { mapStatusStore } from '@state/mapStatus';
 import { markersStore } from '@state/markers';
 import { currentBasemap, offlineStore } from '@state/offline';
@@ -56,6 +59,26 @@ const HILL_SRC = 'terrain-dem-hillshade';
 const LIGHTS_SRC = 'night-lights';
 const LIGHTS_URL = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png';
 const LIGHTS_ATTRIBUTION = 'Night lights: <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>, VIIRS Black Marble 2016';
+// Scape's own Overture buildings, replacing whatever the basemap draws.
+const BLD_SRC = 'overture-buildings';
+const BLD_LAYER = 'overture-building';
+const BLD_PART_LAYER = 'overture-building-part';
+const BLD_SHADOW_SRC = 'building-shadow';
+const BLD_SHADOW_LAYER = 'building-shadow';
+const BLD_MIN_ZOOM = 14;
+const SHADOW_OPACITY = 0.35;
+/** Shadow edges ramp over this depth below the ceiling; the sun's own width is about this soft. */
+const SHADOW_SOFT_M = 5;
+/** Several triggers fire together and the build is a worker round trip, so coalesce them. */
+const SHADOW_DEBOUNCE_MS = 180;
+const D2R = Math.PI / 180;
+const M_PER_DEG_LAT = (EARTH_RADIUS_M * Math.PI) / 180;
+/** Upper bounds on a shadow's reach, sizing the mask rect past the viewport edge. */
+const TALLEST_BUILDING_M = 600;
+const SHADOW_MAX_LENGTH_M = 5_000;
+const BLD_HEIGHT: ExpressionSpecification = ['coalesce', ['get', 'height'], ['*', ['get', 'num_floors'], 3], 5];
+const BLD_BASE: ExpressionSpecification = ['coalesce', ['get', 'min_height'], 0];
+const NOT_UNDERGROUND: ExpressionSpecification = ['!=', ['get', 'is_underground'], true];
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
@@ -69,6 +92,14 @@ function regionFeatures(b: Bbox | null): GeoJSON.FeatureCollection {
   const east = b.west <= b.east ? b.east : b.east + 360;
   const ring = [[b.west, b.south], [east, b.south], [east, b.north], [b.west, b.north], [b.west, b.south]];
   return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } }] };
+}
+
+/** Snapped to a lattice of `stepM`, so a small pan asks the worker for the grid it already has. */
+function snapPoint(p: LngLat, stepM: number): LngLat {
+  const stepLat = stepM / M_PER_DEG_LAT;
+  const lat = Math.round(p.lat / stepLat) * stepLat;
+  const stepLng = stepM / Math.max(1, M_PER_DEG_LAT * Math.cos(lat * D2R));
+  return { lat, lng: Math.round(p.lng / stepLng) * stepLng };
 }
 
 const samePoint = (a: LngLat | null, b: LngLat | null) => a === b || (!!a && !!b && a.lat === b.lat && a.lng === b.lng);
@@ -100,6 +131,7 @@ export class MapController {
   private draftBefore: Bbox | null = null;
   private dragging2 = false;
   private draggingFov = false;
+  private shadowTimer: ReturnType<typeof setTimeout> | 0 = 0;
 
   constructor(container: HTMLElement) {
     const w = worldStore.getState();
@@ -179,17 +211,21 @@ export class MapController {
       this.addOverlayLayers();
       this.applyTerrain();
       this.applyNightLights();
+      this.applyBuildings();
       this.updateRay();
       this.renderAll();
     });
     this.map.on('moveend', () => {
       this.updateRay();
       this.renderAll();
+      this.scheduleShadows();
       const c = this.map.getCenter();
       worldStore.getState().setView({ center: { lng: c.lng, lat: c.lat }, zoom: this.map.getZoom() });
     });
 
     this.unsubs.push(
+      () => clearTimeout(this.shadowTimer),
+      buildingsStore.subscribe((st) => st.shadowMask, () => this.paintShadowMask()),
       worldStore.subscribe(
         (st) => st.pin,
         (pin) => {
@@ -197,6 +233,7 @@ export class MapController {
           this.renderLive();
           this.renderGeodetic();
           this.renderFov();
+          this.scheduleShadows();
         },
         { equalityFn: samePoint }
       ),
@@ -210,7 +247,10 @@ export class MapController {
         },
         { equalityFn: samePoint }
       ),
-      worldStore.subscribe((st) => st.time, () => this.renderLive()),
+      worldStore.subscribe((st) => st.time, () => {
+        this.renderLive();
+        this.scheduleShadows();
+      }),
       worldStore.subscribe((st) => st.pinHeightM, () => this.renderLive()),
       worldStore.subscribe((st) => st.pin2HeightM, () => this.renderLive()),
       worldStore.subscribe(
@@ -245,6 +285,11 @@ export class MapController {
       settingsStore.subscribe(
         (st) => [st.terrain, st.showHillshade, st.terrain3d] as const,
         () => this.applyTerrain(),
+        { equalityFn: shallow }
+      ),
+      settingsStore.subscribe(
+        (st) => [st.showBuildings, st.showSunShadows] as const,
+        () => this.applyBuildings(),
         { equalityFn: shallow }
       ),
       settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
@@ -352,7 +397,10 @@ export class MapController {
   }
 
   private renderedHeightAt(p: LngLat): number | null {
-    const layers = buildingLayerIds(this.map.getStyle()?.layers).filter((id) => this.map.getLayer(id));
+    // Ours answer while the basemap's are hidden, and `building_part` is not a `building`
+    // source-layer, so `buildingLayerIds` never finds it.
+    const ids = new Set([...buildingLayerIds(this.map.getStyle()?.layers), BLD_LAYER, BLD_PART_LAYER]);
+    const layers = [...ids].filter((id) => this.map.getLayer(id));
     if (!layers.length) return null;
     return heightFromFeatures(this.map.queryRenderedFeatures(this.map.project([p.lng, p.lat]), { layers }));
   }
@@ -565,6 +613,122 @@ export class MapController {
     this.map.setTerrain(t3d ? { source: DEM_SRC, exaggeration: 1 } : null);
   }
 
+  /** Our extrusions sit under the labels, over their own shadows, and in place of the basemap's buildings. */
+  private applyBuildings() {
+    if (!this.styleReady) return;
+    const on = settingsStore.getState().showBuildings;
+    if (on && !this.map.getLayer(BLD_LAYER)) {
+      if (!this.map.getSource(BLD_SRC)) this.map.addSource(BLD_SRC, { type: 'vector', url: `pmtiles://${OVERTURE_BUILDINGS_URL}`, attribution: BUILDINGS_ATTRIBUTION });
+      if (!this.map.getSource(BLD_SHADOW_SRC)) this.map.addSource(BLD_SHADOW_SRC, { type: 'image', url: BLANK_PNG, coordinates: [[-1, 1], [1, 1], [1, -1], [-1, -1]] });
+      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
+      const dark = isDarkBasemap(currentBasemap());
+      this.map.addLayer(
+        {
+          id: BLD_SHADOW_LAYER,
+          type: 'raster',
+          source: BLD_SHADOW_SRC,
+          layout: { visibility: 'none' },
+          // A cross-fade would flicker on every rebuild; one raster composite cannot compound.
+          paint: { 'raster-opacity': SHADOW_OPACITY, 'raster-fade-duration': 0 }
+        },
+        before
+      );
+      const paint = {
+        'fill-extrusion-color': dark ? '#5a6472' : '#c9ced6',
+        'fill-extrusion-height': BLD_HEIGHT,
+        'fill-extrusion-base': BLD_BASE,
+        'fill-extrusion-opacity': 0.9,
+        'fill-extrusion-vertical-gradient': true
+      } as const;
+      this.map.addLayer(
+        {
+          id: BLD_LAYER,
+          type: 'fill-extrusion',
+          source: BLD_SRC,
+          'source-layer': 'building',
+          minzoom: BLD_MIN_ZOOM,
+          // Overture replaces a building that has parts with those parts; drawing both double-draws it.
+          filter: ['all', ['!=', ['get', 'has_parts'], true], NOT_UNDERGROUND],
+          paint
+        },
+        before
+      );
+      this.map.addLayer(
+        { id: BLD_PART_LAYER, type: 'fill-extrusion', source: BLD_SRC, 'source-layer': 'building_part', minzoom: BLD_MIN_ZOOM, filter: NOT_UNDERGROUND, paint },
+        before
+      );
+    } else if (!on) {
+      for (const id of [BLD_LAYER, BLD_PART_LAYER, BLD_SHADOW_LAYER]) if (this.map.getLayer(id)) this.map.removeLayer(id);
+    }
+    this.setBasemapBuildings(!on);
+    this.scheduleShadows();
+  }
+
+  /** The basemap's own extrusions are hidden, not removed: `applyRenderedHeight` still queries them. */
+  private setBasemapBuildings(visible: boolean) {
+    for (const id of buildingLayerIds(this.map.getStyle()?.layers)) {
+      if (id === BLD_LAYER || id === BLD_PART_LAYER || !this.map.getLayer(id)) continue;
+      this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+    }
+  }
+
+  /** The build is async through the worker, so it is debounced rather than driven per frame. */
+  private scheduleShadows() {
+    clearTimeout(this.shadowTimer);
+    this.shadowTimer = setTimeout(() => this.requestShadows(), SHADOW_DEBOUNCE_MS);
+  }
+
+  private requestShadows() {
+    if (!this.styleReady || !this.map.getLayer(BLD_SHADOW_LAYER)) return;
+    const s = settingsStore.getState();
+    if (!s.showBuildings || !s.showSunShadows || this.map.getZoom() < BLD_MIN_ZOOM) return this.hideShadows();
+    const w = worldStore.getState();
+    const sun = position(SkyBody.Sun, new Date(w.time), makeObserver(w.pin, w.pinHeightM));
+    if (!(sun.altitude > 0)) return this.hideShadows();
+    const b = this.shadowBounds(sun.altitude, sun.azimuth);
+    const c = this.map.getCenter();
+    // Sized against the true centre, then rebuilt around a snapped one so a small pan reuses the grid.
+    const rough = this.shadowRect({ lng: c.lng, lat: c.lat }, b);
+    const centre = snapPoint({ lng: c.lng, lat: c.lat }, rough.cellM * 16);
+    requestShadowMask(centre, this.shadowRect(centre, b), sun.azimuth, sun.altitude, SHADOW_SOFT_M);
+    // A toggle back on finds the store unchanged; the mask already in hand goes back up.
+    this.paintShadowMask();
+  }
+
+  private shadowRect(centre: LngLat, b: { west: number; east: number; south: number; north: number }): MaskRect {
+    const f = maskFrame(centre);
+    const sw = frameOf(f, { lng: b.west, lat: b.south });
+    const ne = frameOf(f, { lng: b.east, lat: b.north });
+    return maskRect(sw.e, ne.e, sw.n, ne.n);
+  }
+
+  private hideShadows() {
+    if (this.map.getLayer(BLD_SHADOW_LAYER)) this.map.setLayoutProperty(BLD_SHADOW_LAYER, 'visibility', 'none');
+  }
+
+  /** Keeps the previous image on screen until the worker answers. */
+  private paintShadowMask() {
+    const m = buildingsStore.getState().shadowMask;
+    const src = this.styleReady ? (this.map.getSource(BLD_SHADOW_SRC) as ImageSource | undefined) : undefined;
+    if (!m || !src || !this.map.getLayer(BLD_SHADOW_LAYER)) return;
+    src.updateImage({ image: new ImageData(maskPixels(m.mask, m.nx, m.ny), m.nx, m.ny), coordinates: maskCorners(m.centre, m) });
+    this.map.setLayoutProperty(BLD_SHADOW_LAYER, 'visibility', 'visible');
+  }
+
+  /** The viewport grown up-sun by the longest shadow anything out there could cast into it. */
+  private shadowBounds(altDeg: number, azDeg: number): { west: number; east: number; south: number; north: number } {
+    const b = this.map.getBounds();
+    const padM = Math.min(TALLEST_BUILDING_M / Math.tan(altDeg * D2R), SHADOW_MAX_LENGTH_M);
+    const north = Math.max(0, Math.cos(azDeg * D2R)) * padM;
+    const south = Math.max(0, -Math.cos(azDeg * D2R)) * padM;
+    const east = Math.max(0, Math.sin(azDeg * D2R)) * padM;
+    const west = Math.max(0, -Math.sin(azDeg * D2R)) * padM;
+    // The widest degree at any latitude the padded box reaches.
+    const absLat = Math.min(89, Math.max(Math.abs(b.getNorth()), Math.abs(b.getSouth())) + padM / M_PER_DEG_LAT);
+    const perLng = Math.max(1, M_PER_DEG_LAT * Math.cos(absLat * D2R));
+    return { west: b.getWest() - west / perLng, east: b.getEast() + east / perLng, south: b.getSouth() - south / M_PER_DEG_LAT, north: b.getNorth() + north / M_PER_DEG_LAT };
+  }
+
   private applyNightLights() {
     if (!this.styleReady) return;
     const on = settingsStore.getState().showLightPollution;
@@ -684,12 +848,13 @@ export class MapController {
     }
     const sensor = sensorById(c.sensorId, gearStore.getState().cameras);
     const frame = frameMm(sensor, c.orientation);
-    const hfov = fovDeg(frame.w, c.focalMm);
+    const opt = effectiveOptics(c);
+    const hfov = fovDeg(frame.w, opt.focalMm);
     const aim = aimFor(c, w, null);
     const targetM = w.pin2 ? distanceM(w.pin, w.pin2) : null;
     const rangeM = c.fovRangeM ?? targetM ?? DEFAULT_FOV_RANGE_M;
     const focusM = c.focusDistM ?? targetM;
-    const dof = focusM ? depthOfField(c.focalMm, c.fNumber, cocMm(sensor, sensorPixels(sensor), settingsStore.getState().cocRule), focusM) : null;
+    const dof = focusM ? depthOfField(opt.focalMm, opt.fNumber, cocMm(sensor, sensorPixels(sensor), settingsStore.getState().cocRule), focusM) : null;
     src.setData(fovCone(w.pin, aim.azimuthDeg, hfov, { rangeM, dofNearM: dof?.nearM, dofFarM: dof?.farM, panoDeg: c.panoTotalDeg }));
 
     if (this.draggingFov) return;
@@ -714,7 +879,7 @@ export class MapController {
           const a = aimFor(cs, ws, null);
           const half = Math.max(0.5, angleDiff(bearingDeg(ws.pin, p), a.azimuthDeg));
           const fr = frameMm(sensorById(cs.sensorId, gearStore.getState().cameras), cs.orientation);
-          cs.update({ focalMm: Math.round(clampFocalMm(focalForFovMm(fr.w, half * 2)) * 10) / 10 });
+          cs.update(zoomPatch(cs, focalForFovMm(fr.w, half * 2) / tcFactor(cs.teleconverters)));
         },
         (d) => (this.draggingFov = d)
       );

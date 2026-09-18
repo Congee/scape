@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { bearingDeg, normalizeBearing } from '@core/geo/geodesy';
-import { DEFAULT_SENSOR_ID, Orientation } from '@core/optics/fov';
+import { clampBaseFocalMm, DEFAULT_SENSOR_ID, Orientation, tcFactor, type Teleconverter } from '@core/optics/fov';
 import { worldStore, type WorldState } from './world';
 
 /** Camera set-up shared by the map's FOV cone, the Frame panel and the viewfinder. */
@@ -9,6 +9,8 @@ export interface Composition {
   sensorId: string;
   focalMm: number;
   fNumber: number;
+  /** Teleconverters stacked between body and lens; their product multiplies `focalMm` and `fNumber`. */
+  teleconverters: readonly Teleconverter[];
   orientation: Orientation;
   azimuthDeg: number;
   elevationDeg: number;
@@ -29,12 +31,18 @@ export interface Composition {
   showConstellations: boolean;
   showStarNames: boolean;
   showMilkyWay: boolean;
+  /** Master switch for the sun in the picture: its disc, its label and its path. */
+  showSun: boolean;
+  /** Master switch for the moon in the picture; moonlight and sky brightness are unaffected. */
+  showMoon: boolean;
   /** Star trails over `trailMinutes` from the simulated time. */
   showTrails: boolean;
   trailMinutes: number;
   showRadiants: boolean;
   /** OpenStreetMap building volumes rasterised into the frame. */
   showBuildings: boolean;
+  /** Shadows the sun casts, from the terrain and from the buildings. */
+  showSunShadows: boolean;
   /** Lens from the gear list constraining focal length and aperture; null for free values. */
   lensId: string | null;
 }
@@ -49,6 +57,7 @@ export const DEFAULT_COMPOSITION: Composition = {
   sensorId: DEFAULT_SENSOR_ID,
   focalMm: 35,
   fNumber: 8,
+  teleconverters: [],
   orientation: Orientation.Landscape,
   azimuthDeg: 0,
   elevationDeg: 0,
@@ -65,26 +74,47 @@ export const DEFAULT_COMPOSITION: Composition = {
   showConstellations: false,
   showStarNames: true,
   showMilkyWay: true,
+  showSun: true,
+  showMoon: true,
   showTrails: false,
   trailMinutes: 30,
   showRadiants: true,
   showBuildings: true,
+  showSunShadows: true,
   lensId: null
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+export const COMPOSITION_VERSION = 1;
+
+/** Version 0 stored one teleconverter multiplier, where 1 meant none. */
+export function migrateComposition(state: unknown, version: number): Composition {
+  const s = (state ?? {}) as Partial<Composition> & { teleconverter?: number };
+  if (version >= COMPOSITION_VERSION) return s as Composition;
+  const { teleconverter, ...rest } = s;
+  return { ...rest, teleconverters: teleconverter && teleconverter > 1 ? [teleconverter as Teleconverter] : [] } as Composition;
+}
 
 export const compositionStore = create<CompositionState>()(
   subscribeWithSelector(
     persist(
       (set) => ({
         ...DEFAULT_COMPOSITION,
-        update: (patch) => set(patch),
+        // The base focal is re-capped here so no caller can leave focal × the teleconverters past the frame range.
+        update: (patch) =>
+          set((s) =>
+            patch.focalMm == null && patch.teleconverters == null
+              ? patch
+              : { ...patch, focalMm: clampBaseFocalMm(patch.focalMm ?? s.focalMm, tcFactor(patch.teleconverters ?? s.teleconverters)) }
+          ),
         aim: (azimuthDeg, elevationDeg) => set({ azimuthDeg: normalizeBearing(azimuthDeg), elevationDeg: clamp(elevationDeg, -89, 89), aimAtTarget: false })
       }),
       {
         name: 'scape.composition',
-        partialize: ({ update: _u, aim: _a, ...rest }) => rest
+        version: COMPOSITION_VERSION,
+        partialize: ({ update: _u, aim: _a, ...rest }) => rest,
+        migrate: migrateComposition
       }
     )
   )

@@ -4,9 +4,9 @@ import { position } from '@core/astro/positions';
 import { compass, degrees, distance } from '@core/format';
 import { distanceM } from '@core/geo/geodesy';
 import { depthOfField, panoramaShots } from '@core/optics/dof';
-import { aperturesFor, clampFocalMm, cocMm, CocRule, equivalentFocalMm, fitToLens, frameFov, isCameraBody, lensFocals, Orientation, SENSORS, sensorPixels, type SensorFormat } from '@core/optics/fov';
+import { aperturesFor, cocMm, CocRule, effectiveOptics, equivalentFocalMm, fitToLens, F_STOPS, frameFov, isCameraBody, lensFocals, maxApertureAt, Orientation, SENSORS, sensorPixels, tcFactor, Teleconverter, type SensorFormat } from '@core/optics/fov';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
-import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, useGear } from '@state/gear';
+import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, useGear, zoomPatch } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
 import { settingsStore, useSettings } from '@state/settings';
 import { profileKeyFor, useTerrain } from '@state/terrain';
@@ -43,13 +43,18 @@ export function FramePanel() {
   const lens = lensById(c.lensId, lenses);
   const prime = lens !== null && lens.minMm === lens.maxMm;
   const isBody = isCameraBody(sensor.id);
-  const fov = frameFov(sensor, c.focalMm, c.orientation);
+  const opt = effectiveOptics(c);
+  // Only a zoom's two ends are quoted; the widest aperture between them is interpolated, so say so.
+  const apQuoted = lens == null || c.focalMm <= lens.minMm || c.focalMm >= lens.maxMm;
+  const tcf = tcFactor(c.teleconverters);
+  const tc = c.teleconverters.length > 0;
+  const fov = frameFov(sensor, opt.focalMm, c.orientation);
   const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
   const targetM = pin2 ? distanceM(pin, pin2) : null;
   const focusM = c.focusDistM ?? targetM;
   const pixels = sensorPixels(sensor);
   const coc = cocMm(sensor, pixels, cocRule);
-  const dof = focusM ? depthOfField(c.focalMm, c.fNumber, coc, focusM) : null;
+  const dof = focusM ? depthOfField(opt.focalMm, opt.fNumber, coc, focusM) : null;
   const pano = c.panoTotalDeg ? panoramaShots(c.panoTotalDeg, fov.hDeg, c.panoOverlap) : null;
   const update = compositionStore.getState().update;
   const setSetting = settingsStore.getState().update;
@@ -58,8 +63,9 @@ export function FramePanel() {
     const p = position(body, new Date(time), makeObserver(pin, pinHeightM));
     compositionStore.getState().aim(p.azimuth, Math.max(0, p.altitude));
   };
-  const clampLens = (v: number) => (lens ? Math.min(lens.maxMm, Math.max(lens.minMm, v)) : v);
-  const setFocal = (v: number) => update({ focalMm: Math.round(clampFocalMm(clampLens(v)) * 10) / 10 });
+  const setFocal = (v: number) => update(zoomPatch(c, v));
+  // Only a 1.4× and a 2.0× exist, so one of each is the whole stack a body can take.
+  const toggleTc = (t: Teleconverter) => update({ teleconverters: c.teleconverters.includes(t) ? c.teleconverters.filter((x) => x !== t) : [...c.teleconverters, t].toSorted((a, b) => a - b) });
   const selectLens = (id: string) => {
     const l = lensById(id || null, lenses);
     update(l ? { lensId: l.id, ...fitToLens(l, c.focalMm, c.fNumber) } : { lensId: null });
@@ -157,16 +163,10 @@ export function FramePanel() {
           </span>
         </b>
         <span className="k">Focal length</span>
-        {prime ? (
-          <b className="v">
-            {lens.minMm} mm <span className="muted">· {equivalentFocalMm(sensor, lens.minMm).toFixed(0)} mm equiv.</span>
-          </b>
-        ) : (
-          <b className="v">
-            <input type="number" min={lens?.minMm ?? 4} max={lens?.maxMm ?? 2400} step={1} value={c.focalMm} onChange={(e) => setFocal(Number(e.target.value) || c.focalMm)} aria-label="Focal length, millimetres" />
-            <span className="muted">mm · {equivalentFocalMm(sensor, c.focalMm).toFixed(0)} mm equiv.</span>
-          </b>
-        )}
+        {/* Read-only: the slider, the quick picks and the viewfinder wheel already set it, and typing fights the lens clamp on every keystroke. */}
+        <b className="v" role="status">
+          {c.focalMm} mm <span className="muted">{tc ? `· ${opt.focalMm} mm with the ${tcf}× ` : ''}· {equivalentFocalMm(sensor, opt.focalMm).toFixed(0)} mm equiv.</span>
+        </b>
         {lens && !prime && (
           <b className="v wide">
             <input
@@ -192,15 +192,41 @@ export function FramePanel() {
         </div>
       )}
       <div className="kv">
+        <span className="k">Teleconverter</span>
+        <b className="v">
+          <span className="seg">
+            <button className={tc ? '' : 'on'} onClick={() => update({ teleconverters: [] })} title="No teleconverter">
+              None
+            </button>
+            {[Teleconverter.X14, Teleconverter.X20].map((t) => (
+              <button
+                key={t}
+                className={c.teleconverters.includes(t) ? 'on' : ''}
+                aria-pressed={c.teleconverters.includes(t)}
+                onClick={() => toggleTc(t)}
+                title={`${t}× teleconverter: ${t}× the focal length, ${t}× the f-number. Stacks with the other one.`}
+              >
+                {t}×
+              </button>
+            ))}
+          </span>
+          {tc && <span className="muted">· {tcf}× in total</span>}
+        </b>
         <span className="k">Aperture</span>
         <b className="v">
           <select value={c.fNumber} onChange={(e) => update({ fNumber: Number(e.target.value) })} aria-label="Aperture">
-            {aperturesFor(lens).map((f) => (
+            {aperturesFor(lens, c.focalMm, [...F_STOPS, c.fNumber]).map((f) => (
               <option key={f} value={f}>
                 f/{f}
               </option>
             ))}
           </select>
+          {lens?.maxApertureLong != null && (
+            <span className="muted" title="Only the two ends are the maker's figures. Between them this is interpolated: a real zoom holds its wider end for part of the range and then steps.">
+              · f/{lens.maxAperture}–{lens.maxApertureLong} zoom, {apQuoted ? '' : 'about '}f/{maxApertureAt(lens, c.focalMm)} widest at {c.focalMm} mm
+            </span>
+          )}
+          {tc && <span className="muted">· f/{opt.fNumber} with the {tcf}×</span>}
         </b>
         <span className="k">Field of view</span>
         <b className="v">
@@ -298,7 +324,7 @@ export function FramePanel() {
         <b className="v">{dof ? `${dist(dof.nearM, units)} to ${dist(dof.farM, units)}` : 'set a focus distance'}</b>
         <span className="k">Hyperfocal</span>
         <b className="v">
-          {dist(dof?.hyperfocalM ?? depthOfField(c.focalMm, c.fNumber, coc, 1).hyperfocalM, units)}{' '}
+          {dist(dof?.hyperfocalM ?? depthOfField(opt.focalMm, opt.fNumber, coc, 1).hyperfocalM, units)}{' '}
           <span className="muted">
             · CoC {coc.toFixed(3)} mm{cocRule === CocRule.PixelPitch && (pixels ? ' · pixel pitch' : ' · needs the pixel count')}
           </span>

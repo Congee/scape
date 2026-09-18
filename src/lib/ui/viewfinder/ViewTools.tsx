@@ -5,14 +5,17 @@ import { useWorld } from '@state/world';
 type BoolKey = { [K in keyof Composition]: Composition[K] extends boolean ? K : never }[keyof Composition];
 
 const CHIPS: [BoolKey, string, string][] = [
+  ['showSun', 'Sun', 'The sun disc, its label and its path'],
+  ['showMoon', 'Moon', 'The moon disc, its label and its path'],
+  ['showMilkyWay', 'Milky Way', 'NASA Milky Way map'],
   ['showBuildings', 'Buildings', 'OpenStreetMap / Overture building volumes'],
+  ['showSunShadows', 'Shadows', 'Sun shadows cast by terrain and buildings'],
   ['showPaths', 'Paths', 'Sun, moon and Galactic Centre paths for the day'],
   ['showMarkers', 'Markers', 'Markers flagged for the viewfinder'],
   ['showGrid', 'Grid', 'Rule-of-thirds grid'],
   ['showStars', 'Stars', 'Star field (HYG, to magnitude 6.5) with the celestial pole'],
   ['showStarNames', 'Names', 'Names of the brightest stars'],
   ['showConstellations', 'Lines', 'Constellation figures'],
-  ['showMilkyWay', 'Milky Way', 'NASA Milky Way map'],
   ['showTrails', 'Trails', 'Star trails over the duration set in the Night tab'],
   ['showRadiants', 'Radiants', 'Radiants of the active meteor showers']
 ];

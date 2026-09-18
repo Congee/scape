@@ -383,9 +383,34 @@ quarter of the viewport.
   building is the lowest DEM sample over its footprints. The target's height comes from the same
   archive, by a point-in-footprint query in the worker (395 m for 30 Hudson Yards against the
   387 m architectural height, kept as the data says; 443.2 m for the Empire State). Limits: no
-  shadows and no facade detail; a concave footprint can push a hipped ridge outside its walls, so
-  a poor box fit reverts to gabled and then flat; building tiles are fetched live and are not yet
-  part of the offline regions.
+  facade detail; a concave footprint can push a hipped ridge outside its walls, so a poor box fit
+  reverts to gabled and then flat; building tiles are fetched live and are not yet part of the
+  offline regions.
+- **Ground shadows are a draped raster mask, not geometry.** Decided 2026-09-17. One march of a
+  height grid along the sun's ground direction (`core/geo/sunCeiling.ts`) gives, per cell, the
+  height at or below which a point is shadowed, which answers terrain→terrain, terrain→building,
+  building→ground and building→building at once; the map's worker turns that field into an 8-bit
+  mask (`core/geo/shadowMask.ts`) and the main thread hands it to a MapLibre `image` source drawn
+  by a `raster` layer, and the viewfinder reads the same field. A `fill` layer of shadow polygons
+  was rejected: MapLibre alpha-blends overlapping fills at exactly 0.65^n, measured, and a 5° sun
+  over Manhattan reached ten layers deep and turned the map black. Unioning the polygons was
+  rejected too — five libraries benchmarked on realistic input (polygon-clipping, polyclip-ts,
+  martinez, clipper2-js, polybool), the fastest ≈870 ms per rebuild on an M1 Max at 18,371 rings
+  and polybool throwing on every real set, and a union cannot drape on terrain anyway. A `custom`
+  layer was rejected because MapLibre's `LAYERS_TO_TEXTURES` covers only `background, fill, line,
+  raster, hillshade, color-relief`, so a custom layer floats above the terrain mesh instead of
+  draping onto it; a `raster` layer drapes and composites exactly once, which makes the
+  compounding structurally impossible. Mapbox GL JS 3.x, which renders this natively from a
+  `directional` light with `cast-shadows` (this is how TPE does it), was rejected on licence: the
+  SDK is granted "for use only with the relevant Mapbox product(s)" and only while an account is
+  active, which does not cover Scape's Overture/Protomaps/Terrarium stack. The mask grid is laid
+  out in a local Mercator frame scaled to ground metres at the rect centre, because an image
+  source interpolates linearly in Mercator: a grid uniform in metres measured 30.6 m out of
+  register at lat 60 on a 30 km rect, against a 14.6 m half-cell, while the frame costs ≤0.4%
+  cell-size variation, which the metre-based march does not care about. Limits: the draped mask
+  smears on near-vertical cliffs; water is shaded like ground; a cold build at a low sun takes
+  several seconds, dominated by DEM and building tile fetches; and terrain shadows are still gated
+  behind the buildings' `BLD_MIN_ZOOM = 14`, which is arbitrary for mountains.
 - **MapLibre is not a first-person renderer.** The textured 3D terrain under the frame
   (`TerrainView.ts`, Phase 6) was removed on 2026-09-13. At pitch ≥ 90° — the frame aimed at or
   above the horizon, exactly the long-lens-at-a-tower case — MapLibre's camera model degenerates:

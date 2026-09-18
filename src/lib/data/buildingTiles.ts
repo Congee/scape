@@ -8,8 +8,13 @@ export const OVERTURE_BUILDINGS_RELEASE = '2026-08-19.0';
 export const OVERTURE_BUILDINGS_URL = `https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_BUILDINGS_RELEASE}/buildings.pmtiles`;
 export const BUILDINGS_ATTRIBUTION = '© OpenStreetMap contributors, © Overture Maps Foundation';
 
-const MAX_CACHED_TILES = 128;
-const CONCURRENCY = 6;
+let maxCachedTiles = 128;
+const CONCURRENCY = 12;
+
+/** The mask worker holds its own copy of this module, so it sizes the cache for the map rect. */
+export function setBuildingTileCacheSize(n: number): void {
+  maxCachedTiles = n;
+}
 
 export type { DecodedBuildings };
 
@@ -24,7 +29,7 @@ let active = 0;
 function touch(key: string, batch: DecodedBuildings): void {
   cache.delete(key);
   cache.set(key, batch);
-  while (cache.size > MAX_CACHED_TILES) cache.delete(cache.keys().next().value!);
+  while (cache.size > maxCachedTiles) cache.delete(cache.keys().next().value!);
 }
 
 async function acquire(): Promise<void> {

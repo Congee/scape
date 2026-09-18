@@ -1,30 +1,35 @@
 /// <reference lib="webworker" />
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
-import { elevationAt } from '@core/terrain/dem';
+import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
+import { blockUnitBounds, buildLevel, levelCellM, selectBlocks } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { sweepView } from '@core/terrain/view';
-import { lngLatToTilePixel, metersPerPixel, tileKey, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
-import { DemCache, POINT_ZOOM } from '@data/terrainTiles';
-import { TerrainKind, type ElevationRequest, type HorizonRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
+import { lngLatToTilePixel, metersPerPixel, tileKey, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
+import { DemCache, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
+import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 const cache = new DemCache(220);
 /** Newest request id per kind; older ones stop before the expensive step. */
-const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0 };
+const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
 
 function tileAt(p: LngLat, z: number): TileCoord {
   const t = lngLatToTilePixel(p.lng, p.lat, z);
   return { z, x: t.x, y: t.y };
 }
 
+/** The surface the mesh draws, so the eye and anything standing on the ground share it. */
 async function groundAt(p: LngLat): Promise<number> {
-  await cache.load(tileAt(p, POINT_ZOOM));
-  return elevationAt(cache, p.lng, p.lat, POINT_ZOOM);
+  await cache.loadAll(cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM));
+  return elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM);
 }
 
 async function elevation(req: ElevationRequest | PointsRequest): Promise<TerrainResponse> {
-  const elevations = await Promise.all(req.points.map(groundAt));
+  const tiles = new Map<string, TileCoord>();
+  for (const p of req.points) for (const t of cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM)) tiles.set(tileKey(t.z, t.x, t.y), t);
+  await cache.loadAll([...tiles.values()]);
+  const elevations = req.points.map((p) => elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM));
   return { kind: req.kind, id: req.id, elevations };
 }
 
@@ -95,6 +100,33 @@ async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length, missing } };
 }
 
+/** Quadtree levels, finest first, each posted as soon as its DEM tiles are in. */
+async function mesh(req: MeshRequest): Promise<null> {
+  const t0 = performance.now();
+  const g = await groundAt(req.pin);
+  if (latest.Mesh !== req.id) return null;
+  const groundM = Number.isNaN(g) ? 0 : g;
+  const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+  const sel = selectBlocks({ rangeM: req.rangeM, demCellM: metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM), view: req.view });
+  for (const { level, blocks } of sel.levels) {
+    const zoom = zoomForResolution(req.pin.lat, levelCellM(level), 8, TERRAIN_MAX_ZOOM);
+    // Only the selected blocks: a level-1 leaf 10 km out would drag in thousands of z15 tiles otherwise.
+    const tiles = new Map<string, TileCoord>();
+    // The halo covers the cubic stencil's two posts past the block, or its edge would fall back to bilinear.
+    const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom);
+    for (const b of blocks) for (const t of tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom)) tiles.set(tileKey(t.z, t.x, t.y), t);
+    // oxlint-disable-next-line no-await-in-loop -- a level is posted before the next one is fetched
+    await cache.loadAll([...tiles.values()]);
+    if (latest.Mesh !== req.id) return null;
+    // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
+    const out = buildLevel(req.pin, eyeM, level, blocks, (lng, lat) => elevationAtCubic(cache, lng, lat, zoom));
+    if (latest.Mesh !== req.id) return null;
+    const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, ms: performance.now() - t0 };
+    scope.postMessage({ kind: TerrainKind.Mesh, id: req.id, result } satisfies TerrainResponse, [out.pos.buffer, out.nrm.buffer, out.idx.buffer, out.blockStart.buffer, out.blockBox.buffer]);
+  }
+  return null;
+}
+
 function dispatch(req: TerrainRequest): Promise<TerrainResponse | null> {
   switch (req.kind) {
     case TerrainKind.Elevation:
@@ -106,6 +138,8 @@ function dispatch(req: TerrainRequest): Promise<TerrainResponse | null> {
       return horizon(req);
     case TerrainKind.View:
       return view(req);
+    case TerrainKind.Mesh:
+      return mesh(req);
   }
 }
 

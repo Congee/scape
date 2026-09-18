@@ -4,7 +4,7 @@ import { SkyBody } from '@core/astro/bodies';
 import { SkyFilter, type FinderHit, type FinderQuery, type FinderSettings } from '@core/astro/finder';
 import { height, Units } from '@core/format';
 import { bearingDeg, distanceM, elevationAngleDeg, normalizeBearing, type LngLat } from '@core/geo/geodesy';
-import { frameFov } from '@core/optics/fov';
+import { effectiveOptics, frameFov } from '@core/optics/fov';
 import { formatDate, formatTime } from '@core/time/format';
 import { addLocalDays, dayBounds, localMidnight } from '@core/time/localDay';
 import { FinderResponseKind, type FinderRequest, type FinderResponse } from '@workers/finder.protocol';
@@ -144,7 +144,7 @@ export const finderStore = create<FinderState>()(
       fromFrame: () => {
         const w = worldStore.getState();
         const c = compositionStore.getState();
-        const fov = frameFov(sensorById(c.sensorId, gearStore.getState().cameras), c.focalMm, c.orientation);
+        const fov = frameFov(sensorById(c.sensorId, gearStore.getState().cameras), effectiveOptics(c).focalMm, c.orientation);
         const aim = aimFor(c, w, w.pin2 ? targetAngleDeg() : null);
         get().update({
           azFromDeg: normalizeBearing(aim.azimuthDeg - fov.hDeg / 2),

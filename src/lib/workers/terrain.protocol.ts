@@ -1,9 +1,10 @@
 import type { LngLat } from '@core/geo/geodesy';
 import type { HorizonProfile } from '@core/terrain/horizon';
 import type { LosResult } from '@core/terrain/los';
+import type { MeshLevel, MeshView } from '@core/terrain/mesh';
 import type { ViewProfile } from '@core/terrain/view';
 
-export const TerrainKind = { Elevation: 'Elevation', Profile: 'Profile', Horizon: 'Horizon', View: 'View', Points: 'Points' } as const;
+export const TerrainKind = { Elevation: 'Elevation', Profile: 'Profile', Horizon: 'Horizon', View: 'View', Points: 'Points', Mesh: 'Mesh' } as const;
 export type TerrainKind = (typeof TerrainKind)[keyof typeof TerrainKind];
 
 export interface ElevationRequest {
@@ -52,7 +53,18 @@ export interface ViewRequest {
   minStepDeg: number;
 }
 
-export type TerrainRequest = ElevationRequest | PointsRequest | ProfileRequest | HorizonRequest | ViewRequest;
+/** Terrain heightfield geometry for the GPU: a quadtree around the pin, one response per level. */
+export interface MeshRequest {
+  kind: typeof TerrainKind.Mesh;
+  id: number;
+  pin: LngLat;
+  eyeAboveGroundM: number;
+  rangeM: number;
+  /** What the frame is looking at, which decides how finely the ground inside it is cut. */
+  view: MeshView | null;
+}
+
+export type TerrainRequest = ElevationRequest | PointsRequest | ProfileRequest | HorizonRequest | ViewRequest | MeshRequest;
 
 export interface ProfileResult {
   a: LngLat;
@@ -91,10 +103,26 @@ export interface ViewResult {
   missing: number;
 }
 
+export interface MeshResult {
+  mesh: MeshLevel;
+  /** DEM zoom this level's heights came from. */
+  zoom: number;
+  eyeM: number;
+  groundM: number;
+  /** Levels this build will send in all; the finest arrives first. */
+  levels: number;
+  tiles: number;
+  /** How far out the frame's own resolution was afforded, and the cell angle it holds there. */
+  reachM: number;
+  targetRad: number;
+  ms: number;
+}
+
 export type TerrainResponse =
   | { kind: typeof TerrainKind.Elevation; id: number; elevations: number[] }
   | { kind: typeof TerrainKind.Points; id: number; elevations: number[] }
   | { kind: typeof TerrainKind.Profile; id: number; result: ProfileResult }
   | { kind: typeof TerrainKind.Horizon; id: number; result: HorizonResult }
   | { kind: typeof TerrainKind.View; id: number; result: ViewResult }
+  | { kind: typeof TerrainKind.Mesh; id: number; result: MeshResult }
   | { kind: 'Error'; id: number; of: TerrainKind; error: string };

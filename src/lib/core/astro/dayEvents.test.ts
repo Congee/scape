@@ -42,6 +42,18 @@ describe('dayEvents', () => {
     expect(m.illumination).toBeLessThan(0.01);
   });
 
+  it('brackets the blue hours with civil twilight and the horizon', () => {
+    const blueEnd = find(SkyBody.Sun, EventKind.BlueEnd);
+    expect(blueEnd.time).toBeGreaterThan(find(SkyBody.Sun, EventKind.CivilDawn).time);
+    expect(blueEnd.time).toBeLessThan(find(SkyBody.Sun, EventKind.Rise).time);
+    expect(blueEnd.altitude).toBeCloseTo(-4, 1);
+
+    const blueStart = find(SkyBody.Sun, EventKind.BlueStart);
+    expect(blueStart.time).toBeGreaterThan(find(SkyBody.Sun, EventKind.Set).time);
+    expect(blueStart.time).toBeLessThan(find(SkyBody.Sun, EventKind.CivilDusk).time);
+    expect(blueStart.altitude).toBeCloseTo(-4, 1);
+  });
+
   it('is sorted and stays inside the local day', () => {
     for (let i = 1; i < events.length; i++) expect(events[i].time).toBeGreaterThanOrEqual(events[i - 1].time);
     for (const e of events) {

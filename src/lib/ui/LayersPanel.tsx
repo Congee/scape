@@ -122,6 +122,11 @@ export function LayersPanel() {
       <Toggle k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
       <Toggle k="clickMovesPin" label="Clicking the map moves the camera" />
 
+      <h3>Buildings</h3>
+      <Toggle k="showBuildings" label="3D buildings (Overture, in place of the basemap's own)" />
+      <Toggle k="showSunShadows" label="Sun shadows on the ground (terrain and buildings)" />
+      <p className="muted hint">Buildings appear from zoom 14; their shadows follow the timeline time and need the buildings layer on.</p>
+
       <h3>Terrain</h3>
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
       <Toggle k="showHillshade" label="Hillshade" />

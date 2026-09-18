@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { formatLngLat } from '@core/geo/coords';
+import { planOptics } from '@core/plan';
 import { formatDateTime } from '@core/time/format';
 import { exportAll, importAll, ImportMode, isScapeExport } from '@data/db';
 import { libraryStore, useLibrary } from '@state/library';
@@ -140,7 +141,7 @@ function LibraryPage() {
               <button className="primary" onClick={() => openPlan(p.id)} title="Load this plan">
                 <span className="name">{p.name}</span>
                 <span className="detail">
-                  {formatDateTime(p.time, p.tz, hour12)} · {p.composition.focalMm} mm f/{p.composition.fNumber}
+                  {formatDateTime(p.time, p.tz, hour12)} · {planOptics(p.composition).focalMm} mm f/{planOptics(p.composition).fNumber}
                   {p.target ? ' · with target' : ''}
                 </span>
               </button>

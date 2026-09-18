@@ -11,11 +11,13 @@ const LABELS: Record<SkyBody, Partial<Record<EventKind, string>>> = {
     AstroDawn: 'Astronomical dawn',
     NauticalDawn: 'Nautical dawn',
     CivilDawn: 'Civil dawn',
+    BlueEnd: 'Blue hour ends',
     Rise: 'Sunrise',
     GoldenEnd: 'Golden hour ends',
     Transit: 'Sun transit',
     GoldenStart: 'Golden hour begins',
     Set: 'Sunset',
+    BlueStart: 'Blue hour begins',
     CivilDusk: 'Civil dusk',
     NauticalDusk: 'Nautical dusk',
     AstroDusk: 'Astronomical dusk',
@@ -32,12 +34,12 @@ const LABELS: Record<SkyBody, Partial<Record<EventKind, string>>> = {
   }
 };
 
-const RISING = new Set<EventKind>([EventKind.AstroDawn, EventKind.NauticalDawn, EventKind.CivilDawn, EventKind.Rise, EventKind.GoldenEnd, EventKind.TerrainRise]);
+const RISING = new Set<EventKind>([EventKind.AstroDawn, EventKind.NauticalDawn, EventKind.CivilDawn, EventKind.BlueEnd, EventKind.Rise, EventKind.GoldenEnd, EventKind.TerrainRise]);
 const TERRAIN = new Set<EventKind>([EventKind.TerrainRise, EventKind.TerrainSet]);
 
 /** Rows the default, TPE-like list keeps; everything else waits behind Details. */
 const ESSENTIAL: Partial<Record<SkyBody, Set<EventKind>>> = {
-  Sun: new Set<EventKind>([EventKind.AstroDawn, EventKind.NauticalDawn, EventKind.CivilDawn, EventKind.Rise, EventKind.Set, EventKind.CivilDusk, EventKind.NauticalDusk, EventKind.AstroDusk]),
+  Sun: new Set<EventKind>([EventKind.CivilDawn, EventKind.BlueEnd, EventKind.Rise, EventKind.GoldenEnd, EventKind.GoldenStart, EventKind.Set, EventKind.BlueStart, EventKind.CivilDusk]),
   Moon: new Set<EventKind>([EventKind.Rise, EventKind.Set])
 };
 

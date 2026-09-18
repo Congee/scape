@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { compositionStore } from '@state/composition';
-import { orientationFor, parseInstant, parsePoint, validateScene, viewfinderSearchFor, type SceneSearch } from '@state/urlState';
+import { orientationFor, parseInstant, parsePoint, teleconvertersFor, validateScene, viewfinderSearchFor, type SceneSearch } from '@state/urlState';
 import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
 import { DateBar } from '@ui/DateBar';
@@ -35,7 +35,7 @@ function ViewfinderPage() {
     const ms = parseInstant(search.t);
     if (ms != null) w.setTime(ms);
     // An in-app visit carries no framing, so it must not reset the orientation.
-    if (search.f != null || search.camera) compositionStore.getState().update({ ...(search.f != null && { focalMm: search.f }), orientation: orientationFor(search.o) });
+    if (search.f != null || search.camera) compositionStore.getState().update({ ...(search.f != null && { focalMm: search.f }), teleconverters: teleconvertersFor(search.tc), orientation: orientationFor(search.o) });
     // Map or viewfinder drags release the aim lock; entering the viewfinder should face the target again.
     if (worldStore.getState().pin2) compositionStore.setState({ aimAtTarget: true });
     // oxlint-disable-next-line react/exhaustive-deps -- entry-time only

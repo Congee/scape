@@ -9,7 +9,7 @@ export const DEM_TILE_TEMPLATE = 'scape-dem://{z}/{x}/{y}';
 export const TERRAIN_MAX_ZOOM = 15;
 export const TERRAIN_ATTRIBUTION =
   'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (Mapzen, AWS Open Data)';
-/** Zoom used for point elevations; about 5–9 m per pixel at mid-latitudes. */
+/** Point elevations for the alignment worker's own surface; about 5–9 m per pixel at mid-latitudes. */
 export const POINT_ZOOM = 14;
 
 export function terrainTileUrl(z: number, x: number, y: number): string {
@@ -19,6 +19,7 @@ export function terrainTileUrl(z: number, x: number, y: number): string {
 export interface DecodedDem {
   size: number;
   elev: Float32Array;
+  repaired: number;
 }
 
 /**
@@ -29,7 +30,7 @@ export async function decodeTerrainPng(blob: Blob): Promise<DecodedDem> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   try {
     const png = await decodePng(bytes);
-    return { size: png.width, elev: decodeTerrarium(png.data, png.width, png.channels) };
+    return { size: png.width, ...decodeTerrarium(png.data, png.width, png.channels) };
   } catch (e) {
     if (!(e instanceof UnsupportedPngError)) throw e;
   }
@@ -38,7 +39,7 @@ export async function decodeTerrainPng(blob: Blob): Promise<DecodedDem> {
     const canvas = new OffscreenCanvas(bmp.width, bmp.height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(bmp, 0, 0);
-    return { size: bmp.width, elev: decodeTerrarium(ctx.getImageData(0, 0, bmp.width, bmp.height).data, bmp.width) };
+    return { size: bmp.width, ...decodeTerrarium(ctx.getImageData(0, 0, bmp.width, bmp.height).data, bmp.width, 4) };
   } finally {
     bmp.close();
   }
@@ -53,7 +54,7 @@ export class DemCache implements DemSource {
 
   constructor(
     private maxTiles = 200,
-    private concurrency = 6
+    private concurrency = 12
   ) {}
 
   get(z: number, x: number, y: number): DemTile | null | undefined {
@@ -87,20 +88,24 @@ export class DemCache implements DemSource {
     await this.acquire();
     try {
       const local = await localTerrain.tile(c.z, c.x, c.y);
-      if (local) {
-        const { size, elev } = await decodeTerrainPng(new Blob([local]));
-        const tile: DemTile = { ...c, size, elev };
-        this.set(c, tile);
-        return tile;
+      let blob: Blob;
+      if (local) blob = new Blob([local]);
+      else {
+        const res = await fetch(terrainTileUrl(c.z, c.x, c.y));
+        if (res.status === 404 || res.status === 403) {
+          this.set(c, null);
+          return null;
+        }
+        if (!res.ok) return null;
+        blob = await res.blob();
       }
-      const res = await fetch(terrainTileUrl(c.z, c.x, c.y));
-      if (res.status === 404 || res.status === 403) {
+      const { size, elev, repaired } = await decodeTerrainPng(blob);
+      // A tile with no valid post at all is data we do not have, so hand it to the missing-tile path.
+      if (repaired >= size * size) {
         this.set(c, null);
         return null;
       }
-      if (!res.ok) return null;
-      const { size, elev } = await decodeTerrainPng(await res.blob());
-      const tile: DemTile = { ...c, size, elev };
+      const tile: DemTile = { ...c, size, elev, repaired };
       this.set(c, tile);
       return tile;
     } catch {

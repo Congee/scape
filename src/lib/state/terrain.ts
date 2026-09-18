@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { LngLat } from '@core/geo/geodesy';
-import { TerrainKind, type HorizonResult, type ProfileResult, type TerrainRequest, type TerrainResponse, type ViewResult } from '@workers/terrain.protocol';
+import { TerrainKind, type HorizonResult, type MeshResult, type ProfileResult, type TerrainRequest, type TerrainResponse, type ViewResult } from '@workers/terrain.protocol';
 import { markersStore } from './markers';
 import { settingsStore, type Settings } from './settings';
-import { viewfinderStore, type ViewWindow } from './viewfinder';
+import { viewfinderStore, type MeshWindow, type ViewWindow } from './viewfinder';
 import { worldStore, type WorldState } from './world';
 
 /** Eye height above the camera location's ground, added to the observer height setting. */
@@ -23,6 +23,9 @@ export interface TerrainState {
   horizonKey: string;
   view: ViewResult | null;
   viewKey: string;
+  /** Terrain quadtree levels for the GPU, finest first; grows as the worker streams them in. */
+  mesh: MeshResult[];
+  meshKey: string;
   /** Ground under viewfinder markers by marker id. */
   markerGroundM: Record<string, number>;
   busy: Record<TerrainKind, boolean>;
@@ -41,8 +44,10 @@ export const terrainStore = create<TerrainState>()(
     horizonKey: '',
     view: null,
     viewKey: '',
+    mesh: [],
+    meshKey: '',
     markerGroundM: {},
-    busy: { Elevation: false, Profile: false, Horizon: false, View: false, Points: false },
+    busy: { Elevation: false, Profile: false, Horizon: false, View: false, Points: false, Mesh: false },
     error: null
     })
   )
@@ -77,13 +82,26 @@ export function viewKeyFor(w: W, s: S, win: ViewWindow | null): string {
   return `${k4(w.pin)}|${w.pinHeightM + EYE_HEIGHT_M}|${win.azFromDeg.toFixed(2)}|${win.azSpanDeg.toFixed(2)}|${win.azStepDeg.toFixed(4)}|${win.rangeM}|${win.minStepDeg}`;
 }
 
+/** Where the eye is: a mesh built for a different one is geometry for somewhere else. */
+const meshAnchorFor = (w: W) => `${k5(w.pin)}|${w.pinHeightM + EYE_HEIGHT_M}`;
+
+/**
+ * The mesh depends on the eye, on how far it must reach, and — since the cells inside the frame are
+ * cut to a pixel size — on where the frame points and how long the lens is. `MeshWindow` arrives
+ * already quantised, so a pan or a zoom that stays inside the last wedge leaves this key alone.
+ */
+export function meshKeyFor(w: W, s: S, win: MeshWindow | null): string {
+  if (!s.terrain || !win) return '';
+  return `${meshAnchorFor(w)}|${win.rangeM}|${win.azimuthDeg}|${win.hfovDeg}|${win.targetRad}`;
+}
+
 const setBusy = (kind: TerrainKind, on: boolean) => terrainStore.setState((st) => ({ busy: { ...st.busy, [kind]: on } }));
 
 /** Keeps pin elevations, the sightline profile and the horizon sweep in step with the world. */
 export function startTerrainSync(): () => void {
   const worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' });
-  const seq: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0 };
-  const pending: Record<TerrainKind, string> = { Elevation: '', Profile: '', Horizon: '', View: '', Points: '' };
+  const seq: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
+  const pending: Record<TerrainKind, string> = { Elevation: '', Profile: '', Horizon: '', View: '', Points: '', Mesh: '' };
   let pendingPointIds: string[] = [];
   const timers: Partial<Record<TerrainKind, ReturnType<typeof setTimeout>>> = {};
 
@@ -98,6 +116,13 @@ export function startTerrainSync(): () => void {
       return;
     }
     if (res.id !== seq[res.kind]) return;
+    if (res.kind === TerrainKind.Mesh) {
+      // The first level of a new build replaces whatever the last one left; levels after it join in.
+      const kept = terrainStore.getState().meshKey === pending.Mesh ? terrainStore.getState().mesh : [];
+      const mesh = [...kept.filter((m) => m.mesh.level !== res.result.mesh.level), res.result].toSorted((a, b) => a.mesh.level - b.mesh.level);
+      terrainStore.setState({ mesh, meshKey: pending.Mesh, error: null, busy: { ...terrainStore.getState().busy, Mesh: mesh.length < res.result.levels } });
+      return;
+    }
     setBusy(res.kind, false);
     if (res.kind === TerrainKind.Elevation) {
       terrainStore.setState({ pinGroundM: res.elevations[0] ?? null, pin2GroundM: res.elevations[1] ?? null, elevationKey: pending.Elevation, error: null });
@@ -182,20 +207,39 @@ export function startTerrainSync(): () => void {
     post({ kind: TerrainKind.View, id: ++seq.View, pin: w.pin, eyeAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, ...win });
   };
 
-  const syncPoints = () => {
+  const syncMesh = () => {
+    const w = worldStore.getState();
     const s = settingsStore.getState();
-    const ms = markersStore.getState().markers.filter((m) => m.showInViewfinder);
-    const key = s.terrain && viewfinderStore.getState().window ? ms.map((m) => `${m.id}@${k5(m)}`).join(';') : '';
-    if (key === pending.Points) return;
-    pending.Points = key;
-    if (!key) {
-      terrainStore.setState({ markerGroundM: {} });
-      setBusy(TerrainKind.Points, false);
+    const win = viewfinderStore.getState().meshWindow;
+    const key = meshKeyFor(w, s, win);
+    if (key === pending.Mesh) return;
+    const moved = !key || !pending.Mesh.startsWith(`${meshAnchorFor(w)}|`);
+    pending.Mesh = key;
+    if (!key || !win) {
+      terrainStore.setState({ mesh: [], meshKey: '' });
+      setBusy(TerrainKind.Mesh, false);
       return;
     }
-    pendingPointIds = ms.map((m) => m.id);
-    setBusy(TerrainKind.Points, true);
-    post({ kind: TerrainKind.Points, id: ++seq.Points, points: ms.map((m) => ({ lat: m.lat, lng: m.lng })) });
+    // Only the eye moving makes the levels on screen wrong; a re-cut for a new aim may stay up meanwhile.
+    if (moved) terrainStore.setState({ mesh: [] });
+    setBusy(TerrainKind.Mesh, true);
+    post({ kind: TerrainKind.Mesh, id: ++seq.Mesh, pin: w.pin, eyeAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, rangeM: win.rangeM, view: { azimuthDeg: win.azimuthDeg, hfovDeg: win.hfovDeg, targetRad: win.targetRad } });
+  };
+
+  const syncPoints = () => {
+  const s = settingsStore.getState();
+  const ms = markersStore.getState().markers.filter((m) => m.showInViewfinder);
+  const key = s.terrain && viewfinderStore.getState().window ? ms.map((m) => `${m.id}@${k5(m)}`).join(';') : '';
+  if (key === pending.Points) return;
+  pending.Points = key;
+  if (!key) {
+    terrainStore.setState({ markerGroundM: {} });
+    setBusy(TerrainKind.Points, false);
+    return;
+  }
+  pendingPointIds = ms.map((m) => m.id);
+  setBusy(TerrainKind.Points, true);
+  post({ kind: TerrainKind.Points, id: ++seq.Points, points: ms.map((m) => ({ lat: m.lat, lng: m.lng })) });
   };
 
   // Cheap lookups trail the pin closely; the sweeps wait until the pin settles.
@@ -208,6 +252,7 @@ export function startTerrainSync(): () => void {
     schedule(TerrainKind.Profile, syncProfile, 150);
     schedule(TerrainKind.Horizon, syncHorizon, 400);
     schedule(TerrainKind.View, syncView, 250);
+    schedule(TerrainKind.Mesh, syncMesh, 250);
     schedule(TerrainKind.Points, syncPoints, 300);
   };
 
@@ -215,6 +260,7 @@ export function startTerrainSync(): () => void {
   syncProfile();
   syncHorizon();
   syncView();
+  syncMesh();
   syncPoints();
   const unsubs = [worldStore.subscribe(onChange), settingsStore.subscribe(onChange), viewfinderStore.subscribe(onChange), markersStore.subscribe(onChange)];
   return () => {

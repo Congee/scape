@@ -8,7 +8,7 @@ import { polarisAid } from '@core/astro/polaris';
 import { moonInfo, position } from '@core/astro/positions';
 import { apply, enuToEqj } from '@core/astro/skyFrame';
 import { compass, degrees, percent } from '@core/format';
-import { cropFactor, equivalentFocalMm } from '@core/optics/fov';
+import { cropFactor, effectiveOptics, equivalentFocalMm } from '@core/optics/fov';
 import { dirFromAzAlt } from '@core/optics/projection';
 import { npfShutterS, pixelPitchUm, ruleOfN, trailAngleDeg, trailLengthPx } from '@core/optics/startrails';
 import { formatDateShort, formatTime } from '@core/time/format';
@@ -118,8 +118,9 @@ export function NightPanel() {
   const fresh = profile && profileKey === profileKeyFor(worldStore.getState(), settingsStore.getState()) ? profile : null;
   const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
   const dec = aimDeclination(time, obs, aim.azimuthDeg, aim.elevationDeg);
-  const r500 = ruleOfN(c.focalMm, cropFactor(sensor));
-  const npf = pitch ? npfShutterS(c.fNumber, c.focalMm, pitch, dec) : null;
+  const opt = effectiveOptics(c);
+  const r500 = ruleOfN(opt.focalMm, cropFactor(sensor));
+  const npf = pitch ? npfShutterS(opt.fNumber, opt.focalMm, pitch, dec) : null;
   const trailS = c.trailMinutes * 60;
   const { active, upcoming } = showersFor(time);
   const polaris = polarisAid(new Date(time), obs);
@@ -147,7 +148,7 @@ export function NightPanel() {
   const moonFree = moonFreeWindow(night, tonight.events, moonUpAtNightfall);
   const moonSummary = `${moon.name} ${percent(moon.illumination, 0)}${nextMoon ? ` · ${nextMoon.kind === EventKind.Rise ? 'rises' : 'sets'} ${formatTime(nextMoon.time, tz, s.hour12)}` : ''}`;
 
-  const starsSummary = `${npf ? `NPF ${npf.toFixed(1)} s` : `500 rule ${r500.toFixed(1)} s`} at ${c.focalMm} mm${polaris.northern ? ` · Polaris ${signed(polaris.polarisAltDeg)}` : ''}`;
+  const starsSummary = `${npf ? `NPF ${npf.toFixed(1)} s` : `500 rule ${r500.toFixed(1)} s`} at ${opt.focalMm} mm${polaris.northern ? ` · Polaris ${signed(polaris.polarisAltDeg)}` : ''}`;
   const meteorSummary = active[0]
     ? `${active[0].shower.name} active · peak ${formatDateShort(active[0].peakMs, tz)}`
     : upcoming[0]
@@ -276,10 +277,10 @@ export function NightPanel() {
           </b>
           <span className="k">500 rule</span>
           <b className="v">
-            {r500.toFixed(1)} s <span className="muted">· {equivalentFocalMm(sensor, c.focalMm).toFixed(0)} mm equivalent</span>
+            {r500.toFixed(1)} s <span className="muted">· {equivalentFocalMm(sensor, opt.focalMm).toFixed(0)} mm equivalent</span>
           </b>
           <span className="k">NPF rule</span>
-          <b className="v">{npf ? `${npf.toFixed(1)} s` : 'needs the pixel count'} <span className="muted">· f/{c.fNumber}, {c.focalMm} mm, declination {signed(dec, 0)}</span></b>
+          <b className="v">{npf ? `${npf.toFixed(1)} s` : 'needs the pixel count'} <span className="muted">· f/{opt.fNumber}, {opt.focalMm} mm, declination {signed(dec, 0)}</span></b>
         </div>
         <label className="toggle">
           <input type="checkbox" checked={c.showTrails} onChange={(e) => comp({ showTrails: e.target.checked })} />
@@ -288,7 +289,7 @@ export function NightPanel() {
           <span>min</span>
         </label>
         <p className="muted hint">
-          In {c.trailMinutes} min a star at that declination moves {trailAngleDeg(trailS, dec).toFixed(2)}°{pitch ? `, about ${Math.round(trailLengthPx(trailS, c.focalMm, pitch, dec))} px on this sensor` : ''}.
+          In {c.trailMinutes} min a star at that declination moves {trailAngleDeg(trailS, dec).toFixed(2)}°{pitch ? `, about ${Math.round(trailLengthPx(trailS, opt.focalMm, pitch, dec))} px on this sensor` : ''}.
         </p>
 
         <h3>Polar alignment</h3>

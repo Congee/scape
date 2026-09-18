@@ -4,6 +4,15 @@ const R2D = 180 / Math.PI;
 export const Orientation = { Landscape: 'Landscape', Portrait: 'Portrait' } as const;
 export type Orientation = (typeof Orientation)[keyof typeof Orientation];
 
+/** One teleconverter mounted between body and lens; the value is its multiplier. */
+export const Teleconverter = { X14: 1.4, X20: 2 } as const;
+export type Teleconverter = (typeof Teleconverter)[keyof typeof Teleconverter];
+
+/** Combined multiplier of a mounted stack; 1 for none. Rounded so 1.4 × 2 reads 2.8, not 2.8000000000000003. */
+export function tcFactor(list: readonly Teleconverter[]): number {
+  return Math.round(list.reduce((p, t) => p * t, 1) * 100) / 100;
+}
+
 export interface SensorFormat {
   id: string;
   name: string;
@@ -24,6 +33,8 @@ export interface LensSpec {
   maxMm: number;
   /** Widest f-number at the short end. */
   maxAperture: number;
+  /** Widest f-number at the long end; absent on a constant-aperture lens. */
+  maxApertureLong?: number;
   mount: string;
 }
 
@@ -37,16 +48,31 @@ export function isCameraBody(sensorId: string): boolean {
   return sensorId.startsWith('cat:') || sensorId.startsWith('custom:');
 }
 
-/** Focal length and aperture pulled inside what the lens can do. */
-export function fitToLens(lens: LensSpec | null, focalMm: number, fNumber: number): { focalMm: number; fNumber: number } {
-  if (!lens) return { focalMm, fNumber };
-  return { focalMm: Math.round(Math.min(lens.maxMm, Math.max(lens.minMm, focalMm)) * 10) / 10, fNumber: Math.max(fNumber, lens.maxAperture) };
+/**
+ * Widest f-number this lens reaches at `focalMm`, running straight in log2(f-number) against
+ * log2(focal) and holding at the endpoints outside the range. Only the two ends are quoted data:
+ * between them this is a model, and a real zoom holds its wider end for part of the range and then
+ * steps. Label interior values as approximate wherever they are shown.
+ */
+export function maxApertureAt(lens: LensSpec, focalMm: number): number {
+  const long = lens.maxApertureLong;
+  if (!long || lens.maxMm <= lens.minMm) return lens.maxAperture;
+  const t = (Math.log2(focalMm) - Math.log2(lens.minMm)) / (Math.log2(lens.maxMm) - Math.log2(lens.minMm));
+  const u = Math.min(1, Math.max(0, t));
+  return Math.round(2 ** (Math.log2(lens.maxAperture) + u * (Math.log2(long) - Math.log2(lens.maxAperture))) * 10) / 10;
 }
 
-/** Standard stops the lens can reach, starting at its widest aperture. */
-export function aperturesFor(lens: LensSpec | null, stops: readonly number[] = F_STOPS): number[] {
-  if (!lens) return [...stops];
-  return [...new Set([lens.maxAperture, ...stops.filter((f) => f > lens.maxAperture + 1e-9)])].toSorted((a, b) => a - b);
+/** Focal length and aperture pulled inside what the lens can do at that focal length. */
+export function fitToLens(lens: LensSpec | null, focalMm: number, fNumber: number): { focalMm: number; fNumber: number } {
+  if (!lens) return { focalMm, fNumber };
+  const f = Math.round(Math.min(lens.maxMm, Math.max(lens.minMm, focalMm)) * 10) / 10;
+  return { focalMm: f, fNumber: Math.max(fNumber, maxApertureAt(lens, f)) };
+}
+
+/** Standard stops the lens can reach, starting at its widest aperture at `focalMm`. */
+export function aperturesFor(lens: LensSpec | null, focalMm?: number, stops: readonly number[] = F_STOPS): number[] {
+  const widest = lens ? maxApertureAt(lens, focalMm ?? lens.minMm) : 0;
+  return [...new Set([...(widest > 0 ? [widest] : []), ...stops.filter((f) => f > widest + 1e-9)])].toSorted((a, b) => a - b);
 }
 
 export const FULL_FRAME_DIAGONAL_MM = Math.hypot(36, 24);
@@ -127,6 +153,23 @@ export function frameFov(s: SensorFormat, focalMm: number, o: Orientation): Fram
   return { hDeg: fovDeg(w, focalMm), vDeg: fovDeg(h, focalMm), dDeg: fovDeg(Math.hypot(w, h), focalMm) };
 }
 
-export function clampFocalMm(f: number): number {
-  return Math.min(MAX_FOCAL_MM, Math.max(MIN_FOCAL_MM, f));
+/** Base focal on the lens, capped so the teleconverters' product still lands inside the frame range. */
+export function clampBaseFocalMm(f: number, tc: number): number {
+  return Math.min(MAX_FOCAL_MM / tc, Math.max(MIN_FOCAL_MM, f));
+}
+
+/** The one zoom rule: a base focal inside the mounted lens's own range as well as the frame range. */
+export function clampFocalMm(focalMm: number, lens: LensSpec | null, tc: number): number {
+  const f = lens ? Math.min(lens.maxMm, Math.max(lens.minMm, focalMm)) : focalMm;
+  return Math.round(clampBaseFocalMm(f, tc) * 10) / 10;
+}
+
+/**
+ * What the sensor actually sees. A teleconverter multiplies the focal length and costs the same
+ * factor in light, so a 600/4 behind a 2.0× is a 1200/8; a stack multiplies through. Every optical
+ * consumer wants these, not the stored base values.
+ */
+export function effectiveOptics(o: { focalMm: number; fNumber: number; teleconverters: readonly Teleconverter[] }): { focalMm: number; fNumber: number } {
+  const tc = tcFactor(o.teleconverters);
+  return { focalMm: Math.round(o.focalMm * tc * 10) / 10, fNumber: Math.round(o.fNumber * tc * 100) / 100 };
 }

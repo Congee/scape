@@ -1,10 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { depthOfField, hyperfocalM, panoramaCoverageDeg, panoramaShots } from './dof';
-import { circleOfConfusionMm, CocRule, cocMm, cropFactor, focalForFovMm, fovDeg, frameFov, Orientation, SENSORS } from './fov';
+import {
+  aperturesFor,
+  circleOfConfusionMm,
+  clampBaseFocalMm,
+  clampFocalMm,
+  CocRule,
+  cocMm,
+  cropFactor,
+  effectiveOptics,
+  equivalentFocalMm,
+  focalForFovMm,
+  fovDeg,
+  frameFov,
+  maxApertureAt,
+  Orientation,
+  SENSORS,
+  tcFactor,
+  Teleconverter,
+  type LensSpec
+} from './fov';
 import { cameraBasis, discRadiusMm, inFrame, project, unproject, type Camera } from './projection';
 
 const ff = SENSORS[0];
 const mft = SENSORS.find((s) => s.id === 'mft')!;
+const apsc = SENSORS.find((s) => s.id === 'apsc')!;
 
 describe('field of view', () => {
   it('matches the textbook full-frame angles', () => {
@@ -113,5 +133,85 @@ describe('projection', () => {
 
   it('sizes the sun disc', () => {
     expect(discRadiusMm(cam, 0.2667)).toBeCloseTo(0.2327, 3);
+  });
+});
+
+describe('teleconverter', () => {
+  const bare = { focalMm: 600, fNumber: 4, teleconverters: [] as Teleconverter[] };
+
+  it('multiplies focal length and f-number by the same factor', () => {
+    expect(effectiveOptics(bare)).toEqual({ focalMm: 600, fNumber: 4 });
+    expect(effectiveOptics({ ...bare, teleconverters: [Teleconverter.X14] })).toEqual({ focalMm: 840, fNumber: 5.6 });
+    expect(effectiveOptics({ ...bare, teleconverters: [Teleconverter.X20] })).toEqual({ focalMm: 1200, fNumber: 8 });
+  });
+
+  it('stacks a 1.4× and a 2.0× into a 2.8×', () => {
+    expect(tcFactor([])).toBe(1);
+    expect(tcFactor([Teleconverter.X14, Teleconverter.X20])).toBe(2.8);
+    expect(effectiveOptics({ ...bare, teleconverters: [Teleconverter.X14, Teleconverter.X20] })).toEqual({ focalMm: 1680, fNumber: 11.2 });
+  });
+
+  it('frames exactly like the longer lens it makes', () => {
+    const f = effectiveOptics({ ...bare, teleconverters: [Teleconverter.X20] }).focalMm;
+    expect(frameFov(ff, f, Orientation.Landscape).hDeg).toBeCloseTo(frameFov(ff, 1200, Orientation.Landscape).hDeg, 9);
+  });
+
+  it('caps the base focal so the product stays inside the frame range', () => {
+    expect(clampBaseFocalMm(2400, 1)).toBe(2400);
+    expect(clampBaseFocalMm(2400, Teleconverter.X20)).toBe(1200);
+    expect(clampBaseFocalMm(2400, Teleconverter.X14)).toBeCloseTo(1714.3, 1);
+    expect(clampBaseFocalMm(1, Teleconverter.X20)).toBe(4);
+    expect(clampBaseFocalMm(2400, tcFactor([Teleconverter.X14, Teleconverter.X20]))).toBeCloseTo(857.1, 1);
+  });
+});
+
+describe('lens limits', () => {
+  const zoom: LensSpec = { id: 'l', name: 'FE 200-600mm', minMm: 200, maxMm: 600, maxAperture: 5.6, maxApertureLong: 6.3, mount: 'E' };
+  const flat: LensSpec = { id: 'f', name: 'FE 70-200mm', minMm: 70, maxMm: 200, maxAperture: 2.8, mount: 'E' };
+
+  it('keeps a zoom gesture inside the mounted lens', () => {
+    expect(clampFocalMm(50, zoom, 1)).toBe(200);
+    expect(clampFocalMm(5000, zoom, 1)).toBe(600);
+    expect(clampFocalMm(400, zoom, 1)).toBe(400);
+  });
+
+  it('still applies the frame range without a lens', () => {
+    expect(clampFocalMm(1, null, 1)).toBe(4);
+    expect(clampFocalMm(2400, null, Teleconverter.X20)).toBe(1200);
+  });
+
+  it('runs the maximum aperture from end to end of a zoom', () => {
+    expect(maxApertureAt(zoom, 200)).toBe(5.6);
+    expect(maxApertureAt(zoom, 600)).toBe(6.3);
+    expect(maxApertureAt(zoom, 400)).toBe(6);
+  });
+
+  it('holds at the endpoints outside the range and stays flat without a long end', () => {
+    expect(maxApertureAt(zoom, 50)).toBe(5.6);
+    expect(maxApertureAt(zoom, 5000)).toBe(6.3);
+    expect(maxApertureAt(flat, 70)).toBe(2.8);
+    expect(maxApertureAt(flat, 200)).toBe(2.8);
+  });
+
+  it('offers only the stops reachable at that focal length', () => {
+    expect(aperturesFor(zoom, 200)[0]).toBe(5.6);
+    expect(aperturesFor(zoom, 600)[0]).toBe(6.3);
+    expect(aperturesFor(zoom, 600)).not.toContain(5.6);
+  });
+});
+
+describe('crop', () => {
+  it('narrows the frame by the crop factor at a fixed focal', () => {
+    expect(cropFactor(apsc)).toBeCloseTo(1.534, 3);
+    expect(frameFov(apsc, 600, Orientation.Landscape).hDeg).toBeCloseTo(fovDeg(apsc.widthMm, 600), 9);
+    expect(frameFov(apsc, 600, Orientation.Landscape).hDeg).toBeLessThan(frameFov(ff, 600, Orientation.Landscape).hDeg);
+    // The diagonal is what the crop factor is defined on, so it matches the equivalent focal exactly.
+    expect(frameFov(apsc, 600, Orientation.Landscape).dDeg).toBeCloseTo(frameFov(ff, equivalentFocalMm(apsc, 600), Orientation.Landscape).dDeg, 9);
+  });
+
+  it('composes with a teleconverter', () => {
+    const f = effectiveOptics({ focalMm: 600, fNumber: 4, teleconverters: [Teleconverter.X20] }).focalMm;
+    expect(frameFov(apsc, f, Orientation.Landscape).dDeg).toBeCloseTo(frameFov(ff, equivalentFocalMm(apsc, 1200), Orientation.Landscape).dDeg, 9);
+    expect(equivalentFocalMm(apsc, f)).toBeCloseTo(1840.7, 1);
   });
 });

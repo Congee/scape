@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { SavedPlan } from '@core/plan';
+import { planTeleconverters, type SavedPlan } from '@core/plan';
 import { deleteOne, listAll, putOne } from '@data/db';
 import { compositionStore } from './composition';
 import { worldStore } from './world';
@@ -47,6 +47,7 @@ export function capturePlan(name: string, existing?: SavedPlan): SavedPlan {
       sensorId: c.sensorId,
       focalMm: c.focalMm,
       fNumber: c.fNumber,
+      teleconverters: c.teleconverters,
       orientation: c.orientation,
       azimuthDeg: c.azimuthDeg,
       elevationDeg: c.elevationDeg,
@@ -67,6 +68,7 @@ export function applyPlan(p: SavedPlan): void {
   w.setPin2Height(p.target?.heightM ?? 0);
   w.setTz(p.tzAuto ? null : p.tz);
   w.setTime(p.time);
-  compositionStore.getState().update(p.composition);
+  const { teleconverter: _legacy, ...pc } = p.composition;
+  compositionStore.getState().update({ ...pc, teleconverters: planTeleconverters(p.composition) });
   w.flyTo({ lat: p.camera.lat, lng: p.camera.lng }, Math.max(w.view.zoom, 12), false);
 }

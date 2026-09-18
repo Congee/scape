@@ -1,6 +1,6 @@
 import type { Observer } from 'astronomy-engine';
 import { shallow } from 'zustand/shallow';
-import { BODIES, makeObserver, SkyBody } from '@core/astro/bodies';
+import { BODIES, bodyVisible, makeObserver, SkyBody } from '@core/astro/bodies';
 import type { PreparedConstellations } from '@core/astro/constellations';
 import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
 import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
@@ -8,22 +8,26 @@ import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
 import { distance, height } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
-import { buildPrisms, makePrismTarget, rasterisePrisms, type PrismTarget, type PrismTile } from '@core/geo/prismRaster';
+import { PrismOccluder } from '@core/geo/prismOcclude';
+import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
-import { frameFov, frameMm } from '@core/optics/fov';
+import { effectiveOptics, fovDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
+import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
+import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
-import { columnAt, occluded, surfaceAt, type ViewProfile } from '@core/terrain/view';
+import { meshAzPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
+import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
 import { buildingsStore, requestBuildings } from '@state/buildings';
 import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
-import { gearStore, sensorById } from '@state/gear';
+import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { markersStore } from '@state/markers';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
-import { EYE_HEIGHT_M, profileKeyFor, terrainStore } from '@state/terrain';
+import { EYE_HEIGHT_M, meshKeyFor, profileKeyFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { CATEGORY_COLORS } from '../map/overlays';
@@ -45,44 +49,11 @@ const haloText = (ctx: CanvasRenderingContext2D, text: string, x: number, y: num
   ctx.restore();
   ctx.fillText(text, x, y);
 };
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const smooth = (a: number, b: number, x: number) => {
-  const t = clamp((x - a) / (b - a), 0, 1);
-  return t * t * (3 - 2 * t);
-};
-const mix = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 /** Hex colour multiplied by a flat shade factor. */
 const shaded = (hex: string, k: number) => {
   const n = Number.parseInt(hex.slice(1), 16);
   return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`;
 };
-
-/** Sky and ground colours for a sun altitude, shared by the terrain raster and the building haze. */
-function palette(sunAlt: number) {
-  const day = smooth(-12, 4, sunAlt);
-  const dusk = smooth(-10, -3, sunAlt) * (1 - smooth(-1, 6, sunAlt));
-  const zenithDay = [46, 96, 168];
-  const horizonDay = [176, 205, 232];
-  const zenithNight = [6, 9, 18];
-  const horizonNight = [22, 30, 48];
-  const duskGlow = [236, 132, 72];
-  const groundNear = mix([18, 22, 24], [86, 96, 70], day);
-  const groundFar = mix([26, 34, 52], [150, 170, 200], day);
-  const skyAt = (alt: number) => {
-    const t = smooth(0, 60, alt);
-    let c = mix(mix(horizonNight, zenithNight, t), mix(horizonDay, zenithDay, t), day);
-    const glow = dusk * (1 - smooth(0, 18, alt));
-    c = mix(c, duskGlow, glow * 0.6);
-    return c;
-  };
-  const groundAt = (distM: number, slope: number) => {
-    const haze = 1 - Math.exp(-distM / 45_000);
-    const c = mix(groundNear, groundFar, haze);
-    const shade = 0.75 + 0.5 * clamp(slope, 0, 1);
-    return [c[0] * shade, c[1] * shade, c[2] * shade];
-  };
-  return { skyAt, groundAt, groundFar };
-}
 
 interface Frame {
   x: number;
@@ -103,6 +74,7 @@ interface Scene {
   eyeM: number;
   eyeAboveGroundM: number;
   sunAlt: number;
+  sunAz: number;
   time: Date;
   obs: Observer;
   /** How dark the sky is for stars, 0 by day to 1 in astronomical night. */
@@ -137,7 +109,6 @@ interface StarGroup {
 /** Synthetic camera view: terrain layers from the DEM sweep, sky, sun/moon/GC paths, target and markers. */
 export class ViewfinderController {
   private ctx: CanvasRenderingContext2D;
-  private raster = document.createElement('canvas');
   private ro: ResizeObserver;
   private unsubs: (() => void)[] = [];
   private raf = 0;
@@ -145,21 +116,30 @@ export class ViewfinderController {
   private h = 0;
   private dpr = 1;
   private drag: { x: number; y: number; az: number; el: number } | null = null;
-  private quality = 1;
   private starGroups: { cat: StarCatalog; groups: StarGroup[]; polaris: number } | null = null;
   private showers: { day: number; list: ShowerStatus[] } | null = null;
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
   /** Eye-relative prisms per tile, rebuilt when the camera location moves. */
   private prisms = new Map<string, PrismTile>();
   private prismKey = '';
-  private prismTarget: PrismTarget | null = null;
   private prismMs = 0;
-  /** Building pixels alone, drawn back over the sun and moon so a tower can hide a disc. */
-  private mask = document.createElement('canvas');
-  private maskLive = false;
+  private prismStats = { buildings: 0, tiles: 0 };
+  private rasterMs = 0;
+  /** The GPU picture pass; null only when it could not start, which `glError` then explains. */
+  private sceneGl: SceneGl | null = null;
+  private glError = '';
+  /** Per-object building occlusion for the current frame; the GPU picture cannot mask objects. */
+  private occ: PrismOccluder | null = null;
+  private occCache: { key: string; occ: PrismOccluder } | null = null;
+  private gpuMs = -1;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
+    try {
+      this.sceneGl = SceneGl.create(glCanvas);
+    } catch (err) {
+      this.glError = err instanceof Error ? err.message : String(err);
+    }
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(canvas);
     this.resize();
@@ -203,6 +183,7 @@ export class ViewfinderController {
     this.h = r.height;
     this.canvas.width = Math.round(r.width * this.dpr);
     this.canvas.height = Math.round(r.height * this.dpr);
+    this.sceneGl?.resize(this.canvas.width, this.canvas.height);
     this.ensureWindow();
     // Not a direct draw: sizing the 3D view inside a ResizeObserver callback trips the loop guard.
     this.schedule();
@@ -225,10 +206,11 @@ export class ViewfinderController {
     const t = terrainStore.getState();
     const sensor = sensorById(c.sensorId, gearStore.getState().cameras);
     const fm = frameMm(sensor, c.orientation);
-    const fov = frameFov(sensor, c.focalMm, c.orientation);
+    const opt = effectiveOptics(c);
+    const fov = frameFov(sensor, opt.focalMm, c.orientation);
     const fresh = t.profile && t.profileKey === profileKeyFor(w, s) ? t.profile : null;
     const aim = aimFor(c, w, fresh?.los.targetAngleDeg ?? null);
-    const cam: Camera = { azimuthDeg: aim.azimuthDeg, elevationDeg: aim.elevationDeg, focalMm: c.focalMm, frameWmm: fm.w, frameHmm: fm.h };
+    const cam: Camera = { azimuthDeg: aim.azimuthDeg, elevationDeg: aim.elevationDeg, focalMm: opt.focalMm, frameWmm: fm.w, frameHmm: fm.h };
     const eyeAboveGroundM = w.pinHeightM + EYE_HEIGHT_M;
     // Only a sweep made for this camera position may be drawn; a stale one from elsewhere would lie.
     const here = `${w.pin.lat.toFixed(4)},${w.pin.lng.toFixed(4)}|${eyeAboveGroundM}`;
@@ -237,7 +219,8 @@ export class ViewfinderController {
     const eyeM = view?.eyeM ?? Math.max(Number.isNaN(ground) ? 0 : ground, 0) + eyeAboveGroundM;
     const time = new Date(w.time);
     const obs = makeObserver(w.pin, w.pinHeightM);
-    const sunAlt = position(SkyBody.Sun, time, obs).altitude;
+    const sun = position(SkyBody.Sun, time, obs);
+    const sunAlt = sun.altitude;
     const moon = position(SkyBody.Moon, time, obs);
     const night = smooth(-4, -14, sunAlt);
     const moonFactor = night > 0 ? smooth(-2, 8, moon.altitude) * moonInfo(time).illumination : 0;
@@ -247,18 +230,20 @@ export class ViewfinderController {
       if (profile) for (let i = 0; i < profile.nAz; i++) max = Math.max(max, profile.skylineDeg[i]);
       this.skylineMax = { view: profile, max };
     }
-    return { cam, basis: cameraBasis(cam), aim, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
+    return { cam, basis: cameraBasis(cam), aim, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
   }
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
   private ensureWindow() {
     const s = settingsStore.getState();
-    if (!s.terrain || this.w < 40) return;
+    if (this.w < 40) return;
     const sc = this.scene();
+    if (!s.terrain) return;
     const wantStep = clamp(sc.hfov / Math.max(100, sc.frame.w), 0.02, 0.5);
     const wantSpan = Math.min(360, Math.max(30, sc.hfov * 2 + 10));
     const stepForSpan = Math.max(wantStep, wantSpan / MAX_COLUMNS);
     const rangeM = s.horizonRangeKm * 1000;
+    this.ensureMeshWindow(sc, rangeM);
     const minStepDeg = Math.max(0.005, sc.vfov / Math.max(100, sc.frame.h) / 2);
     const cur = viewfinderStore.getState().window;
     const needFrom = sc.aim.azimuthDeg - sc.hfov / 2 - 5;
@@ -282,6 +267,23 @@ export class ViewfinderController {
     this.askBuildings(win);
   }
 
+  /**
+   * Cuts the terrain mesh for the frame. Focal and target land on a quarter-octave ladder and the
+   * aim on a grid one pad wide, so zooming or panning inside the wedge the last mesh was built for
+   * changes nothing and no rebuild is asked for.
+   */
+  private ensureMeshWindow(sc: Scene, rangeM: number) {
+    const focalMm = 2 ** (Math.round(Math.log2(sc.cam.focalMm) * 4) / 4);
+    const hfovDeg = fovDeg(sc.cam.frameWmm, focalMm);
+    const pxH = Math.max(100, sc.frame.h * this.dpr);
+    const targetRad = 2 ** (Math.round(Math.log2((MESH_PX_PER_CELL * sc.cam.frameHmm) / (focalMm * pxH)) * 4) / 4);
+    const step = meshAzPadDeg(hfovDeg);
+    const azimuthDeg = Math.round(sc.aim.azimuthDeg / step) * step;
+    const cur = viewfinderStore.getState().meshWindow;
+    if (cur && cur.rangeM === rangeM && cur.hfovDeg === hfovDeg && cur.targetRad === targetRad && cur.azimuthDeg === azimuthDeg) return;
+    viewfinderStore.getState().setMeshWindow({ rangeM, azimuthDeg, hfovDeg, targetRad });
+  }
+
   /** Building volumes for the same wedge the terrain sweep covers, so small pans need no new fetch. */
   private askBuildings(win: ViewWindow) {
     if (!compositionStore.getState().showBuildings) return;
@@ -295,7 +297,6 @@ export class ViewfinderController {
     this.canvas.focus();
     const sc = this.scene();
     this.drag = { x: e.clientX, y: e.clientY, az: sc.aim.azimuthDeg, el: sc.aim.elevationDeg };
-    this.quality = 0.5;
   };
 
   private onMove = (e: PointerEvent) => {
@@ -309,7 +310,6 @@ export class ViewfinderController {
 
   private onUp = () => {
     this.drag = null;
-    this.quality = 1;
     this.schedule();
   };
 
@@ -317,7 +317,7 @@ export class ViewfinderController {
     e.preventDefault();
     const c = compositionStore.getState();
     const factor = Math.exp(-e.deltaY * 0.0015);
-    c.update({ focalMm: Math.round(clamp(c.focalMm * factor, 4, 2400) * 10) / 10 });
+    c.update(zoomPatch(c, c.focalMm * factor));
   };
 
   private onDouble = (e: MouseEvent) => {
@@ -337,8 +337,8 @@ export class ViewfinderController {
     else if (e.key === 'ArrowRight') c.aim(sc.aim.azimuthDeg + step, sc.aim.elevationDeg);
     else if (e.key === 'ArrowUp') c.aim(sc.aim.azimuthDeg, sc.aim.elevationDeg + step);
     else if (e.key === 'ArrowDown') c.aim(sc.aim.azimuthDeg, sc.aim.elevationDeg - step);
-    else if (e.key === '+' || e.key === '=') c.update({ focalMm: Math.round(clamp(c.focalMm * 1.1, 4, 2400) * 10) / 10 });
-    else if (e.key === '-') c.update({ focalMm: Math.round(clamp(c.focalMm / 1.1, 4, 2400) * 10) / 10 });
+    else if (e.key === '+' || e.key === '=') c.update(zoomPatch(c, c.focalMm * 1.1));
+    else if (e.key === '-') c.update(zoomPatch(c, c.focalMm / 1.1));
     else return;
     e.preventDefault();
   };
@@ -370,151 +370,105 @@ export class ViewfinderController {
     return this.prisms;
   }
 
-  /** Building volumes at the raster's resolution, or null when they are off or nothing has arrived. */
-  private rasterBuildings(sc: Scene, rw: number, rh: number, hazeRgb: number[]): PrismTarget | null {
+  /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */
+  private glPrisms(sc: Scene, hazeRgb: readonly number[]): { tiles: Iterable<PrismTile>; shading: PrismShading } | null {
+    this.prismStats = { buildings: 0, tiles: 0 };
     if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
     const tiles = this.prismTiles(sc);
     if (tiles.size === 0) return null;
-    if (this.prismTarget?.rw !== rw || this.prismTarget.rh !== rh) this.prismTarget = makePrismTarget(rw, rh);
-    // Flat shading follows the sun by day and a fixed key light behind the camera's left at night.
-    const lightAzDeg = sc.sunAlt > 0 ? position(SkyBody.Sun, sc.time, sc.obs).azimuth : sc.aim.azimuthDeg + 135;
+    this.prismStats = { buildings: 0, tiles: tiles.size };
+    const lightAzDeg = sc.sunAlt > 0 ? sc.sunAz : sc.aim.azimuthDeg + 135;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    const t0 = performance.now();
-    const drawn = rasterisePrisms(this.prismTarget, sc.cam, sc.basis, tiles.values(), { lightAzDeg, hazeRgb, night: sc.night, rangeM });
-    this.prismMs = performance.now() - t0;
-    if (import.meta.env.DEV) {
-      const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
-      if (dev) dev.prism = { ms: this.prismMs, buildings: drawn, tiles: tiles.size, rw, rh };
-    }
-    return this.prismTarget;
+    return { tiles: [...tiles.values()], shading: { lightAzDeg, hazeRgb, night: sc.night, rangeM } };
   }
 
-  /** Sky and layered terrain, one pixel at a time at reduced resolution, then scaled into the frame. */
-  private drawRaster(sc: Scene) {
-    const { frame, view } = sc;
-    const rw = Math.max(2, Math.round(frame.w * this.quality * Math.min(this.dpr, 1.5) * 0.6));
-    const rh = Math.max(2, Math.round((rw * frame.h) / frame.w));
-    this.raster.width = rw;
-    this.raster.height = rh;
-    const rctx = this.raster.getContext('2d')!;
-    const img = rctx.createImageData(rw, rh);
-    const data = img.data;
+  /** Index of the same prisms the picture draws; it only changes when the tiles or the camera move. */
+  private occluder(sc: Scene): PrismOccluder | null {
+    if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
+    const tiles = this.prismTiles(sc);
+    if (tiles.size === 0) return null;
+    const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
+    const key = `${this.prismKey}|${buildingsStore.getState().version}|${rangeM}`;
+    if (this.occCache?.key !== key) this.occCache = { key, occ: new PrismOccluder(tiles.values(), rangeM) };
+    return this.occCache.occ;
+  }
 
-    const { skyAt, groundAt, groundFar } = palette(sc.sunAlt);
-    const bld = this.rasterBuildings(sc, rw, rh, groundFar);
-    const mctx = bld ? this.maskContext(rw, rh) : null;
-    const mask = mctx ? mctx.createImageData(rw, rh) : null;
-    this.maskLive = false;
+  /** True when a building stands between the eye and a direction; `distM` is Infinity for the sky. */
+  private behindBuilding(azDeg: number, altDeg: number, distM: number): boolean {
+    if (!this.occ) return false;
+    const ca = Math.cos(altDeg * D2R);
+    return this.occ.occludes(ca * Math.sin(azDeg * D2R), ca * Math.cos(azDeg * D2R), Math.sin(altDeg * D2R), distM);
+  }
 
-    // Milky Way: sample the equirectangular J2000 texture along each sky pixel's direction.
+  /** Sky, terrain, buildings and shadows on the GPU, into the canvas that sits under this one. */
+  private drawSceneGl(sc: Scene, gl: SceneGl) {
+    const { frame } = sc;
+    const pal = palette(sc.sunAlt);
+    const vx = Math.round(frame.x * this.dpr);
+    const vw = Math.max(2, Math.round(frame.w * this.dpr));
+    const vh = Math.max(2, Math.round(frame.h * this.dpr));
+    // GL counts rows from the bottom of the drawing buffer.
+    const vy = Math.max(0, this.canvas.height - Math.round(frame.y * this.dpr) - vh);
     const comp = compositionStore.getState();
     const wantMw = comp.showMilkyWay && sc.night > 0;
     if (wantMw) skyStore.getState().ensure();
     const tex = wantMw ? skyStore.getState().milkyWay : null;
-    const E = tex ? enuToEqj(sc.time, sc.obs) : null;
-    const mwGain = 0.8 * sc.night * (1 - 0.7 * sc.moonFactor);
-    const skyPixel = (alt: number, vx: number, vy: number, vz: number, len: number) => {
-      const c0 = skyAt(alt);
-      if (!tex || !E) return c0;
-      const e = vx / len;
-      const n = vy / len;
-      const u = vz / len;
-      const qx = E[0] * e + E[1] * n + E[2] * u;
-      const qy = E[3] * e + E[4] * n + E[5] * u;
-      const qz = E[6] * e + E[7] * n + E[8] * u;
-      let fu = 0.5 - Math.atan2(qy, qx) / (2 * Math.PI);
-      fu -= Math.floor(fu);
-      const fv = (Math.PI / 2 - Math.asin(clamp(qz, -1, 1))) / Math.PI;
-      const x = fu * tex.width - 0.5;
-      const y = clamp(fv * tex.height - 0.5, 0, tex.height - 1);
-      const x0 = Math.floor(x);
-      const y0 = Math.floor(y);
-      const dx = x - x0;
-      const dy = y - y0;
-      const cx0 = ((x0 % tex.width) + tex.width) % tex.width;
-      const cx1 = (cx0 + 1) % tex.width;
-      const cy0 = Math.min(tex.height - 1, Math.max(0, y0));
-      const cy1 = Math.min(tex.height - 1, cy0 + 1);
-      const i00 = (cy0 * tex.width + cx0) * 4;
-      const i10 = (cy0 * tex.width + cx1) * 4;
-      const i01 = (cy1 * tex.width + cx0) * 4;
-      const i11 = (cy1 * tex.width + cx1) * 4;
-      const texel = (k: number) => (tex.rgba[i00 + k] * (1 - dx) + tex.rgba[i10 + k] * dx) * (1 - dy) + (tex.rgba[i01 + k] * (1 - dx) + tex.rgba[i11 + k] * dx) * dy;
-      return [c0[0] + texel(0) * mwGain, c0[1] + texel(1) * mwGain, c0[2] + texel(2) * mwGain];
-    };
-
-    const { forward: F, right: R, up: U } = sc.basis;
-    const f = sc.cam.focalMm;
-    const fallback = flatHorizonDeg(sc.eyeAboveGroundM);
-    let k = 0;
-    for (let py = 0; py < rh; py++) {
-      const yMm = ((0.5 - (py + 0.5) / rh) * frame.h) / frame.pxPerMm;
-      for (let px = 0; px < rw; px++) {
-        const xMm = (((px + 0.5) / rw - 0.5) * frame.w) / frame.pxPerMm;
-        const vx = F.x + (xMm / f) * R.x + (yMm / f) * U.x;
-        const vy = F.y + (xMm / f) * R.y + (yMm / f) * U.y;
-        const vz = F.z + (xMm / f) * R.z + (yMm / f) * U.z;
-        const len = Math.hypot(vx, vy, vz);
-        const alt = Math.asin(vz / len) / D2R;
-        let c: number[];
-        // Distance of whatever the sweep puts here; a building nearer than it stands in front.
-        let surfaceM = Infinity;
-        if (view) {
-          const az = Math.atan2(vx, vy) / D2R;
-          const col = columnAt(view, az);
-          if (col < 0 || alt > view.skylineDeg[col]) c = skyPixel(alt, vx, vy, vz, len);
-          else {
-            const m = surfaceAt(view, col, alt);
-            if (m < 0) {
-              c = groundAt(view.rangeM, 0);
-              surfaceM = view.rangeM;
-            } else {
-              const prev = m > view.start[col] ? m - 1 : -1;
-              const slope = prev >= 0 ? (view.angleDeg[m] - view.angleDeg[prev]) / Math.max(0.02, Math.log(view.distM[m] / Math.max(1, view.distM[prev])) * 8) : 0.4;
-              c = groundAt(view.distM[m], slope);
-              surfaceM = view.distM[m];
-            }
-          }
-        } else if (alt > fallback) c = skyPixel(alt, vx, vy, vz, len);
-        else {
-          surfaceM = clamp(-sc.eyeAboveGroundM / Math.tan(Math.min(-0.001, alt * D2R)), 20, 50_000);
-          c = groundAt(surfaceM, 0.3);
-        }
-        const i = py * rw + px;
-        if (bld && bld.depth[i] < surfaceM) {
-          const rgb = bld.color[i];
-          c = [(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255];
-          if (mask) {
-            mask.data[k] = c[0];
-            mask.data[k + 1] = c[1];
-            mask.data[k + 2] = c[2];
-            mask.data[k + 3] = 255;
-            this.maskLive = true;
-          }
-        }
-        data[k++] = c[0];
-        data[k++] = c[1];
-        data[k++] = c[2];
-        data[k++] = 255;
-      }
+    const shadowOn = compositionStore.getState().showSunShadows;
+    const t0 = performance.now();
+    const stats = gl.render(
+      {
+        cam: sc.cam,
+        basis: sc.basis,
+        eyeAboveGroundM: sc.eyeAboveGroundM,
+        fallbackDeg: flatHorizonDeg(sc.eyeAboveGroundM),
+        day: pal.day,
+        dusk: pal.dusk,
+        groundNear: pal.groundNear,
+        groundFar: pal.groundFar,
+        terrain: settingsStore.getState().terrain ? this.meshLevels() : [],
+        prism: this.glPrisms(sc, pal.groundFar),
+        milkyWay: tex,
+        eqj: tex ? enuToEqj(sc.time, sc.obs) : null,
+        mwGain: 0.8 * sc.night * (1 - 0.7 * sc.moonFactor),
+        sunAzDeg: sc.sunAz,
+        sunAltDeg: sc.sunAlt,
+        // The last degree of sun casts a shadow over everything, so fade it out rather than pop at sunset.
+        shadowGain: shadowOn ? smooth(0, 1.5, sc.sunAlt) : 0,
+        sunDisc: comp.showSun ? this.bodyDisc(sc, SkyBody.Sun) : null,
+        moonDisc: comp.showMoon ? this.bodyDisc(sc, SkyBody.Moon) : null
+      },
+      vx,
+      vy,
+      vw,
+      vh
+    );
+    this.rasterMs = performance.now() - t0;
+    this.prismMs = -1;
+    this.prismStats = { buildings: stats.prism?.buildings ?? 0, tiles: stats.prism?.tiles ?? 0 };
+    this.gpuMs = stats.gpuMs;
+    if (import.meta.env.DEV) {
+      const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
+      const shade = { on: stats.cascades > 0, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, terrain: stats.terrain, rw: vw, rh: vh, shadow: shade };
     }
-    rctx.putImageData(img, 0, 0);
-    this.ctx.imageSmoothingEnabled = true;
-    this.ctx.drawImage(this.raster, frame.x, frame.y, frame.w, frame.h);
-    if (mctx && mask) mctx.putImageData(mask, 0, 0);
   }
 
-  private maskContext(rw: number, rh: number): CanvasRenderingContext2D {
-    this.mask.width = rw;
-    this.mask.height = rh;
-    return this.mask.getContext('2d')!;
+  /** Mesh levels for this camera position; a set built elsewhere would sit at the wrong height. */
+  private meshLevels(): MeshLevel[] {
+    const t = terrainStore.getState();
+    const want = meshKeyFor(worldStore.getState(), settingsStore.getState(), viewfinderStore.getState().meshWindow);
+    return want && t.meshKey === want ? t.mesh.map((m) => m.mesh) : [];
   }
 
-  /** Buildings only, painted back over the sun and moon so a disc behind a tower shows its visible part. */
-  private drawBuildingMask(sc: Scene) {
-    if (!this.maskLive) return;
-    this.ctx.imageSmoothingEnabled = true;
-    this.ctx.drawImage(this.mask, sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+  /** Sun and moon for the picture pass, which clips them against the depth the overlay cannot see. */
+  private bodyDisc(sc: Scene, body: SkyBody): BodyDisc | null {
+    const pos = position(body, sc.time, sc.obs);
+    if (pos.altitude < -2) return null;
+    const d = cameraBasis({ azimuthDeg: pos.azimuth, elevationDeg: pos.altitude }).forward;
+    const semiDeg = semidiameterDeg(body, sc.time, sc.obs);
+    if (body !== SkyBody.Moon) return { dir: [d.x, d.y, d.z], semiDeg, moon: null };
+    const info = moonInfo(sc.time);
+    return { dir: [d.x, d.y, d.z], semiDeg, moon: moonTerminator(info.illumination, info.waxing) };
   }
 
   private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {
@@ -554,6 +508,7 @@ export class ViewfinderController {
       if (Number.isNaN(az)) az = Math.atan2(e, n) / D2R;
       hidden = this.hiddenBySkyline(sc, az, alt);
     }
+    if (!hidden && this.occ) hidden = this.occ.occludes(e, n, u, Infinity);
     return { x: p.x, y: p.y, altDeg: alt, hidden };
   }
 
@@ -776,10 +731,10 @@ export class ViewfinderController {
     for (let i = 0; i < curve.n; i++) {
       const p = this.toPx(sc, azs[i], alts[i]);
       const inside = this.inFrame(sc, p, 40);
-      const hidden = !!sc.view && (() => {
+      const hidden = (!!sc.view && (() => {
         const col = columnAt(sc.view!, azs[i]);
         return col >= 0 && alts[i] < sc.view!.skylineDeg[col];
-      })();
+      })()) || this.behindBuilding(azs[i], alts[i], Infinity);
       if (p && prev && (inside || this.inFrame(sc, prev, 40))) {
         ctx.strokeStyle = color;
         ctx.globalAlpha = hidden || prevHidden ? 0.35 : 0.9;
@@ -818,8 +773,10 @@ export class ViewfinderController {
     const col = sc.view ? columnAt(sc.view, pos.azimuth) : -1;
     const skyline = col >= 0 && sc.view ? sc.view.skylineDeg[col] : flatHorizonDeg(sc.eyeAboveGroundM);
     const semi = semidiameterDeg(body, date, sc.obs);
-    const hidden = pos.altitude + semi < skyline;
+    const hidden = pos.altitude + semi < skyline || this.behindBuilding(pos.azimuth, pos.altitude, Infinity);
     const r = Math.max(3, discRadiusMm(sc.cam, semi) * sc.frame.pxPerMm);
+    // The picture pass draws the discs itself, clipped per pixel; only the label is left here.
+    const inPicture = !!this.sceneGl && body !== SkyBody.Gc;
     ctx.save();
     ctx.beginPath();
     ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
@@ -837,6 +794,8 @@ export class ViewfinderController {
       ctx.moveTo(p.x, p.y - 10);
       ctx.lineTo(p.x, p.y + 10);
       ctx.stroke();
+    } else if (inPicture) {
+      // Nothing to draw over the picture.
     } else if (body === SkyBody.Sun) {
       const g = ctx.createRadialGradient(p.x, p.y, r * 0.5, p.x, p.y, r * 4);
       g.addColorStop(0, 'rgba(255,220,120,0.55)');
@@ -867,7 +826,7 @@ export class ViewfinderController {
     return { x: p.x, y: p.y + r + 4, text: body === SkyBody.Gc ? 'Galactic Centre' : body === SkyBody.Sun ? 'Sun' : 'Moon', color: BODY_COLOR[body], alpha: hidden ? 0.35 : 1 };
   }
 
-  /** Body names, drawn after the building mask so a tower never swallows a label. */
+  /** Body names, drawn over the picture so a tower never swallows a label. */
   private drawBodyLabels(sc: Scene, labels: BodyLabel[]) {
     if (labels.length === 0) return;
     const { ctx } = this;
@@ -938,7 +897,7 @@ export class ViewfinderController {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     // Flat shading follows the sun by day and a fixed key light from the camera's left at night.
-    const sunAz = sc.sunAlt > -6 ? position(SkyBody.Sun, sc.time, sc.obs).azimuth : null;
+    const sunAz = sc.sunAlt > -6 ? sc.sunAz : null;
     const markers: SavedMarker[] = markersStore.getState().markers.filter((m) => m.showInViewfinder);
     for (const m of markers) {
       const d = distanceM(w.pin, m);
@@ -954,7 +913,7 @@ export class ViewfinderController {
       const top = this.toPx(sc, az, topAlt);
       const halfW = m.widthM > 0 ? (Math.atan(m.widthM / 2 / d) / D2R / sc.hfov) * sc.frame.w : 0;
       if (!base || !top || !(this.inFrame(sc, base, 20 + halfW) || this.inFrame(sc, top, 20 + halfW))) continue;
-      const hidden = !!sc.view && occluded(sc.view, az, topAlt, d);
+      const hidden = (!!sc.view && occluded(sc.view, az, topAlt, d)) || this.behindBuilding(az, topAlt, d);
       const color = CATEGORY_COLORS[m.category];
       ctx.globalAlpha = hidden ? 0.4 : 1;
       ctx.strokeStyle = color;
@@ -1039,7 +998,7 @@ export class ViewfinderController {
     ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'top';
     const y = sc.frame.y + sc.frame.h + 6;
-    const lens = `${c.focalMm} mm · ${sc.hfov.toFixed(1)}° × ${sc.vfov.toFixed(1)}°`;
+    const lens = `${effectiveOptics(c).focalMm} mm${c.teleconverters.length === 0 ? '' : ` · ${tcFactor(c.teleconverters)}×`} · ${sc.hfov.toFixed(1)}° × ${sc.vfov.toFixed(1)}°`;
     let status = '';
     if (!s.terrain) status = 'Elevation data is off (Settings): flat horizon';
     else if (t.busy.View) status = 'Sweeping terrain…';
@@ -1062,27 +1021,54 @@ export class ViewfinderController {
     }
   }
 
+  /** No GPU, no picture: the frame carries the reason rather than a blank canvas. */
+  private drawGlError(sc: Scene) {
+    const { ctx } = this;
+    const { x, y, w, h } = sc.frame;
+    ctx.strokeStyle = 'rgba(230,237,243,0.9)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w), Math.round(h));
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(230,237,243,0.9)';
+    const lines: string[] = [];
+    for (const word of this.glError.split(' ')) {
+      const last = lines.at(-1);
+      if (last && ctx.measureText(`${last} ${word}`).width <= w - 24) lines[lines.length - 1] = `${last} ${word}`;
+      else lines.push(word);
+    }
+    for (const [i, line] of lines.entries()) ctx.fillText(line, x + w / 2, y + h / 2 + (i - (lines.length - 1) / 2) * 18);
+  }
+
   private draw() {
     const { ctx, w, h } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = '#07090c';
-    ctx.fillRect(0, 0, w, h);
+    // The GL canvas underneath holds the picture; over it this one must stay transparent.
+    if (this.sceneGl) ctx.clearRect(0, 0, w, h);
+    else {
+      ctx.fillStyle = '#07090c';
+      ctx.fillRect(0, 0, w, h);
+    }
     if (w < 40 || h < 40) return;
     const sc = this.scene();
+    if (!this.sceneGl) {
+      this.drawGlError(sc);
+      return;
+    }
     const s = settingsStore.getState();
     const c = compositionStore.getState();
-    this.drawRaster(sc);
+    this.occ = this.occluder(sc);
+    this.drawSceneGl(sc, this.sceneGl);
     this.drawSky(sc);
 
     const date = new Date(worldStore.getState().time);
     const labels: BodyLabel[] = [];
     for (const b of BODIES) {
-      if (b === SkyBody.Gc && !s.showGc) continue;
+      if (!bodyVisible(b, c, s)) continue;
       const l = this.drawBody(sc, b, date);
       if (l) labels.push(l);
     }
-    this.drawBuildingMask(sc);
-
     // Horizon (0°) as a faint dashed line.
     ctx.save();
     ctx.beginPath();
@@ -1105,7 +1091,7 @@ export class ViewfinderController {
     ctx.setLineDash([]);
     if (c.showPaths) {
       for (const b of BODIES) {
-        if (b === SkyBody.Gc && !s.showGc) continue;
+        if (!bodyVisible(b, c, s)) continue;
         this.drawPath(sc, b, BODY_COLOR[b]);
       }
     }
@@ -1143,6 +1129,7 @@ export class ViewfinderController {
   }
 
   dispose() {
+    this.sceneGl?.dispose();
     for (const u of this.unsubs) u();
     this.ro.disconnect();
     cancelAnimationFrame(this.raf);

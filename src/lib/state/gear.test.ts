@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { fitToLens, isCameraBody, type LensSpec } from '@core/optics/fov';
-import { defaultKitName, kitMatches, type Kit } from './gear';
+import { effectiveOptics, fitToLens, isCameraBody, Teleconverter, type LensSpec } from '@core/optics/fov';
+import { DEFAULT_FOCALS, defaultKitName, GEAR_PERSIST, GEAR_VERSION, kitMatches, migrateGear, type Kit } from './gear';
 
 const zoom: LensSpec = { id: 'cat:Sony FE 100-400mm F4.5-5.6 GM OSS (E)', name: 'Sony FE 100-400mm', minMm: 100, maxMm: 400, maxAperture: 4.5, mount: 'E' };
 const prime: LensSpec = { id: 'cat:Sony FE 50mm F1.2 GM (E)', name: 'Sony FE 50mm', minMm: 50, maxMm: 50, maxAperture: 1.2, mount: 'E' };
+const tele: LensSpec = { id: 'cat:Sony FE 600mm F4 GM OSS (E)', name: 'Sony FE 600mm', minMm: 600, maxMm: 600, maxAperture: 4, mount: 'E' };
 
 describe('isCameraBody', () => {
   it('accepts catalogue and custom bodies', () => {
@@ -37,6 +38,12 @@ describe('fitToLens', () => {
   it('opens no wider than the lens does', () => {
     expect(fitToLens(zoom, 200, 2.8).fNumber).toBe(4.5);
     expect(fitToLens(zoom, 200, 11).fNumber).toBe(11);
+  });
+
+  it('clamps the base focal, leaving the teleconverter free to go past the lens', () => {
+    const base = fitToLens(tele, 1200, 4);
+    expect(base).toEqual({ focalMm: 600, fNumber: 4 });
+    expect(effectiveOptics({ ...base, teleconverters: [Teleconverter.X20] })).toEqual({ focalMm: 1200, fNumber: 8 });
   });
 
   it('rounds the focal length to a tenth', () => {
@@ -75,5 +82,70 @@ describe('defaultKitName', () => {
 
   it('does not chop a make that is only a prefix', () => {
     expect(defaultKitName('Sony α7R V', 'Sonyx 50mm')).toBe('Sony α7R V + Sonyx 50mm');
+  });
+});
+
+describe('migrateGear', () => {
+  const old = [14, 16, 20, 24, 28, 35, 50, 70, 85, 100, 135, 200, 300, 400, 600];
+
+  it('adds newly shipped presets to a v0 profile', () => {
+    expect(migrateGear({ cameras: [], lenses: [], kits: [], focalPresets: old }, 0).focalPresets).toEqual(DEFAULT_FOCALS);
+  });
+
+  it('keeps the user’s own presets, sorted and de-duplicated', () => {
+    const stored = [...old, 12, 400];
+    expect(migrateGear({ focalPresets: stored }, 0).focalPresets).toEqual([12, ...DEFAULT_FOCALS]);
+  });
+
+  it('carries the rest of the profile through', () => {
+    const kit: Kit = { id: 'k1', name: 'α7R V', cameraId: 'cat:Sony α7R V', lensId: null };
+    const s = migrateGear({ cameras: [], lenses: [prime], kits: [kit], focalPresets: old }, 0);
+    expect(s.lenses).toEqual([prime]);
+    expect(s.kits).toEqual([kit]);
+  });
+
+  it('leaves a current profile’s presets alone', () => {
+    expect(migrateGear({ focalPresets: [50, 100] }, 1).focalPresets).toEqual([50, 100]);
+  });
+
+  it('backfills the long-end aperture on lenses saved before it existed', () => {
+    const saved: LensSpec = { id: 'cat:Sony FE 200-600mm F5.6-6.3 G OSS (E)', name: 'Sony FE 200-600mm F5.6-6.3 G OSS', minMm: 200, maxMm: 600, maxAperture: 5.6, mount: 'E' };
+    expect(migrateGear({ lenses: [saved] }, 1).lenses[0]).toEqual({ ...saved, maxApertureLong: 6.3 });
+  });
+
+  it('does not re-union the presets of a v1 profile it is only taking to v2', () => {
+    expect(migrateGear({ focalPresets: [50, 100], lenses: [] }, 1).focalPresets).toEqual([50, 100]);
+  });
+
+  it('runs both steps on a v0 profile', () => {
+    const saved: LensSpec = { id: 'l', name: 'Canon RF 100-400mm F5.6-8 IS USM', minMm: 100, maxMm: 400, maxAperture: 5.6, mount: 'RF' };
+    const g = migrateGear({ focalPresets: [12], lenses: [saved] }, 0);
+    expect(g.lenses[0].maxApertureLong).toBe(8);
+    expect(g.focalPresets).toEqual([12, ...DEFAULT_FOCALS]);
+  });
+
+  it('leaves a constant-aperture lens and a v2 profile untouched', () => {
+    expect(migrateGear({ lenses: [prime] }, 1).lenses).toEqual([prime]);
+    const ranged: LensSpec = { ...zoom, name: 'Sony FE 100-400mm F4.5-5.6 GM OSS' };
+    expect(migrateGear({ lenses: [ranged] }, GEAR_VERSION).lenses).toEqual([ranged]);
+  });
+
+  it('survives a malformed lens list', () => {
+    expect(migrateGear({ lenses: 'nope' }, 0).lenses).toEqual([]);
+    expect(migrateGear({ lenses: [null, {}, { name: 7 }, { name: 'FE 200-600mm F5.6-6.3' }] }, 0).lenses).toEqual([null, {}, { name: 7 }, { name: 'FE 200-600mm F5.6-6.3' }]);
+  });
+
+  it('survives a missing or malformed persisted state', () => {
+    expect(migrateGear(undefined, 0).focalPresets).toEqual(DEFAULT_FOCALS);
+    expect(migrateGear({ focalPresets: null }, 0)).toEqual({ cameras: [], lenses: [], kits: [], focalPresets: DEFAULT_FOCALS });
+  });
+});
+
+describe('gear persistence', () => {
+  // The migration is useless unless the store actually runs it.
+  it('runs the migration on a stored profile older than the current version', () => {
+    expect(GEAR_PERSIST.name).toBe('scape.gear');
+    expect(GEAR_PERSIST.version).toBe(GEAR_VERSION);
+    expect(GEAR_PERSIST.migrate({ focalPresets: [45] }, 0).focalPresets).toEqual([45, ...DEFAULT_FOCALS].toSorted((a, b) => a - b));
   });
 });
