@@ -41,6 +41,7 @@ const view = (focalMm: number, frameWmm = 36, frameHmm = 24, pitchDeg = 0): Mesh
   return {
     azimuthDeg: 37,
     hfovDeg: (2 * Math.atan(frameWmm / 2 / focalMm) * 180) / Math.PI,
+    vfovDeg: (2 * Math.atan(frameHmm / 2 / focalMm) * 180) / Math.PI,
     pitchDeg,
     elHalfDeg: Math.max(span.maxDeg - pitchDeg, pitchDeg - span.minDeg),
     targetRad: (MESH_PX_PER_CELL * frameHmm) / (focalMm * PX_H)
@@ -485,13 +486,6 @@ describe('azimuth-only selection is untouched', () => {
       expect(got, `${rangeM} m, ${demCellM} m posts, ${focalMm} mm`).toEqual([levels, blocks, triangles, targetRad, reachM]);
     }
   });
-
-  it('a pitch that looks nowhere near the ground changes nothing without a bound', () => {
-    const level = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: view(600) });
-    const up = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: view(600, 36, 24, 45) });
-    expect(up.blocks).toBe(level.blocks);
-    expect(up.reachM).toBe(level.reachM);
-  });
 });
 
 /** A flat plain, so the whole mesh sits on one plane a known angle from the eye. */
@@ -554,5 +548,25 @@ describe('the frame elevation band', () => {
     const far = allBlocks(sel).filter((b) => nearest(b) > 3000 && nearest(b) < sel.reachM && angleTo(centreBearingDeg(b), v.azimuthDeg) < v.hfovDeg / 4);
     expect(far.length).toBeGreaterThan(0);
     for (const b of far) expect(levelCellM(b.level)).toBeLessThanOrEqual(Math.max(v.targetRad * nearest(b), 2 * DEM) + 1e-9);
+  });
+  it('pitching down into a plain costs no reach: the splayed bearings are all near ground', () => {
+    const opts = { rangeM: RANGE, demCellM: DEM, heightBoundM: plain(1000), eyeM: 1600 };
+    const level = selectBlocks({ ...opts, view: view(24, 24, 36) });
+    // Charging every block the rim's full width instead crushed this to a third of the reach.
+    for (const pitchDeg of [-20, -40, -60]) {
+      const down = selectBlocks({ ...opts, view: view(24, 24, 36, pitchDeg) });
+      expect(down.reachM, `${pitchDeg}\u00b0`).toBeGreaterThanOrEqual(level.reachM);
+    }
+  });
+
+  it('the near ground a pitched frame looks down at still gets the splay its rim reaches', () => {
+    const opts = { rangeM: RANGE, demCellM: DEM, heightBoundM: plain(1000), eyeM: 1600 };
+    const v = view(24, 24, 36, -40);
+    // The band where the coarse target no longer refines on distance alone, so the wedge decides.
+    const edge = (sel: ReturnType<typeof selectBlocks>) =>
+      Math.max(...allBlocks(sel).filter((b) => levelCellM(b.level) === sel.minCellM && nearest(b) >= 300 && nearest(b) < 1000).map((b) => angleTo(centreBearingDeg(b), v.azimuthDeg)));
+    const down = edge(selectBlocks({ ...opts, view: v }));
+    expect(down).toBeGreaterThan(edge(selectBlocks({ ...opts, view: view(24, 24, 36) })) + 5);
+    expect(down).toBeGreaterThan(v.hfovDeg);
   });
 });

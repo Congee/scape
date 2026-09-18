@@ -279,13 +279,15 @@ export class ViewfinderController {
     const targetRad = 2 ** (Math.round(Math.log2((MESH_PX_PER_CELL * sc.cam.frameHmm) / (focalMm * pxH)) * 4) / 4);
     const step = meshAzPadDeg(hfovDeg);
     const azimuthDeg = Math.round(sc.aim.azimuthDeg / step) * step;
-    const elStep = meshElPadDeg(fovDeg(sc.cam.frameHmm, focalMm));
+    const vfovDeg = fovDeg(sc.cam.frameHmm, focalMm);
+    const elStep = meshElPadDeg(vfovDeg);
     const pitchDeg = Math.round(sc.aim.elevationDeg / elStep) * elStep;
     const span = frameElevationSpanDeg(pitchDeg, sc.cam.frameWmm, sc.cam.frameHmm, focalMm);
     const elHalfDeg = Math.max(span.maxDeg - pitchDeg, pitchDeg - span.minDeg);
     const cur = viewfinderStore.getState().meshWindow;
-    if (cur && cur.rangeM === rangeM && cur.hfovDeg === hfovDeg && cur.targetRad === targetRad && cur.azimuthDeg === azimuthDeg && cur.pitchDeg === pitchDeg) return;
-    viewfinderStore.getState().setMeshWindow({ rangeM, azimuthDeg, hfovDeg, pitchDeg, elHalfDeg, targetRad });
+    // Frame height sets the wedge as well as the band, so hfov and pitch alone do not pin the mesh.
+    if (cur && cur.rangeM === rangeM && cur.hfovDeg === hfovDeg && cur.targetRad === targetRad && cur.azimuthDeg === azimuthDeg && cur.pitchDeg === pitchDeg && cur.elHalfDeg === elHalfDeg && cur.vfovDeg === vfovDeg) return;
+    viewfinderStore.getState().setMeshWindow({ rangeM, azimuthDeg, hfovDeg, vfovDeg, pitchDeg, elHalfDeg, targetRad });
   }
 
   /** Building volumes for the same wedge the terrain sweep covers, so small pans need no new fetch. */

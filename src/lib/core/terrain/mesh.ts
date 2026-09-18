@@ -7,6 +7,7 @@
  */
 
 import { curvatureDropM, destination, type LngLat } from '@core/geo/geodesy';
+import { frameAzimuthHalfCurve } from '@core/optics/fov';
 import { lngLatToTilePixel } from '@core/terrain/tiles';
 
 const R2D = 180 / Math.PI;
@@ -88,8 +89,10 @@ export const meshElPadDeg = (vfovDeg: number): number => Math.max(MESH_EL_MIN_PA
 /** Where the frame points and how fine it wants the terrain inside it. */
 export interface MeshView {
   azimuthDeg: number;
-  /** Horizontal field of view of the frame itself; the pad is added on top. */
+  /** Horizontal field of view of the frame itself; sets the pads and the cell size, not the wedge. */
   hfovDeg: number;
+  /** Vertical field of view of the frame itself; with the pitch it sets how wide the rim splays. */
+  vfovDeg: number;
   /** Elevation of the frame centre. */
   pitchDeg: number;
   /** Largest departure of any frame rim point's elevation from `pitchDeg`; the pad is added on top. */
@@ -137,16 +140,14 @@ function farthestDistM(e0: number, n0: number, e1: number, n1: number): number {
 }
 
 /**
- * True while the elevation angles a block subtends can reach the frame's band. Each bound takes the
- * curvature drop that makes it widest, so the test never coarsens ground the picture could hold; an
- * unbounded span (no DEM coverage) spans the whole sky and always passes.
+ * Elevation angles a block subtends at the eye, radians. Each bound takes the curvature drop that
+ * makes it widest, so the span never coarsens ground the picture could hold; an unbounded height
+ * (no DEM coverage) spans the whole sky.
  */
-function reachesBand(minM: number, maxM: number, eyeM: number, dNear: number, dFar: number, loRad: number, hiRad: number): boolean {
+function elevationSpanRad(minM: number, maxM: number, eyeM: number, dNear: number, dFar: number): { loRad: number; hiRad: number } {
   const u1 = maxM - eyeM - curvatureDropM(dNear);
   const u0 = minM - eyeM - curvatureDropM(dFar);
-  const elMax = Math.atan2(u1, u1 > 0 ? dNear : dFar);
-  const elMin = Math.atan2(u0, u0 < 0 ? dNear : dFar);
-  return elMax >= loRad && elMin <= hiRad;
+  return { loRad: Math.atan2(u0, u0 < 0 ? dNear : dFar), hiRad: Math.atan2(u1, u1 > 0 ? dNear : dFar) };
 }
 
 /**
@@ -189,7 +190,9 @@ const inRoot = (rootLevel: number, level: number, ix: number, iy: number): boole
 function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineRad: number, reachM: number): Map<string, BlockId> {
   const view = opts.view;
   const viewMid = view ? view.azimuthDeg * D2R : 0;
-  const viewHalf = view ? (view.hfovDeg / 2 + meshAzPadDeg(view.hfovDeg)) * D2R : 0;
+  const azPad = view ? meshAzPadDeg(view.hfovDeg) : 0;
+  // Focal normalised to 1: only the frame's shape and pitch matter to how its rim splays.
+  const azCurve = view ? frameAzimuthHalfCurve(view.pitchDeg, 2 * Math.tan((view.hfovDeg / 2) * D2R), 2 * Math.tan((view.vfovDeg / 2) * D2R), 1) : null;
   const bound = view ? opts.heightBoundM : undefined;
   const eyeM = opts.eyeM ?? 0;
   const elPad = view ? meshElPadDeg(2 * view.elHalfDeg) : 0;
@@ -204,13 +207,18 @@ function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineR
     const n0 = b.iy * s;
     const d = nearestDistM(e0, n0, e0 + s, n0 + s);
     let target = COARSE_TARGET_RAD;
-    if (view && d <= reachM) {
-      const span = viewHalf >= Math.PI ? null : bearingSpan(e0, n0, e0 + s, n0 + s);
-      // A null span is the eye inside the block, or a wedge that has grown to the whole circle.
-      if (!span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf) {
-        // d === 0 is the eye inside the block, where every elevation is covered.
-        const bnd = bound && d > 0 ? bound(b) : null;
-        if (!bnd || reachesBand(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s), elLo, elHi)) target = fineRad;
+    if (view && azCurve && d <= reachM) {
+      // d === 0 is the eye inside the block, where every elevation is covered.
+      const bnd = bound && d > 0 ? bound(b) : null;
+      const band = bnd ? elevationSpanRad(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s)) : null;
+      if (!band || (band.hiRad >= elLo && band.loRad <= elHi)) {
+        // Only the elevations the block and the frame share can splay the rim, so they set its width.
+        const lo = band ? Math.max(band.loRad, elLo) : elLo;
+        const hi = band ? Math.min(band.hiRad, elHi) : elHi;
+        const viewHalf = (azCurve(lo * R2D, hi * R2D) + azPad) * D2R;
+        const span = viewHalf >= Math.PI ? null : bearingSpan(e0, n0, e0 + s, n0 + s);
+        // A null span is the eye inside the block, or a wedge that has grown to the whole circle.
+        if (!span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf) target = fineRad;
       }
     }
     if (b.level > minLevel && levelCellM(b.level) > target * d) {

@@ -92,7 +92,7 @@ const meshAnchorFor = (w: W) => `${k5(w.pin)}|${w.pinHeightM + EYE_HEIGHT_M}`;
  */
 export function meshKeyFor(w: W, s: S, win: MeshWindow | null): string {
   if (!s.terrain || !win) return '';
-  return `${meshAnchorFor(w)}|${win.rangeM}|${win.azimuthDeg}|${win.hfovDeg}|${win.pitchDeg}|${win.elHalfDeg}|${win.targetRad}`;
+  return `${meshAnchorFor(w)}|${win.rangeM}|${win.azimuthDeg}|${win.hfovDeg}|${win.vfovDeg}|${win.pitchDeg}|${win.elHalfDeg}|${win.targetRad}`;
 }
 
 const setBusy = (kind: TerrainKind, on: boolean) => terrainStore.setState((st) => ({ busy: { ...st.busy, [kind]: on } }));
@@ -223,7 +223,7 @@ export function startTerrainSync(): () => void {
     // Only the eye moving makes the levels on screen wrong; a re-cut for a new aim may stay up meanwhile.
     if (moved) terrainStore.setState({ mesh: [] });
     setBusy(TerrainKind.Mesh, true);
-    post({ kind: TerrainKind.Mesh, id: ++seq.Mesh, pin: w.pin, eyeAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, rangeM: win.rangeM, view: { azimuthDeg: win.azimuthDeg, hfovDeg: win.hfovDeg, pitchDeg: win.pitchDeg, elHalfDeg: win.elHalfDeg, targetRad: win.targetRad } });
+    post({ kind: TerrainKind.Mesh, id: ++seq.Mesh, pin: w.pin, eyeAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, rangeM: win.rangeM, view: { azimuthDeg: win.azimuthDeg, hfovDeg: win.hfovDeg, vfovDeg: win.vfovDeg, pitchDeg: win.pitchDeg, elHalfDeg: win.elHalfDeg, targetRad: win.targetRad } });
   };
 
   const syncPoints = () => {

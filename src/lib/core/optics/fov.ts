@@ -209,3 +209,50 @@ export function frameAzimuthHalfDeg(pitchDeg: number, frameWmm: number, frameHmm
   const fwd = focalMm * Math.cos(p) - (frameHmm / 2) * Math.abs(Math.sin(p));
   return fwd > 0 ? Math.atan(frameWmm / 2 / fwd) * R2D : 180;
 }
+
+/**
+ * The same half-width, but as a function of the elevations a target spans, degrees. The wide
+ * bearings of a pitched frame belong only to the rim it tilts towards, so a target that shares just
+ * the far elevations of the frame is bracketed far more tightly than `frameAzimuthHalfDeg` allows.
+ * Elevation rises with y and the forward component is linear in it, so the two move together and one
+ * sampled pass over the part of the frame that still faces forward answers every query.
+ */
+export function frameAzimuthHalfCurve(pitchDeg: number, frameWmm: number, frameHmm: number, focalMm: number): (elLoDeg: number, elHiDeg: number) => number {
+  const p = pitchDeg * D2R;
+  const sp = Math.sin(p);
+  const cp = Math.cos(p);
+  const x = frameWmm / 2;
+  const hy = frameHmm / 2;
+  if (sp === 0) {
+    const half = Math.atan(x / focalMm) * R2D;
+    return () => half;
+  }
+  const yTurn = (focalMm * cp) / sp;
+  const y0 = sp < 0 ? Math.max(-hy, yTurn) : -hy;
+  const y1 = sp > 0 ? Math.min(hy, yTurn) : hy;
+  if (!(y0 < y1)) return () => 180;
+  // True when the turn, not the frame edge, ended the interval: past it every bearing is in.
+  const open = sp < 0 ? y0 > -hy : y1 < hy;
+  const n = 128;
+  const el = new Float64Array(n + 1);
+  const beta = new Float64Array(n + 1);
+  for (let i = 0; i <= n; i++) {
+    const y = y0 + ((y1 - y0) * i) / n;
+    const fwd = focalMm * cp - y * sp;
+    el[i] = Math.atan2(y * cp + focalMm * sp, Math.hypot(fwd, x)) * R2D;
+    beta[i] = fwd > 0 ? Math.atan(x / fwd) * R2D : 90;
+  }
+  return (elLoDeg, elHiDeg) => {
+    const want = sp < 0 ? elLoDeg : elHiDeg;
+    if (want <= el[0]) return sp < 0 && open ? 180 : beta[0];
+    if (want >= el[n]) return sp > 0 && open ? 180 : beta[n];
+    let lo = 0;
+    let hi = n;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (el[m] <= want) lo = m;
+      else hi = m;
+    }
+    return beta[lo] + ((want - el[lo]) / (el[hi] - el[lo])) * (beta[hi] - beta[lo]);
+  };
+}

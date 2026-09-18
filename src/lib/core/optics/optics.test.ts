@@ -12,6 +12,7 @@ import {
   equivalentFocalMm,
   focalForFovMm,
   fovDeg,
+  frameAzimuthHalfCurve,
   frameAzimuthHalfDeg,
   frameElevationSpanDeg,
   frameFov,
@@ -284,5 +285,54 @@ describe('frame azimuth half-width', () => {
         for (let u = -1; u <= 1; u += 0.1)
           for (let v = -1; v <= 1; v += 0.1) expect(Math.abs(azAt(pitchDeg, f, u * 18, v * 12))).toBeLessThanOrEqual(half + 1e-9);
       }
+  });
+});
+
+describe('frame azimuth half-width by elevation', () => {
+  const FRAMES: [number, number, number][] = [
+    [36, 24, 14],
+    [24, 36, 24],
+    [36, 24, 70],
+    [36, 24, 600]
+  ];
+
+  it('asked for the whole sky, it is the width of the whole rim', () => {
+    for (const pitchDeg of [-89, -64, -40, -18.56, 0, 18.56, 40, 64, 89])
+      for (const [w, h, f] of FRAMES) expect(frameAzimuthHalfCurve(pitchDeg, w, h, f)(-90, 90), `${pitchDeg}\u00b0 ${w}x${h} ${f}mm`).toBeCloseTo(frameAzimuthHalfDeg(pitchDeg, w, h, f), 6);
+  });
+
+  it('a level frame is hfov / 2 at every elevation', () => {
+    const curve = frameAzimuthHalfCurve(0, 36, 24, 200);
+    for (const el of [-80, -10, 0, 10, 80]) expect(curve(el - 1, el + 1)).toBeCloseTo(fovDeg(36, 200) / 2, 9);
+  });
+
+  it('widens monotonically towards the rim the frame tilts to', () => {
+    const down = frameAzimuthHalfCurve(-40, 24, 36, 24);
+    let prev = 0;
+    for (let el = 10; el >= -100; el -= 5) {
+      const half = down(el, el);
+      expect(half, `${el}\u00b0`).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = half;
+    }
+  });
+
+  it('charges a down-pitched frame the splay only where it looks down, not near its own top', () => {
+    const pitchDeg = -40;
+    const [w, h, f] = [24, 36, 24];
+    const curve = frameAzimuthHalfCurve(pitchDeg, w, h, f);
+    const span = frameElevationSpanDeg(pitchDeg, w, h, f);
+    const hfovHalf = fovDeg(w, f) / 2;
+    // Distant ground sits high in the frame, where the rim is no wider than a level frame's.
+    expect(curve(span.maxDeg - 1, span.maxDeg)).toBeLessThanOrEqual(hfovHalf + 1e-9);
+    // The near ground under the bottom rim is where the wide bearings live.
+    expect(curve(span.minDeg, span.minDeg + 1)).toBeGreaterThan(2 * hfovHalf);
+    expect(curve(span.minDeg, span.minDeg + 1)).toBeCloseTo(frameAzimuthHalfDeg(pitchDeg, w, h, f), 0);
+  });
+
+  it('a frame that turns over inside its own height takes in every bearing past the turn', () => {
+    expect(frameAzimuthHalfCurve(-70, 36, 24, 24)(-90, -80)).toBe(180);
+    expect(frameAzimuthHalfCurve(70, 36, 24, 24)(80, 90)).toBe(180);
+    // Its other rim still points forward, so it is not the whole circle everywhere.
+    expect(frameAzimuthHalfCurve(-70, 36, 24, 24)(-50, -48)).toBeLessThan(180);
   });
 });
