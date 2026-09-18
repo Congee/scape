@@ -465,6 +465,11 @@ quarter of the viewport.
 
 ## 9. Open work (2026-09-18)
 
+Numbered items below are a register, not a queue; most are landed and kept for the measurements in
+them. What is actually left, in order: **14** (cancel a superseded request's queued tile fetches),
+then **15** (`selectBlocks` cost). **8** is a watch, not a task. **2**'s last step turned out to be a
+picture decision rather than a constant, so it joins **18–20** as blocked on the user.
+
 **Precision**
 
 1. **Mapterhorn terrain source** — landed. `tiles.mapterhorn.com/{z}/{x}/{y}.webp`, 512 px, decoded
@@ -511,10 +516,29 @@ quarter of the viewport.
    long as the mesh still fits, and reach is never traded back for cell size. A long lens therefore
    reaches the 2 m cell on its own budget while 70 mm and 200 mm keep the reach they had.
 
-   The 0.41 m post is still two rungs away, and not because of the budget: `buildLevel` picks its DEM
-   zoom from the cell it is filling, so a 2 m cell reads z15 at 1.66 m posts. Meeting z17 wants
-   `BASE_CELL_M` at 0.5 with `MAX_LEVELS` raised two rungs to hold the same reach — a structural change
-   to the ladder, and a separate step.
+   The 0.41 m post is still two rungs away. `buildLevel` picks its DEM zoom from the cell it is
+   filling, so a 2 m cell reads z15 at 1.66 m posts, and z16 and z17 never reach the screen at any
+   focal length.
+
+   Taking `BASE_CELL_M` to 0.5 with `MAX_LEVELS` at 11 was tried and reverted. It is metrically clean:
+   `levelHalfExtentM(MAX_LEVELS - 1)` and `blockSideM` are unchanged, the `EXPECTED` table moves its
+   level labels two rungs and not one block, triangle, `targetRad` or `reachM`, and reach is identical
+   at 24/70/200/600/1200/2400 mm in both orientations. `heightBound`'s pyramid has to be pinned to a
+   2 m base or its grid goes 16× denser and undoes 12. What it does not do is deliver the post.
+   Zermatt village to the Matterhorn, 8.5 km, aimed at the target: at 200, 600, 1200 and 2400 mm
+   *nothing changes at all* — the floor stays 2 m and the DEM zoom 15, because the budget binds two
+   rungs before the constant does. The 2400 mm selection is 436 blocks, 2.18 M triangles; one rung
+   finer is about 8.7 M against a 3 M cap. The single case where the finer constant did bite is the
+   one that wanted it least: portrait 24 mm went to a 1 m floor and z16, 499 blocks → 574, for 279
+   changed pixels of 4.0 M.
+
+   That asymmetry is the finding. `targetRad` is angular, so the cell a block may use scales with its
+   distance and *every* in-band block ends up asking for the floor; dropping the floor a rung
+   therefore costs ~4× across the whole cone, and the greediest consumer is the near field — the
+   opposite of what a long lens wants. So the next step is not a finer constant. It is to bound the
+   fine region to the subject's neighbourhood, so the rung is spent where the subject is instead of
+   everywhere, which changes what the foreground looks like and is a picture decision rather than a
+   number. **Needs a user decision.**
 3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
    up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
    reach the frame's elevation band now fall back to `COARSE_TARGET_RAD` rather than being dropped, so
