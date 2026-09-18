@@ -472,41 +472,135 @@ quarter of the viewport.
    dispatched on container magic so archives written by either source still read, "© Mapterhorn"
    attribution, AWS as the fallback when `ImageDecoder` is absent. The mesh floor deliberately stays
    at 4 m; see 2.
-2. **The triangle budget is spent nearest-first, which is backwards for a landscape camera.**
-   `selectBlocks` reads `minLevel` off the DEM post size (mesh.ts:219), then shrinks `reachM` all the
-   way to `MIN_MESH_REACH_M` before it will coarsen `targetRad` at all (mesh.ts:231). So letting the
-   0.41 m Mapterhorn post unlock the 2 m cell bought near-field detail by collapsing reach: at 600 mm
-   from Zermatt village the Matterhorn at 9.5 km went from 4 m cells to 64 m, and reach from 11.25 km
-   to 5.6 km — 16× worse on the subject of the photograph, in exchange for finer ground at the
-   photographer's feet that a frame pitched up at a summit does not contain. `MESH_MIN_CELL_M` pins
-   the floor at 4 m until the mesh can tell what is in the frame.
-3. **Frame-pitch culling — the unlock for actually using the finer DEM.** The mesh wedge is
-   azimuth-only. A 600 mm frame pitched 16.7° up at the Matterhorn still meshes the valley floor
-   below it at full resolution. Culling blocks that fall under the frame's lower ray would free most
-   of the budget and let the floor drop to 1 m or 0.5 m where the picture needs it. Wants a
-   conservative per-block height bound at selection time, before the heights are fetched.
-4. **Ridge sweeps still read the old surface** — `horizon.ts`, `view.ts` and `los.ts` sample bilinear
-   at their own zooms while the mesh draws cubic at max zoom, so a computed skyline can disagree with
-   the drawn one.
-5. **`buildings.worker.ts` `fillFrameTerrain`** fills one shadow-mask height grid from two disagreeing
+
+   The fine zooms carry real data, not an upsample. Measured as the residual between each tile and a
+   bilinear upsample of its own parent: over the Matterhorn, 2.45 m RMS at z14, 1.79 m at z15, 1.66 m
+   at z16 and 0.52 m at z17, with single-post maxima of 78 m, 77 m, 68 m and 17 m; Eiger and Zermatt
+   village are smaller but never zero. So stopping the mesh at z14 discards about 2.5 m RMS of genuine
+   relief on the Matterhorn's faces, with metre-scale maxima on the cliffs. Over Switzerland the
+   underlying source is swissALTI3D at 0.5 m (swisstopo, Open Government Data), so z17's 0.41 m posts
+   are essentially native resolution and there is nothing deeper to reach for.
+
+   But that detail is about how the picture looks, not about whether the answers are right. Across a
+   ±2.5° fan of ridgelines around the Matterhorn, the skyline computed at z17 differs from the same
+   skyline at z14 by 0.002° median, 0.010° at p90 and 0.044° worst — under a tenth of the 0.53° solar
+   disc. The grazing-light times are already accurate at the current floor. What the finer surface
+   buys is a subject that stops looking soft at long focal lengths.
+2. **The mesh floor wants to be a function of the frame, not a constant.** `selectBlocks` reads
+   `minLevel` off the DEM post size, then shrinks `reachM` all the way to `MIN_MESH_REACH_M` before it
+   will coarsen `targetRad` at all. A finer floor therefore buys near-field detail by collapsing
+   reach, which is backwards for a landscape camera: at 600 mm from Zermatt, letting the 0.41 m post
+   unlock the 2 m cell took the Matterhorn at 9.5 km from 4 m cells to 64 m and reach from 11.25 km to
+   5.6 km.
+
+   What the floor is worth. `targetRad` is `4 · 24 / (focal · pxH)`, so the cell the design asks for on
+   a subject 8.55 km out is 11.6 m at 70 mm, 4.1 m at 200 mm, 1.35 m at 600 mm, 0.68 m at 1200 mm and
+   0.34 m at 2400 mm. The 4 m floor costs nothing below 200 mm and everything above it — which matches
+   the 2400 mm frame looking soft.
+
+   Measured against 3, now that the frame band frees the budget: a flat `MESH_MIN_CELL_M = 2` **fits at
+   600 mm and longer** and halves the cell on the subject (4 m → 2 m) inside the 3 M budget — 2.13 M
+   triangles at 2400 mm with reach still saturated at 100 km, 2.85 M at 600 mm with reach collapsing
+   from 100 km to 8 594 m, which clears the Matterhorn at 8 550 m by only 44 m. **It is a regression at
+   short focal lengths**, where the band frees nothing: 70 mm goes 32 m → 64 m on the subject with
+   reach halved 5 078 → 2 344 m, and 200 mm goes 16 m → 64 m with reach halved 7 813 → 3 906 m. So the
+   floor should drop below 4 m only once `targetRad · reach` is already under it, rather than
+   unconditionally. Not implemented; `MESH_MIN_CELL_M` is still 4.
+
+   Going past 2 m to meet the 0.41 m post wants `BASE_CELL_M` at 0.5 with `MAX_LEVELS` raised two rungs
+   to hold the same reach — a structural change to the ladder, and a separate step.
+3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
+   up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
+   reach the frame's elevation band now fall back to `COARSE_TARGET_RAD` rather than being dropped, so
+   the shadow map keeps its casters and a tilt inside the pad shows no hole. The bound has to exist
+   before any height is fetched, so it comes from a coarse DEM prepass (`heightBound.ts`), dilated a
+   post and padded for relief between posts; missing coverage leaves a block unbounded.
+
+   Measured in the browser from Zermatt at the Matterhorn (bearing 234.8°, pitch 18.56°, range 100 km):
+
+   | focal | blocks | triangles | reach |
+   |---|---|---|---|
+   | 70 mm | 580 | 2 895 360 | 5 078 m |
+   | 200 mm | 556 | 2 775 552 | 7 813 m |
+   | 600 mm | 394 | 1 966 848 | **100 000 m** |
+   | 1200 mm | 307 | 1 532 544 | **100 000 m** |
+   | 2400 mm | 295 | 1 472 640 | **100 000 m** |
+
+   The win is not a smaller triangle count but reach: at 600 mm and longer it saturates at the full
+   100 km while the budget drops to about half. Waste the band reclaims, measured against the
+   azimuth-only selection: 0 % at 70 mm, 22 % at 200 mm, 62 % at 600 mm, 69 % at 1200 and 2400 mm — the
+   70 mm frame really does hold everything. Safety was checked directly by ray-marching a 25×25 grid of
+   image points against the real DEM for nine (focal, pitch) pairs: **0 of 625 rays per case landed in
+   a coarser block**, so in-frame ground is never coarsened.
+
+   Checked across the frame matrix in the app — 24/70/200/600/2400 mm, both orientations, aimed at
+   the target and manually at +45°, +40° and −25°, midday, golden hour and night: no holes, no
+   errors, and a repeat of the first case after the whole tour reproduced it exactly.
+
+   Accepted caveat: ground below the band can still cast a shadow into the frame under a low sun.
+   `MESH_EL_DOWN_PAD` widens the lower side; making the band depend on the sun would rebuild the mesh
+   on every scrub of the timeline, which is far worse than a coarse caster.
+4. **Terrain reads corrupted by the browser's canvas — the map, not the viewfinder.** MapLibre decodes
+   `raster-dem` tiles by drawing an `ImageBitmap` into a 2D canvas and reading it back, and on Brave
+   canvas readback carries sparse anti-fingerprinting noise. Measured on Mapterhorn `17/68324/46642`
+   against a WebCodecs decode of the same bytes: 258 of 262144 posts differ, and **94 of them by
+   exactly ±256 m** (a ±1 in the red channel). It is not the codec — a synthetic opaque buffer through
+   `putImageData` → `getImageData` loses bytes the same way, and so does re-encoding the tile as PNG.
+   MapLibre guards against exactly this with `isOffscreenCanvasDistorted()`, but the probe writes 25
+   pixels and the noise is sparse enough to miss them. The viewfinder is unaffected: it has decoded
+   with WebCodecs since 1. Fix in progress — a custom source type that hands the worker already-decoded
+   pixels, which also skips a canvas round trip per tile.
+5. **Ridge sweeps read bilinear where the mesh draws cubic — measured, and not worth fixing.**
+   From Zermatt the two surfaces put the skyline within 0.0025° of each other toward the Matterhorn
+   and within 0.0012° on three near ridges, against a 0.53° solar disc. Individual posts differ by up
+   to 6 m on the Matterhorn's steep face, but a skyline is set by locally smooth ridge crests, so the
+   error does not reach the answer. The sweeps also cap at the same zoom the mesh actually uses today
+   (the 4 m floor keeps the mesh at z14 everywhere), so there is no zoom mismatch either. Revisit only
+   if the mesh floor drops far enough that the mesh reads z16 or z17 near the subject.
+6. **`buildings.worker.ts` `fillFrameTerrain`** fills one shadow-mask height grid from two disagreeing
    surfaces (bilinear grid, cubic roof bases). It is a 2D mask, so nothing visibly floats.
-6. `align.worker.ts`, `core/align/alignment.ts`, `core/align/visibility.ts` read bilinear at their own
+7. `align.worker.ts`, `core/align/alignment.ts`, `core/align/visibility.ts` read bilinear at their own
    plan zoom. Self-consistent, like `profile()`; lower priority.
-7. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
+8. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
    survive. Seen 1- and 2-row bands so far; widen the neighbourhood if a 4-row band appears. No bad
    post has yet been found in Mapterhorn; the filter stays as a safety net over whichever source runs.
-8. **Hillshade is capped at `demZoom(15)`**, not `TERRAIN_MAX_ZOOM`: MapLibre's raster-dem source has
-   no overzoom and `demProtocol.ts` throws on 404, so pointing it deeper would hole every region whose
-   coverage stops early. Needs its own crop-and-rescale overzoom to reach full Mapterhorn detail.
+9. **The azimuth wedge assumes the frame is level.** `ensureMeshWindow` passes the unpitched
+   `hfovDeg`, but a rectilinear frame pitched up spreads its top edge wider in azimuth than
+   `hfov / 2` — the ray azimuth goes as `atan(x / (f·cos p − y·sin p))`, and the denominator shrinks
+   along the top edge. `MESH_AZ_PAD` covers it at the focal lengths tried so far; a wide lens aimed
+   steeply up would refine a wedge narrower than the picture. The elevation band added in 3 does bound
+   its axis exactly, via `frameElevationSpanDeg`; azimuth is the remaining approximation.
+10. **Hillshade overzoom** — landed. `demProtocol.ts` resamples from the deepest ancestor that resolves
+    rather than throwing, so the map's DEM source can point at `TERRAIN_MAX_ZOOM` without holing every
+    region whose coverage stops early. Ocean, absent at every level, stays an error rather than
+    becoming a flat sea.
+11. **`aim(az, el)` accepts non-finite input and persists it.** Calling it with a missing argument
+    writes `NaN` through `normalizeBearing`/`clamp` into the persisted composition, after which every
+    wedge test fails, the mesh degenerates to its coarsest 100 blocks and the viewfinder renders empty
+    sky with no error. Found by hitting it. Needs a finite guard.
 
 **Performance**
 
-9. Frame time measured end to end; only `gpuMs` is observed today.
-10. Priority lanes in the DEM and Overture fetch queues, so the aimed-at tiles land first.
-11. `selectBlocks` cost.
-12. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
+12. **Height-bound prepass memo** — landed. The grid build was 494–611 ms of a 752–1183 ms warm mesh
+    and ran on **every** rebuild, recomputing a bit-identical result, because it depends only on the
+    pin and never on the view: 1027² = 1.05 M `elevationAt` samples at ~476 ns each. One most-recent
+    entry keyed on (pin, source, zoom, post size, root level) removes it from every aim, focal and
+    tilt change. Warm mesh at Zermatt is now 688 ms at 70 mm, 613–644 at 200, 257–276 at 600, 172 at
+    1200 and 150 at 2400. A grid built while a tile was missing is not cached, since it would stay
+    unbounded for good once the tile landed; a complete grid can never improve, so it is kept.
+    Restricting the grid to the azimuth wedge would be the other lever, but it would make the result
+    view-dependent and so defeat the memo, which is the much larger win.
+13. **Frame time end to end — measured, and there is nothing to fix at 70 mm.** Scrubbing the clock a
+    minute per frame, which moves the sun and so re-renders every shadow cascade, holds p50 8.2 ms,
+    p99 10.4 ms, max 10.6 ms against an 8.33 ms vsync — the viewfinder is display-locked, not
+    compute-bound. Still worth re-running at 2400 mm with a mesh rebuild in flight, which is the real
+    stress case; `gpuMs` remains the only figure the app itself reports.
+14. Priority lanes in the DEM and Overture fetch queues, so the aimed-at tiles land first.
+15. `selectBlocks` cost.
+16. `BLD_MIN_ZOOM` / `showBuildings` gate on terrain shadows at `MapController.ts:686` — not started.
+17. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
 
 **Awaiting the user**
 
-13. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
-14. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)
+18. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
+19. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)
