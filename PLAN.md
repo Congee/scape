@@ -881,15 +881,31 @@ need no decision from anyone.
     Raising the triangle cap is not on this list: at long focal it is already slack (2.18 M of 3 M at
     2400 mm), and where it binds, these reductions are the cheaper answer.
 
-    A fourth, orthogonal to all of them and not yet measured: **the worker fetches levels strictly in
-    series** — `await cache.loadAll(want)`, build, post, next level — so a cold pass pays the *sum* of
-    every level's fetch rather than the longest. Cold is 16.7 s against 5.99 s warm at 600 mm, so
-    roughly 10.8 s of serialized fetch. Issuing the union of all levels' tiles up front, unawaited and
-    unretained, would warm the cache without disturbing anything: the FIFO semaphore means the finest
-    level's tiles are still first in the queue, so the first post cannot get slower, and each later
-    level's per-level `retain` + `loadAll` still runs before `buildLevel`, so a prefetched tile
-    evicted in the meantime is re-fetched rather than read as sea level. The cost is that a superseded
-    request leaves a larger stale backlog — 14's measurement, at a bigger volume.
+    A fourth, orthogonal to all of them: **the worker fetches levels strictly in series** —
+    `await cache.loadAll(want)`, build, post, next level — so a cold pass pays the *sum* of every
+    level's fetch rather than the longest. Issuing the union of all levels' tiles up front, unawaited
+    and unretained, warms the cache without disturbing anything: each later level's per-level `retain`
+    + `loadAll` still runs before `buildLevel`, so a prefetched tile evicted in the meantime is
+    re-fetched rather than read as sea level. Measured against `a3b1d7b` in a detached worktree, real
+    network, median of 4–5 runs: **warm total −28% and tail −45%** (2223 → 1606 ms, 1264 → 690 ms),
+    with the remaining tail matching pure `buildLevel` — the serialized fetch is fully hidden. Warm is
+    the common case, since `DemCache` starts empty on every page load however hot the HTTP cache is.
+
+    Two claims made here before measuring were wrong, and are corrected rather than deleted:
+
+    - **"The first post cannot get slower" does not hold.** FIFO ordering is intact, but the prefetch
+      pulls ~38 extra tiles' *decode* onto the same worker thread as `buildLevel`. With 250 ms of
+      artificial per-tile latency the first post landed 313 ms later in 4/4 runs, and the total came
+      out ~3% worse — when fetch is throughput-bound rather than ordering-bound, the 12-wide semaphore
+      is already saturated and the prefetch buys nothing. Deferring the prefetch until after the first
+      level is posted should recover first paint while keeping levels 2..n overlapped; in flight.
+    - **The 16.7 s cold / ~10.8 s serialized figure is not reproducible at this site.** Upstream and OS
+      caches stay too hot even behind a fresh browser profile; cold came out −1.4%, inside noise. The
+      cold claim is unverified, not confirmed.
+
+    Supersede cancellation was not added: `DemCache.load` hands back a shared inflight promise and the
+    semaphore has no cancel, so there is no cheap path that does not reintroduce 14's refcounting. A
+    superseded request therefore leaves a larger stale backlog — 14's measurement, at a bigger volume.
 
     Two pre-existing defects surfaced while checking the step, both reproduced on master and neither
     caused by it:
@@ -913,8 +929,34 @@ need no decision from anyone.
       camera that way; the GL side is what is left unexamined. Separately and definitely real: the
       same URL and focal gave
       zoom 15 / 2 m / reach 100 km on one load and zoom 14 / 4 m / reach 23 km on another, so an
-      unguarded capture script cannot be trusted — `shot4.sh` and `shot1f.sh` now print the aim beside
-      the configuration.
+      unguarded capture script cannot be trusted (22 is the cause) — `shot4.sh` and `shot1f.sh` now
+      print the aim beside the configuration.
+
+22. **Every cold `aimAtTarget` load builds the whole mesh twice** (2026-09-18). Established by reading
+    the path, not yet measured in the browser. `aimFor` returns `elevationDeg: targetAngleDeg ?? 0`,
+    and `ViewfinderController.ts:212` supplies that angle as `fresh?.los.targetAngleDeg ?? null`,
+    where `fresh` is non-null only once the sightline profile for the exact current key has resolved.
+    So until then the aim's elevation is a fabricated 0. `ensureMeshWindow` takes its pitch from that
+    same aim. The mesh sync is on a 250 ms trailing debounce; the profile is not debounced but awaits
+    a whole tile set along the sightline at up to z14, which cold cannot come back inside 250 ms. The
+    result: a complete mesh is built and posted at pitch 0, the profile lands, the pitch snaps to the
+    true angle, and the entire mesh is built again.
+
+    **The aim never needed the profile.** `analyzeSightline` computes `targetAngleDeg =
+    elevationAngleDeg(total, targetM - eyeM)` from the endpoints alone — the 400-sample ground array
+    serves occlusion and clearance only — over `eyeM = max(groundA,0) + eyeAboveGroundM` and `targetM
+    = max(groundB,0) + targetAboveGroundM`. Those are the two pin elevations the terrain store already
+    holds from the far cheaper `Elevation` request, and `ViewfinderController.ts:864` already computes
+    exactly that shape as a fallback for another purpose. Deriving the aim from them instead makes the
+    first committed window the right one. The two angles differ only by the DEM zoom between the
+    elevation lookup and the profile's z14 sampling — order 1 m over 8.5 km, ~0.007°, far inside the
+    pitch quantum of at least 0.25°, so the corrected window should not itself provoke a rebuild.
+
+    This subsumes the "unguarded capture script" note in 21: a pitch-0 mesh is coarser and shallower,
+    and `zoom 14 / 4 m / reach 23 km` is what a capture taken before the rebuild sees. It also
+    explains why 21's prefetch measured −28% warm but nothing cold — cold is dominated by a duplicated
+    build, not by serialized fetch, so it is worth more than all three of 21's reductions together and
+    should be measured before any of them is judged on cold numbers.
 
 **Awaiting the user**
 
