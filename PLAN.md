@@ -504,11 +504,17 @@ quarter of the viewport.
    from 100 km to 8 594 m, which clears the Matterhorn at 8 550 m by only 44 m. **It is a regression at
    short focal lengths**, where the band frees nothing: 70 mm goes 32 m → 64 m on the subject with
    reach halved 5 078 → 2 344 m, and 200 mm goes 16 m → 64 m with reach halved 7 813 → 3 906 m. So the
-   floor should drop below 4 m only once `targetRad · reach` is already under it, rather than
-   unconditionally. Not implemented; `MESH_MIN_CELL_M` is still 4.
+   floor had to become conditional rather than flat.
 
-   Going past 2 m to meet the 0.41 m post wants `BASE_CELL_M` at 0.5 with `MAX_LEVELS` raised two rungs
-   to hold the same reach — a structural change to the ladder, and a separate step.
+   Landed as exactly that. `MESH_START_CELL_M = 4` is where the reach ladder runs, not a floor: once
+   the reach has settled, `minLevel` descends one rung at a time toward the DEM's own post size for as
+   long as the mesh still fits, and reach is never traded back for cell size. A long lens therefore
+   reaches the 2 m cell on its own budget while 70 mm and 200 mm keep the reach they had.
+
+   The 0.41 m post is still two rungs away, and not because of the budget: `buildLevel` picks its DEM
+   zoom from the cell it is filling, so a 2 m cell reads z15 at 1.66 m posts. Meeting z17 wants
+   `BASE_CELL_M` at 0.5 with `MAX_LEVELS` raised two rungs to hold the same reach — a structural change
+   to the ladder, and a separate step.
 3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
    up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
    reach the frame's elevation band now fall back to `COARSE_TARGET_RAD` rather than being dropped, so
@@ -597,7 +603,7 @@ quarter of the viewport.
 8. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
    survive. Seen 1- and 2-row bands so far; widen the neighbourhood if a 4-row band appears. No bad
    post has yet been found in Mapterhorn; the filter stays as a safety net over whichever source runs.
-9. **The azimuth wedge assumes the frame is level.** `ensureMeshWindow` passes the unpitched
+9. **The azimuth wedge assumed the frame was level** — landed. `ensureMeshWindow` passed the unpitched
    `hfovDeg`, but a rectilinear frame pitched up spreads its top edge wider in azimuth than
    `hfov / 2` — the ray azimuth goes as `atan(x / (f·cos p − y·sin p))`, and the denominator shrinks
    along the top edge. The elevation band added in 3 bounds its axis exactly; azimuth is the remaining
@@ -619,13 +625,39 @@ quarter of the viewport.
    so the symptom is blocky terrain along the left and right of a steeply pitched frame, up to 1.2°
    per cell, which at 24 mm is about 60 px of a 1000 px frame.
 
-   `frameAzimuthHalfDeg` in `optics/fov.ts` computes the exact half-width and is tested:
-   `atan((w/2) / (f·cos p − (h/2)·|sin p|))`, and 180° once that denominator reaches zero, which a
-   24 mm frame does at 63.4° of pitch. That case is right rather than ruinous — a frame at the zenith
-   really does take in every bearing, and the elevation band culls the ground it cannot see.
-   Remaining: carry it through `MeshView` beside `hfovDeg` and read it in `descend`. The pad stays
-   keyed to the frame's own `hfovDeg`, which measures how far the aim may wander, not how wide the
-   picture is.
+   `frameAzimuthHalfDeg` in `optics/fov.ts` computes that exact half-width:
+   `atan((w/2) / (f·cos p − (h/2)·|sin p|))`, and 180° once the denominator reaches zero, which a
+   24 mm frame does at 63.4° of pitch. Carrying it through `MeshView` as a constant `azHalfDeg` was
+   the first attempt, and it was a regression, not a no-op. The up-pitch matrix at Lauterbrunnen
+   showed nothing, because `|sin p|` puts the widest rim on the sky side, which the height bound culls
+   anyway; the down-pitch matrix at Zermatt lost a sunlit ridge outright. A constant wedge charges
+   every block the near rim's splay — portrait 24 mm at −40° goes 27.9° → 77.5° — the budget ladder
+   pays for it in reach, and distant terrain drops to the coarse mesh.
+
+   The rim only splays at the elevations it tilts towards, so the wedge is now a function of them.
+   `frameAzimuthHalfCurve` samples the frame's side edge once per view and answers
+   `(elLo, elHi) → half-width`; `descend` asks it for the elevations the block and the frame actually
+   share, so a block that only reaches the far rim is bracketed as tightly as a level frame would
+   bracket it. `MeshView` carries `vfovDeg` in place of `azHalfDeg`. Reach measured on
+   `plain(1000)`, portrait 24 mm, `rangeM` 100 km:
+
+   | pitch | constant wedge | elevation curve |
+   |---|---|---|
+   | 0° | 100000 | 100000 |
+   | −20° | 100000 | 100000 |
+   | −40° | 37500 | 100000 |
+   | −60° | 4297 | 100000 |
+
+   Both matrices re-shot against a same-session HEAD baseline — 30 cells, Lauterbrunnen up-pitch
+   (24/70/200 mm × 40/55/70° × both orientations) and Zermatt down-pitch (24/70 mm × −40/−55/−70°) —
+   are pixel-identical bar a transient "Loading buildings…" toast, and four up-pitch cells build
+   slightly fewer blocks because the curve is *narrower* than `hfov / 2` at a down-tilted frame's far
+   rim. The added coverage near the splayed rim is invisible for the same reason it is cheap: a
+   pitched frame's wide bearings land on close ground, which `COARSE_TARGET_RAD × d` already refines
+   to the cell floor. The win is that the correct wedge is now affordable at any pitch.
+
+   The pad stays keyed to the frame's own `hfovDeg`, which measures how far the aim may wander, not
+   how wide the picture is.
 10. **Hillshade overzoom** — landed. `demProtocol.ts` resamples from the deepest ancestor that resolves
     rather than throwing, so the map's DEM source can point at `TERRAIN_MAX_ZOOM` without holing every
     region whose coverage stops early — and it now does, in place of the old `demZoom(15)` cap.
@@ -652,7 +684,9 @@ quarter of the viewport.
     p99 10.4 ms, max 10.6 ms against an 8.33 ms vsync — the viewfinder is display-locked, not
     compute-bound. Still worth re-running at 2400 mm with a mesh rebuild in flight, which is the real
     stress case; `gpuMs` remains the only figure the app itself reports.
-14. Priority lanes in the DEM and Overture fetch queues, so the aimed-at tiles land first.
+14. Cancelling a superseded request's queued tile fetches in `DemCache`. Priority lanes were the
+    first framing, but the mesh already rebuilds from scratch on every aim change, so the queue's
+    problem is work nobody is waiting for rather than work in the wrong order.
 15. `selectBlocks` cost.
 16. **Terrain shadows no longer ride on the buildings gate** — landed. The mask was always terrain plus
     roofs, but `requestShadows` bailed on `!showBuildings` and the raster layer lived and died inside
@@ -663,9 +697,26 @@ quarter of the viewport.
     reach) since a wall throws far further than a 600 m tower. A new `SHADOW_MIN_ZOOM = 8` replaces the
     old floor: the mask's DEM load is uncapped, and two zooms below that the cell outgrows the coarsest
     DEM zoom and the tile count runs 12 → 108 → 1645, with `maskRect` finally returning a negative width.
-17. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
+17. **DEM tiles a mesh level was about to read could be evicted under it** — landed. `DemCache` held
+    55 tiles against a working set of about 58 at Zermatt, and every `await loadAll(want)` in
+    `terrain.worker.ts` was followed by a synchronous read of the same tiles: a competing request —
+    the map page is enough — could evict them in between, and `buildLevel` then read zeros. The
+    symptom was a flattened far field, not an error. Instrumented at 55 slots: `level=3 tiles=5
+    gone=1 evictions=3`, 15 606 of 127 057 vertices at sea level, 9 of 10 rebuilds at 2400 mm
+    affected. `DemCache.retain(coords)` now pins a caller's working set behind a refcount and
+    returns an idempotent release, the eviction loop skips held keys, and the cache holds 80 tiles.
+    After: 0 evictions, 0 tiles gone, 0 missing vertices across 600/1200/2400 mm × landscape/portrait.
+    The pure part is `core/terrain/holds.ts`, so it unit-tests without pulling `localTiles` and its
+    `BroadcastChannel` into the worker.
+
+    The two follow-ups of the same shape are closed too. `DemCache.load()` went through the map
+    directly, so a hit never moved the key and the LRU degraded to FIFO under `loadAll`; it now goes
+    through `get`. And every one of the six `loadAll` sites in the worker — `groundAt`, `elevation`,
+    `profile`, `horizon`, `view` and the mesh's two — now wraps its await in `retain`/`release`, not
+    just the mesh.
+18. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
 
 **Awaiting the user**
 
-18. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
-19. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)
+19. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
+20. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)
