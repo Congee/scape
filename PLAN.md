@@ -535,10 +535,50 @@ decision rather than a constant, so it joins **18–20** as blocked on the user.
    That asymmetry is the finding. `targetRad` is angular, so the cell a block may use scales with its
    distance and *every* in-band block ends up asking for the floor; dropping the floor a rung
    therefore costs ~4× across the whole cone, and the greediest consumer is the near field — the
-   opposite of what a long lens wants. So the next step is not a finer constant. It is to bound the
-   fine region to the subject's neighbourhood, so the rung is spent where the subject is instead of
-   everywhere, which changes what the foreground looks like and is a picture decision rather than a
-   number. **Needs a user decision.**
+   opposite of what a long lens wants. So the next step is not a finer constant on its own.
+
+   **What the 0.5 m surface actually looks like** (2026-09-18). Before designing around the budget,
+   the reference picture was rendered: `BASE_CELL_M` 0.5, `MAX_LEVELS` 11 *and* the triangle cap lifted
+   to 12 M, so nothing binds and the mesh reaches its own 0.41 m posts. Zermatt village to the
+   Matterhorn at 8.55 km, landscape, aimed at the target. The floor reached 0.5 m at every focal and
+   `dataLevel` — the DEM itself — is what stopped it; DEM zoom reached z17 with no missing tiles.
+
+   It is a large difference, and it is on the subject's faces rather than its outline. Pixels past a
+   1% channel delta: 31% of the frame at 2400 mm, 15% at 1200 mm, 6% at 600 mm, and **0.1% at 24 mm
+   portrait — indistinguishable**. The sky/terrain boundary moves a median of 4 px and at most 23 px
+   across a 0.9° frame, i.e. 0.0024° median and 0.014° worst, so at most ~3% of the changed pixels are
+   silhouette; the rest is surface. At 2 m the summit is smooth modelling clay with a few soft shadow
+   blobs; at 0.5 m it is rock — vertical fluting down the west face, a stippled field of small
+   shadowed notches over the crest and east face. The softness was the DEM's, not the renderer's.
+
+   **Both limits bind, at different rungs, and the GPU is not either of them.** On master the *constant*
+   stops the ladder: 2400 mm settles at `minCellM === BASE_CELL_M === 2` having built 2.18 M of the 3 M
+   cap, with the headroom unspendable. Lifting only the constant (the reverted experiment above) then
+   runs into the *budget* at the next rung down. So the 0.5 m picture needs the constant **and** about
+   2.5× the cap — 7.57 M triangles at 2400 mm, 10.11 M at 600 mm — and neither alone does anything.
+   The GPU shrugged at that: no context loss or allocation failure at ~10 M, `gpuMs` 1.9 → 2.24 ms at
+   2400 mm, shadow raster 1.3 → 2.7 ms, and the 24 mm frame if anything got faster. The frustum culls
+   nearly all of it — at 2400 mm, **1 516 blocks are built and 52 are drawn**.
+
+   The whole cost is CPU selection, mesh build and DEM fetch: time to first level 407 → 2 489 ms at
+   2400 mm, and to the last level 2 404 → 10 230 ms at 600 mm. That is what is unshippable, not the
+   triangles.
+
+   So bounding the fine region to the subject's neighbourhood is the enabling work, and the prize is
+   now known: roughly 85% of the built blocks touch neither the frame nor its shadow cascades, so
+   cutting the fine region to the subject should recover most of the latency and leave the picture
+   intact. It composes with a finer constant rather than replacing it, and it still changes what the
+   foreground looks like — a picture decision, not a number. **Needs a user decision**: crops at
+   `scratchpad/ref05/summit-2400.png`, `frame-600.png` and `wide-24.png`. Raising the cap alone is not
+   worth doing — at long focal it is already slack, and where it does bind (600 mm) bounding is the
+   cheaper answer.
+
+   Two things the experiment turned up that are not about the floor. `KEY_HALF` in `mesh.ts` was
+   hardcoded for a level-8 root and would have silently folded a level-10 root's keys onto their
+   neighbours; it is now derived from `MAX_LEVELS`, by shift so it stays a smi (computing it with `**`
+   boxes the constant as a double and costs 2× on the whole selection). And `planHeightBound` stays
+   metrically unchanged when pinned to a 2 m base, but `buildPyramid`'s lookup then has to clamp to the
+   pinned level and index via the covering ancestor — looser, never unsafe.
 3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
    up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
    reach the frame's elevation band now fall back to `COARSE_TARGET_RAD` rather than being dropped, so
