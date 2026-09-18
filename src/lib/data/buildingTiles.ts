@@ -1,34 +1,20 @@
 import { VectorTile } from '@mapbox/vector-tile';
+import { FetchSource, PMTiles } from 'pmtiles';
 import { PbfReader } from 'pbf';
-import { decodeBuildings, type VectorLayerLike } from '@core/geo/buildingTiles';
+import { decodeBuildings, type DecodedBuildings, type VectorLayerLike } from '@core/geo/buildingTiles';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
-import type { BuildingBatch } from '@workers/buildings.protocol';
 
-export const BUILDINGS_TILEJSON_URL = 'https://tiles.openfreemap.org/planet';
-export const BUILDINGS_ATTRIBUTION = '© OpenStreetMap contributors, OpenFreeMap';
+export const OVERTURE_BUILDINGS_RELEASE = '2026-08-19.0';
+export const OVERTURE_BUILDINGS_URL = `https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_BUILDINGS_RELEASE}/buildings.pmtiles`;
+export const BUILDINGS_ATTRIBUTION = '© OpenStreetMap contributors, © Overture Maps Foundation';
 
 const MAX_CACHED_TILES = 128;
 const CONCURRENCY = 6;
 
-export type DecodedBuildings = Omit<BuildingBatch, 'groundM'>;
+export type { DecodedBuildings };
 
-let tilesTemplate: Promise<string> | null = null;
-
-/** TileJSON is fetched once; the release path in `tiles[0]` changes with every planet build. */
-function templateUrl(): Promise<string> {
-  tilesTemplate ??= fetch(BUILDINGS_TILEJSON_URL)
-    .then((r) => (r.ok ? (r.json() as Promise<{ tiles?: string[] }>) : Promise.reject(new Error(`TileJSON ${r.status}`))))
-    .then((j) => {
-      const t = j.tiles?.[0];
-      if (!t) throw new Error('TileJSON has no tiles template');
-      return t;
-    })
-    .catch((e: unknown) => {
-      tilesTemplate = null;
-      throw e;
-    });
-  return tilesTemplate;
-}
+/** The 180 GB planet archive is never downloaded: tiles are read with HTTP range requests. */
+const archive = new PMTiles(new FetchSource(OVERTURE_BUILDINGS_URL));
 
 const cache = new Map<string, DecodedBuildings>();
 const inflight = new Map<string, Promise<DecodedBuildings | null>>();
@@ -58,11 +44,10 @@ function release(): void {
 async function load(tile: TileCoord, key: string): Promise<DecodedBuildings | null> {
   await acquire();
   try {
-    const url = (await templateUrl()).replace('{z}', String(tile.z)).replace('{x}', String(tile.x)).replace('{y}', String(tile.y));
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const layer = new VectorTile(new PbfReader(new Uint8Array(await res.arrayBuffer()))).layers.building as VectorLayerLike | undefined;
-    const batch = decodeBuildings(layer ?? { length: 0, extent: 4096, feature: () => ({ properties: {}, loadGeometry: () => [] }) }, tile);
+    const res = await archive.getZxy(tile.z, tile.x, tile.y);
+    if (!res) return null;
+    const { layers } = new VectorTile(new PbfReader(new Uint8Array(res.data)));
+    const batch = decodeBuildings(layers.building as VectorLayerLike | undefined, layers.building_part as VectorLayerLike | undefined, tile);
     touch(key, batch);
     return batch;
   } catch {
@@ -72,7 +57,7 @@ async function load(tile: TileCoord, key: string): Promise<DecodedBuildings | nu
   }
 }
 
-/** Decoded `building` layer of one tile; null when it is absent, 404s or the network fails. */
+/** Decoded `building` and `building_part` layers of one tile; null when the tile is empty or the network fails. */
 export function fetchBuildingBatch(tile: TileCoord): Promise<DecodedBuildings | null> {
   const key = tileKey(tile.z, tile.x, tile.y);
   const hit = cache.get(key);

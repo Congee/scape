@@ -1,10 +1,11 @@
+import { BUILDINGS_ATTRIBUTION } from '@data/buildingTiles';
 import { compositionStore, useComposition, type Composition } from '@state/composition';
 import { useWorld } from '@state/world';
 
 type BoolKey = { [K in keyof Composition]: Composition[K] extends boolean ? K : never }[keyof Composition];
 
 const CHIPS: [BoolKey, string, string][] = [
-  ['showBuildings', 'Buildings', 'OpenStreetMap building volumes'],
+  ['showBuildings', 'Buildings', 'OpenStreetMap / Overture building volumes'],
   ['showPaths', 'Paths', 'Sun, moon and Galactic Centre paths for the day'],
   ['showMarkers', 'Markers', 'Markers flagged for the viewfinder'],
   ['showGrid', 'Grid', 'Rule-of-thirds grid'],
@@ -31,6 +32,7 @@ export function ViewTools() {
           {label}
         </button>
       ))}
+      <p className="muted hint">Buildings: {BUILDINGS_ATTRIBUTION}</p>
     </div>
   );
 }

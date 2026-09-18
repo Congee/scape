@@ -2,10 +2,12 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
-import { BuildingsKind, type BuildingBatch, type BuildingsResponse, type TilesRequest } from '@workers/buildings.protocol';
+import { BuildingsKind, type BuildingBatch, type BuildingsResponse, type HeightAtRequest, type TilesRequest } from '@workers/buildings.protocol';
 
 /** Decoded tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
+/** A height lookup that never comes back resolves null rather than leaving the caller hanging. */
+const HEIGHT_TIMEOUT_MS = 15_000;
 
 export interface BuildingsState {
   /** Decoded tiles by "14/x/y". */
@@ -34,6 +36,8 @@ export const useBuildings = buildingsStore;
 
 let worker: Worker | null = null;
 let seq = 0;
+/** Id of the wedge request whose responses the store still wants. */
+let tilesId = 0;
 let lastKey = '';
 let lastPin: LngLat = { lat: 0, lng: 0 };
 
@@ -55,7 +59,16 @@ function ensureWorker(): Worker {
   worker = new Worker(new URL('../workers/buildings.worker.ts', import.meta.url), { type: 'module' });
   worker.addEventListener('message', (e: MessageEvent<BuildingsResponse>) => {
     const res = e.data;
-    if (res.id !== seq) return;
+    const waiter = heightWaiters.get(res.id);
+    if (waiter) {
+      heightWaiters.delete(res.id);
+      clearTimeout(waiter.timer);
+      if (res.kind === BuildingsKind.Height) waiter.resolve(res.heightM);
+      else waiter.reject(new Error(res.kind === BuildingsKind.Error ? res.error : 'Unexpected buildings response'));
+      return;
+    }
+    if (res.kind === BuildingsKind.Height) return; // its waiter already timed out
+    if (res.id !== tilesId) return;
     if (res.kind === BuildingsKind.Tiles) {
       buildingsStore.setState((st) => {
         const tiles = new Map(st.tiles);
@@ -77,7 +90,30 @@ export function requestBuildings(pin: LngLat, azFromDeg: number, azSpanDeg: numb
   if (key === lastKey) return;
   lastKey = key;
   lastPin = pin;
+  tilesId = ++seq;
   buildingsStore.setState({ busy: true, error: null });
-  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: ++seq, pin, azFromDeg, azSpanDeg, rangeM };
+  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, azFromDeg, azSpanDeg, rangeM };
   ensureWorker().postMessage(req);
+}
+
+interface HeightWaiter {
+  resolve: (h: number | null) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const heightWaiters = new Map<number, HeightWaiter>();
+
+/** Apex of the building under `p`, metres; null when nothing stands there. */
+export function buildingHeightAt(p: LngLat): Promise<number | null> {
+  const id = ++seq;
+  return new Promise<number | null>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      heightWaiters.delete(id);
+      resolve(null);
+    }, HEIGHT_TIMEOUT_MS);
+    heightWaiters.set(id, { resolve, reject, timer });
+    const req: HeightAtRequest = { kind: BuildingsKind.HeightAt, id, point: p };
+    ensureWorker().postMessage(req);
+  });
 }

@@ -1181,6 +1181,11 @@ label.file input {
   padding: 6px;
 }
 
+.vf-tools .hint {
+  flex: 100%;
+  margin: 6px 2px 0;
+}
+
 /* Night tab */
 .night .verdict {
   margin: 4px 6px;

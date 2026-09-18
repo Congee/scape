@@ -24,6 +24,7 @@ import { ensureDemProtocol } from '@data/demProtocol';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
+import { buildingHeightAt } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById } from '@state/gear';
@@ -324,12 +325,24 @@ export class MapController {
   private applyBuildingHeight(p: LngLat, retry: boolean) {
     const w = worldStore.getState();
     if (!w.pin2HeightAuto && w.pin2HeightM > 0) return;
-    const h = this.buildingHeightAt(p);
+    void buildingHeightAt(p).then((h) => {
+      const now = worldStore.getState();
+      // The target moved, or the user typed a height, while we waited.
+      if (!samePoint(now.pin2, p) || (!now.pin2HeightAuto && now.pin2HeightM > 0)) return;
+      if (h == null) this.applyRenderedHeight(p, retry);
+      else worldStore.getState().setPin2Height(Math.round(h), true);
+    });
+  }
+
+  /** Fallback when the buildings archive has nothing there: the height of the drawn basemap feature. */
+  private applyRenderedHeight(p: LngLat, retry: boolean) {
+    const w = worldStore.getState();
+    const h = this.renderedHeightAt(p);
     if (h == null) {
       // The building layer may not be rendered yet; look again once the tiles have landed.
       if (retry) {
         this.map.once('idle', () => {
-          if (samePoint(worldStore.getState().pin2, p)) this.applyBuildingHeight(p, false);
+          if (samePoint(worldStore.getState().pin2, p)) this.applyRenderedHeight(p, false);
         });
       }
       else if (w.pin2HeightAuto) w.setPin2Height(0, false);
@@ -338,7 +351,7 @@ export class MapController {
     w.setPin2Height(Math.round(h), true);
   }
 
-  private buildingHeightAt(p: LngLat): number | null {
+  private renderedHeightAt(p: LngLat): number | null {
     const layers = buildingLayerIds(this.map.getStyle()?.layers).filter((id) => this.map.getLayer(id));
     if (!layers.length) return null;
     return heightFromFeatures(this.map.queryRenderedFeatures(this.map.project([p.lng, p.lat]), { layers }));

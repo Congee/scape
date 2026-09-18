@@ -347,8 +347,8 @@ quarter of the viewport.
 - **Landmark solids before 3D models.** Box, cylinder and spire markers give exact angular geometry
   from height, width, depth and rotation on the existing canvas. What comes next is the open
   decision below.
-- **3D building models — open decision** (user, 2026-09-12: "I absolutely need the precise 3D
-  model"; it is why they left TPE for PlanIt). Facts: SRTM `.hgt` and Terrarium are both
+- **3D building models — precise meshes still open** (user, 2026-09-12: "I absolutely
+  need the precise 3D model"; it is why they left TPE for PlanIt). Facts: SRTM `.hgt` and Terrarium are both
   terrain-only height grids (Terrarium merges SRTM with 3DEP and EU-DEM); neither contains a
   building. PlanIt's models are meshes made by users, uploaded to PlanIt's server and downloaded
   on demand under a separate subscription (the shared "30 Hudson Yards" landmark: 327 vertices,
@@ -363,18 +363,29 @@ quarter of the viewport.
   Recommendation: A, then B on the canvas, then C. Taken 2026-09-13 (user: the viewfinder "shall
   be able to replicate PlanIt viewfinder, though without precise 3D building models"; later "glTF
   or in-app modelling, I don't care. I only care about usability and precision"): A is the
-  baseline, rendered by Scape itself. A worker fetches the z14 OpenFreeMap tiles for the wedge the
-  frame looks into (`@mapbox/vector-tile` + `pbf`, approved by the user; heights exist only at z14,
-  z13 holds one untagged footprint per tile), decodes the `building` layer and reads the DEM under
-  each footprint; the viewfinder extrudes the footprints to prisms and rasterises them with the
-  frame's own pinhole projection, depth-tested per pixel against the terrain sweep, at every focal
-  length (`core/geo/prismRaster.ts`). Limits of A: footprints without a height tag draw at
-  OpenMapTiles' 5 m default; the ground under a footprint is the DEM at its centroid, so houses on
-  steep slopes sink partly into the terrain raster; building tiles are fetched live and are not yet
-  part of the offline regions. Placing the target on the map fills its height from the
-  building underneath (`core/geo/buildingHeight.ts`, `render_height`; 395 m for 30 Hudson Yards
-  against the 387 m architectural height, kept as the data says). The precise-model step is C, in-app
-  modelling on the same rasteriser, with B as an import path; the user has delegated that choice.
+  baseline, rendered by Scape itself. A worker fetches the z14 building tiles for the wedge the
+  frame looks into (`@mapbox/vector-tile` + `pbf`, approved by the user), decodes them and reads
+  the DEM under each footprint; the viewfinder extrudes the footprints to solids and rasterises
+  them with the frame's own pinhole projection, depth-tested per pixel against the terrain sweep,
+  at every focal length (`core/geo/prismRaster.ts`). The precise-model step is C, in-app modelling
+  on the same rasteriser, with B as an import path; the user has delegated that choice.
+- **Buildings come from Overture, drawn to the OSM Simple 3D rules.** Decided 2026-09-13 (user:
+  "let's do it then") on the source research in `docs/research/3d-models.md`, replacing
+  OpenFreeMap. The `buildings.pmtiles` archive of the Overture 2026-08-19.0 release is read live
+  by HTTP range request: 180 GB on S3, never downloaded whole, ODbL, CORS open
+  (`data/buildingTiles.ts`). Overture carries what OpenFreeMap drops — `building_part` rows keyed
+  by `building_id`, so a parent tagged `has_parts` is replaced by its parts; `min_height` for
+  volumes that start above the ground; `roof_shape`, `roof_height`, `roof_direction` and
+  `roof_orientation`. `core/geo/roofs.ts` turns those into geometry (skillion, pyramidal, gabled,
+  hipped, domed) against the footprint's minimum-area box, so 30 Hudson Yards keeps its sloped
+  crown and the Edge deck, and the Empire State its setbacks and pyramidal spire. Height falls
+  back through `height`, `num_floors × 3`, a per-class default, then 5 m; the ground under a
+  building is the lowest DEM sample over its footprints. The target's height comes from the same
+  archive, by a point-in-footprint query in the worker (395 m for 30 Hudson Yards against the
+  387 m architectural height, kept as the data says; 443.2 m for the Empire State). Limits: no
+  shadows and no facade detail; a concave footprint can push a hipped ridge outside its walls, so
+  a poor box fit reverts to gabled and then flat; building tiles are fetched live and are not yet
+  part of the offline regions.
 - **MapLibre is not a first-person renderer.** The textured 3D terrain under the frame
   (`TerrainView.ts`, Phase 6) was removed on 2026-09-13. At pitch ≥ 90° — the frame aimed at or
   above the horizon, exactly the long-lens-at-a-tower case — MapLibre's camera model degenerates:
