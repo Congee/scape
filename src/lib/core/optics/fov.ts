@@ -198,3 +198,14 @@ export function frameElevationSpanDeg(pitchDeg: number, frameWmm: number, frameH
   }
   return { minDeg, maxDeg };
 }
+
+/**
+ * Half-width in azimuth of a roll-free rectilinear frame, degrees. Not `hfov / 2`: pitching the
+ * frame shortens the forward component of the rays along the rim it tilts towards, and they splay
+ * wider for it. Past the pitch where that component reaches zero the frame takes in every bearing.
+ */
+export function frameAzimuthHalfDeg(pitchDeg: number, frameWmm: number, frameHmm: number, focalMm: number): number {
+  const p = pitchDeg * D2R;
+  const fwd = focalMm * Math.cos(p) - (frameHmm / 2) * Math.abs(Math.sin(p));
+  return fwd > 0 ? Math.atan(frameWmm / 2 / fwd) * R2D : 180;
+}

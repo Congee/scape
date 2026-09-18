@@ -579,9 +579,32 @@ quarter of the viewport.
 9. **The azimuth wedge assumes the frame is level.** `ensureMeshWindow` passes the unpitched
    `hfovDeg`, but a rectilinear frame pitched up spreads its top edge wider in azimuth than
    `hfov / 2` — the ray azimuth goes as `atan(x / (f·cos p − y·sin p))`, and the denominator shrinks
-   along the top edge. `MESH_AZ_PAD` covers it at the focal lengths tried so far; a wide lens aimed
-   steeply up would refine a wedge narrower than the picture. The elevation band added in 3 does bound
-   its axis exactly, via `frameElevationSpanDeg`; azimuth is the remaining approximation.
+   along the top edge. The elevation band added in 3 bounds its axis exactly; azimuth is the remaining
+   approximation.
+
+   The earlier note that `MESH_AZ_PAD` covers it was wrong, and only looked right because the frame
+   matrix stopped at 40° of pitch. Half-width the wedge uses against the half-width the picture needs,
+   full frame:
+
+   | pitch | 24 mm land | 70 mm land | 600 mm land | 24 mm port |
+   |---|---|---|---|---|
+   | 40° | 59.0 vs 59.3° | covered | covered | 42.5 vs 60.4° |
+   | 45° | 59.0 vs 64.8° | 23.1 vs 23.7° | covered | 42.5 vs 70.5° |
+   | 60° | 59.0 vs 84.9° | 23.1 vs 36.2° | 2.75 vs 3.56° | 42.5 vs 180° |
+   | 75° | 59.0 vs 180° | 23.1 vs 70.1° | 2.75 vs 7.14° | 42.5 vs 180° |
+
+   52 of 98 (orientation, focal, pitch) cases are short, every focal length included once the pitch
+   reaches 60°. It is not a hole — ground outside the wedge still meshes, at `COARSE_TARGET_RAD` —
+   so the symptom is blocky terrain along the left and right of a steeply pitched frame, up to 1.2°
+   per cell, which at 24 mm is about 60 px of a 1000 px frame.
+
+   `frameAzimuthHalfDeg` in `optics/fov.ts` computes the exact half-width and is tested:
+   `atan((w/2) / (f·cos p − (h/2)·|sin p|))`, and 180° once that denominator reaches zero, which a
+   24 mm frame does at 63.4° of pitch. That case is right rather than ruinous — a frame at the zenith
+   really does take in every bearing, and the elevation band culls the ground it cannot see.
+   Remaining: carry it through `MeshView` beside `hfovDeg` and read it in `descend`. The pad stays
+   keyed to the frame's own `hfovDeg`, which measures how far the aim may wander, not how wide the
+   picture is.
 10. **Hillshade overzoom** — landed. `demProtocol.ts` resamples from the deepest ancestor that resolves
     rather than throwing, so the map's DEM source can point at `TERRAIN_MAX_ZOOM` without holing every
     region whose coverage stops early — and it now does, in place of the old `demZoom(15)` cap.

@@ -12,6 +12,7 @@ import {
   equivalentFocalMm,
   focalForFovMm,
   fovDeg,
+  frameAzimuthHalfDeg,
   frameElevationSpanDeg,
   frameFov,
   maxApertureAt,
@@ -248,6 +249,40 @@ describe('frame elevation span', () => {
             expect(el).toBeLessThanOrEqual(span.maxDeg + 1e-9);
             expect(el).toBeGreaterThanOrEqual(span.minDeg - 1e-9);
           }
+      }
+  });
+});
+
+/** Azimuth of an image point relative to the frame centre, straight from the projection. */
+const azAt = (pitchDeg: number, f: number, x: number, y: number) => {
+  const p = (pitchDeg * Math.PI) / 180;
+  return (Math.atan2(x, f * Math.cos(p) - y * Math.sin(p)) * 180) / Math.PI;
+};
+
+describe('frame azimuth half-width', () => {
+  it('a level frame is exactly hfov / 2', () => {
+    expect(frameAzimuthHalfDeg(0, 36, 24, 200)).toBeCloseTo(fovDeg(36, 200) / 2, 9);
+  });
+
+  it('a pitched frame splays wider than hfov / 2, at the rim it tilts towards', () => {
+    const half = frameAzimuthHalfDeg(40, 36, 24, 24);
+    expect(half).toBeGreaterThan(fovDeg(36, 24) / 2);
+    expect(half).toBeCloseTo(azAt(40, 24, 18, 12), 9);
+  });
+
+  it('takes in every bearing once the top rim reaches the zenith', () => {
+    // tan p = f / (h / 2): a 24 mm frame on full frame turns over at 63.435°.
+    expect(frameAzimuthHalfDeg(63, 36, 24, 24)).toBeLessThan(180);
+    expect(frameAzimuthHalfDeg(64, 36, 24, 24)).toBe(180);
+    expect(frameAzimuthHalfDeg(-64, 36, 24, 24)).toBe(180);
+  });
+
+  it('brackets every point of the frame, at every pitch and focal length', () => {
+    for (const pitchDeg of [-89, -45, -18.56, 0, 18.56, 60, 89])
+      for (const f of [14, 70, 600, 2400]) {
+        const half = frameAzimuthHalfDeg(pitchDeg, 36, 24, f);
+        for (let u = -1; u <= 1; u += 0.1)
+          for (let v = -1; v <= 1; v += 0.1) expect(Math.abs(azAt(pitchDeg, f, u * 18, v * 12))).toBeLessThanOrEqual(half + 1e-9);
       }
   });
 });
