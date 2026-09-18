@@ -24,8 +24,9 @@ import '@data/maplibre';
 import { isDarkBasemap, styleFor, type Basemap } from '@data/basemaps';
 import { BUILDINGS_ATTRIBUTION, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
 import { ensureDemProtocol } from '@data/demProtocol';
+import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
-import { demZoom, DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
+import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
 import { buildingsStore, buildingHeightAt, requestShadowMask } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
@@ -138,6 +139,7 @@ export class MapController {
     const s = settingsStore.getState();
     ensurePmtilesProtocol();
     ensureDemProtocol();
+    void ensureDemSourceType();
     const bm = currentBasemap();
     this.basemapKey = `${bm.id}|${bm.flavor ?? ''}`;
 
@@ -583,16 +585,18 @@ export class MapController {
 
   private ensureDem(id: string) {
     if (this.map.getSource(id)) return;
-    this.map.addSource(id, {
-      type: 'raster-dem',
-      tiles: [DEM_TILE_TEMPLATE],
-      tileSize: TERRAIN_TILE_SIZE,
-      encoding: 'terrarium',
-      // Short of the source's own maximum: MapLibre has no overzoom of its own, and coverage
-      // past this ends at a different zoom in every region.
-      maxzoom: demZoom(15),
-      attribution: TERRAIN_ATTRIBUTION
-    });
+    this.map.addSource(
+      id,
+      demSourceSpec({
+        tiles: [DEM_TILE_TEMPLATE],
+        tileSize: TERRAIN_TILE_SIZE,
+        encoding: 'terrarium',
+        // The source's own maximum: where a region's coverage ends short of it, the loader
+        // resamples from the deepest ancestor it has rather than leaving a hole.
+        maxzoom: TERRAIN_MAX_ZOOM,
+        attribution: TERRAIN_ATTRIBUTION
+      })
+    );
   }
 
   /** Hillshade sits under labels and our lines. */
