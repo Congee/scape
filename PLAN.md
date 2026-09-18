@@ -146,7 +146,7 @@ search params.
 | Map | MapLibre GL JS 6.9 always; deck.gl 9.4 lazy-loaded only where a feature needs it | globe, raster-dem terrain, hillshade, custom layers; "don't pay for what we don't need" |
 | Basemaps | User-selectable layer list: OpenFreeMap vector styles (default), OSM raster, any PMTiles archive (remote URL or local file) | keyless; PMTiles is first-class, not an offline afterthought |
 | Offline basemap | Protomaps PMTiles builds + `@protomaps/basemaps` style | ODbL data, CC0 style |
-| Terrain | AWS Terrarium tiles online; Mapterhorn PMTiles offline | attribution per region |
+| Terrain | Mapterhorn 512 px lossless-WebP terrarium tiles (z0–17), decoded with WebCodecs `ImageDecoder`; AWS Terrarium as fallback | best open national DEM per region (0.5 m Switzerland); canvas decode is lossy for terrarium, attribution per region |
 | Time zone | `@photostructure/tz-lookup` (86 KB, CC0) + manual override | geo-tz is 70 MB, too big |
 | Storage | IndexedDB via `idb` (library, settings); OPFS for tile bytes | persist() requested |
 | PWA | `vite-plugin-pwa` 1.3 (Workbox) | precache shell, runtime-cache tiles |
@@ -445,9 +445,14 @@ quarter of the viewport.
 - **Naming**: the two pins are the **camera location** and the **target location** in every user-facing
   string and doc; code keeps the short `pin` / `pin2` identifiers. Enum-like unions are `as const`
   objects with PascalCase members (`EventKind.TerrainRise`), never bare camelCase literals.
-- **Terrain regions are packed from the AWS Terrarium PNG tiles, not Mapterhorn**: Mapterhorn is WebP
-  and only canvas decoding is available for it, which is lossy for Terrarium; Mapterhorn archives can
-  still be imported for the map's own terrain rendering.
+- **Terrain comes from Mapterhorn, decoded with WebCodecs `ImageDecoder`** (2026-09-18). Its tiles are
+  lossless WebP (VP8L) at 512 px, z0–17, terrarium-encoded, CORS `*`, carrying the best open national
+  DEM per region — swissALTI3D 0.5 m over Zermatt, 0.25 m over Zürich, 1 m over the US. This reverses
+  the earlier "canvas decoding is lossy, so pack AWS PNG instead" note: canvas *is* lossy, measured at
+  ±1 on the red channel, which is ±256 m in terrarium; `ImageDecoder.copyTo` is byte-exact, so the
+  objection was to the decoder, not the source. Canvas must never decode a DEM.
+- **Terrain depth varies by region and 404s past it** (Zermatt z17, Yosemite/NYC z16, Nepal z12), so
+  the sampler overzooms from the deepest tile that exists rather than assuming a global max zoom.
 - **Basemap regions are client-side range extracts of a PMTiles planet build.** The default source is
   the Protomaps daily build, whose CORS allowlist covers only local development origins
   (localhost:5173, localhost:3000), so it serves dogfooding but not a deployed origin; the source URL
@@ -457,3 +462,32 @@ quarter of the viewport.
 - **OPFS is the source of truth for archives** (each `<id>.pmtiles` with an `<id>.json` sidecar);
   IndexedDB stays for the library.
 - **Name**: "scape" is a placeholder.
+
+## 9. Open work (2026-09-18)
+
+**Precision**
+
+1. **Mapterhorn terrain source** — swap the DEM to `tiles.mapterhorn.com/{z}/{x}/{y}.webp`: 512 px
+   tiles, WebCodecs `ImageDecoder` (never canvas), overzoom past each region's max zoom, DEM cache
+   entry counts cut 4× for equal memory, "© Mapterhorn" plus per-source attribution, AWS as fallback.
+2. **Ridge sweeps still read the old surface** — `horizon.ts`, `view.ts` and `los.ts` sample bilinear
+   at their own zooms while the mesh draws cubic at max zoom, so a computed skyline can disagree with
+   the drawn one.
+3. **`buildings.worker.ts` `fillFrameTerrain`** fills one shadow-mask height grid from two disagreeing
+   surfaces (bilinear grid, cubic roof bases). It is a 2D mask, so nothing visibly floats.
+4. `align.worker.ts`, `core/align/alignment.ts`, `core/align/visibility.ts` read bilinear at their own
+   plan zoom. Self-consistent, like `profile()`; lower priority.
+5. **DEM outlier filter** — a corrupt band of 4+ consecutive rows would outvote the 7×7 median and
+   survive. Seen 1- and 2-row bands so far; widen the neighbourhood if a 4-row band appears.
+
+**Performance**
+
+6. Frame time measured end to end; only `gpuMs` is observed today.
+7. Priority lanes in the DEM and Overture fetch queues, so the aimed-at tiles land first.
+8. `selectBlocks` cost.
+9. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
+
+**Awaiting the user**
+
+10. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
+11. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)
