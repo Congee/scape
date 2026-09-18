@@ -469,7 +469,8 @@ Numbered items below are a register, not a queue; most are landed and kept for t
 them. **14** was measured and closed unfixed, **15** is landed, **8** is a watch rather than a task,
 and **2**'s last step is a picture decision, so it joins **18–20** as blocked on the user. What is
 actually left is **21**, which came out of 2's reference render: most of the mesh serves nothing, on
-shipped master, and two of its three reductions need no decision from anyone.
+shipped master. Its second reduction is landed; the extent cap and the worker's serial fetch still
+need no decision from anyone.
 
 **Precision**
 
@@ -863,10 +864,15 @@ shipped master, and two of its three reductions need no decision from anyone.
       and *not* the cascade plane alone: at this site the furthest drawn block is 9.2 km only because
       the subject is, and a frame containing a 40 km peak must still build it. Worth ~50 blocks and
       the z7–z9 cold fetch. The only one that is visually free by construction.
-    - **Let `balance` take a two-level step**, with the skirt deepened to cover a 4-cell crack.
-      Attacks the 87% directly — an estimated ~300 blocks and ~820 ms at 2400 mm in the fine config.
-      Needs a picture check, not a number: the failure modes are sky through a seam and a skirt flange
-      hanging below a convex rim. **Being measured now.**
+    - **Let `balance` take a two-level step** — landed in `ed2b167`. `skirtDepth` is derived from the
+      step (`3·cellM·2^k`, which at k=1 reproduces the shipped `6·cellM`), so the slope the seams
+      tolerate is unchanged at 6. Verified against master at the same site: at 900 mm both trees pick
+      the same configuration and the same 236-block fine level, and the picture is **AE 0** while the
+      total falls 580 → 454 blocks; 1200 mm and 2400 mm are likewise AE 0 at −24% blocks and ~−25%
+      warm build. Where the freed budget changes the configuration the picture improves: 600 mm buys a
+      2 m cell in place of 4 m, and 200 mm buys reach 7813 → 8594 m, which finally puts the 8.55 km
+      subject inside the fine wedge at all. Neither failure mode appeared, and an 8× deeper skirt is
+      AE 0, so nothing in any captured frame is a seam gap.
     - **Bounding the fine region to the subject** — 2's parked decision — is worth more than either,
       and now has a second reason: shrinking the wedge-to-coarse level gap collapses the gradation
       ring that the two-level step attacks from the other side. A wedge bottoming out at level 4
@@ -884,6 +890,23 @@ shipped master, and two of its three reductions need no decision from anyone.
     level's per-level `retain` + `loadAll` still runs before `buildLevel`, so a prefetched tile
     evicted in the meantime is re-fetched rather than read as sea level. The cost is that a superseded
     request leaves a larger stale backlog — 14's measurement, at a bigger volume.
+
+    Two pre-existing defects surfaced while checking the step, both reproduced on master and neither
+    caused by it:
+
+    - **Thin dark lines down steep faces at a 2 m cell** — one pixel wide, ruler-straight over hundreds
+      of pixels. Not a seam gap: 8× the skirt depth is AE 0, and rim normals are true central
+      differences over a one-cell halo. Not the block grid either, on spacing: the pair at 600 mm is
+      ~8.5 m apart where a block is 96 m and a z15 DEM tile ~850 m. Most likely the DEM's own couloirs,
+      but unconfirmed, and it is the first sighting of anything like the worst 3.72× seam overrun the
+      balance audit found on master. Only shows once a focal reaches the 2 m cell, which the step now
+      makes happen at 600 mm rather than 1200 mm.
+    - **Persisted composition state leaks across a pin change.** Loading a viewfinder URL for a new
+      camera can keep the previous aim, so the mesh window and the rendered aim disagree and the canvas
+      comes back empty with a correct mesh behind it — right eye, right wedge, 35 blocks drawn, nothing
+      in frame. The same URL and focal gave zoom 15 / 2 m / reach 100 km on one load and zoom 14 / 4 m /
+      reach 23 km on another. User-visible on any shared link, and it makes an unguarded capture script
+      untrustworthy, so `shot4.sh` and `shot1f.sh` now print the aim beside the configuration.
 
 **Awaiting the user**
 
