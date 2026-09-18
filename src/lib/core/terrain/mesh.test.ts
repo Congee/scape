@@ -16,12 +16,14 @@ import {
   levelCellM,
   levelHalfExtentM,
   levelsForRange,
+  MAX_LEVEL_STEP,
   MAX_LEVELS,
   MAX_MESH_TRIANGLES,
   MESH_PX_PER_CELL,
   MESH_START_CELL_M,
   samplePoint,
   selectBlocks,
+  skirtDepth,
   TRIANGLES_PER_BLOCK,
   type BlockId,
   type MeshView
@@ -164,7 +166,7 @@ describe('selectBlocks', () => {
           const s = 2 ** (m - b.level);
           if (at.has(`${m}/${Math.floor(nx / s)}/${Math.floor(ny / s)}`)) found = m;
         }
-        expect(found - b.level).toBeLessThanOrEqual(1);
+        expect(found - b.level).toBeLessThanOrEqual(MAX_LEVEL_STEP);
       }
   });
 
@@ -199,14 +201,14 @@ describe('selectBlocks', () => {
           const ny = b.iy + dy;
           const h = (BLOCKS_PER_SIDE / 2) * 2 ** (root - b.level);
           if (nx < -h || nx >= h || ny < -h || ny >= h) continue;
-          // Exactly one level carries the leaf over that cell, and it is within one of this one.
+          // Exactly one level carries the leaf over that cell, and it is within the step of this one.
           const covers = [];
           for (let m = b.level; m <= root; m++) {
             const t = 2 ** (m - b.level);
             if (at.has(`${m}/${Math.floor(nx / t)}/${Math.floor(ny / t)}`)) covers.push(m);
           }
           expect(covers.length, `${where} at ${b.level}/${b.ix}/${b.iy}`).toBeLessThanOrEqual(1);
-          if (covers.length === 1) expect(covers[0] - b.level, where).toBeLessThanOrEqual(1);
+          if (covers.length === 1) expect(covers[0] - b.level, where).toBeLessThanOrEqual(MAX_LEVEL_STEP);
         }
     }
   });
@@ -277,6 +279,55 @@ describe('selectBlocks', () => {
   });
 });
 
+/**
+ * The exact worst case the skirt depth is derived for: a tooth of slope 6 peaking at the midpoint
+ * of the coarsest neighbour's cell, which is where the fine rim departs furthest from the chord
+ * the coarse block draws across the same span.
+ */
+/** Height of one block's grid vertex. */
+const rimU = (lv: ReturnType<typeof buildLevel>, i: number, j: number) => lv.pos[(j * (BLOCK_CELLS + 1) + i) * 3 + 2];
+
+const tooth = (sign: number, cellM: number) => (lng: number, lat: number) => {
+  const b = bearingDeg(PIN, { lng, lat }) * D2R;
+  const n = distanceM(PIN, { lng, lat }) * Math.cos(b);
+  const q = ((n % cellM) + cellM) % cellM;
+  return 1200 + sign * 6 * (cellM / 2 - Math.abs(q - cellM / 2));
+};
+
+describe('a seam to the coarsest neighbour the balance allows', () => {
+  // Edge-adjacent across MAX_LEVEL_STEP levels: the fine block's east edge is the coarse one's west.
+  const fineLevel = 0;
+  const coarseLevel = fineLevel + MAX_LEVEL_STEP;
+  const ratio = 2 ** MAX_LEVEL_STEP;
+  const fine: BlockId = { level: fineLevel, ix: ratio - 1, iy: 0 };
+  const coarse: BlockId = { level: coarseLevel, ix: 1, iy: 0 };
+  const cellC = levelCellM(coarseLevel);
+  const cellF = levelCellM(fineLevel);
+
+  for (const sign of [1, -1]) {
+    it(`is closed by the skirts when the relief ${sign > 0 ? 'rises' : 'falls'} between the coarse posts`, () => {
+      const sample = tooth(sign, cellC);
+      const lf = buildLevel(PIN, 1200, fineLevel, [fine], sample);
+      const lc = buildLevel(PIN, 1200, coarseLevel, [coarse], sample);
+      let aboveM = 0;
+      let belowM = 0;
+      for (let t = 0; t <= BLOCK_CELLS; t++) {
+        const q = (t * cellF) / cellC;
+        const i0 = Math.floor(q);
+        const chord = rimU(lc, 0, i0) + (rimU(lc, 0, i0 + 1) - rimU(lc, 0, i0)) * (q - i0);
+        const gap = rimU(lf, BLOCK_CELLS, t) - chord;
+        aboveM = Math.max(aboveM, gap);
+        belowM = Math.max(belowM, -gap);
+      }
+      // The tooth is built to reach the derived bound, so a shallower fine skirt would crack here.
+      expect(Math.max(aboveM, belowM)).toBeGreaterThan(skirtDepth(cellF) - 0.2);
+      // A rim above its neighbour's chord is hidden by its own skirt, so each side pays for its own case.
+      expect(aboveM).toBeLessThanOrEqual(skirtDepth(cellF) + 0.2);
+      expect(belowM).toBeLessThanOrEqual(skirtDepth(cellC) + 0.2);
+    });
+  }
+});
+
 describe('buildLevel', () => {
   const blocks: BlockId[] = [
     { level: 2, ix: -2, iy: -2 },
@@ -317,7 +368,7 @@ describe('buildLevel', () => {
       const want = 1200 - 1250 - curvatureDropM(Math.hypot(e, n));
       // Skirt vertices hang below their rim; everything else sits on the surface.
       expect(u).toBeLessThan(want + 0.01);
-      expect(u).toBeGreaterThan(want - 6 * levelCellM(2) - 9);
+      expect(u).toBeGreaterThan(want - skirtDepth(levelCellM(2)) - 1);
     }
   });
 
@@ -493,33 +544,33 @@ describe('block count against the old clipmap', () => {
 describe('azimuth-only selection is untouched', () => {
   const EXPECTED: [number, number, number, string, number, number, number, number][] = [
     [20000, 4, 0, '1:16 2:12 3:12 4:12 5:12 6:12 7:12', 88, 439296, 0.020833333333333332, 20000],
-    [20000, 4, 24, '1:184 2:142 3:145 4:56 5:34 6:21 7:7', 589, 2940288, 0.003948667324777887, 10000],
-    [20000, 4, 70, '1:384 2:68 3:43 4:35 5:22 6:23 7:8', 583, 2910336, 0.0013538287970667044, 5000],
-    [20000, 4, 200, '1:380 2:73 3:46 4:30 5:23 6:19 7:9', 580, 2895360, 0.0004738400789733465, 7500],
-    [20000, 4, 600, '1:288 2:92 3:59 4:31 5:26 6:22 7:8', 526, 2625792, 0.0001579466929911155, 10000],
-    [20000, 4, 1200, '1:300 2:117 3:64 4:40 5:27 6:21 7:8', 577, 2880384, 0.00007897334649555775, 12500],
-    [20000, 4, 2400, '1:280 2:122 3:76 4:41 5:30 6:20 7:8', 577, 2880384, 0.00003948667324777888, 13750],
+    [20000, 4, 24, '1:184 2:138 3:138 4:74 5:22 6:19 7:8', 583, 2910336, 0.003948667324777887, 12500],
+    [20000, 4, 70, '1:468 2:43 3:32 4:18 5:15 6:10 7:12', 598, 2985216, 0.0013538287970667044, 5625],
+    [20000, 4, 200, '1:428 2:49 3:37 4:21 5:18 6:9 7:12', 574, 2865408, 0.0004738400789733465, 8125],
+    [20000, 4, 600, '1:400 2:52 3:50 4:22 5:21 6:12 7:11', 568, 2835456, 0.0001579466929911155, 12500],
+    [20000, 4, 1200, '1:380 2:65 3:56 4:32 5:18 6:20 7:9', 580, 2895360, 0.00007897334649555775, 15000],
+    [20000, 4, 2400, '1:368 2:72 3:67 4:29 5:22 6:19 7:9', 586, 2925312, 0.00003948667324777888, 17500],
     [20000, 30, 0, '4:16 5:12 6:12 7:12', 52, 259584, 0.020833333333333332, 20000],
-    [20000, 30, 24, '4:184 5:54 6:19 7:5', 262, 1307904, 0.003948667324777887, 20000],
-    [20000, 30, 70, '4:132 5:43 6:17 7:7', 199, 993408, 0.0013538287970667044, 20000],
-    [20000, 30, 200, '4:88 5:34 6:18 7:8', 148, 738816, 0.0004738400789733465, 20000],
-    [20000, 30, 600, '4:60 5:37 6:19 7:8', 124, 619008, 0.0001579466929911155, 20000],
-    [20000, 30, 1200, '4:56 5:38 6:19 7:8', 121, 604032, 0.00007897334649555775, 20000],
-    [20000, 30, 2400, '4:56 5:38 6:19 7:8', 121, 604032, 0.00003948667324777888, 20000],
+    [20000, 30, 24, '4:184 5:50 6:12 7:7', 253, 1262976, 0.003948667324777887, 20000],
+    [20000, 30, 70, '4:132 5:23 6:18 7:8', 181, 903552, 0.0013538287970667044, 20000],
+    [20000, 30, 200, '4:88 5:22 6:17 7:9', 136, 678912, 0.0004738400789733465, 20000],
+    [20000, 30, 600, '4:60 5:17 6:20 7:9', 106, 529152, 0.0001579466929911155, 20000],
+    [20000, 30, 1200, '4:56 5:18 6:20 7:9', 103, 514176, 0.00007897334649555775, 20000],
+    [20000, 30, 2400, '4:56 5:18 6:20 7:9', 103, 514176, 0.00003948667324777888, 20000],
     [100000, 4, 0, '1:16 2:12 3:12 4:12 5:12 6:12 7:12 8:12', 100, 499200, 0.020833333333333332, 100000],
-    [100000, 4, 24, '1:184 2:142 3:133 4:47 5:37 6:21 7:27 8:7', 598, 2985216, 0.003948667324777887, 7812.5],
-    [100000, 4, 70, '1:352 2:68 3:45 4:35 5:22 6:23 7:24 8:8', 577, 2880384, 0.0013538287970667044, 4687.5],
-    [100000, 4, 200, '1:340 2:71 3:45 4:27 5:20 6:20 7:21 8:9', 553, 2760576, 0.0004738400789733465, 7031.25],
-    [100000, 4, 600, '1:300 2:101 3:64 4:33 5:29 6:21 7:20 8:9', 577, 2880384, 0.0001579466929911155, 10156.25],
-    [100000, 4, 1200, '1:300 2:117 3:64 4:40 5:27 6:21 7:20 8:9', 598, 2985216, 0.00007897334649555775, 12500],
-    [100000, 4, 2400, '1:248 2:110 3:69 4:40 5:27 6:21 7:20 8:9', 544, 2715648, 0.00003948667324777888, 12500],
+    [100000, 4, 24, '1:184 2:138 3:138 4:74 5:22 6:19 7:8 8:12', 595, 2970240, 0.003948667324777887, 12500],
+    [100000, 4, 70, '1:448 2:36 3:35 4:18 5:15 6:10 7:12 8:12', 586, 2925312, 0.0013538287970667044, 5468.75],
+    [100000, 4, 200, '1:404 2:51 3:38 4:21 5:18 6:9 7:12 8:12', 565, 2820480, 0.0004738400789733465, 7812.5],
+    [100000, 4, 600, '1:400 2:52 3:50 4:22 5:21 6:12 7:11 8:12', 580, 2895360, 0.0001579466929911155, 12500],
+    [100000, 4, 1200, '1:352 2:60 3:51 4:30 5:19 6:16 7:10 8:12', 550, 2745600, 0.00007897334649555775, 14062.5],
+    [100000, 4, 2400, '1:364 2:73 3:63 4:30 5:22 6:19 7:9 8:12', 592, 2955264, 0.00003948667324777888, 17187.5],
     [100000, 30, 0, '4:16 5:12 6:12 7:12 8:12', 64, 319488, 0.020833333333333332, 100000],
-    [100000, 30, 24, '4:184 5:142 6:69 7:15 8:5', 415, 2071680, 0.003948667324777887, 100000],
-    [100000, 30, 70, '4:448 5:76 6:41 7:14 8:7', 586, 2925312, 0.0013538287970667044, 43750],
-    [100000, 30, 200, '4:380 5:53 6:31 7:15 8:8', 487, 2431104, 0.0004738400789733465, 100000],
-    [100000, 30, 600, '4:192 5:68 6:35 7:16 8:8', 319, 1592448, 0.0001579466929911155, 100000],
-    [100000, 30, 1200, '4:156 5:69 6:37 7:16 8:8', 286, 1427712, 0.00007897334649555775, 100000],
-    [100000, 30, 2400, '4:140 5:69 6:38 7:16 8:8', 271, 1352832, 0.00003948667324777888, 100000]
+    [100000, 30, 24, '4:184 5:138 6:62 7:9 8:7', 400, 1996800, 0.003948667324777887, 100000],
+    [100000, 30, 70, '4:500 5:39 6:31 7:14 8:8', 592, 2955264, 0.0013538287970667044, 46875],
+    [100000, 30, 200, '4:380 5:41 6:26 7:13 8:9', 469, 2341248, 0.0004738400789733465, 100000],
+    [100000, 30, 600, '4:192 5:32 6:28 7:16 8:9', 277, 1382784, 0.0001579466929911155, 100000],
+    [100000, 30, 1200, '4:156 5:33 6:30 7:16 8:9', 244, 1218048, 0.00007897334649555775, 100000],
+    [100000, 30, 2400, '4:140 5:37 6:30 7:16 8:9', 232, 1158144, 0.00003948667324777888, 100000]
   ];
 
   it('matches block for block, level for level, over range, DEM post and focal length', () => {

@@ -53,6 +53,12 @@ export interface BlockId {
  * the old mesh exactly where the frame does not look, which is what still casts shadows and skyline.
  */
 export const COARSE_TARGET_RAD = 1 / BLOCK_CELLS;
+/**
+ * Levels two edge-sharing leaves may differ by. Each rung the step forbids is a gradation ring of
+ * blocks nested around the frame's wedge, bought with nothing but a shallower skirt; `skirtDepth`
+ * is derived from this.
+ */
+export const MAX_LEVEL_STEP = 2;
 /** The frame's wedge is widened by this fraction of its own width on each side, so small pans need no rebuild. */
 export const MESH_AZ_PAD = 0.3;
 /** …but never by less than this, or a 2400 mm frame would rebuild on every nudge. */
@@ -235,9 +241,9 @@ function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineR
 }
 
 /**
- * Splits leaves until no two that share an edge differ by more than one level. The skirt depth is
- * `6 * cellM`, which only covers the step to a neighbour of the next level up; a raw selection can
- * put a 4 m leaf beside a 512 m one where the frame's wedge ends.
+ * Splits leaves until no two that share an edge differ by more than `MAX_LEVEL_STEP` levels; a raw
+ * selection can put a 4 m leaf beside a 512 m one where the frame's wedge ends. Every rung the step
+ * allows is one gradation ring the wedge need not nest, and `skirtDepth` pays for it.
  */
 function balance(leaves: Map<number, BlockId>, rootLevel: number): void {
   const queue = [...leaves.values()];
@@ -263,7 +269,7 @@ function balance(leaves: Map<number, BlockId>, rootLevel: number): void {
           const s = 2 ** (m - n.level);
           hit = leaves.get(blockKey(m, Math.floor(nx / s), Math.floor(ny / s)));
         }
-        if (!hit || hit.level < n.level + 2) break;
+        if (!hit || hit.level <= n.level + MAX_LEVEL_STEP) break;
         leaves.delete(blockKey(hit.level, hit.ix, hit.iy));
         for (let cy = 0; cy < 2; cy++)
           for (let cx = 0; cx < 2; cx++) {
@@ -407,8 +413,13 @@ export function samplePoint(pin: LngLat, e: number, n: number): LngLat {
   return d < 1e-9 ? pin : destination(pin, Math.atan2(e, n) * R2D, d);
 }
 
-/** Skirts hang this far below the rim, enough to cover the step to a neighbour one level coarser. */
-const skirtDepth = (cellM: number) => Math.max(8, 6 * cellM);
+/**
+ * Skirts hang this far below the rim. A seam crack is the sag of the fine rim away from the coarse
+ * neighbour's chord across one of its cells: at most half that cell times the relief's slope, so
+ * the depth scales with the coarsest neighbour `balance` allows, at a slope of 6 over the step.
+ * The floor covers the levels finer than a metre.
+ */
+export const skirtDepth = (cellM: number) => Math.max(8, 3 * cellM * 2 ** MAX_LEVEL_STEP);
 
 /**
  * One level's blocks. Heights come from `sample` over a one-cell halo so every vertex normal is a
