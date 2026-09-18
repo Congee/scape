@@ -163,7 +163,8 @@ export class DemCache implements DemSource {
 
   load(c: TileCoord): Promise<DemTile | null> {
     const k = tileKey(c.z, c.x, c.y);
-    const have = this.tiles.get(k);
+    // Through `get`, so a hit counts as a use: otherwise the LRU degrades to FIFO under `loadAll`.
+    const have = this.get(c.z, c.x, c.y);
     if (have !== undefined) return Promise.resolve(have);
     let p = this.inflight.get(k);
     if (!p) {

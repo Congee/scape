@@ -22,16 +22,28 @@ function tileAt(p: LngLat, z: number): TileCoord {
 
 /** The surface the mesh draws, so the eye and anything standing on the ground share it. */
 async function groundAt(p: LngLat): Promise<number> {
-  await cache.loadAll(cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE));
-  return elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM);
+  const want = cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);
+  const release = cache.retain(want);
+  try {
+    await cache.loadAll(want);
+    return elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM);
+  } finally {
+    release();
+  }
 }
 
 async function elevation(req: ElevationRequest | PointsRequest): Promise<TerrainResponse> {
   const tiles = new Map<string, TileCoord>();
   for (const p of req.points) for (const t of cubicStencilTiles(p.lng, p.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE)) tiles.set(tileKey(t.z, t.x, t.y), t);
-  await cache.loadAll([...tiles.values()]);
-  const elevations = req.points.map((p) => elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM));
-  return { kind: req.kind, id: req.id, elevations };
+  const want = [...tiles.values()];
+  const release = cache.retain(want);
+  try {
+    await cache.loadAll(want);
+    const elevations = req.points.map((p) => elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM));
+    return { kind: req.kind, id: req.id, elevations };
+  } finally {
+    release();
+  }
 }
 
 async function profile(req: ProfileRequest): Promise<TerrainResponse | null> {
@@ -50,14 +62,19 @@ async function profile(req: ProfileRequest): Promise<TerrainResponse | null> {
     const t = tileAt(p, zoom);
     tiles.set(tileKey(t.z, t.x, t.y), t);
   }
-  await cache.loadAll([...tiles.values()]);
-  if (latest.Profile !== req.id) return null;
-
+  const want = [...tiles.values()];
+  const release = cache.retain(want);
   const groundM = new Float32Array(n);
   let missing = 0;
-  for (let i = 0; i < n; i++) {
-    groundM[i] = elevationAt(cache, lng[i], lat[i], zoom);
-    if (Number.isNaN(groundM[i])) missing++;
+  try {
+    await cache.loadAll(want);
+    if (latest.Profile !== req.id) return null;
+    for (let i = 0; i < n; i++) {
+      groundM[i] = elevationAt(cache, lng[i], lat[i], zoom);
+      if (Number.isNaN(groundM[i])) missing++;
+    }
+  } finally {
+    release();
   }
   // Endpoints come from the same zoom as the path so their own cells cannot "block" them.
   const groundA = Number.isNaN(groundM[0]) ? 0 : groundM[0];
@@ -79,12 +96,17 @@ async function horizon(req: HorizonRequest): Promise<TerrainResponse | null> {
   const groundM = Number.isNaN(g) ? 0 : g;
   const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, minZoom: demZoom(8), maxZoom: demZoom(14), tileSize: TERRAIN_TILE_SIZE });
   const tiles = requiredTiles(plan);
-  await cache.loadAll(tiles);
-  if (latest.Horizon !== req.id) return null;
-  const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
-  const skyline = sweepHorizon(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM);
-  const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
-  return { kind: TerrainKind.Horizon, id: req.id, result: { profile: skyline, groundM, eyeM, tiles: tiles.length, missing } };
+  const release = cache.retain(tiles);
+  try {
+    await cache.loadAll(tiles);
+    if (latest.Horizon !== req.id) return null;
+    const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+    const skyline = sweepHorizon(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM);
+    const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
+    return { kind: TerrainKind.Horizon, id: req.id, result: { profile: skyline, groundM, eyeM, tiles: tiles.length, missing } };
+  } finally {
+    release();
+  }
 }
 
 /** Finer and closer than the horizon sweep: the viewfinder shows the near ground too. */
@@ -93,12 +115,17 @@ async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   const groundM = Number.isNaN(g) ? 0 : g;
   const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, azFromDeg: req.azFromDeg, azSpanDeg: req.azSpanDeg, minDistM: 20, minZoom: demZoom(8), maxZoom: demZoom(15), tileSize: TERRAIN_TILE_SIZE });
   const tiles = requiredTiles(plan);
-  await cache.loadAll(tiles);
-  if (latest.View !== req.id) return null;
-  const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
-  const layers = sweepView(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
-  const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
-  return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length, missing } };
+  const release = cache.retain(tiles);
+  try {
+    await cache.loadAll(tiles);
+    if (latest.View !== req.id) return null;
+    const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+    const layers = sweepView(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
+    const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
+    return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length, missing } };
+  } finally {
+    release();
+  }
 }
 
 /** Coverage for the height-bound prepass: the deepest zoom that still takes the whole box in ~16 tiles. */
@@ -125,7 +152,6 @@ async function mesh(req: MeshRequest): Promise<null> {
   const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
   const rootLevel = levelsForRange(req.rangeM) - 1;
   const plan = planHeightBound(req.pin, rootLevel);
-  // Held across the await: a concurrent request's fetch could otherwise evict these before they are read.
   const releasePlan = cache.retain(plan.tiles);
   let heightBoundM: HeightBound;
   try {
@@ -150,7 +176,6 @@ async function mesh(req: MeshRequest): Promise<null> {
     const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom, TERRAIN_TILE_SIZE);
     for (const b of blocks) for (const t of tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom)) tiles.set(tileKey(t.z, t.x, t.y), t);
     const want = [...tiles.values()];
-    // Held across the await: a concurrent request's fetch could otherwise evict them and flatten the level.
     const release = cache.retain(want);
     try {
       // oxlint-disable-next-line no-await-in-loop -- a level is posted before the next one is fetched
