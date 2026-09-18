@@ -6,6 +6,7 @@ import type { BuildingBatch } from '@workers/buildings.protocol';
 import { RoofShape } from '@workers/buildings.protocol';
 import { lngLatToTilePixel, metersPerPixel, tilesInBounds } from '@core/terrain/tiles';
 import {
+  BASE_CELL_M,
   BLOCKS_PER_SIDE,
   BLOCK_CELLS,
   blockSideM,
@@ -17,8 +18,8 @@ import {
   levelsForRange,
   MAX_LEVELS,
   MAX_MESH_TRIANGLES,
-  MESH_MIN_CELL_M,
   MESH_PX_PER_CELL,
+  MESH_START_CELL_M,
   samplePoint,
   selectBlocks,
   TRIANGLES_PER_BLOCK,
@@ -100,22 +101,33 @@ describe('selectBlocks', () => {
     expect(sel.levels[0].blocks).toHaveLength(BLOCKS_PER_SIDE ** 2);
   });
 
-  it('keeps its resolution ladder when the DEM posts get finer', () => {
-    // Mapterhorn's 512 px z17 posts are sub-metre; unfloored they halve the cell and the budget
-    // pays for it out of reach, which is where a long-focal subject lives.
-    const finer = Math.max(MESH_MIN_CELL_M, metersPerPixel(PIN.lat, 17, 512));
+  it('spends only what the reach ladder left over when the DEM posts get finer', () => {
+    // Mapterhorn's 512 px z17 posts are sub-metre; a finer DEM may buy a finer cell, never at the
+    // cost of reach or of in-frame resolution.
+    const finer = metersPerPixel(PIN.lat, 17, 512);
     for (const rangeM of [20_000, RANGE])
       for (const focalMm of [70, 600, 2400]) {
         const before = selectBlocks({ rangeM, demCellM: DEM, view: view(focalMm) });
         const after = selectBlocks({ rangeM, demCellM: finer, view: view(focalMm) });
-        expect(levelCellM(after.levels[0].level)).toBe(levelCellM(before.levels[0].level));
-        expect(after.reachM).toBeCloseTo(before.reachM, 3);
-        expect(after.targetRad).toBe(before.targetRad);
+        const at = `${rangeM} m, ${focalMm} mm`;
+        expect(after.reachM, at).toBeGreaterThanOrEqual(before.reachM);
+        expect(after.targetRad, at).toBeLessThanOrEqual(before.targetRad);
+        expect(levelCellM(after.levels[0].level), at).toBeLessThanOrEqual(levelCellM(before.levels[0].level));
       }
-    // The pre-change values a 600 mm frame at Zermatt gets today.
-    const sel = selectBlocks({ rangeM: 20_000, demCellM: finer, view: view(600) });
-    expect(levelCellM(sel.levels[0].level)).toBe(4);
-    expect(sel.reachM).toBeCloseTo(10_000, 0);
+  });
+
+  it('leaves the start cell alone when the budget has nothing to spare', () => {
+    const finer = metersPerPixel(PIN.lat, 17, 512);
+    const start = selectBlocks({ rangeM: RANGE, demCellM: MESH_START_CELL_M, view: view(2400) });
+    const sel = selectBlocks({ rangeM: RANGE, demCellM: finer, view: view(2400), maxTriangles: start.triangles });
+    expect(sel.minCellM).toBe(MESH_START_CELL_M);
+  });
+
+  it('descends to the DEM posts and no further when the budget is generous', () => {
+    const finer = metersPerPixel(PIN.lat, 17, 512);
+    const sel = selectBlocks({ rangeM: RANGE, demCellM: finer, view: view(2400), maxTriangles: 1e9 });
+    expect(sel.minCellM).toBe(BASE_CELL_M);
+    expect(sel.minCellM).toBeGreaterThanOrEqual(finer);
   });
 
   it('takes the cap from the DEM, not from the level floor, when the posts are coarse', () => {

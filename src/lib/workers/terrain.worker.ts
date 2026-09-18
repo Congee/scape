@@ -2,7 +2,7 @@
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
 import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
 import { buildHeightBound } from '@core/terrain/heightBound';
-import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildLevel, enuBoxUnitBounds, levelCellM, levelsForRange, MESH_MIN_CELL_M, selectBlocks } from '@core/terrain/mesh';
+import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildLevel, enuBoxUnitBounds, levelCellM, levelsForRange, selectBlocks } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { sweepView } from '@core/terrain/view';
@@ -130,7 +130,7 @@ async function mesh(req: MeshRequest): Promise<null> {
   const heightBoundM = buildHeightBound(req.pin, cache, plan.zoom, metersPerPixel(req.pin.lat, plan.zoom, TERRAIN_TILE_SIZE), rootLevel);
   const sel = selectBlocks({
     rangeM: req.rangeM,
-    demCellM: Math.max(MESH_MIN_CELL_M, metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE)),
+    demCellM: metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE),
     view: req.view,
     heightBoundM,
     eyeM
@@ -148,7 +148,7 @@ async function mesh(req: MeshRequest): Promise<null> {
     // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
     const out = buildLevel(req.pin, eyeM, level, blocks, (lng, lat) => elevationAtCubic(cache, lng, lat, zoom));
     if (latest.Mesh !== req.id) return null;
-    const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, ms: performance.now() - t0 };
+    const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, minCellM: sel.minCellM, ms: performance.now() - t0 };
     scope.postMessage({ kind: TerrainKind.Mesh, id: req.id, result } satisfies TerrainResponse, [out.pos.buffer, out.nrm.buffer, out.idx.buffer, out.blockStart.buffer, out.blockBox.buffer]);
   }
   return null;

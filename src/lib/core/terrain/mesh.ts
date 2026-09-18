@@ -74,11 +74,11 @@ export const MESH_PX_PER_CELL = 4;
 /** The budget is spent by pulling the screen-space target in towards the eye, down to this reach. */
 export const MIN_MESH_REACH_M = 1000;
 /**
- * Floor for `demCellM`, so a finer DEM cannot pull `minLevel` down on its own. The budget cannot
- * hold a 2 m floor and still reach a 10 km subject: the near field would eat it and the mountain
- * being photographed would coarsen. Lowering this needs frame-pitch culling first.
+ * Cell the reach ladder is run at. Not a floor: once the reach has settled, the budget descends
+ * towards the DEM's own post size for as long as it still fits. Starting any finer would make the
+ * near field eat the budget before the reach is known.
  */
-export const MESH_MIN_CELL_M = 4;
+export const MESH_START_CELL_M = 4;
 
 /** How far the aim may wander before the frame leaves the wedge that was selected for it. */
 export const meshAzPadDeg = (hfovDeg: number): number => Math.max(MESH_AZ_MIN_PAD_DEG, MESH_AZ_PAD * hfovDeg);
@@ -100,7 +100,7 @@ export interface MeshView {
 
 export interface SelectOptions {
   rangeM: number;
-  /** Ground size of one DEM post at this latitude; the mesh never goes finer. */
+  /** Raw ground size of one DEM post at this latitude; the mesh never goes finer. */
   demCellM: number;
   view: MeshView | null;
   maxTriangles?: number;
@@ -119,6 +119,8 @@ export interface Selection {
   targetRad: number;
   /** How far out that target was afforded; past it the mesh falls back to the coarse one. */
   reachM: number;
+  /** Cell of the finest level the budget afforded. */
+  minCellM: number;
 }
 
 const wrapPi = (a: number): number => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
@@ -265,40 +267,54 @@ function balance(leaves: Map<string, BlockId>, rootLevel: number): void {
  * at the eye, so the ground the frame looks at holds a fixed pixel size whatever the focal length,
  * while everything outside the frame's wedge keeps the old clipmap's resolution for shadows and
  * skyline. Holding that target over the whole range costs tens of millions of triangles at a long
- * focal, so the budget is spent nearest first: the reach shrinks until the mesh fits, and only once
- * the reach has bottomed out does the target itself coarsen.
+ * focal, so the budget is spent nearest first: the reach shrinks until the mesh fits, then whatever
+ * the reach left over buys a finer cell down to the DEM's own posts, and only once both have
+ * bottomed out does the target itself coarsen.
  */
 export function selectBlocks(opts: SelectOptions): Selection {
   const rootLevel = levelsForRange(opts.rangeM) - 1;
-  let minLevel = 0;
-  while (minLevel < rootLevel && levelCellM(minLevel) < opts.demCellM) minLevel++;
+  const levelFor = (cellM: number) => {
+    let l = 0;
+    while (l < rootLevel && levelCellM(l) < cellM) l++;
+    return l;
+  };
+  /** The DEM's own level: below it refining is pure interpolation. */
+  const dataLevel = levelFor(opts.demCellM);
+  let minLevel = levelFor(Math.max(opts.demCellM, MESH_START_CELL_M));
   const budget = opts.maxTriangles ?? MAX_MESH_TRIANGLES;
-  const walk = (reach: number, target: number) => {
-    const l = descend(rootLevel, minLevel, opts, target, reach);
+  const walk = (reach: number, target: number, floor: number) => {
+    const l = descend(rootLevel, floor, opts, target, reach);
     balance(l, rootLevel);
     return l;
   };
   const fits = (l: Map<string, BlockId>) => l.size * TRIANGLES_PER_BLOCK <= budget;
   let targetRad = opts.view ? Math.min(opts.view.targetRad, COARSE_TARGET_RAD) : COARSE_TARGET_RAD;
   let reachM = opts.rangeM;
-  let leaves = walk(reachM, targetRad);
+  let leaves = walk(reachM, targetRad, minLevel);
   // Halve the reach until the mesh fits, then bisect back up for what the budget really affords.
   while (!fits(leaves) && reachM > MIN_MESH_REACH_M) {
     reachM = Math.max(MIN_MESH_REACH_M, reachM / 2);
-    leaves = walk(reachM, targetRad);
+    leaves = walk(reachM, targetRad, minLevel);
   }
   for (let i = 0, hi = Math.min(opts.rangeM, reachM * 2); i < 3 && fits(leaves) && reachM < opts.rangeM; i++) {
     const mid = (reachM + hi) / 2;
-    const wider = walk(mid, targetRad);
+    const wider = walk(mid, targetRad, minLevel);
     if (fits(wider)) {
       reachM = mid;
       leaves = wider;
     } else hi = mid;
   }
+  // Reach is never traded back for cell size: this only spends what the reach ladder left over.
+  while (fits(leaves) && minLevel > dataLevel) {
+    const finer = walk(reachM, targetRad, minLevel - 1);
+    if (!fits(finer)) break;
+    minLevel--;
+    leaves = finer;
+  }
   // Only once the reach has bottomed out does the target itself give way.
   while (!fits(leaves) && targetRad < COARSE_TARGET_RAD) {
     targetRad = Math.min(COARSE_TARGET_RAD, targetRad * 2);
-    leaves = walk(reachM, targetRad);
+    leaves = walk(reachM, targetRad, minLevel);
   }
   const byLevel = new Map<number, BlockId[]>();
   for (const b of leaves.values()) {
@@ -309,7 +325,7 @@ export function selectBlocks(opts: SelectOptions): Selection {
   const levels = [...byLevel.entries()]
     .toSorted((a, b) => a[0] - b[0])
     .map(([level, blocks]) => ({ level, blocks: blocks.toSorted((a, b) => a.iy - b.iy || a.ix - b.ix) }));
-  return { levels, blocks: leaves.size, triangles: leaves.size * TRIANGLES_PER_BLOCK, targetRad, reachM };
+  return { levels, blocks: leaves.size, triangles: leaves.size * TRIANGLES_PER_BLOCK, targetRad, reachM, minCellM: levelCellM(minLevel) };
 }
 
 /**

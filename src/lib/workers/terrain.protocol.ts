@@ -115,6 +115,8 @@ export interface MeshResult {
   /** How far out the frame's own resolution was afforded, and the cell angle it holds there. */
   reachM: number;
   targetRad: number;
+  /** Cell of the finest level the budget afforded. */
+  minCellM: number;
   ms: number;
 }
 
