@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Teleconverter } from '@core/optics/fov';
-import { COMPOSITION_VERSION, DEFAULT_COMPOSITION, migrateComposition } from './composition';
+import { aimPatch, COMPOSITION_VERSION, DEFAULT_COMPOSITION, migrateComposition } from './composition';
 
 describe('migrateComposition', () => {
   it('turns the v0 scalar teleconverter into a stack', () => {
@@ -19,5 +19,17 @@ describe('migrateComposition', () => {
 
   it('leaves a current profile alone', () => {
     expect(migrateComposition(DEFAULT_COMPOSITION, COMPOSITION_VERSION)).toEqual(DEFAULT_COMPOSITION);
+  });
+});
+
+describe('aimPatch', () => {
+  it('normalises the bearing and clamps the elevation', () => {
+    expect(aimPatch(-10, 120)).toEqual({ azimuthDeg: 350, elevationDeg: 89, aimAtTarget: false });
+  });
+
+  it('refuses a non-finite angle rather than persisting it', () => {
+    expect(aimPatch(NaN, 10)).toEqual({});
+    expect(aimPatch(10, NaN)).toEqual({});
+    expect(aimPatch(Infinity, 10)).toEqual({});
   });
 });

@@ -86,6 +86,15 @@ export const DEFAULT_COMPOSITION: Composition = {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/**
+ * Patch for a manual aim, empty when either angle is non-finite. A NaN aim persists and then
+ * silently degrades the mesh to nothing, with no error anywhere.
+ */
+export function aimPatch(azimuthDeg: number, elevationDeg: number): Partial<Composition> {
+  if (!Number.isFinite(azimuthDeg) || !Number.isFinite(elevationDeg)) return {};
+  return { azimuthDeg: normalizeBearing(azimuthDeg), elevationDeg: clamp(elevationDeg, -89, 89), aimAtTarget: false };
+}
+
 export const COMPOSITION_VERSION = 1;
 
 /** Version 0 stored one teleconverter multiplier, where 1 meant none. */
@@ -108,7 +117,7 @@ export const compositionStore = create<CompositionState>()(
               ? patch
               : { ...patch, focalMm: clampBaseFocalMm(patch.focalMm ?? s.focalMm, tcFactor(patch.teleconverters ?? s.teleconverters)) }
           ),
-        aim: (azimuthDeg, elevationDeg) => set({ azimuthDeg: normalizeBearing(azimuthDeg), elevationDeg: clamp(elevationDeg, -89, 89), aimAtTarget: false })
+        aim: (azimuthDeg, elevationDeg) => set(aimPatch(azimuthDeg, elevationDeg))
       }),
       {
         name: 'scape.composition',
