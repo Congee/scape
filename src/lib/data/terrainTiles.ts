@@ -1,4 +1,5 @@
 import { decodeTerrarium, overzoomTile, type DemSource, type DemTile } from '@core/terrain/dem';
+import { evictionKeys, Holds } from '@core/terrain/holds';
 import { decodePng, UnsupportedPngError } from '@core/terrain/png';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
 import { localTerrain } from './localTiles';
@@ -125,13 +126,19 @@ export async function decodeTerrainWebp(data: ArrayBuffer): Promise<DecodedDem> 
 /** The source has no tile there; distinct from a transient failure, which is never cached. */
 const ABSENT = Symbol('absent');
 
-/** In-memory LRU of decoded tiles with de-duplicated, concurrency-limited fetches. */
+/**
+ * In-memory LRU of decoded tiles with de-duplicated, concurrency-limited fetches.
+ * The cache is shared by every request the worker serves, so a caller that reads tiles back
+ * synchronously after an `await` must `retain` them: another request's fetch resolving in between
+ * would otherwise evict them and the read would silently fall back to sea level.
+ */
 export class DemCache implements DemSource {
   private tiles = new Map<string, DemTile | null>();
   private inflight = new Map<string, Promise<DemTile | null>>();
   private absent = new Set<string>();
   private waiting: (() => void)[] = [];
   private active = 0;
+  private holds = new Holds();
 
   constructor(
     private maxTiles = 200,
@@ -147,6 +154,11 @@ export class DemCache implements DemSource {
       this.tiles.set(k, t);
     }
     return t;
+  }
+
+  /** Pins tiles against eviction until the returned release is called; safe to call before they are loaded. */
+  retain(coords: readonly TileCoord[]): () => void {
+    return this.holds.retain(coords.map((c) => tileKey(c.z, c.x, c.y)));
   }
 
   load(c: TileCoord): Promise<DemTile | null> {
@@ -219,11 +231,8 @@ export class DemCache implements DemSource {
 
   private set(c: TileCoord, t: DemTile | null) {
     this.tiles.set(tileKey(c.z, c.x, c.y), t);
-    while (this.tiles.size > this.maxTiles) {
-      const oldest = this.tiles.keys().next().value;
-      if (oldest === undefined) break;
-      this.tiles.delete(oldest);
-    }
+    // Held tiles are skipped, so the cache can sit above `maxTiles` by at most one caller's working set.
+    for (const k of evictionKeys(this.tiles.keys(), this.holds, this.tiles.size - this.maxTiles)) this.tiles.delete(k);
   }
 
   private acquire(): Promise<void> {

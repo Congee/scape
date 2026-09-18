@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
 import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
-import { buildHeightBound } from '@core/terrain/heightBound';
+import { buildHeightBound, type HeightBound } from '@core/terrain/heightBound';
 import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildLevel, enuBoxUnitBounds, levelCellM, levelsForRange, selectBlocks } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
@@ -11,7 +11,7 @@ import { demCacheTiles, demZoom, DemCache, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE }
 import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-const cache = new DemCache(demCacheTiles(220));
+const cache = new DemCache(demCacheTiles(320));
 /** Newest request id per kind; older ones stop before the expensive step. */
 const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
 
@@ -125,9 +125,16 @@ async function mesh(req: MeshRequest): Promise<null> {
   const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
   const rootLevel = levelsForRange(req.rangeM) - 1;
   const plan = planHeightBound(req.pin, rootLevel);
-  await cache.loadAll(plan.tiles);
-  if (latest.Mesh !== req.id) return null;
-  const heightBoundM = buildHeightBound(req.pin, cache, plan.zoom, metersPerPixel(req.pin.lat, plan.zoom, TERRAIN_TILE_SIZE), rootLevel);
+  // Held across the await: a concurrent request's fetch could otherwise evict these before they are read.
+  const releasePlan = cache.retain(plan.tiles);
+  let heightBoundM: HeightBound;
+  try {
+    await cache.loadAll(plan.tiles);
+    if (latest.Mesh !== req.id) return null;
+    heightBoundM = buildHeightBound(req.pin, cache, plan.zoom, metersPerPixel(req.pin.lat, plan.zoom, TERRAIN_TILE_SIZE), rootLevel);
+  } finally {
+    releasePlan();
+  }
   const sel = selectBlocks({
     rangeM: req.rangeM,
     demCellM: metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE),
@@ -142,14 +149,21 @@ async function mesh(req: MeshRequest): Promise<null> {
     // The halo covers the cubic stencil's two posts past the block, or its edge would fall back to bilinear.
     const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom, TERRAIN_TILE_SIZE);
     for (const b of blocks) for (const t of tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom)) tiles.set(tileKey(t.z, t.x, t.y), t);
-    // oxlint-disable-next-line no-await-in-loop -- a level is posted before the next one is fetched
-    await cache.loadAll([...tiles.values()]);
-    if (latest.Mesh !== req.id) return null;
-    // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
-    const out = buildLevel(req.pin, eyeM, level, blocks, (lng, lat) => elevationAtCubic(cache, lng, lat, zoom));
-    if (latest.Mesh !== req.id) return null;
-    const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, minCellM: sel.minCellM, ms: performance.now() - t0 };
-    scope.postMessage({ kind: TerrainKind.Mesh, id: req.id, result } satisfies TerrainResponse, [out.pos.buffer, out.nrm.buffer, out.idx.buffer, out.blockStart.buffer, out.blockBox.buffer]);
+    const want = [...tiles.values()];
+    // Held across the await: a concurrent request's fetch could otherwise evict them and flatten the level.
+    const release = cache.retain(want);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a level is posted before the next one is fetched
+      await cache.loadAll(want);
+      if (latest.Mesh !== req.id) return null;
+      // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
+      const out = buildLevel(req.pin, eyeM, level, blocks, (lng, lat) => elevationAtCubic(cache, lng, lat, zoom));
+      if (latest.Mesh !== req.id) return null;
+      const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, minCellM: sel.minCellM, ms: performance.now() - t0 };
+      scope.postMessage({ kind: TerrainKind.Mesh, id: req.id, result } satisfies TerrainResponse, [out.pos.buffer, out.nrm.buffer, out.idx.buffer, out.blockStart.buffer, out.blockBox.buffer]);
+    } finally {
+      release();
+    }
   }
   return null;
 }
