@@ -540,16 +540,28 @@ quarter of the viewport.
    Accepted caveat: ground below the band can still cast a shadow into the frame under a low sun.
    `MESH_EL_DOWN_PAD` widens the lower side; making the band depend on the sun would rebuild the mesh
    on every scrub of the timeline, which is far worse than a coarse caster.
-4. **Terrain reads corrupted by the browser's canvas — the map, not the viewfinder.** MapLibre decodes
-   `raster-dem` tiles by drawing an `ImageBitmap` into a 2D canvas and reading it back, and on Brave
-   canvas readback carries sparse anti-fingerprinting noise. Measured on Mapterhorn `17/68324/46642`
-   against a WebCodecs decode of the same bytes: 258 of 262144 posts differ, and **94 of them by
-   exactly ±256 m** (a ±1 in the red channel). It is not the codec — a synthetic opaque buffer through
-   `putImageData` → `getImageData` loses bytes the same way, and so does re-encoding the tile as PNG.
-   MapLibre guards against exactly this with `isOffscreenCanvasDistorted()`, but the probe writes 25
-   pixels and the noise is sparse enough to miss them. The viewfinder is unaffected: it has decoded
-   with WebCodecs since 1. Fix in progress — a custom source type that hands the worker already-decoded
-   pixels, which also skips a canvas round trip per tile.
+4. **Terrain reads corrupted by the browser's canvas — the map, not the viewfinder** — landed.
+   MapLibre decodes `raster-dem` tiles by drawing an `ImageBitmap` into a 2D canvas and reading it
+   back, and on Brave canvas readback carries sparse anti-fingerprinting noise. Measured on Mapterhorn
+   `17/68324/46642` against a WebCodecs decode of the same bytes: 258 of 262144 posts differed, and
+   **94 of them by exactly ±256 m** (a ±1 in the red channel). It is not the codec — a synthetic opaque
+   buffer through `putImageData` → `getImageData` loses bytes the same way, and so does re-encoding the
+   tile as PNG. MapLibre guards against exactly this with `isOffscreenCanvasDistorted()`, but the probe
+   writes 25 pixels and the noise is sparse enough to miss them. The viewfinder was never affected: it
+   has decoded with WebCodecs since 1.
+
+   `demSource.ts` registers a `scape-raster-dem` source type whose `loadTile` fetches and decodes
+   through the same WebCodecs path the viewfinder uses, then hands the worker a plain `ImageData` —
+   `RasterDEMTileWorkerSource` only rasterises what is an `ImageBitmap`, so nothing touches a canvas.
+   The spec passed downstream still says `type: 'raster-dem'`, or hillshade's style validation and the
+   tile manager's DEM backfill both refuse it. Where `ImageDecoder` is absent the spec falls back to
+   MapLibre's own source.
+
+   Verified in Brave, the browser that has the noise: **0 of 262144 posts differ** on each of three
+   tiles at z16 and z17, `queryTerrainElevation` at Zermatt reads 1602.7 m against the viewfinder's
+   1602.8 m, and the hillshade over the Matterhorn is clean. Cost is 4.3 ms → 9.4 ms per tile, 4.6 ms
+   of which is `repairPosts` — work MapLibre never did, and the first thing to make optional if
+   main-thread jank shows.
 5. **Ridge sweeps read bilinear where the mesh draws cubic — measured, and not worth fixing.**
    From Zermatt the two surfaces put the skyline within 0.0025° of each other toward the Matterhorn
    and within 0.0012° on three near ridges, against a 0.53° solar disc. Individual posts differ by up
@@ -572,12 +584,13 @@ quarter of the viewport.
    its axis exactly, via `frameElevationSpanDeg`; azimuth is the remaining approximation.
 10. **Hillshade overzoom** — landed. `demProtocol.ts` resamples from the deepest ancestor that resolves
     rather than throwing, so the map's DEM source can point at `TERRAIN_MAX_ZOOM` without holing every
-    region whose coverage stops early. Ocean, absent at every level, stays an error rather than
-    becoming a flat sea.
-11. **`aim(az, el)` accepts non-finite input and persists it.** Calling it with a missing argument
-    writes `NaN` through `normalizeBearing`/`clamp` into the persisted composition, after which every
-    wedge test fails, the mesh degenerates to its coarsest 100 blocks and the viewfinder renders empty
-    sky with no error. Found by hitting it. Needs a finite guard.
+    region whose coverage stops early — and it now does, in place of the old `demZoom(15)` cap.
+    Ocean, absent at every level, stays an error rather than becoming a flat sea.
+11. **`aim(az, el)` accepted non-finite input and persisted it** — landed. Calling it with a missing
+    argument wrote `NaN` through `normalizeBearing`/`clamp` into the persisted composition, after which
+    every wedge test failed, the mesh degenerated to its coarsest 100 blocks and the viewfinder
+    rendered empty sky with no error. `aimPatch` is now a pure export that returns an empty patch for
+    a non-finite angle, so the store keeps its last good aim.
 
 **Performance**
 
