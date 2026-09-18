@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
 import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
-import { blockUnitBounds, buildLevel, levelCellM, MESH_MIN_CELL_M, selectBlocks } from '@core/terrain/mesh';
+import { buildHeightBound } from '@core/terrain/heightBound';
+import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildLevel, enuBoxUnitBounds, levelCellM, levelsForRange, MESH_MIN_CELL_M, selectBlocks } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { sweepView } from '@core/terrain/view';
@@ -100,6 +101,21 @@ async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length, missing } };
 }
 
+/** Coverage for the height-bound prepass: the deepest zoom that still takes the whole box in ~16 tiles. */
+export function planHeightBound(pin: LngLat, rootLevel: number): { zoom: number; tiles: TileCoord[] } {
+  const half = (BLOCKS_PER_SIDE / 2) * blockSideM(rootLevel);
+  const bounds = enuBoxUnitBounds(pin, -half, -half, half, half);
+  let zoom = demZoom(8);
+  let tiles = tilesInBounds(bounds, zoom);
+  for (let z = zoom + 1; z <= demZoom(12); z++) {
+    const deeper = tilesInBounds(bounds, z);
+    if (deeper.length > 16) break;
+    zoom = z;
+    tiles = deeper;
+  }
+  return { zoom, tiles };
+}
+
 /** Quadtree levels, finest first, each posted as soon as its DEM tiles are in. */
 async function mesh(req: MeshRequest): Promise<null> {
   const t0 = performance.now();
@@ -107,7 +123,18 @@ async function mesh(req: MeshRequest): Promise<null> {
   if (latest.Mesh !== req.id) return null;
   const groundM = Number.isNaN(g) ? 0 : g;
   const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
-  const sel = selectBlocks({ rangeM: req.rangeM, demCellM: Math.max(MESH_MIN_CELL_M, metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE)), view: req.view });
+  const rootLevel = levelsForRange(req.rangeM) - 1;
+  const plan = planHeightBound(req.pin, rootLevel);
+  await cache.loadAll(plan.tiles);
+  if (latest.Mesh !== req.id) return null;
+  const heightBoundM = buildHeightBound(req.pin, cache, plan.zoom, metersPerPixel(req.pin.lat, plan.zoom, TERRAIN_TILE_SIZE), rootLevel);
+  const sel = selectBlocks({
+    rangeM: req.rangeM,
+    demCellM: Math.max(MESH_MIN_CELL_M, metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE)),
+    view: req.view,
+    heightBoundM,
+    eyeM
+  });
   for (const { level, blocks } of sel.levels) {
     const zoom = zoomForResolution(req.pin.lat, levelCellM(level), demZoom(8), TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);
     // Only the selected blocks: a level-1 leaf 10 km out would drag in thousands of the finest tiles otherwise.

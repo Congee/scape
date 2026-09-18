@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bearingDeg, curvatureDropM, distanceM } from '@core/geo/geodesy';
 import { buildPrisms } from '@core/geo/prismRaster';
+import { frameElevationSpanDeg } from '@core/optics/fov';
 import type { BuildingBatch } from '@workers/buildings.protocol';
 import { RoofShape } from '@workers/buildings.protocol';
 import { lngLatToTilePixel, metersPerPixel, tilesInBounds } from '@core/terrain/tiles';
@@ -34,11 +35,16 @@ const DEM = metersPerPixel(PIN.lat, 15);
 const ROOT = levelsForRange(RANGE) - 1;
 const PX_H = 1013;
 
-const view = (focalMm: number, frameWmm = 36, frameHmm = 24): MeshView => ({
-  azimuthDeg: 37,
-  hfovDeg: (2 * Math.atan(frameWmm / 2 / focalMm) * 180) / Math.PI,
-  targetRad: (MESH_PX_PER_CELL * frameHmm) / (focalMm * PX_H)
-});
+const view = (focalMm: number, frameWmm = 36, frameHmm = 24, pitchDeg = 0): MeshView => {
+  const span = frameElevationSpanDeg(pitchDeg, frameWmm, frameHmm, focalMm);
+  return {
+    azimuthDeg: 37,
+    hfovDeg: (2 * Math.atan(frameWmm / 2 / focalMm) * 180) / Math.PI,
+    pitchDeg,
+    elHalfDeg: Math.max(span.maxDeg - pitchDeg, pitchDeg - span.minDeg),
+    targetRad: (MESH_PX_PER_CELL * frameHmm) / (focalMm * PX_H)
+  };
+};
 
 const allBlocks = (s: { levels: { level: number; blocks: BlockId[] }[] }) => s.levels.flatMap((l) => l.blocks);
 /** Distance from the eye to the nearest point of a block, metres. */
@@ -421,5 +427,120 @@ describe('block count against the old clipmap', () => {
       expect(sel.triangles).toBeGreaterThan(old);
       expect(sel.triangles).toBeLessThanOrEqual(MAX_MESH_TRIANGLES);
     }
+  });
+});
+
+/**
+ * The selection with no height bound must not have moved at all: the elevation test is the only new
+ * behaviour, and it is gated on a bound being supplied. These are the numbers from before it existed.
+ */
+describe('azimuth-only selection is untouched', () => {
+  const EXPECTED: [number, number, number, string, number, number, number, number][] = [
+    [20000, 4, 0, '1:16 2:12 3:12 4:12 5:12 6:12 7:12', 88, 439296, 0.020833333333333332, 20000],
+    [20000, 4, 24, '1:184 2:142 3:145 4:56 5:34 6:21 7:7', 589, 2940288, 0.003948667324777887, 10000],
+    [20000, 4, 70, '1:384 2:68 3:43 4:35 5:22 6:23 7:8', 583, 2910336, 0.0013538287970667044, 5000],
+    [20000, 4, 200, '1:380 2:73 3:46 4:30 5:23 6:19 7:9', 580, 2895360, 0.0004738400789733465, 7500],
+    [20000, 4, 600, '1:288 2:92 3:59 4:31 5:26 6:22 7:8', 526, 2625792, 0.0001579466929911155, 10000],
+    [20000, 4, 1200, '1:300 2:117 3:64 4:40 5:27 6:21 7:8', 577, 2880384, 0.00007897334649555775, 12500],
+    [20000, 4, 2400, '1:280 2:122 3:76 4:41 5:30 6:20 7:8', 577, 2880384, 0.00003948667324777888, 13750],
+    [20000, 30, 0, '4:16 5:12 6:12 7:12', 52, 259584, 0.020833333333333332, 20000],
+    [20000, 30, 24, '4:184 5:54 6:19 7:5', 262, 1307904, 0.003948667324777887, 20000],
+    [20000, 30, 70, '4:132 5:43 6:17 7:7', 199, 993408, 0.0013538287970667044, 20000],
+    [20000, 30, 200, '4:88 5:34 6:18 7:8', 148, 738816, 0.0004738400789733465, 20000],
+    [20000, 30, 600, '4:60 5:37 6:19 7:8', 124, 619008, 0.0001579466929911155, 20000],
+    [20000, 30, 1200, '4:56 5:38 6:19 7:8', 121, 604032, 0.00007897334649555775, 20000],
+    [20000, 30, 2400, '4:56 5:38 6:19 7:8', 121, 604032, 0.00003948667324777888, 20000],
+    [100000, 4, 0, '1:16 2:12 3:12 4:12 5:12 6:12 7:12 8:12', 100, 499200, 0.020833333333333332, 100000],
+    [100000, 4, 24, '1:184 2:142 3:133 4:47 5:37 6:21 7:27 8:7', 598, 2985216, 0.003948667324777887, 7812.5],
+    [100000, 4, 70, '1:352 2:68 3:45 4:35 5:22 6:23 7:24 8:8', 577, 2880384, 0.0013538287970667044, 4687.5],
+    [100000, 4, 200, '1:340 2:71 3:45 4:27 5:20 6:20 7:21 8:9', 553, 2760576, 0.0004738400789733465, 7031.25],
+    [100000, 4, 600, '1:300 2:101 3:64 4:33 5:29 6:21 7:20 8:9', 577, 2880384, 0.0001579466929911155, 10156.25],
+    [100000, 4, 1200, '1:300 2:117 3:64 4:40 5:27 6:21 7:20 8:9', 598, 2985216, 0.00007897334649555775, 12500],
+    [100000, 4, 2400, '1:248 2:110 3:69 4:40 5:27 6:21 7:20 8:9', 544, 2715648, 0.00003948667324777888, 12500],
+    [100000, 30, 0, '4:16 5:12 6:12 7:12 8:12', 64, 319488, 0.020833333333333332, 100000],
+    [100000, 30, 24, '4:184 5:142 6:69 7:15 8:5', 415, 2071680, 0.003948667324777887, 100000],
+    [100000, 30, 70, '4:448 5:76 6:41 7:14 8:7', 586, 2925312, 0.0013538287970667044, 43750],
+    [100000, 30, 200, '4:380 5:53 6:31 7:15 8:8', 487, 2431104, 0.0004738400789733465, 100000],
+    [100000, 30, 600, '4:192 5:68 6:35 7:16 8:8', 319, 1592448, 0.0001579466929911155, 100000],
+    [100000, 30, 1200, '4:156 5:69 6:37 7:16 8:8', 286, 1427712, 0.00007897334649555775, 100000],
+    [100000, 30, 2400, '4:140 5:69 6:38 7:16 8:8', 271, 1352832, 0.00003948667324777888, 100000]
+  ];
+
+  it('matches block for block, level for level, over range, DEM post and focal length', () => {
+    for (const [rangeM, demCellM, focalMm, levels, blocks, triangles, targetRad, reachM] of EXPECTED) {
+      const sel = selectBlocks({ rangeM, demCellM, view: focalMm ? view(focalMm) : null });
+      const got = [sel.levels.map((l) => `${l.level}:${l.blocks.length}`).join(' '), sel.blocks, sel.triangles, sel.targetRad, sel.reachM];
+      expect(got, `${rangeM} m, ${demCellM} m posts, ${focalMm} mm`).toEqual([levels, blocks, triangles, targetRad, reachM]);
+    }
+  });
+
+  it('a pitch that looks nowhere near the ground changes nothing without a bound', () => {
+    const level = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: view(600) });
+    const up = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: view(600, 36, 24, 45) });
+    expect(up.blocks).toBe(level.blocks);
+    expect(up.reachM).toBe(level.reachM);
+  });
+});
+
+/** A flat plain, so the whole mesh sits on one plane a known angle from the eye. */
+const plain = (heightM: number) => () => ({ minM: heightM, maxM: heightM });
+
+describe('the frame elevation band', () => {
+  it('coarsens ground below the frame instead of dropping it, so the tiling still closes', () => {
+    const v = view(600, 36, 24, 20);
+    const opts = { rangeM: RANGE, demCellM: DEM, view: v, heightBoundM: plain(1000), eyeM: 1600 };
+    const cut = selectBlocks(opts);
+    const flat = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v });
+    // Every block that was fine now sits under the frame, so the wedge collapses to the coarse mesh.
+    expect(cut.blocks).toBeLessThan(flat.blocks / 2);
+    const area = allBlocks(cut).reduce((a, b) => a + blockSideM(b.level) ** 2, 0);
+    expect(area).toBeCloseTo((BLOCKS_PER_SIDE * blockSideM(ROOT)) ** 2, -3);
+  });
+
+  it('keeps the ground the frame does hold: a level frame over a plain at eye height is unchanged', () => {
+    const v = view(600);
+    const bound = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v, heightBoundM: plain(1600), eyeM: 1600 });
+    const flat = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v });
+    expect(bound.blocks).toBe(flat.blocks);
+    expect(bound.reachM).toBe(flat.reachM);
+  });
+
+  it('never coarsens a block whose DEM coverage is missing', () => {
+    const v = view(600, 36, 24, 20);
+    const gone = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v, heightBoundM: () => ({ minM: -Infinity, maxM: Infinity }), eyeM: 1600 });
+    const flat = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v });
+    expect(gone.blocks).toBe(flat.blocks);
+    expect(gone.reachM).toBe(flat.reachM);
+  });
+
+  /** Cell of the leaf the frame's centre ray lands on, where the ground is `dropM` below the eye. */
+  const cellUnderAimM = (sel: ReturnType<typeof selectBlocks>, v: MeshView, dropM: number): number => {
+    const d = dropM / Math.tan(-v.pitchDeg * D2R);
+    const at = new Map(allBlocks(sel).map((b) => [`${b.level}/${b.ix}/${b.iy}`, b.level]));
+    const e = d * Math.sin(v.azimuthDeg * D2R);
+    const n = d * Math.cos(v.azimuthDeg * D2R);
+    for (let l = 0; l < MAX_LEVELS; l++) {
+      const side = blockSideM(l);
+      if (at.has(`${l}/${Math.floor(e / side)}/${Math.floor(n / side)}`)) return levelCellM(l);
+    }
+    throw new Error('no leaf covers the aim point');
+  };
+
+  it('holds the near ground when the frame is pitched down into it', () => {
+    // 600 m below the eye at 20° down is 1.6 km out; that ground is in the picture and stays fine.
+    const v = view(600, 36, 24, -20);
+    const sel = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v, heightBoundM: plain(1000), eyeM: 1600 });
+    // The DEM floor, which is as fine as the mesh goes at all.
+    expect(cellUnderAimM(sel, v, 600)).toBe(levelCellM(sel.levels[0].level));
+  });
+
+  it('a near-horizontal frame still reaches past the ground the horizon curves under', () => {
+    const v = view(600, 36, 24, -0.5);
+    const sel = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v, heightBoundM: plain(1600), eyeM: 1600 });
+    // The aim meets a plain at eye height only through the curvature drop, 65 km out.
+    expect(sel.reachM).toBeGreaterThan(4000);
+    const far = allBlocks(sel).filter((b) => nearest(b) > 3000 && nearest(b) < sel.reachM && angleTo(centreBearingDeg(b), v.azimuthDeg) < v.hfovDeg / 4);
+    expect(far.length).toBeGreaterThan(0);
+    for (const b of far) expect(levelCellM(b.level)).toBeLessThanOrEqual(Math.max(v.targetRad * nearest(b), 2 * DEM) + 1e-9);
   });
 });

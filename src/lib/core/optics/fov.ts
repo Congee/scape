@@ -173,3 +173,28 @@ export function effectiveOptics(o: { focalMm: number; fNumber: number; teleconve
   const tc = tcFactor(o.teleconverters);
   return { focalMm: Math.round(o.focalMm * tc * 10) / 10, fNumber: Math.round(o.fNumber * tc * 100) / 100 };
 }
+
+/**
+ * Elevation angles the rim of a roll-free rectilinear frame reaches, degrees. The band is not
+ * pitch ± vfov/2: along the bottom edge sin(el)'s numerator is fixed while its denominator grows
+ * with |x|, so a frame pitched above the horizon dips lowest at a bottom *corner*. A steeply
+ * pitched frame also turns over inside its own height, so that critical row is a candidate too.
+ */
+export function frameElevationSpanDeg(pitchDeg: number, frameWmm: number, frameHmm: number, focalMm: number): { minDeg: number; maxDeg: number } {
+  const w = frameWmm / 2;
+  const h = frameHmm / 2;
+  const sp = Math.sin(pitchDeg * D2R);
+  const cp = Math.cos(pitchDeg * D2R);
+  let minDeg = Infinity;
+  let maxDeg = -Infinity;
+  // x enters only as x², so the two halves of the frame agree and the edge midpoints are x = 0.
+  for (const x of [0, w]) {
+    const yc = (cp * (focalMm * focalMm + x * x)) / (focalMm * sp);
+    for (const y of [-h, h, Math.min(h, Math.max(-h, yc))]) {
+      const el = Math.asin((y * cp + focalMm * sp) / Math.hypot(focalMm, x, y)) * R2D;
+      if (el < minDeg) minDeg = el;
+      if (el > maxDeg) maxDeg = el;
+    }
+  }
+  return { minDeg, maxDeg };
+}

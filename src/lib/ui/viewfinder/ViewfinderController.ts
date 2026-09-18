@@ -11,13 +11,13 @@ import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, t
 import { PrismOccluder } from '@core/geo/prismOcclude';
 import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
-import { effectiveOptics, fovDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
+import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
-import { meshAzPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
+import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
 import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
 import { buildingsStore, requestBuildings } from '@state/buildings';
@@ -269,8 +269,8 @@ export class ViewfinderController {
 
   /**
    * Cuts the terrain mesh for the frame. Focal and target land on a quarter-octave ladder and the
-   * aim on a grid one pad wide, so zooming or panning inside the wedge the last mesh was built for
-   * changes nothing and no rebuild is asked for.
+   * aim on a grid one pad wide on each axis, so zooming, panning or tilting inside the wedge the
+   * last mesh was built for changes nothing and no rebuild is asked for.
    */
   private ensureMeshWindow(sc: Scene, rangeM: number) {
     const focalMm = 2 ** (Math.round(Math.log2(sc.cam.focalMm) * 4) / 4);
@@ -279,9 +279,13 @@ export class ViewfinderController {
     const targetRad = 2 ** (Math.round(Math.log2((MESH_PX_PER_CELL * sc.cam.frameHmm) / (focalMm * pxH)) * 4) / 4);
     const step = meshAzPadDeg(hfovDeg);
     const azimuthDeg = Math.round(sc.aim.azimuthDeg / step) * step;
+    const elStep = meshElPadDeg(fovDeg(sc.cam.frameHmm, focalMm));
+    const pitchDeg = Math.round(sc.aim.elevationDeg / elStep) * elStep;
+    const span = frameElevationSpanDeg(pitchDeg, sc.cam.frameWmm, sc.cam.frameHmm, focalMm);
+    const elHalfDeg = Math.max(span.maxDeg - pitchDeg, pitchDeg - span.minDeg);
     const cur = viewfinderStore.getState().meshWindow;
-    if (cur && cur.rangeM === rangeM && cur.hfovDeg === hfovDeg && cur.targetRad === targetRad && cur.azimuthDeg === azimuthDeg) return;
-    viewfinderStore.getState().setMeshWindow({ rangeM, azimuthDeg, hfovDeg, targetRad });
+    if (cur && cur.rangeM === rangeM && cur.hfovDeg === hfovDeg && cur.targetRad === targetRad && cur.azimuthDeg === azimuthDeg && cur.pitchDeg === pitchDeg) return;
+    viewfinderStore.getState().setMeshWindow({ rangeM, azimuthDeg, hfovDeg, pitchDeg, elHalfDeg, targetRad });
   }
 
   /** Building volumes for the same wedge the terrain sweep covers, so small pans need no new fetch. */

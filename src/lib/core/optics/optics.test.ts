@@ -12,6 +12,7 @@ import {
   equivalentFocalMm,
   focalForFovMm,
   fovDeg,
+  frameElevationSpanDeg,
   frameFov,
   maxApertureAt,
   Orientation,
@@ -213,5 +214,40 @@ describe('crop', () => {
     const f = effectiveOptics({ focalMm: 600, fNumber: 4, teleconverters: [Teleconverter.X20] }).focalMm;
     expect(frameFov(apsc, f, Orientation.Landscape).dDeg).toBeCloseTo(frameFov(ff, equivalentFocalMm(apsc, 1200), Orientation.Landscape).dDeg, 9);
     expect(equivalentFocalMm(apsc, f)).toBeCloseTo(1840.7, 1);
+  });
+});
+
+/** Elevation of an image point, straight from the projection, as the reference. */
+const elAt = (pitchDeg: number, f: number, x: number, y: number) => {
+  const p = (pitchDeg * Math.PI) / 180;
+  return (Math.asin((y * Math.cos(p) + f * Math.sin(p)) / Math.hypot(f, x, y)) * 180) / Math.PI;
+};
+
+describe('frame elevation span', () => {
+  it('a level frame is exactly pitch ± vfov / 2', () => {
+    const span = frameElevationSpanDeg(0, 36, 24, 200);
+    expect(span.maxDeg).toBeCloseTo(fovDeg(24, 200) / 2, 9);
+    expect(span.minDeg).toBeCloseTo(-fovDeg(24, 200) / 2, 9);
+  });
+
+  it('a frame pitched up dips lower at its bottom corners than at its bottom centre', () => {
+    const span = frameElevationSpanDeg(18.56, 36, 24, 200);
+    // The naive band is not a bound: the corner sits below pitch − vfov / 2.
+    expect(span.minDeg).toBeLessThan(18.56 - fovDeg(24, 200) / 2);
+    expect(span.minDeg).toBeCloseTo(elAt(18.56, 200, 18, -12), 9);
+    expect(span.maxDeg).toBeCloseTo(elAt(18.56, 200, 0, 12), 9);
+  });
+
+  it('brackets every point of the frame, at every pitch and focal length', () => {
+    for (const pitchDeg of [-89, -45, -18.56, 0, 18.56, 60, 89])
+      for (const f of [14, 70, 600, 2400]) {
+        const span = frameElevationSpanDeg(pitchDeg, 36, 24, f);
+        for (let u = -1; u <= 1; u += 0.1)
+          for (let v = -1; v <= 1; v += 0.1) {
+            const el = elAt(pitchDeg, f, u * 18, v * 12);
+            expect(el).toBeLessThanOrEqual(span.maxDeg + 1e-9);
+            expect(el).toBeGreaterThanOrEqual(span.minDeg - 1e-9);
+          }
+      }
   });
 });

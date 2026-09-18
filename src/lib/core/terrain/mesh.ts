@@ -56,6 +56,17 @@ export const COARSE_TARGET_RAD = 1 / BLOCK_CELLS;
 export const MESH_AZ_PAD = 0.3;
 /** …but never by less than this, or a 2400 mm frame would rebuild on every nudge. */
 export const MESH_AZ_MIN_PAD_DEG = 0.25;
+/** The frame's elevation band is widened the same way its wedge is, so small tilts need no rebuild. */
+export const MESH_EL_PAD = 0.3;
+/** …and floored the same way, so a long lens does not rebuild on every nudge of the tilt. */
+export const MESH_EL_MIN_PAD_DEG = 0.25;
+/**
+ * The band's lower side is padded by this much more than its upper one. Ground below the frame can
+ * still cast a shadow into it under a low sun, and a coarse caster is the same approximation the
+ * azimuth wedge has always made; making the band depend on the sun would rebuild the mesh on every
+ * scrub of the timeline, which is far worse than the artifact.
+ */
+export const MESH_EL_DOWN_PAD = 2;
 /** Triangles one mesh may reach; about 600 blocks, 65 MB of vertex and index buffers. */
 export const MAX_MESH_TRIANGLES = 3_000_000;
 /** Pixels one cell may span inside the frame; 4 puts about 250 cells across a 1000 px frame. */
@@ -71,12 +82,18 @@ export const MESH_MIN_CELL_M = 4;
 
 /** How far the aim may wander before the frame leaves the wedge that was selected for it. */
 export const meshAzPadDeg = (hfovDeg: number): number => Math.max(MESH_AZ_MIN_PAD_DEG, MESH_AZ_PAD * hfovDeg);
+/** How far the tilt may wander before the frame leaves the elevation band that was selected for it. */
+export const meshElPadDeg = (vfovDeg: number): number => Math.max(MESH_EL_MIN_PAD_DEG, MESH_EL_PAD * vfovDeg);
 
 /** Where the frame points and how fine it wants the terrain inside it. */
 export interface MeshView {
   azimuthDeg: number;
   /** Horizontal field of view of the frame itself; the pad is added on top. */
   hfovDeg: number;
+  /** Elevation of the frame centre. */
+  pitchDeg: number;
+  /** Largest departure of any frame rim point's elevation from `pitchDeg`; the pad is added on top. */
+  elHalfDeg: number;
   /** Largest angle one cell may subtend inside the frame, radians. */
   targetRad: number;
 }
@@ -87,6 +104,10 @@ export interface SelectOptions {
   demCellM: number;
   view: MeshView | null;
   maxTriangles?: number;
+  /** Conservative height span of a block above the datum, metres; omitted leaves the mesh azimuth-only. */
+  heightBoundM?: (b: BlockId) => { minM: number; maxM: number };
+  /** Eye height above the datum, metres; only needed alongside `heightBoundM`. */
+  eyeM?: number;
 }
 
 export interface Selection {
@@ -106,6 +127,24 @@ const blockKey = (level: number, ix: number, iy: number): string => `${level}/${
 /** Distance from the eye to the nearest point of a block, metres; 0 when the eye is inside it. */
 function nearestDistM(e0: number, n0: number, e1: number, n1: number): number {
   return Math.hypot(Math.max(e0, -e1, 0), Math.max(n0, -n1, 0));
+}
+
+/** Distance from the eye to the farthest point of a block, metres. */
+function farthestDistM(e0: number, n0: number, e1: number, n1: number): number {
+  return Math.hypot(Math.max(-e0, e1), Math.max(-n0, n1));
+}
+
+/**
+ * True while the elevation angles a block subtends can reach the frame's band. Each bound takes the
+ * curvature drop that makes it widest, so the test never coarsens ground the picture could hold; an
+ * unbounded span (no DEM coverage) spans the whole sky and always passes.
+ */
+function reachesBand(minM: number, maxM: number, eyeM: number, dNear: number, dFar: number, loRad: number, hiRad: number): boolean {
+  const u1 = maxM - eyeM - curvatureDropM(dNear);
+  const u0 = minM - eyeM - curvatureDropM(dFar);
+  const elMax = Math.atan2(u1, u1 > 0 ? dNear : dFar);
+  const elMin = Math.atan2(u0, u0 < 0 ? dNear : dFar);
+  return elMax >= loRad && elMin <= hiRad;
 }
 
 /**
@@ -145,9 +184,15 @@ const inRoot = (rootLevel: number, level: number, ix: number, iy: number): boole
 };
 
 /** One descent, with no budget check; exported for tests that want a fixed target. */
-function descend(rootLevel: number, minLevel: number, view: MeshView | null, fineRad: number, reachM: number): Map<string, BlockId> {
+function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineRad: number, reachM: number): Map<string, BlockId> {
+  const view = opts.view;
   const viewMid = view ? view.azimuthDeg * D2R : 0;
   const viewHalf = view ? (view.hfovDeg / 2 + meshAzPadDeg(view.hfovDeg)) * D2R : 0;
+  const bound = view ? opts.heightBoundM : undefined;
+  const eyeM = opts.eyeM ?? 0;
+  const elPad = view ? meshElPadDeg(2 * view.elHalfDeg) : 0;
+  const elLo = view ? (view.pitchDeg - view.elHalfDeg - MESH_EL_DOWN_PAD * elPad) * D2R : 0;
+  const elHi = view ? (view.pitchDeg + view.elHalfDeg + elPad) * D2R : 0;
   const leaves = new Map<string, BlockId>();
   const stack = rootBlocks(rootLevel);
   while (stack.length) {
@@ -160,7 +205,11 @@ function descend(rootLevel: number, minLevel: number, view: MeshView | null, fin
     if (view && d <= reachM) {
       const span = viewHalf >= Math.PI ? null : bearingSpan(e0, n0, e0 + s, n0 + s);
       // A null span is the eye inside the block, or a wedge that has grown to the whole circle.
-      if (!span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf) target = fineRad;
+      if (!span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf) {
+        // d === 0 is the eye inside the block, where every elevation is covered.
+        const bnd = bound && d > 0 ? bound(b) : null;
+        if (!bnd || reachesBand(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s), elLo, elHi)) target = fineRad;
+      }
     }
     if (b.level > minLevel && levelCellM(b.level) > target * d) {
       for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) stack.push({ level: b.level - 1, ix: 2 * b.ix + dx, iy: 2 * b.iy + dy });
@@ -225,7 +274,7 @@ export function selectBlocks(opts: SelectOptions): Selection {
   while (minLevel < rootLevel && levelCellM(minLevel) < opts.demCellM) minLevel++;
   const budget = opts.maxTriangles ?? MAX_MESH_TRIANGLES;
   const walk = (reach: number, target: number) => {
-    const l = descend(rootLevel, minLevel, opts.view, target, reach);
+    const l = descend(rootLevel, minLevel, opts, target, reach);
     balance(l, rootLevel);
     return l;
   };
@@ -271,10 +320,11 @@ export function selectBlocks(opts: SelectOptions): Selection {
  */
 export function blockUnitBounds(pin: LngLat, b: BlockId, haloM = levelCellM(b.level)): { x0: number; x1: number; y0: number; y1: number } {
   const s = blockSideM(b.level);
-  const e0 = b.ix * s - haloM;
-  const n0 = b.iy * s - haloM;
-  const e1 = e0 + s + 2 * haloM;
-  const n1 = n0 + s + 2 * haloM;
+  return enuBoxUnitBounds(pin, b.ix * s - haloM, b.iy * s - haloM, (b.ix + 1) * s + haloM, (b.iy + 1) * s + haloM);
+}
+
+/** The same for an arbitrary eye-relative box, which is what the height-bound prepass covers. */
+export function enuBoxUnitBounds(pin: LngLat, e0: number, n0: number, e1: number, n1: number): { x0: number; x1: number; y0: number; y1: number } {
   let x0 = Infinity;
   let x1 = -Infinity;
   let y0 = Infinity;
