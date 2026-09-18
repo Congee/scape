@@ -875,6 +875,16 @@ shipped master, and two of its three reductions need no decision from anyone.
     Raising the triangle cap is not on this list: at long focal it is already slack (2.18 M of 3 M at
     2400 mm), and where it binds, these reductions are the cheaper answer.
 
+    A fourth, orthogonal to all of them and not yet measured: **the worker fetches levels strictly in
+    series** — `await cache.loadAll(want)`, build, post, next level — so a cold pass pays the *sum* of
+    every level's fetch rather than the longest. Cold is 16.7 s against 5.99 s warm at 600 mm, so
+    roughly 10.8 s of serialized fetch. Issuing the union of all levels' tiles up front, unawaited and
+    unretained, would warm the cache without disturbing anything: the FIFO semaphore means the finest
+    level's tiles are still first in the queue, so the first post cannot get slower, and each later
+    level's per-level `retain` + `loadAll` still runs before `buildLevel`, so a prefetched tile
+    evicted in the meantime is re-fetched rather than read as sea level. The cost is that a superseded
+    request leaves a larger stale backlog — 14's measurement, at a bigger volume.
+
 **Awaiting the user**
 
 19. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
