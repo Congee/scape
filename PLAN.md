@@ -1012,25 +1012,31 @@ need no decision from anyone.
       but unconfirmed, and it is the first sighting of anything like the worst 3.72× seam overrun the
       balance audit found on master. Only shows once a focal reaches the 2 m cell, which the step now
       makes happen at 600 mm rather than 1200 mm.
-    - **A viewfinder URL for a fresh camera can render an empty canvas**, with a correct mesh behind
-      it: right eye (1606.5 m), mesh-window azimuth 234.7° matching the aim, 35 blocks and 174 720
-      triangles reported drawn, fresh profile, no missing tiles, no error — and nothing in frame but
-      the target marker, which itself projects to a plausible spot. Reproduced on master, so it is not
-      the two-level step. Mechanism NOT established: the composition store held a stale `azimuthDeg`
-      15 / `elevationDeg` −70 from a previous pin, but `aimFor` overrides both when `aimAtTarget` is
-      set, and the mesh key's azimuth proves the window followed the override — so the stale store
-      values are a symptom to chase, not a demonstrated cause. **22 is very likely the mechanism**: the
-      renderer draws `t.meshKey === meshKeyFor(world, settings, meshWindow) ? … : []`, so the instant
-      the profile lands and the pitch moves off the fabricated 0 the built mesh stops matching the
-      window and *nothing* is drawn until the rebuild arrives — seconds, cold. That is an empty canvas
-      with a correct mesh behind it, an azimuth that matches because only the pitch was ever wrong,
-      and a target marker still projecting correctly. Not yet reproduced deliberately, and the 35
-      blocks reported drawn do not fit a `[]` sync, so the telemetry was probably sampled off-frame.
-      Separately and definitely real: the
-      same URL and focal gave
-      zoom 15 / 2 m / reach 100 km on one load and zoom 14 / 4 m / reach 23 km on another, so an
-      unguarded capture script cannot be trusted (22 is the cause) — `shot4.sh` and `shot1f.sh` now
-      print the aim beside the configuration.
+    - **A viewfinder URL for a fresh camera can render an empty canvas** — reproduced deliberately and
+      **closed by 22**. The symptom was a flat sky with a correct mesh behind it: right eye, mesh-window
+      azimuth matching the aim, fresh profile, no missing tiles, no error, and nothing in frame but the
+      target marker, projecting to a plausible spot. The suspected mechanism was 22: the renderer draws
+      `t.meshKey === meshKeyFor(world, settings, meshWindow) ? … : []`, so the moment the window's pitch
+      moves off the fabricated 0 the built mesh stops matching it and *nothing* is drawn until the
+      rebuild lands.
+
+      Confirmed by A/B on two worktrees at once, `25d8855^` and master, same URL (Zermatt →
+      Matterhorn, 600 mm), same procedure: load, wait for the mesh to settle, then nudge the clock one
+      minute, which is the cheapest "unrelated store bump" there is. Pre-22 the window sits at pitch 0
+      with 8 levels built and 20 blocks drawn; the nudge re-runs `ensureMeshWindow`, the profile is now
+      there, the window jumps to pitch 18.29 — and for **1.1 s** `__scape.prism.terrain` is absent
+      entirely while the store still holds all 8 levels. The screenshot taken inside that window is the
+      bug report's picture exactly: flat blue, target marker, "behind terrain". On master the same
+      nudge holds 37 blocks across every 100 ms sample with no gap at all, because the window was
+      already at the true pitch and nothing had to be re-cut.
+
+      The 35 blocks quoted in the original report are explained too: `__scape.prism` is not cleared
+      when a frame draws nothing, it simply stops updating, so it kept the last good frame's numbers.
+      Cold, the gap is the whole rebuild — seconds, not 1.1 s.
+
+      Separately and definitely real: the same URL and focal gave zoom 15 / 2 m / reach 100 km on one
+      load and zoom 14 / 4 m / reach 23 km on another, so an unguarded capture script cannot be trusted
+      (22 is the cause) — `shot4.sh` and `shot1f.sh` now print the aim beside the configuration.
 
 22. **Every cold `aimAtTarget` load aimed its mesh at the horizon** (2026-09-18) — fixed in
     `25d8855`. Found by reading the path, then measured in the browser. `aimFor` returns `elevationDeg: targetAngleDeg ?? 0`,
