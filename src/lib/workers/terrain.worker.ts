@@ -168,13 +168,22 @@ async function mesh(req: MeshRequest): Promise<null> {
     heightBoundM,
     eyeM
   });
-  for (const { level, blocks } of sel.levels) {
+  const plans = sel.levels.map(({ level, blocks }) => {
     const zoom = zoomForResolution(req.pin.lat, levelCellM(level), demZoom(8), TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);
     // Only the selected blocks: a level-1 leaf 10 km out would drag in thousands of the finest tiles otherwise.
     const tiles = new Map<string, TileCoord>();
     // The halo covers the cubic stencil's two posts past the block, or its edge would fall back to bilinear.
     const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom, TERRAIN_TILE_SIZE);
     for (const b of blocks) for (const t of tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom)) tiles.set(tileKey(t.z, t.x, t.y), t);
+    return { level, blocks, zoom, tiles };
+  });
+  // Warms every level while the first one builds. Unretained and unawaited on purpose: the fetch queue is
+  // FIFO so the finest level stays first, and each level still awaits its own retained load, so a tile
+  // evicted after the prefetch is re-fetched rather than read as sea level.
+  const union = new Map<string, TileCoord>();
+  for (const p of plans) for (const [k, t] of p.tiles) union.set(k, t);
+  void cache.loadAll([...union.values()]).catch(() => {});
+  for (const { level, blocks, zoom, tiles } of plans) {
     const want = [...tiles.values()];
     const release = cache.retain(want);
     try {
