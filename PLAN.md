@@ -1022,9 +1022,34 @@ need no decision from anyone.
     `pinGroundM|pin2GroundM|profileKey` subscription bumps the controller when the ground lands.
     `finder.ts` keeps its sea-level default by passing it in.
 
-    Still open, deliberately: `FramePanel.tsx:52` and `NightPanel.tsx:119` also feed `aimFor` from
-    `fresh?.los.targetAngleDeg ?? null`, so their elevation readouts still show 0 on a cold load.
-    Switching them needs their `useTerrain` selectors widened to the two ground heights.
+    **The two panels followed** in `cf76192`. `FramePanel` and `NightPanel` rebuilt the aim from the
+    profile alone and so read `+0.00°` for the ~1 s before it landed; both now call the shared
+    resolver. Frame keeps the bearing, which never needed terrain, and says `…` for the angle alone
+    — the GeodeticsPanel spelling, not a third one. Degrading the whole aim instead, the way the
+    panels do when there is no target pin, was tried and rejected: it turns the readouts into editable
+    inputs showing 0/0 while "Aim at the target location" is checked, and throws away an azimuth that
+    is already correct. Cold, Frame now reads `234.80° SW` / `…` at 0.44 s and the true `+18.35°` at
+    1.20 s, against `+0.00°` held to ~1.95 s before. Night has no natural place for a `…` — its
+    declination feeds three sentences with the number embedded — so it keeps `aimFor`'s placeholder
+    and simply gets the true angle at 1.05 s instead of 2.00 s.
+
+    **Two things the panel work turned up, both recorded rather than fixed.**
+
+    `startTerrainSync()` runs at module scope in `main.tsx:42` and fires the first `Elevation` request
+    against whatever `worldStore` holds, while the URL's `camera`/`target` are applied in a
+    `useEffect` inside `ViewfinderPage` (`routes/viewfinder.tsx:24-33`) after first render. So the
+    first elevation answer of every load is for the pre-URL pin and is thrown away. Harmless today —
+    with empty storage there is no `pin2`, so `pin2GroundM` lands null and the resolver correctly
+    declines — but it is one wasted round trip on the critical path of exactly the cold load 21 and 22
+    are about.
+
+    `targetAngleFor` checks `profileKey` before trusting the profile but never checks `elevationKey`
+    before trusting the two grounds, so on a re-target it briefly pairs the old pins' ground with the
+    new pins' distance. **Deliberately left.** Guarding it would blank the angle — and, through
+    `aimKnown`, freeze the mesh window — on every target drag, whereas the stale ground is wrong by
+    only as much as the ground moved, almost always far inside the 0.25° pitch quantum, so it costs no
+    rebuild. It is the placeholder 0 that was worth refusing, not an approximation that converges.
+    Cold loads are unaffected either way: `elevationKey` is empty then and the grounds are null.
 
     **Verified over a matrix**, not the single setting the fix was found at, by recording every
     mesh-key transition from first paint rather than sampling the end state: 24/200/600/1200/2400 mm,
