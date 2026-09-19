@@ -589,19 +589,16 @@ need no decision from anyone.
     is not only a soft distant subject, it is a blank near field on any downward shot, which a
     frame-derived floor would fix from the same end.
 
-    **A separate artifact surfaced there and is not explained.** At −5.7° from the same camera, a
-    hard-edged near-white band runs the full width of the frame, about a tenth of its height, between
-    the near facet and the far valley wall. Four candidates are eliminated: it is not a seam gap (an
-    8× skirt is **AE 0**), not the building prisms (`showBuildings` off changes nothing), not the
-    shadow pass (`showShadow` and `showSunShadows` off change nothing), and it *is* terrain geometry
-    (`terrain` off replaces the whole frame with the flat fallback). Its colour is exactly
-    `srgb(224,224,226)`, constant across the band's whole width — and the terrain G-buffer shader
-    cannot produce that. `base` is a haze mix between `groundNearDay` [86,96,70] and `groundFarDay`
-    [150,170,200], scaled by at most `0.42 + 0.68·1`, so its brightest possible output is about
-    (165,187,220) and stays blue-dominant; the band is neutral and brighter. So the colour is made in
-    the lighting composite that consumes `oColor`/`oPos`/`oNormal`, not in `terrainGl`, and the
-    likeliest shape is a blowout on flat sunlit ground seen at grazing incidence. Worth chasing when
-    the composite is next opened; it would read as a bug to anyone shooting downhill from a summit.
+    A hard-edged near-white band across that frame turned out to be **the Gornergrat observatory's
+    roof**, 16 m from the camera, and not a defect at all. Recorded because the identification came
+    from the colour and is a usable technique: the band measured exactly `srgb(224,224,226)`, which
+    is `prismGl`'s `BASE` of (244,244,246) times `ROOF_SHADE` 0.92 with haze negligible at that
+    range — an exact match, where the terrain shader's brightest possible output is about
+    (165,187,220) and stays blue-dominant. **One real trap surfaced on the way**: the viewfinder's
+    prism gate reads `compositionStore.showBuildings`, while the map's Layers tab writes
+    `settingsStore.showBuildings`. Toggling the settings one hides nothing in the viewfinder and
+    leaves `__scape.prism.buildings` unchanged, so it is easy to "eliminate" buildings as a cause
+    while they are still being drawn. That cost a wrong conclusion here; check the composition store.
 
 3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
    up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
