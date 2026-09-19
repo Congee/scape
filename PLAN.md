@@ -581,24 +581,24 @@ need no decision from anyone.
    boxes the constant as a double and costs 2× on the whole selection). And `planHeightBound` stays
    metrically unchanged when pinned to a 2 m base, but `buildPyramid`'s lookup then has to clamp to the
    pinned level and index via the covering ancestor — looser, never unsafe.
-    **The floor also costs the foreground, not just the subject** (2026-09-18). Aiming downward from a
-    summit — Gornergrat at 3109 m, eye 1.6 m up — a 200 mm frame at −17° is filled edge to edge by a
-    single untextured facet, because the sightline meets the ground about 5 m away and the mesh's
-    finest cell there is 4 m. At −30° it is 2.8 m away and 18 blocks cover the whole frame. That much
-    is geometry, not a defect: a 4 m floor cannot show anything at 3 m. But it means the floor's cost
-    is not only a soft distant subject, it is a blank near field on any downward shot, which a
-    frame-derived floor would fix from the same end.
+   **The floor also costs the foreground, not just the subject** (2026-09-18). Aiming downward from a
+   summit — Gornergrat at 3109 m, eye 1.6 m up — a 200 mm frame at −17° is filled edge to edge by a
+   single untextured facet, because the sightline meets the ground about 5 m away and the mesh's
+   finest cell there is 4 m. At −30° it is 2.8 m away and 18 blocks cover the whole frame. That much
+   is geometry, not a defect: a 4 m floor cannot show anything at 3 m. But it means the floor's cost
+   is not only a soft distant subject, it is a blank near field on any downward shot, which a
+   frame-derived floor would fix from the same end.
 
-    A hard-edged near-white band across that frame turned out to be **the Gornergrat observatory's
-    roof**, 16 m from the camera, and not a defect at all. Recorded because the identification came
-    from the colour and is a usable technique: the band measured exactly `srgb(224,224,226)`, which
-    is `prismGl`'s `BASE` of (244,244,246) times `ROOF_SHADE` 0.92 with haze negligible at that
-    range — an exact match, where the terrain shader's brightest possible output is about
-    (165,187,220) and stays blue-dominant. **One real trap surfaced on the way**: the viewfinder's
-    prism gate reads `compositionStore.showBuildings`, while the map's Layers tab writes
-    `settingsStore.showBuildings`. Toggling the settings one hides nothing in the viewfinder and
-    leaves `__scape.prism.buildings` unchanged, so it is easy to "eliminate" buildings as a cause
-    while they are still being drawn. That cost a wrong conclusion here; check the composition store.
+   A hard-edged near-white band across that frame turned out to be **the Gornergrat observatory's
+   roof**, 16 m from the camera, and not a defect at all. Recorded because the identification came
+   from the colour and is a usable technique: the band measured exactly `srgb(224,224,226)`, which
+   is `prismGl`'s `BASE` of (244,244,246) times `ROOF_SHADE` 0.92 with haze negligible at that
+   range — an exact match, where the terrain shader's brightest possible output is about
+   (165,187,220) and stays blue-dominant. **One real trap surfaced on the way**: the viewfinder's
+   prism gate reads `compositionStore.showBuildings`, while the map's Layers tab writes
+   `settingsStore.showBuildings`. Toggling the settings one hides nothing in the viewfinder and
+   leaves `__scape.prism.buildings` unchanged, so it is easy to "eliminate" buildings as a cause
+   while they are still being drawn. That cost a wrong conclusion here; check the composition store.
 
 3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
    up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
