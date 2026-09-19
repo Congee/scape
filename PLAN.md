@@ -1005,13 +1005,27 @@ need no decision from anyone.
     Two pre-existing defects surfaced while checking the step, both reproduced on master and neither
     caused by it:
 
-    - **Thin dark lines down steep faces at a 2 m cell** — one pixel wide, ruler-straight over hundreds
-      of pixels. Not a seam gap: 8× the skirt depth is AE 0, and rim normals are true central
-      differences over a one-cell halo. Not the block grid either, on spacing: the pair at 600 mm is
-      ~8.5 m apart where a block is 96 m and a z15 DEM tile ~850 m. Most likely the DEM's own couloirs,
-      but unconfirmed, and it is the first sighting of anything like the worst 3.72× seam overrun the
-      balance audit found on master. Only shows once a focal reaches the 2 m cell, which the step now
-      makes happen at 600 mm rather than 1200 mm.
+    - **Thin dark lines down steep faces at a 2 m cell** — **they are the terrain.** One pixel wide and
+      ruler-straight over hundreds of pixels at 600 mm, which is what made them look synthetic. Already
+      ruled out: a seam gap (8× the skirt depth is AE 0, and rim normals are true central differences
+      over a one-cell halo) and the block grid on spacing (the pair at 600 mm is ~8.5 m apart where a
+      block is 96 m and a z15 DEM tile ~850 m).
+
+      Settled two ways. In the source, over the Matterhorn's NE face: at the zoom a 2 m cell reads
+      (z15, 1.66 m posts) 1.3% of posts sit more than 2 m below the mean of their four neighbours,
+      while at z17 (0.415 m posts) there are **none at all** — because the same gullies are four posts
+      wide there and no longer register as a one-post groove. And the pyramid is not aliasing them into
+      existence: a z15 post against the 4×4 box average of its z17 children is **RMS 0.019 m**, against
+      1.012 m for a decimation of the same children, so the coarser levels are true averages and the
+      grooves survive the average because they are deeper than they are wide.
+
+      In the render, the pair's separation scales with focal — 40 px at 600 mm, 83 px at 1200 mm, a
+      ratio of 2.07 against the expected 2.00 — so they are fixed in the world, not in the raster,
+      which is the one thing a rendering artifact could not do. At 1200 mm they also stop being
+      one-pixel lines and resolve into irregular features with jagged tops and tapering ends. They are
+      narrow rock gullies about 1.5–2 m wide, correctly drawn, and only visible once the cell is fine
+      enough to resolve them, which the two-level step moved from 1200 mm to 600 mm. The speculative
+      link to the balance audit's worst 3.72× seam overrun is void.
     - **A viewfinder URL for a fresh camera can render an empty canvas** — reproduced deliberately and
       **closed by 22**. The symptom was a flat sky with a correct mesh behind it: right eye, mesh-window
       azimuth matching the aim, fresh profile, no missing tiles, no error, and nothing in frame but the
