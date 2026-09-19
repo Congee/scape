@@ -859,11 +859,26 @@ need no decision from anyone.
 
     Three reductions, in the order they are worth doing:
 
-    - **Cap the mesh's extent** where nothing can be served. Must be the union of what the frustum can
-      reach and the last cascade's far plane, fed back from `fitCascades` — *not* a distance constant
-      and *not* the cascade plane alone: at this site the furthest drawn block is 9.2 km only because
-      the subject is, and a frame containing a 40 km peak must still build it. Worth ~50 blocks and
-      the z7–z9 cold fetch. The only one that is visually free by construction.
+    - **Cap the mesh's extent** where nothing can be served — built, verified, and **held, not
+      shipped**. The cap is the union of what the frustum can reach and the last cascade's far plane,
+      fed back from `fitCascades`; it cannot be a distance constant or the cascade plane alone,
+      because at this site the furthest drawn block is 9.2 km only because the subject is, and a
+      frame containing a 40 km peak must still build it. It works: a 1200-case randomised A/B puts
+      the `descend` refactor at **875 cap-open cases / 0 mismatches**, so the restructuring is exact,
+      and 325 cap-finite cases drop 222 blocks. Two objections raised against it were both wrong. The
+      low-sun one — that the cap would silently drop distant casters — has the right premise
+      (`casterTris` falls by up to 44 928 at low sun; midday is bit-identical) and the wrong
+      conclusion: **AE 0 at 05:40, 06:00, 06:20 and 07:00**, every frame lit and shadow-textured. The
+      cone-drift one was real but fixable, and the fix found a second rounding: the window quantizes
+      focal onto a quarter-octave ladder while `cascadeSplits` uses the camera's own, worst case 6%
+      tighter, and the pitch is rounded onto a `meshElPadDeg` grid that pulls `|pitch|` toward level
+      by the full pad. Both are absorbed conservatively at zero cost. **It is nonetheless not worth
+      shipping**: warm build 887 → 885 ms, −24 blocks of 529, −3 DEM tiles of 54 — not a performance
+      change. What is left is an occasional budget re-spend (14 of 325 cases change reach, 5 change
+      cell size), bought with a new GL→terrain module edge and a failure mode that silently removes a
+      shadow, which is the app's core promise and is verified at one site only. Reverted and kept as
+      a patch; it should be revisited if the fine wedge is ever bounded to the subject (below), which
+      would make the outer field the dominant cost rather than a rounding error.
     - **Let `balance` take a two-level step** — landed in `ed2b167`. `skirtDepth` is derived from the
       step (`3·cellM·2^k`, which at k=1 reproduces the shipped `6·cellM`), so the slope the seams
       tolerate is unchanged at 6. Verified against master at the same site: at 900 mm both trees pick
@@ -924,23 +939,38 @@ need no decision from anyone.
       the two-level step. Mechanism NOT established: the composition store held a stale `azimuthDeg`
       15 / `elevationDeg` −70 from a previous pin, but `aimFor` overrides both when `aimAtTarget` is
       set, and the mesh key's azimuth proves the window followed the override — so the stale store
-      values are a symptom to chase, not a demonstrated cause. `ensureMeshWindow` takes both its
-      azimuth and its pitch from `sc.aim`, the effective aim, so the window cannot disagree with the
-      camera that way; the GL side is what is left unexamined. Separately and definitely real: the
+      values are a symptom to chase, not a demonstrated cause. **22 is very likely the mechanism**: the
+      renderer draws `t.meshKey === meshKeyFor(world, settings, meshWindow) ? … : []`, so the instant
+      the profile lands and the pitch moves off the fabricated 0 the built mesh stops matching the
+      window and *nothing* is drawn until the rebuild arrives — seconds, cold. That is an empty canvas
+      with a correct mesh behind it, an azimuth that matches because only the pitch was ever wrong,
+      and a target marker still projecting correctly. Not yet reproduced deliberately, and the 35
+      blocks reported drawn do not fit a `[]` sync, so the telemetry was probably sampled off-frame.
+      Separately and definitely real: the
       same URL and focal gave
       zoom 15 / 2 m / reach 100 km on one load and zoom 14 / 4 m / reach 23 km on another, so an
       unguarded capture script cannot be trusted (22 is the cause) — `shot4.sh` and `shot1f.sh` now
       print the aim beside the configuration.
 
-22. **Every cold `aimAtTarget` load builds the whole mesh twice** (2026-09-18). Established by reading
-    the path, not yet measured in the browser. `aimFor` returns `elevationDeg: targetAngleDeg ?? 0`,
+22. **Every cold `aimAtTarget` load aimed its mesh at the horizon** (2026-09-18) — fixed in
+    `25d8855`. Found by reading the path, then measured in the browser. `aimFor` returns `elevationDeg: targetAngleDeg ?? 0`,
     and `ViewfinderController.ts:212` supplies that angle as `fresh?.los.targetAngleDeg ?? null`,
     where `fresh` is non-null only once the sightline profile for the exact current key has resolved.
     So until then the aim's elevation is a fabricated 0. `ensureMeshWindow` takes its pitch from that
     same aim. The mesh sync is on a 250 ms trailing debounce; the profile is not debounced but awaits
     a whole tile set along the sightline at up to z14, which cold cannot come back inside 250 ms. The
-    result: a complete mesh is built and posted at pitch 0, the profile lands, the pitch snaps to the
-    true angle, and the entire mesh is built again.
+    result: a complete mesh is built and posted at pitch 0.
+
+    **The measurement was worse than that.** Two builds would at least have converged. At HEAD in a
+    detached worktree with cache and OPFS cleared, the cold load produced **exactly one mesh key, at
+    4511 ms, with `pitch=0`, and never corrected it in 30 s** — with `profileKey` set,
+    `targetAngle: 18.337`, `pin2GroundM: 4447.4` and `busy` false throughout. `ensureMeshWindow` was
+    never subscribed to the terrain store at all; only `schedule()` was. So the fabricated window
+    stayed committed until some unrelated store happened to bump it, and what a user sees on a cold
+    load is a mesh cut for a band of terrain the camera is not pointing at. The same load after the
+    fix: one build at 4560 ms with `pitch=18.290905764334017`, no second build, no latency cost. The
+    before shot is the Matterhorn as a smooth featureless clay pyramid; the after has vertical
+    fluting, shadowed notches and an articulated ridgeline, AE 94 542 over 7.3% of pixels.
 
     **The aim never needed the profile.** `analyzeSightline` computes `targetAngleDeg =
     elevationAngleDeg(total, targetM - eyeM)` from the endpoints alone — the 400-sample ground array
@@ -948,15 +978,34 @@ need no decision from anyone.
     = max(groundB,0) + targetAboveGroundM`. Those are the two pin elevations the terrain store already
     holds from the far cheaper `Elevation` request, and `ViewfinderController.ts:864` already computes
     exactly that shape as a fallback for another purpose. Deriving the aim from them instead makes the
-    first committed window the right one. The two angles differ only by the DEM zoom between the
-    elevation lookup and the profile's z14 sampling — order 1 m over 8.5 km, ~0.007°, far inside the
-    pitch quantum of at least 0.25°, so the corrected window should not itself provoke a rebuild.
+    first committed window the right one. The "~0.007°" bound claimed here before was wrong: the
+    profile samples at `demZoom(14)` ≈ 6.6 m posts while `Elevation` reads z17 at 0.41 m, so on a
+    summit the two can disagree by tens of metres and the angles *can* cross the 0.25° pitch quantum.
+    That costs at most one rebuild, in place of today's guaranteed wrong-band build.
 
-    This subsumes the "unguarded capture script" note in 21: a pitch-0 mesh is coarser and shallower,
+    **`finder.ts:59` already does this**, preferring the profile's angle and falling back to the
+    endpoint elevations. So this is not a fix to design but existing behaviour one call site is
+    missing, and the expression now exists three times — there and twice in the controller.
+
+    It probably accounts for both of 21's open defects, not just one: the empty canvas is the window
+    changing out from under a built mesh, which the renderer answers by drawing nothing. And it
+    subsumes the "unguarded capture script" note in 21: a pitch-0 mesh is coarser and shallower,
     and `zoom 14 / 4 m / reach 23 km` is what a capture taken before the rebuild sees. It also
-    explains why 21's prefetch measured −28% warm but nothing cold — cold is dominated by a duplicated
+    explains why 21's prefetch measured −28% warm but nothing cold — cold is dominated by the wrong
     build, not by serialized fetch, so it is worth more than all three of 21's reductions together and
-    should be measured before any of them is judged on cold numbers.
+    nothing else should be judged on cold numbers until it is in.
+
+    **The fix**, in `25d8855`: `targetAngleFor` in `@state/terrain` is the one resolver, preferring a
+    current profile and otherwise reading the two stored pin elevations, and `endpointHeightM` /
+    `endpointAngleDeg` in `@core/terrain/los` are shared by it and by `analyzeSightline` itself, so
+    the expression that existed three times now exists once. A `Scene.aimKnown` flag makes
+    `ensureMeshWindow` return rather than cut a window for a placeholder, and a narrow
+    `pinGroundM|pin2GroundM|profileKey` subscription bumps the controller when the ground lands.
+    `finder.ts` keeps its sea-level default by passing it in.
+
+    Still open, deliberately: `FramePanel.tsx:52` and `NightPanel.tsx:119` also feed `aimFor` from
+    `fresh?.los.targetAngleDeg ?? null`, so their elevation readouts still show 0 on a cold load.
+    Switching them needs their `useTerrain` selectors widened to the two ground heights.
 
 **Awaiting the user**
 
