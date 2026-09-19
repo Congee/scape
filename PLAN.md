@@ -466,11 +466,17 @@ quarter of the viewport.
 ## 9. Open work (2026-09-18)
 
 Numbered items below are a register, not a queue; most are landed and kept for the measurements in
-them. **14** was measured and closed unfixed, **15** is landed, **8** is a watch rather than a task,
-and **2**'s last step is a picture decision, so it joins **18–20** as blocked on the user. What is
-actually left is **21**, which came out of 2's reference render: most of the mesh serves nothing, on
-shipped master. Its second reduction is landed; the extent cap and the worker's serial fetch still
-need no decision from anyone.
+them. **14** was measured and closed unfixed, **8** is a watch rather than a task, and **22** is
+fixed, which also closed both of **21**'s open defects — the empty canvas was 22's own doing, and the
+thin dark lines turned out to be real rock gullies.
+
+**Nothing in this register is now waiting on work rather than on a decision.** What is left is four
+questions for the user, in rough order of how much they change: **2**'s last step (bound the fine
+region to the subject — a picture decision, with crops to look at), **18** (the cascade count, now
+reframed: N=4 or N=6, and a far bound that beats both for free), **19** (`maxApertureAt`'s
+interpolated interior) and **20** (whether hiding the Sun should hide its glow). **21**'s extent cap
+is held on the local branch `wip/mesh-extent-cap` and is worth revisiting under 18, which gives it a
+second and better reason to ship than the 2 ms of build time it was shelved over.
 
 **Precision**
 
@@ -1002,8 +1008,8 @@ need no decision from anyone.
     semaphore has no cancel, so there is no cheap path that does not reintroduce 14's refcounting. A
     superseded request therefore leaves a larger stale backlog — 14's measurement, at a bigger volume.
 
-    Two pre-existing defects surfaced while checking the step, both reproduced on master and neither
-    caused by it:
+    Two pre-existing defects surfaced while checking the step, both reproduced on master, neither
+    caused by it, and both now closed:
 
     - **Thin dark lines down steep faces at a 2 m cell** — **they are the terrain.** One pixel wide and
       ruler-straight over hundreds of pixels at 600 mm, which is what made them look synthetic. Already
