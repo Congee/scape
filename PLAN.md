@@ -587,9 +587,21 @@ need no decision from anyone.
     finest cell there is 4 m. At −30° it is 2.8 m away and 18 blocks cover the whole frame. That much
     is geometry, not a defect: a 4 m floor cannot show anything at 3 m. But it means the floor's cost
     is not only a soft distant subject, it is a blank near field on any downward shot, which a
-    frame-derived floor would fix from the same end. One artifact there is *not* explained: at −5.7°,
-    where the near facet meets the far valley wall, a hard-edged white band runs the full width of
-    the frame, unshaded and several pixels deep. Probably a skirt seen edge-on, unconfirmed.
+    frame-derived floor would fix from the same end.
+
+    **A separate artifact surfaced there and is not explained.** At −5.7° from the same camera, a
+    hard-edged near-white band runs the full width of the frame, about a tenth of its height, between
+    the near facet and the far valley wall. Four candidates are eliminated: it is not a seam gap (an
+    8× skirt is **AE 0**), not the building prisms (`showBuildings` off changes nothing), not the
+    shadow pass (`showShadow` and `showSunShadows` off change nothing), and it *is* terrain geometry
+    (`terrain` off replaces the whole frame with the flat fallback). Its colour is exactly
+    `srgb(224,224,226)`, constant across the band's whole width — and the terrain G-buffer shader
+    cannot produce that. `base` is a haze mix between `groundNearDay` [86,96,70] and `groundFarDay`
+    [150,170,200], scaled by at most `0.42 + 0.68·1`, so its brightest possible output is about
+    (165,187,220) and stays blue-dominant; the band is neutral and brighter. So the colour is made in
+    the lighting composite that consumes `oColor`/`oPos`/`oNormal`, not in `terrainGl`, and the
+    likeliest shape is a blowout on flat sunlit ground seen at grazing incidence. Worth chasing when
+    the composite is next opened; it would read as a bug to anyone shooting downhill from a summit.
 
 3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
    up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
