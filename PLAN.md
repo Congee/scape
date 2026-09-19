@@ -581,6 +581,16 @@ need no decision from anyone.
    boxes the constant as a double and costs 2× on the whole selection). And `planHeightBound` stays
    metrically unchanged when pinned to a 2 m base, but `buildPyramid`'s lookup then has to clamp to the
    pinned level and index via the covering ancestor — looser, never unsafe.
+    **The floor also costs the foreground, not just the subject** (2026-09-18). Aiming downward from a
+    summit — Gornergrat at 3109 m, eye 1.6 m up — a 200 mm frame at −17° is filled edge to edge by a
+    single untextured facet, because the sightline meets the ground about 5 m away and the mesh's
+    finest cell there is 4 m. At −30° it is 2.8 m away and 18 blocks cover the whole frame. That much
+    is geometry, not a defect: a 4 m floor cannot show anything at 3 m. But it means the floor's cost
+    is not only a soft distant subject, it is a blank near field on any downward shot, which a
+    frame-derived floor would fix from the same end. One artifact there is *not* explained: at −5.7°,
+    where the near facet meets the far valley wall, a hard-edged white band runs the full width of
+    the frame, unshaded and several pixels deep. Probably a skirt seen edge-on, unconfirmed.
+
 3. **Frame-elevation band in mesh selection** — landed. The wedge was azimuth-only, so a frame pitched
    up at a summit meshed the valley floor below it at full resolution. Blocks whose height bound cannot
    reach the frame's elevation band now fall back to `COARSE_TARGET_RAD` rather than being dropped, so
@@ -1006,6 +1016,15 @@ need no decision from anyone.
     Still open, deliberately: `FramePanel.tsx:52` and `NightPanel.tsx:119` also feed `aimFor` from
     `fresh?.los.targetAngleDeg ?? null`, so their elevation readouts still show 0 on a cold load.
     Switching them needs their `useTerrain` selectors widened to the two ground heights.
+
+    **Verified over a matrix**, not the single setting the fix was found at, by recording every
+    mesh-key transition from first paint rather than sampling the end state: 24/200/600/1200/2400 mm,
+    both orientations, midday / dawn / night, and three sites chosen for the sign of the answer —
+    Zermatt→Matterhorn at +18.3°, Hoboken→the Edge at −0.07°, and Gornergrat→Zermatt at −17.0°. In
+    all ten cases there is **exactly one committed window and its pitch is already right** (+18.25 to
+    +19.14 where the grid rounds it, 0 at the level site, −17.23 looking down). The profile landed at
+    200–640 ms, i.e. after the 250 ms mesh debounce in nine of the ten, so nine of them would have
+    committed pitch 0 before the fix.
 
 **Awaiting the user**
 
