@@ -915,27 +915,41 @@ need no decision from anyone.
     Raising the triangle cap is not on this list: at long focal it is already slack (2.18 M of 3 M at
     2400 mm), and where it binds, these reductions are the cheaper answer.
 
-    A fourth, orthogonal to all of them: **the worker fetches levels strictly in series** —
-    `await cache.loadAll(want)`, build, post, next level — so a cold pass pays the *sum* of every
-    level's fetch rather than the longest. Issuing the union of all levels' tiles up front, unawaited
-    and unretained, warms the cache without disturbing anything: each later level's per-level `retain`
-    + `loadAll` still runs before `buildLevel`, so a prefetched tile evicted in the meantime is
-    re-fetched rather than read as sea level. Measured against `a3b1d7b` in a detached worktree, real
-    network, median of 4–5 runs: **warm total −28% and tail −45%** (2223 → 1606 ms, 1264 → 690 ms),
-    with the remaining tail matching pure `buildLevel` — the serialized fetch is fully hidden. Warm is
-    the common case, since `DemCache` starts empty on every page load however hot the HTTP cache is.
+    A fourth, orthogonal to all of them: **the worker fetched levels strictly in series** —
+    `await cache.loadAll(want)`, build, post, next level — so a pass paid the *sum* of every level's
+    fetch rather than the longest. Landed in `20f197c`: the union of all levels' tiles is issued up
+    front, unawaited and unretained, which warms the cache without disturbing anything. Each level's
+    own `retain` + `loadAll` still runs before `buildLevel`, so a prefetched tile evicted in the
+    meantime is re-fetched rather than read as sea level, and FIFO order keeps the finest level first.
 
-    Two claims made here before measuring were wrong, and are corrected rather than deleted:
+    Measured on the fixed base `25d8855`, per-tile latency instrumented to 250 ms so the serialized
+    fetch is visible at all, medians of n=5–6 with the arms rotated:
 
-    - **"The first post cannot get slower" does not hold.** FIFO ordering is intact, but the prefetch
-      pulls ~38 extra tiles' *decode* onto the same worker thread as `buildLevel`. With 250 ms of
-      artificial per-tile latency the first post landed 313 ms later in 4/4 runs, and the total came
-      out ~3% worse — when fetch is throughput-bound rather than ordering-bound, the 12-wide semaphore
-      is already saturated and the prefetch buys nothing. Deferring the prefetch until after the first
-      level is posted should recover first paint while keeping levels 2..n overlapped; in flight.
-    - **The 16.7 s cold / ~10.8 s serialized figure is not reproducible at this site.** Upstream and OS
-      caches stay too hot even behind a fresh browser profile; cold came out −1.4%, inside noise. The
-      cold claim is unverified, not confirmed.
+    | arm | cold first | cold total | cold tail | warm first | warm total | warm tail |
+    |---|---|---|---|---|---|---|
+    | before | 2311 | 6146 | 3818 | 4253 | 5727 | 1469 |
+    | **eager (shipped)** | 2329 | **3246** | **844** | 4268 | **4995** | **733** |
+    | deferred | 2244 | 3380 | 1126 | 4254 | 5239 | 985 |
+
+    Cold total −47% and tail −78%; warm total −13% and tail −50%; first post unchanged to within
+    run-to-run spread. One eager cold run in six came out before-like (tail 3744 against the other
+    five at 818–857) and could not be reproduced deliberately. On the real network at this site all
+    three arms are inside noise — 54 tiles come back fast enough that there is no serialized fetch
+    left to hide — so the instrumented arm is the one that carries the mechanism.
+
+    **Both corrections recorded here earlier were themselves wrong, and item 22 was the reason.** The
+    +313 ms first post attributed to decode contention does not exist on the fixed base: it was
+    cross-request interference from 22's duplicate build, whose own prefetch backlog collided with the
+    real request's first level. So "the first post cannot get slower" holds after all, and the
+    "throughput-bound, so the prefetch cannot help cold" conclusion drawn from the same runs retires
+    with it. Deferring the prefetch until after the first post was built and measured to fix a
+    regression that had already gone; it is strictly worse in all four instrumented cells, and was
+    discarded. The 16.7 s cold figure quoted before any of this remains unreproducible at this site —
+    upstream and OS caches stay too hot behind a fresh browser profile — so it stays unverified.
+
+    What the bullet predicted and still stands: a superseded request drags its whole union along, with
+    no cancellation path in `DemCache`. Before 22 that cost was doubled cold, since the discarded
+    pitch-0 build prefetched its own union too. It is a single backlog again.
 
     Supersede cancellation was not added: `DemCache.load` hands back a shared inflight promise and the
     semaphore has no cancel, so there is no cheap path that does not reintroduce 14's refcounting. A
