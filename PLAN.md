@@ -840,7 +840,54 @@ need no decision from anyone.
     through `get`. And every one of the six `loadAll` sites in the worker — `groundAt`, `elevation`,
     `profile`, `horizon`, `view` and the mesh's two — now wraps its await in `retain`/`release`, not
     just the mesh.
-18. Midtown cascade allocation (N=5 or 6, ~1.3 ms per cascade) — **needs a user decision**.
+18. **Midtown cascade allocation — the question was wrong, and the answer is probably not more
+    cascades** (2026-09-18). `CASCADE_COUNT` is 4. `fitCascades` is pure, so N was swept offline in a
+    worktree against the Midtown scene the tests already use (eye 120 m up, terrain 60–120 m below,
+    towers to 300 m above, sun 30°/40°, mesh half 20 km), reading off the worst shadow texel any
+    receiver inside 5 km can get:
+
+    | worst texel ≤5 km | 24 mm | 50 mm | 200 mm |
+    |---|---|---|---|
+    | N=4 (today) | 18.22 m | 8.72 m | 6.73 m |
+    | N=5 | 18.22 m | 8.72 m | 1.76 m |
+    | N=6 | **4.76 m** | **2.95 m** | 2.00 m |
+    | N=7 | 5.66 m | 3.51 m | 2.28 m |
+
+    **N is not monotone, and N=5 is dominated.** At 24 and 50 mm it changes the worst case by nothing
+    at all, and at some distances it is worse than N=4 (50 mm at 1.5 km: 1.76 m → 2.38 m), because the
+    practical split moves every boundary and a receiver can land at the far end of its new slab. N=7
+    is worse than N=6 at every focal. So the real choice is **4 or 6**, at about 2.6 ms more per
+    shadow re-render and 67 → 101 MB of depth array (2048² `DEPTH_COMPONENT32F` per layer). Against
+    13's measured p50 8.2 ms while scrubbing the clock — which re-renders every cascade each frame —
+    2.6 ms puts a scrub over the 8.33 ms vsync. Sitting still it costs nothing.
+
+    What N=4 actually looks like: at 24 mm an 18.22 m texel on a receiver 3 km out subtends 0.35°,
+    which on a 1100 px frame is **7 px of stair-stepping** along a shadow edge; at 50 mm and 2 km it
+    is about 2 px. So there is something to fix at wide angle, and almost nothing at 200 mm once the
+    far field is handled.
+
+    **The far bound is the bigger lever and it is free.** The outermost cascade is identical at every
+    N — `lensFar` clamps to `scene.halfM`, so the last slab always runs to the mesh edge and more
+    cascades only subdivide the interior. Sweeping `scene.halfM` instead, at N=4:
+
+    | worst texel ≤5 km | 24 mm | 50 mm | 200 mm |
+    |---|---|---|---|
+    | half 20 km (today) | 18.22 m | 8.72 m | 6.73 m |
+    | half 10 km | 9.11 m | 4.36 m | 3.22 m |
+    | half 6 km | 5.42 m | 2.59 m | 1.92 m |
+    | half 3 km | 2.71 m | 1.35 m | 0.92 m |
+
+    A 6 km bound beats N=6 at 50 and 200 mm and ties it at 24 mm, while *removing* render cost rather
+    than adding it. This is a sensitivity study, not a measurement of the app: it says what the
+    cascades would do given a tighter mesh, not that the mesh can be tightened. **21's held extent cap
+    is exactly the mechanism** — and this is a second, better reason to revisit it than the 2 ms of
+    build time it was shelved over. The catch is that the cap closes at long focal and stays open at
+    24 mm near level, where the frustum genuinely reaches the horizon; that is the one case the extra
+    cascades would still be for. Shrinking the bound also drops distant terrain as a caster, which is
+    nothing in Midtown and not nothing in the Alps — which is why the cap computes it per frame.
+
+    **Needs a user decision**, now framed as: leave it at 4 and take the wide-angle stair-stepping;
+    go to 6 for ~2.6 ms and 34 MB; or ship the extent cap for the long end and decide 24 mm after.
 21. **Most of the mesh serves nothing, and that is true on shipped master** (2026-09-18). Every
     selected block was classified against the renderer's own `sphereVisible` and `boxCastsInto`
     calls — not a reimplementation — and cross-checked: the audit's drawn totals match
