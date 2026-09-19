@@ -17,7 +17,7 @@ import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { useDayData } from '@state/dayData';
 import { sensorById, useGear } from '@state/gear';
 import { settingsStore, useSettings } from '@state/settings';
-import { horizonKeyFor, profileKeyFor, useTerrain } from '@state/terrain';
+import { horizonKeyFor, targetAngleFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
 
@@ -105,6 +105,8 @@ export function NightPanel() {
   const profileKey = useTerrain((t) => t.profileKey);
   const horizon = useTerrain((t) => t.horizon);
   const horizonKey = useTerrain((t) => t.horizonKey);
+  const pinGroundM = useTerrain((t) => t.pinGroundM);
+  const pin2GroundM = useTerrain((t) => t.pin2GroundM);
   const [pxText, setPxText] = useState('');
 
   const obs = makeObserver(pin, pinHeightM);
@@ -115,8 +117,8 @@ export function NightPanel() {
   const sensor = sensorById(c.sensorId, cameras);
   const pixels = sensor.pixelsWide ?? (Number(pxText) > 0 ? Number(pxText) : null);
   const pitch = pixels ? pixelPitchUm(sensor.widthMm, pixels) : null;
-  const fresh = profile && profileKey === profileKeyFor(worldStore.getState(), settingsStore.getState()) ? profile : null;
-  const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
+  const targetAngleDeg = targetAngleFor(worldStore.getState(), settingsStore.getState(), { profile, profileKey, pinGroundM, pin2GroundM });
+  const aim = aimFor(c, { pin, pin2 }, targetAngleDeg);
   const dec = aimDeclination(time, obs, aim.azimuthDeg, aim.elevationDeg);
   const opt = effectiveOptics(c);
   const r500 = ruleOfN(opt.focalMm, cropFactor(sensor));

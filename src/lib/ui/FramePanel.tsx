@@ -9,7 +9,7 @@ import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, useGear, zoomPatch } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
 import { settingsStore, useSettings } from '@state/settings';
-import { profileKeyFor, useTerrain } from '@state/terrain';
+import { targetAngleFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 import { GearSearch } from './GearSearch';
 
@@ -34,11 +34,13 @@ export function FramePanel() {
   const cocRule = useSettings((s) => s.cocRule);
   const profile = useTerrain((s) => s.profile);
   const profileKey = useTerrain((s) => s.profileKey);
+  const pinGroundM = useTerrain((s) => s.pinGroundM);
+  const pin2GroundM = useTerrain((s) => s.pin2GroundM);
   const [kitName, setKitName] = useState<string | null>(null);
   const [planName, setPlanName] = useState('');
   const [saved, setSaved] = useState('');
 
-  const fresh = profile && profileKey === profileKeyFor(worldStore.getState(), settingsStore.getState()) ? profile : null;
+  const targetAngleDeg = targetAngleFor(worldStore.getState(), settingsStore.getState(), { profile, profileKey, pinGroundM, pin2GroundM });
   const sensor = sensorById(c.sensorId, cameras);
   const lens = lensById(c.lensId, lenses);
   const prime = lens !== null && lens.minMm === lens.maxMm;
@@ -49,7 +51,7 @@ export function FramePanel() {
   const tcf = tcFactor(c.teleconverters);
   const tc = c.teleconverters.length > 0;
   const fov = frameFov(sensor, opt.focalMm, c.orientation);
-  const aim = aimFor(c, { pin, pin2 }, fresh?.los.targetAngleDeg ?? null);
+  const aim = aimFor(c, { pin, pin2 }, targetAngleDeg);
   const targetM = pin2 ? distanceM(pin, pin2) : null;
   const focusM = c.focusDistM ?? targetM;
   const pixels = sensorPixels(sensor);
@@ -256,7 +258,8 @@ export function FramePanel() {
         <span className="k">Elevation</span>
         <b className="v">
           {aim.locked ? (
-            signed(aim.elevationDeg)
+            // The bearing needs no terrain, but the angle does: say so rather than show the placeholder 0.
+            targetAngleDeg == null ? '…' : signed(aim.elevationDeg)
           ) : (
             <>
               <input type="number" min={-89} max={89} step={0.5} value={Number(c.elevationDeg.toFixed(1))} onChange={(e) => compositionStore.getState().aim(c.azimuthDeg, Number(e.target.value) || 0)} aria-label="Elevation, degrees" />
