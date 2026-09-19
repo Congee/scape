@@ -24,6 +24,15 @@ export interface LosResult {
   visible: Uint8Array;
 }
 
+/** Height of an endpoint above the geoid: its DEM ground, never taken below sea level, plus its own height. */
+export const endpointHeightM = (groundM: number, aboveGroundM: number): number => Math.max(groundM, 0) + aboveGroundM;
+
+/**
+ * The elevation angle `analyzeSightline` reports, from the two endpoints alone. The ground samples
+ * between them bear only on occlusion, so nothing that needs the aim has to wait for a profile.
+ */
+export const endpointAngleDeg = (distM: number, eyeM: number, targetM: number): number => elevationAngleDeg(distM, targetM - eyeM);
+
 /** Height of a sight line leaving the eye at `angleDeg`, measured above the geoid at `distM`. */
 export function sightlineHeightM(distM: number, eyeM: number, angleDeg: number): number {
   return eyeM + Math.tan(angleDeg * D2R) * distM + curvatureDropM(distM);
@@ -43,7 +52,7 @@ export function flatHorizonDeg(heightM: number): number {
 export function analyzeSightline(distM: Float32Array, groundM: Float32Array, eyeM: number, targetM: number, edgeSkipM = 0): LosResult {
   const n = distM.length;
   const total = distM[n - 1];
-  const targetAngleDeg = elevationAngleDeg(total, targetM - eyeM);
+  const targetAngleDeg = endpointAngleDeg(total, eyeM, targetM);
   const visible = new Uint8Array(n);
   visible[0] = 1;
   let running = -90;

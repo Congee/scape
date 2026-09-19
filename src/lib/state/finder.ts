@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { SkyBody } from '@core/astro/bodies';
 import { SkyFilter, type FinderHit, type FinderQuery, type FinderSettings } from '@core/astro/finder';
 import { height, Units } from '@core/format';
-import { bearingDeg, distanceM, elevationAngleDeg, normalizeBearing, type LngLat } from '@core/geo/geodesy';
+import { bearingDeg, normalizeBearing, type LngLat } from '@core/geo/geodesy';
 import { effectiveOptics, frameFov } from '@core/optics/fov';
 import { formatDate, formatTime } from '@core/time/format';
 import { addLocalDays, dayBounds, localMidnight } from '@core/time/localDay';
@@ -11,7 +11,7 @@ import { FinderResponseKind, type FinderRequest, type FinderResponse } from '@wo
 import { aimFor, compositionStore } from './composition';
 import { gearStore, sensorById } from './gear';
 import { settingsStore } from './settings';
-import { EYE_HEIGHT_M, horizonKeyFor, profileKeyFor, terrainStore } from './terrain';
+import { EYE_HEIGHT_M, horizonKeyFor, targetAngleFor, terrainStore } from './terrain';
 import { worldStore } from './world';
 
 export interface FinderState {
@@ -55,17 +55,8 @@ export const DEFAULT_FINDER_SETTINGS: FinderSettings = {
 
 const todayIso = () => dayBounds(new Date(), worldStore.getState().tz).isoDate;
 
-/** Sightline elevation angle to the target, from the terrain profile when it is current. */
-function targetAngleDeg(): number {
-  const w = worldStore.getState();
-  if (!w.pin2) return 0;
-  const t = terrainStore.getState();
-  const s = settingsStore.getState();
-  if (t.profile && t.profileKey === profileKeyFor(w, s)) return t.profile.los.targetAngleDeg;
-  const eyeM = Math.max(t.pinGroundM ?? 0, 0) + w.pinHeightM + EYE_HEIGHT_M;
-  const topM = Math.max(t.pin2GroundM ?? 0, 0) + w.pin2HeightM;
-  return elevationAngleDeg(distanceM(w.pin, w.pin2), topM - eyeM);
-}
+/** Sightline elevation angle to the target; ground the DEM has not answered for yet counts as sea level. */
+const targetAngleDeg = (): number => targetAngleFor(worldStore.getState(), settingsStore.getState(), terrainStore.getState(), 0) ?? 0;
 
 /** The settings resolved against the world's time zone. */
 export function finderQuery(f: FinderSettings, tz: string): FinderQuery {

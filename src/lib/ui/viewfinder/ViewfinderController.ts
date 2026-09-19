@@ -27,7 +27,7 @@ import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { markersStore } from '@state/markers';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
-import { EYE_HEIGHT_M, meshKeyFor, profileKeyFor, terrainStore } from '@state/terrain';
+import { EYE_HEIGHT_M, meshKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { CATEGORY_COLORS } from '../map/overlays';
@@ -67,6 +67,8 @@ interface Scene {
   cam: Camera;
   basis: CameraBasis;
   aim: Aim;
+  /** False while a locked aim has no target elevation yet, so its 0 is a placeholder. */
+  aimKnown: boolean;
   frame: Frame;
   hfov: number;
   vfov: number;
@@ -153,6 +155,8 @@ export class ViewfinderController {
       gearStore.subscribe(bump),
       settingsStore.subscribe(bump),
       terrainStore.subscribe(() => this.schedule()),
+      // The aim elevation comes from the terrain, so new ground or a new profile can move the window.
+      terrainStore.subscribe((st) => `${st.pinGroundM}|${st.pin2GroundM}|${st.profileKey}`, bump),
       dayDataStore.subscribe(() => this.schedule()),
       skyStore.subscribe(() => this.schedule()),
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
@@ -208,8 +212,8 @@ export class ViewfinderController {
     const fm = frameMm(sensor, c.orientation);
     const opt = effectiveOptics(c);
     const fov = frameFov(sensor, opt.focalMm, c.orientation);
-    const fresh = t.profile && t.profileKey === profileKeyFor(w, s) ? t.profile : null;
-    const aim = aimFor(c, w, fresh?.los.targetAngleDeg ?? null);
+    const targetAngleDeg = targetAngleFor(w, s, t);
+    const aim = aimFor(c, w, targetAngleDeg);
     const cam: Camera = { azimuthDeg: aim.azimuthDeg, elevationDeg: aim.elevationDeg, focalMm: opt.focalMm, frameWmm: fm.w, frameHmm: fm.h };
     const eyeAboveGroundM = w.pinHeightM + EYE_HEIGHT_M;
     // Only a sweep made for this camera position may be drawn; a stale one from elsewhere would lie.
@@ -230,7 +234,7 @@ export class ViewfinderController {
       if (profile) for (let i = 0; i < profile.nAz; i++) max = Math.max(max, profile.skylineDeg[i]);
       this.skylineMax = { view: profile, max };
     }
-    return { cam, basis: cameraBasis(cam), aim, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
+    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
   }
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
@@ -273,6 +277,8 @@ export class ViewfinderController {
    * last mesh was built for changes nothing and no rebuild is asked for.
    */
   private ensureMeshWindow(sc: Scene, rangeM: number) {
+    // Cutting the mesh for a placeholder pitch would build the whole thing again once the real one lands.
+    if (!sc.aimKnown) return;
     const focalMm = 2 ** (Math.round(Math.log2(sc.cam.focalMm) * 4) / 4);
     const hfovDeg = fovDeg(sc.cam.frameWmm, focalMm);
     const pxH = Math.max(100, sc.frame.h * this.dpr);
@@ -860,8 +866,8 @@ export class ViewfinderController {
     const fresh = t.profile && t.profileKey === profileKeyFor(w, s) ? t.profile : null;
     const az = bearingDeg(w.pin, w.pin2);
     const d = distanceM(w.pin, w.pin2);
-    const ground2 = t.pin2GroundM;
-    const alt = fresh ? fresh.los.targetAngleDeg : elevationAngleDeg(d, Math.max(ground2 ?? 0, 0) + w.pin2HeightM - sc.eyeM);
+    const alt = targetAngleFor(w, s, t);
+    if (alt == null) return;
     const p = this.toPx(sc, az, alt);
     if (!this.inFrame(sc, p, 30)) return;
     const { ctx } = this;

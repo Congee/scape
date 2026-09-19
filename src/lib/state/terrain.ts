@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import type { LngLat } from '@core/geo/geodesy';
+import { distanceM, type LngLat } from '@core/geo/geodesy';
+import { endpointAngleDeg, endpointHeightM } from '@core/terrain/los';
 import { TerrainKind, type HorizonResult, type MeshResult, type ProfileResult, type TerrainRequest, type TerrainResponse, type ViewResult } from '@workers/terrain.protocol';
 import { markersStore } from './markers';
 import { settingsStore, type Settings } from './settings';
@@ -75,6 +76,23 @@ export function profileKeyFor(w: W, s: S): string {
 export function elevationKeyFor(w: W, s: S): string {
   if (!s.terrain) return '';
   return `${k5(w.pin)}|${w.pin2 ? k5(w.pin2) : '-'}`;
+}
+
+/**
+ * Elevation angle from the eye to the target: the profile's when it is current, otherwise the very
+ * same geometry over the two endpoint elevations, which land far sooner. Null while either endpoint
+ * is still unknown, unless `assumeGroundM` stands in for it — a fabricated aim would cut the terrain
+ * mesh for the wrong band, but a caller that only needs a number may ask for sea level instead.
+ */
+export function targetAngleFor(w: W, s: S, t: Pick<TerrainState, 'profile' | 'profileKey' | 'pinGroundM' | 'pin2GroundM'>, assumeGroundM: number | null = null): number | null {
+  if (!w.pin2) return null;
+  if (t.profile && t.profileKey === profileKeyFor(w, s)) return t.profile.los.targetAngleDeg;
+  // With terrain off there is no DEM to wait for; a NaN ground is a gap the endpoints read as sea level.
+  const ground = (m: number | null) => (!s.terrain ? 0 : m == null ? assumeGroundM : Number.isNaN(m) ? 0 : m);
+  const groundA = ground(t.pinGroundM);
+  const groundB = ground(t.pin2GroundM);
+  if (groundA == null || groundB == null) return null;
+  return endpointAngleDeg(distanceM(w.pin, w.pin2), endpointHeightM(groundA, w.pinHeightM + EYE_HEIGHT_M), endpointHeightM(groundB, w.pin2HeightM));
 }
 
 export function viewKeyFor(w: W, s: S, win: ViewWindow | null): string {
