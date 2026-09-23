@@ -400,7 +400,7 @@ export function selectBlocks(opts: SelectOptions): Selection {
     leaves = finer;
   }
   let fineCap = 0;
-  if (opts.view && fits(leaves) && minLevel > dataLevel && minLevel === casterLevel) {
+  if (opts.view && detail && fits(leaves) && minLevel > dataLevel && minLevel === casterLevel) {
     // Past the caster cell the frame only spends what the tight bound and the frame-only ring saved, so it is never slower.
     const plain = descend(rootLevel, minLevel, minLevel, classifier(opts, coarse), targetRad, reachM);
     balance(plain, rootLevel, role, true);

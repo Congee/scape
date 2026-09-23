@@ -11,8 +11,8 @@ import { demCacheTiles, demZoom, DemCache, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE }
 import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-/** Detail-bound zooms, in 256 px terms: z14 posts are ~7 m, z12 ~27 m at mid-latitudes. */
-const DETAIL_ZOOMS = [demZoom(12), demZoom(14)] as const;
+/** Detail-bound zooms, in 256 px terms: z14 posts are ~7 m, z13 ~14 m at mid-latitudes. */
+const DETAIL_ZOOMS = [demZoom(13), demZoom(14)] as const;
 const cache = new DemCache(demCacheTiles(320));
 /** Newest request id per kind; older ones stop before the expensive step. */
 const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
