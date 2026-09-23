@@ -470,12 +470,11 @@ them. **14** and **18** were measured and closed unfixed, **8** is a watch rathe
 **22** is fixed, which also closed both of **21**'s open defects — the empty canvas was 22's own
 doing, and the thin dark lines turned out to be real rock gullies.
 
-**Nothing in this register is waiting on work rather than on a decision.** What is left is three
-questions for the user: **2**'s last step (bound the fine region to the subject — a picture decision,
-with crops to look at), **19** (`maxApertureAt`'s interpolated interior) and **20** (whether hiding
-the Sun should hide its glow). **21**'s extent cap is held on the local branch `wip/mesh-extent-cap`;
-18 was expected to give it a second reason to ship and instead showed it does not bind at Midtown at
-all, so its case is still 21's own.
+**Nothing in this register is waiting on a decision.** **19** and **20** were answered on
+2026-09-23 and are closed below. **2**'s last step is no longer parked: the fine region is being
+bounded to what the frame draws on `wip/fine-region`, decided in favour of the native surface
+because precision is the product. **21**'s extent cap stays held on `wip/mesh-extent-cap`; 18 showed
+it does not bind at Midtown, so its case is still 21's own.
 
 **Precision**
 
@@ -1142,7 +1141,9 @@ all, so its case is still 21's own.
     200–640 ms, i.e. after the 250 ms mesh debounce in nine of the ten, so nine of them would have
     committed pitch 0 before the fix.
 
-**Awaiting the user**
+**Answered by the user**
 
-19. `maxApertureAt`'s interpolated interior: a real constraint, or a hedged display only?
-20. Hiding the Sun — should its glow halo go with it? (Today yes, same `uSun.w > 0.0` branch.)
+19. **Variable zoom apertures — removed** (2026-09-23, `c8dbd97`). The user's call: every zoom
+    steps differently and there is no per-focal database, so a lens's `maxAperture` is its only limit
+    at every focal and the photographer stops down themselves. Gear persist v3 strips the stored field.
+20. **Hiding the Sun hides its glow too** — kept as shipped (2026-09-23), same `uSun.w > 0.0` branch.
