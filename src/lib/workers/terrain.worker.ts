@@ -13,6 +13,8 @@ import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshReque
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** Detail-bound zooms, in 256 px terms: z14 posts are ~7 m, z13 ~14 m at mid-latitudes. */
 const DETAIL_ZOOMS = [demZoom(13), demZoom(14)] as const;
+/** Narrower than this the detail bound usually pays, so its tiles load alongside the coarse ones; wider waits to be asked. */
+const DETAIL_PREFETCH_HFOV_DEG = 6;
 const cache = new DemCache(demCacheTiles(320));
 /** Newest request id per kind; older ones stop before the expensive step. */
 const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
@@ -154,10 +156,15 @@ async function mesh(req: MeshRequest): Promise<null> {
   const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
   const rootLevel = levelsForRange(req.rangeM) - 1;
   const plan = planHeightBound(req.pin, rootLevel);
+  const planDetail = () => (req.view ? planDetailBound(req.pin, req.view, req.rangeM, DETAIL_ZOOMS[0], DETAIL_ZOOMS[1], TERRAIN_TILE_SIZE) : null);
+  const early = req.view && req.view.hfovDeg < DETAIL_PREFETCH_HFOV_DEG ? planDetail() : null;
   const releasePlan = cache.retain(plan.tiles);
   let sel: Selection;
   try {
-    await cache.loadAll(plan.tiles);
+    const coarse = cache.loadAll(plan.tiles);
+    // Queued behind the coarse tiles, and unretained: the selection retains them only if it wants them.
+    if (early) void cache.loadAll(early.tiles).catch(() => {});
+    await coarse;
     if (latest.Mesh !== req.id) return null;
     const opts = {
       rangeM: req.rangeM,
@@ -168,7 +175,7 @@ async function mesh(req: MeshRequest): Promise<null> {
     };
     sel = selectBlocks(opts);
     // The detail tiles cost a load and their mips, so only where even the tightest bound could buy a finer frame.
-    const detail = sel.detailMayPay && req.view ? planDetailBound(req.pin, req.view, req.rangeM, DETAIL_ZOOMS[0], DETAIL_ZOOMS[1], TERRAIN_TILE_SIZE) : null;
+    const detail = sel.detailMayPay ? (early ?? planDetail()) : null;
     if (detail) {
       const releaseDetail = cache.retain(detail.tiles);
       try {
