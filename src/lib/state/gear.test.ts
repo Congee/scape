@@ -40,6 +40,13 @@ describe('fitToLens', () => {
     expect(fitToLens(zoom, 200, 11).fNumber).toBe(11);
   });
 
+  it('raises the aperture past the short end of a variable zoom', () => {
+    const long: LensSpec = { ...zoom, name: 'Sony FE 200-600mm', minMm: 200, maxMm: 600, maxAperture: 5.6, maxApertureLong: 6.3 };
+    expect(fitToLens(long, 400, 5.6).fNumber).toBe(6.3);
+    expect(fitToLens(long, 400, 8).fNumber).toBe(8);
+    expect(fitToLens(long, 200, 5.6).fNumber).toBe(5.6);
+  });
+
   it('clamps the base focal, leaving the teleconverter free to go past the lens', () => {
     const base = fitToLens(tele, 1200, 4);
     expect(base).toEqual({ focalMm: 600, fNumber: 4 });
@@ -113,7 +120,19 @@ describe('migrateGear', () => {
     expect(migrateGear({ lenses: [saved] }, 1).lenses[0]).toEqual({ ...saved, maxApertureLong: 6.3 });
   });
 
-  it('does not re-union the presets of a v1 profile it is only taking to v2', () => {
+  it('re-derives the long-end aperture a v3 profile stripped', () => {
+    const saved: LensSpec = { id: 'cat:Sony FE 200-600mm F5.6-6.3 G OSS (E)', name: 'Sony FE 200-600mm F5.6-6.3 G OSS', minMm: 200, maxMm: 600, maxAperture: 5.6, mount: 'E' };
+    const g = migrateGear({ lenses: [saved, prime], focalPresets: [50] }, 3);
+    expect(g.lenses).toEqual([{ ...saved, maxApertureLong: 6.3 }, prime]);
+    expect(g.focalPresets).toEqual([50]);
+  });
+
+  it('keeps the long-end aperture a v2 profile stored', () => {
+    const saved: LensSpec = { id: 'custom:1', name: 'My 200-600', minMm: 200, maxMm: 600, maxAperture: 5.6, maxApertureLong: 6.3, mount: 'E' };
+    expect(migrateGear({ lenses: [saved] }, 2).lenses).toEqual([saved]);
+  });
+
+  it('does not re-union the presets of a v1 profile', () => {
     expect(migrateGear({ focalPresets: [50, 100], lenses: [] }, 1).focalPresets).toEqual([50, 100]);
   });
 
@@ -124,7 +143,7 @@ describe('migrateGear', () => {
     expect(g.focalPresets).toEqual([12, ...DEFAULT_FOCALS]);
   });
 
-  it('leaves a constant-aperture lens and a v2 profile untouched', () => {
+  it('leaves a constant-aperture lens and a current profile untouched', () => {
     expect(migrateGear({ lenses: [prime] }, 1).lenses).toEqual([prime]);
     const ranged: LensSpec = { ...zoom, name: 'Sony FE 100-400mm F4.5-5.6 GM OSS' };
     expect(migrateGear({ lenses: [ranged] }, GEAR_VERSION).lenses).toEqual([ranged]);

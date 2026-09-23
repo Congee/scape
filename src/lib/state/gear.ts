@@ -38,13 +38,13 @@ export interface GearState {
 /** The slice of {@link GearState} written to storage. */
 type PersistedGear = Pick<GearState, 'cameras' | 'lenses' | 'focalPresets' | 'kits'>;
 
-export const GEAR_VERSION = 2;
+export const GEAR_VERSION = 4;
 
 const sortedFocals = (list: number[]): number[] => [...new Set(list.filter((f) => f > 0))].toSorted((a, b) => a - b);
 
-/** Re-derives the long-end aperture from the model name a saved lens already carries. */
+/** Re-derives the long-end aperture from the model name a saved lens already carries, keeping a stored one. */
 function withLongAperture(lens: LensSpec): LensSpec {
-  if (!lens || typeof lens.name !== 'string' || !(lens.maxAperture > 0)) return lens;
+  if (!lens || typeof lens.name !== 'string' || !(lens.maxAperture > 0) || lens.maxApertureLong != null) return lens;
   const long = longApertureOf(lens.name);
   return long && long > lens.maxAperture ? { ...lens, maxApertureLong: long } : lens;
 }
@@ -55,8 +55,8 @@ function withLongAperture(lens: LensSpec): LensSpec {
  * told apart from "never existed": the union re-adds deleted defaults, but the alternatives would either
  * drop the user's own presets or hide every newly shipped one.
  *
- * v1 -> v2: fills in `maxApertureLong` on lenses saved before variable apertures existed. The two steps
- * are gated separately so reaching v2 does not re-run the preset union over a v1 profile.
+ * v1..v3 -> v4: fills in `maxApertureLong` on lenses saved without it (v3 had stripped it). The two steps
+ * are gated separately so a v1+ profile does not re-run the preset union.
  */
 export function migrateGear(persisted: unknown, version: number): PersistedGear {
   const s = (persisted ?? {}) as Partial<PersistedGear>;
@@ -64,7 +64,7 @@ export function migrateGear(persisted: unknown, version: number): PersistedGear 
   const lenses = Array.isArray(s.lenses) ? s.lenses : [];
   return {
     cameras: s.cameras ?? [],
-    lenses: version >= 2 ? lenses : lenses.map(withLongAperture),
+    lenses: version >= 4 ? lenses : lenses.map(withLongAperture),
     kits: s.kits ?? [],
     focalPresets: version >= 1 ? sortedFocals(stored) : sortedFocals([...stored, ...DEFAULT_FOCALS])
   };

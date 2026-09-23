@@ -183,17 +183,22 @@ describe('lens limits', () => {
     expect(clampFocalMm(2400, null, Teleconverter.X20)).toBe(1200);
   });
 
-  it('runs the maximum aperture from end to end of a zoom', () => {
+  it('allows the short-end aperture only at the short end', () => {
     expect(maxApertureAt(zoom, 200)).toBe(5.6);
-    expect(maxApertureAt(zoom, 600)).toBe(6.3);
-    expect(maxApertureAt(zoom, 400)).toBe(6);
+    for (const f of [200.04, 250, 400, 600, 5000]) expect(maxApertureAt(zoom, f)).toBe(6.3);
+    expect(maxApertureAt(zoom, 50)).toBe(5.6);
   });
 
-  it('holds at the endpoints outside the range and stays flat without a long end', () => {
-    expect(maxApertureAt(zoom, 50)).toBe(5.6);
-    expect(maxApertureAt(zoom, 5000)).toBe(6.3);
+  it('stays flat on a prime and on a zoom without a long end', () => {
+    const prime: LensSpec = { id: 'p', name: 'FE 600mm', minMm: 600, maxMm: 600, maxAperture: 4, mount: 'E' };
+    expect(maxApertureAt(prime, 600)).toBe(4);
     expect(maxApertureAt(flat, 70)).toBe(2.8);
+    expect(maxApertureAt(flat, 135)).toBe(2.8);
     expect(maxApertureAt(flat, 200)).toBe(2.8);
+  });
+
+  it('keeps the short end at a fractional minimum rounded to a tenth', () => {
+    expect(maxApertureAt({ ...zoom, minMm: 18.46 }, 18.5)).toBe(5.6);
   });
 
   it('offers only the stops reachable at that focal length', () => {

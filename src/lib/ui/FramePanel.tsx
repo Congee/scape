@@ -46,8 +46,6 @@ export function FramePanel() {
   const prime = lens !== null && lens.minMm === lens.maxMm;
   const isBody = isCameraBody(sensor.id);
   const opt = effectiveOptics(c);
-  // Only a zoom's two ends are quoted; the widest aperture between them is interpolated, so say so.
-  const apQuoted = lens == null || c.focalMm <= lens.minMm || c.focalMm >= lens.maxMm;
   const tcf = tcFactor(c.teleconverters);
   const tc = c.teleconverters.length > 0;
   const fov = frameFov(sensor, opt.focalMm, c.orientation);
@@ -224,8 +222,8 @@ export function FramePanel() {
             ))}
           </select>
           {lens?.maxApertureLong != null && (
-            <span className="muted" title="Only the two ends are the maker's figures. Between them this is interpolated: a real zoom holds its wider end for part of the range and then steps.">
-              · f/{lens.maxAperture}–{lens.maxApertureLong} zoom, {apQuoted ? '' : 'about '}f/{maxApertureAt(lens, c.focalMm)} widest at {c.focalMm} mm
+            <span className="muted">
+              · f/{lens.maxAperture}–{lens.maxApertureLong} zoom, f/{maxApertureAt(lens, c.focalMm)} widest at {c.focalMm} mm
             </span>
           )}
           {tc && <span className="muted">· f/{opt.fNumber} with the {tcf}×</span>}

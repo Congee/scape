@@ -48,18 +48,11 @@ export function isCameraBody(sensorId: string): boolean {
   return sensorId.startsWith('cat:') || sensorId.startsWith('custom:');
 }
 
-/**
- * Widest f-number this lens reaches at `focalMm`, running straight in log2(f-number) against
- * log2(focal) and holding at the endpoints outside the range. Only the two ends are quoted data:
- * between them this is a model, and a real zoom holds its wider end for part of the range and then
- * steps. Label interior values as approximate wherever they are shown.
- */
+/** Only a zoom's two ends are quoted, and past the short end only the long-end value is certain. */
 export function maxApertureAt(lens: LensSpec, focalMm: number): number {
-  const long = lens.maxApertureLong;
-  if (!long || lens.maxMm <= lens.minMm) return lens.maxAperture;
-  const t = (Math.log2(focalMm) - Math.log2(lens.minMm)) / (Math.log2(lens.maxMm) - Math.log2(lens.minMm));
-  const u = Math.min(1, Math.max(0, t));
-  return Math.round(2 ** (Math.log2(lens.maxAperture) + u * (Math.log2(long) - Math.log2(lens.maxAperture))) * 10) / 10;
+  // Focals are rounded to 0.1 mm, which can land just past a fractional short end.
+  const shortEnd = Math.max(lens.minMm, Math.round(lens.minMm * 10) / 10);
+  return focalMm <= shortEnd + 1e-6 ? lens.maxAperture : (lens.maxApertureLong ?? lens.maxAperture);
 }
 
 /** Focal length and aperture pulled inside what the lens can do at that focal length. */
