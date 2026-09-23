@@ -471,9 +471,8 @@ them. **14** and **18** were measured and closed unfixed, **8** is a watch rathe
 doing, and the thin dark lines turned out to be real rock gullies.
 
 **Nothing in this register is waiting on a decision.** **19** and **20** were answered on
-2026-09-23 and are closed below. **2**'s last step is no longer parked: the fine region is being
-bounded to what the frame draws on `wip/fine-region`, decided in favour of the native surface
-because precision is the product. **21**'s extent cap stays held on `wip/mesh-extent-cap`; 18 showed
+2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
+(merged `763a99b`). **21**'s extent cap stays held on `wip/mesh-extent-cap`; 18 showed
 it does not bind at Midtown, so its case is still 21's own.
 
 **Precision**
@@ -574,10 +573,17 @@ it does not bind at Midtown, so its case is still 21's own.
    now known: roughly 85% of the built blocks touch neither the frame nor its shadow cascades, so
    cutting the fine region to the subject should recover most of the latency and leave the picture
    intact. It composes with a finer constant rather than replacing it, and it still changes what the
-   foreground looks like — a picture decision, not a number. Under way on `wip/fine-region`.
-   Raising the cap alone is not
-   worth doing — at long focal it is already slack, and where it does bind (600 mm) bounding is the
+   foreground looks like — a picture decision, not a number. Raising the cap alone is not worth doing — at long focal it is already slack, and where it does bind (600 mm) bounding is the
    cheaper answer.
+
+   **Closed** (2026-09-23, merged `763a99b`). Blocks are Frame, Caster (floored at 2 m, the cascade
+   texel) or Coarse; balance runs only on Frame–Frame seams, so the gradation ring is gone. Every
+   selection is held to master's balanced coarse-bound cost, and the z13/z14 detail bound is loaded
+   only where `detailMayPay` says it could buy a finer frame. Floor per view, master → now: 600l
+   2 → 0.5 m, 1200l 2 → 1 m, 1200p 2 → 0.5 m, 2400l 2 → 1 m; 24/70/200 and 600p unchanged and
+   pixel-identical. Missing shadows vs a 0.5 m reference halve at 1200–2400 (2400l 12:00: 2.79 →
+   1.13%). Warm latency within noise of master everywhere; cold is bimodal (~1 s modes) in both arms.
+   2400 at 0.5 m would need 442 blocks against a 331 cap — left as the latency trade-off.
 
    Two things the experiment turned up that are not about the floor. `KEY_HALF` in `mesh.ts` was
    hardcoded for a level-8 root and would have silently folded a level-10 root's keys onto their
