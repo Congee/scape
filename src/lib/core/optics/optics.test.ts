@@ -12,11 +12,11 @@ import {
   equivalentFocalMm,
   focalForFovMm,
   fovDeg,
-  F_STOPS,
   frameAzimuthHalfCurve,
   frameAzimuthHalfDeg,
   frameElevationSpanDeg,
   frameFov,
+  maxApertureAt,
   Orientation,
   SENSORS,
   tcFactor,
@@ -169,7 +169,8 @@ describe('teleconverter', () => {
 });
 
 describe('lens limits', () => {
-  const zoom: LensSpec = { id: 'l', name: 'FE 200-600mm', minMm: 200, maxMm: 600, maxAperture: 5.6, mount: 'E' };
+  const zoom: LensSpec = { id: 'l', name: 'FE 200-600mm', minMm: 200, maxMm: 600, maxAperture: 5.6, maxApertureLong: 6.3, mount: 'E' };
+  const flat: LensSpec = { id: 'f', name: 'FE 70-200mm', minMm: 70, maxMm: 200, maxAperture: 2.8, mount: 'E' };
 
   it('keeps a zoom gesture inside the mounted lens', () => {
     expect(clampFocalMm(50, zoom, 1)).toBe(200);
@@ -182,10 +183,23 @@ describe('lens limits', () => {
     expect(clampFocalMm(2400, null, Teleconverter.X20)).toBe(1200);
   });
 
-  it('offers the stops from the lens’s widest aperture', () => {
-    expect(aperturesFor(zoom)[0]).toBe(5.6);
-    expect(aperturesFor(zoom)).not.toContain(4);
-    expect(aperturesFor(null)[0]).toBe(F_STOPS[0]);
+  it('runs the maximum aperture from end to end of a zoom', () => {
+    expect(maxApertureAt(zoom, 200)).toBe(5.6);
+    expect(maxApertureAt(zoom, 600)).toBe(6.3);
+    expect(maxApertureAt(zoom, 400)).toBe(6);
+  });
+
+  it('holds at the endpoints outside the range and stays flat without a long end', () => {
+    expect(maxApertureAt(zoom, 50)).toBe(5.6);
+    expect(maxApertureAt(zoom, 5000)).toBe(6.3);
+    expect(maxApertureAt(flat, 70)).toBe(2.8);
+    expect(maxApertureAt(flat, 200)).toBe(2.8);
+  });
+
+  it('offers only the stops reachable at that focal length', () => {
+    expect(aperturesFor(zoom, 200)[0]).toBe(5.6);
+    expect(aperturesFor(zoom, 600)[0]).toBe(6.3);
+    expect(aperturesFor(zoom, 600)).not.toContain(5.6);
   });
 });
 

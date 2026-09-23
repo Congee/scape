@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { clampFocalMm, fitToLens, SENSORS, tcFactor, type LensSpec, type SensorFormat } from '@core/optics/fov';
+import { clampFocalMm, fitToLens, maxApertureAt, SENSORS, tcFactor, type LensSpec, type SensorFormat } from '@core/optics/fov';
+import { longApertureOf } from '@core/optics/gearSearch';
 import { compositionStore, type Composition } from './composition';
 
 export const DEFAULT_FOCALS = [14, 16, 20, 24, 28, 35, 50, 70, 85, 100, 135, 200, 300, 400, 600, 900, 1200];
@@ -37,15 +38,15 @@ export interface GearState {
 /** The slice of {@link GearState} written to storage. */
 type PersistedGear = Pick<GearState, 'cameras' | 'lenses' | 'focalPresets' | 'kits'>;
 
-export const GEAR_VERSION = 3;
+export const GEAR_VERSION = 2;
 
 const sortedFocals = (list: number[]): number[] => [...new Set(list.filter((f) => f > 0))].toSorted((a, b) => a - b);
 
-/** Drops the long-end aperture that v2 stored on zooms. */
-function withoutLongAperture(lens: LensSpec): LensSpec {
-  if (!lens || typeof lens !== 'object' || !('maxApertureLong' in lens)) return lens;
-  const { maxApertureLong: _, ...rest } = lens as LensSpec & { maxApertureLong?: number };
-  return rest;
+/** Re-derives the long-end aperture from the model name a saved lens already carries. */
+function withLongAperture(lens: LensSpec): LensSpec {
+  if (!lens || typeof lens.name !== 'string' || !(lens.maxAperture > 0)) return lens;
+  const long = longApertureOf(lens.name);
+  return long && long > lens.maxAperture ? { ...lens, maxApertureLong: long } : lens;
 }
 
 /**
@@ -54,8 +55,8 @@ function withoutLongAperture(lens: LensSpec): LensSpec {
  * told apart from "never existed": the union re-adds deleted defaults, but the alternatives would either
  * drop the user's own presets or hide every newly shipped one.
  *
- * v1 -> v2 filled in `maxApertureLong`; v2 -> v3 strips it again, a no-op on older profiles.
- * The steps are gated separately so a v1 profile does not re-run the preset union.
+ * v1 -> v2: fills in `maxApertureLong` on lenses saved before variable apertures existed. The two steps
+ * are gated separately so reaching v2 does not re-run the preset union over a v1 profile.
  */
 export function migrateGear(persisted: unknown, version: number): PersistedGear {
   const s = (persisted ?? {}) as Partial<PersistedGear>;
@@ -63,7 +64,7 @@ export function migrateGear(persisted: unknown, version: number): PersistedGear 
   const lenses = Array.isArray(s.lenses) ? s.lenses : [];
   return {
     cameras: s.cameras ?? [],
-    lenses: version >= 3 ? lenses : lenses.map(withoutLongAperture),
+    lenses: version >= 2 ? lenses : lenses.map(withLongAperture),
     kits: s.kits ?? [],
     focalPresets: version >= 1 ? sortedFocals(stored) : sortedFocals([...stored, ...DEFAULT_FOCALS])
   };
@@ -134,10 +135,11 @@ export function kitMatches(kit: Kit, c: { sensorId: string; lensId: string | nul
   return kit.cameraId === c.sensorId && kit.lensId === c.lensId;
 }
 
-/** Zoom gestures: the focal inside the mounted lens's range. */
-export function zoomPatch(c: Composition, focalMm: number): { focalMm: number } {
+/** Zoom gestures: the focal inside the mounted lens's range, with the aperture still reachable there. */
+export function zoomPatch(c: Composition, focalMm: number): { focalMm: number; fNumber: number } {
   const lens = lensById(c.lensId, gearStore.getState().lenses);
-  return { focalMm: clampFocalMm(focalMm, lens, tcFactor(c.teleconverters)) };
+  const f = clampFocalMm(focalMm, lens, tcFactor(c.teleconverters));
+  return { focalMm: f, fNumber: lens ? Math.max(c.fNumber, maxApertureAt(lens, f)) : c.fNumber };
 }
 
 /** Selects the kit's camera and lens, fitting the focal length and aperture to the lens. */

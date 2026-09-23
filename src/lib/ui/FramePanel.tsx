@@ -4,7 +4,7 @@ import { position } from '@core/astro/positions';
 import { compass, degrees, distance } from '@core/format';
 import { distanceM } from '@core/geo/geodesy';
 import { depthOfField, panoramaShots } from '@core/optics/dof';
-import { aperturesFor, cocMm, CocRule, effectiveOptics, equivalentFocalMm, fitToLens, F_STOPS, frameFov, isCameraBody, lensFocals, Orientation, SENSORS, sensorPixels, tcFactor, Teleconverter, type SensorFormat } from '@core/optics/fov';
+import { aperturesFor, cocMm, CocRule, effectiveOptics, equivalentFocalMm, fitToLens, F_STOPS, frameFov, isCameraBody, lensFocals, maxApertureAt, Orientation, SENSORS, sensorPixels, tcFactor, Teleconverter, type SensorFormat } from '@core/optics/fov';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, useGear, zoomPatch } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
@@ -46,6 +46,8 @@ export function FramePanel() {
   const prime = lens !== null && lens.minMm === lens.maxMm;
   const isBody = isCameraBody(sensor.id);
   const opt = effectiveOptics(c);
+  // Only a zoom's two ends are quoted; the widest aperture between them is interpolated, so say so.
+  const apQuoted = lens == null || c.focalMm <= lens.minMm || c.focalMm >= lens.maxMm;
   const tcf = tcFactor(c.teleconverters);
   const tc = c.teleconverters.length > 0;
   const fov = frameFov(sensor, opt.focalMm, c.orientation);
@@ -215,12 +217,17 @@ export function FramePanel() {
         <span className="k">Aperture</span>
         <b className="v">
           <select value={c.fNumber} onChange={(e) => update({ fNumber: Number(e.target.value) })} aria-label="Aperture">
-            {aperturesFor(lens, [...F_STOPS, c.fNumber]).map((f) => (
+            {aperturesFor(lens, c.focalMm, [...F_STOPS, c.fNumber]).map((f) => (
               <option key={f} value={f}>
                 f/{f}
               </option>
             ))}
           </select>
+          {lens?.maxApertureLong != null && (
+            <span className="muted" title="Only the two ends are the maker's figures. Between them this is interpolated: a real zoom holds its wider end for part of the range and then steps.">
+              · f/{lens.maxAperture}–{lens.maxApertureLong} zoom, {apQuoted ? '' : 'about '}f/{maxApertureAt(lens, c.focalMm)} widest at {c.focalMm} mm
+            </span>
+          )}
           {tc && <span className="muted">· f/{opt.fNumber} with the {tcf}×</span>}
         </b>
         <span className="k">Field of view</span>
