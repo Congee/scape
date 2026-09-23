@@ -40,6 +40,11 @@ describe('fitToLens', () => {
     expect(fitToLens(zoom, 200, 11).fNumber).toBe(11);
   });
 
+  it('limits the aperture by maxAperture alone at every focal length', () => {
+    for (const f of [100, 250, 400]) expect(fitToLens(zoom, f, 1.4).fNumber).toBe(4.5);
+    for (const f of [100, 250, 400]) expect(fitToLens(zoom, f, 4.5).fNumber).toBe(4.5);
+  });
+
   it('clamps the base focal, leaving the teleconverter free to go past the lens', () => {
     const base = fitToLens(tele, 1200, 4);
     expect(base).toEqual({ focalMm: 600, fNumber: 4 });
@@ -108,26 +113,32 @@ describe('migrateGear', () => {
     expect(migrateGear({ focalPresets: [50, 100] }, 1).focalPresets).toEqual([50, 100]);
   });
 
-  it('backfills the long-end aperture on lenses saved before it existed', () => {
+  it('strips the long-end aperture a v2 profile stored, keeping the rest', () => {
     const saved: LensSpec = { id: 'cat:Sony FE 200-600mm F5.6-6.3 G OSS (E)', name: 'Sony FE 200-600mm F5.6-6.3 G OSS', minMm: 200, maxMm: 600, maxAperture: 5.6, mount: 'E' };
-    expect(migrateGear({ lenses: [saved] }, 1).lenses[0]).toEqual({ ...saved, maxApertureLong: 6.3 });
+    const kit: Kit = { id: 'k1', name: 'α7R V', cameraId: 'cat:Sony α7R V', lensId: saved.id };
+    const g = migrateGear({ cameras: [], lenses: [{ ...saved, maxApertureLong: 6.3 }, prime], kits: [kit], focalPresets: [50, 100] }, 2);
+    expect(g).toEqual({ cameras: [], lenses: [saved, prime], kits: [kit], focalPresets: [50, 100] });
+    expect(g.lenses[0]).not.toHaveProperty('maxApertureLong');
   });
 
-  it('does not re-union the presets of a v1 profile it is only taking to v2', () => {
+  it('does not re-union the presets of a v1 profile', () => {
     expect(migrateGear({ focalPresets: [50, 100], lenses: [] }, 1).focalPresets).toEqual([50, 100]);
   });
 
-  it('runs both steps on a v0 profile', () => {
+  it('takes a v1 profile to the current version without adding a long-end aperture', () => {
+    const saved: LensSpec = { id: 'l', name: 'Canon RF 100-400mm F5.6-8 IS USM', minMm: 100, maxMm: 400, maxAperture: 5.6, mount: 'RF' };
+    expect(migrateGear({ focalPresets: [12], lenses: [saved] }, 1)).toEqual({ cameras: [], lenses: [saved], kits: [], focalPresets: [12] });
+  });
+
+  it('runs the preset step on a v0 profile', () => {
     const saved: LensSpec = { id: 'l', name: 'Canon RF 100-400mm F5.6-8 IS USM', minMm: 100, maxMm: 400, maxAperture: 5.6, mount: 'RF' };
     const g = migrateGear({ focalPresets: [12], lenses: [saved] }, 0);
-    expect(g.lenses[0].maxApertureLong).toBe(8);
+    expect(g.lenses).toEqual([saved]);
     expect(g.focalPresets).toEqual([12, ...DEFAULT_FOCALS]);
   });
 
-  it('leaves a constant-aperture lens and a v2 profile untouched', () => {
-    expect(migrateGear({ lenses: [prime] }, 1).lenses).toEqual([prime]);
-    const ranged: LensSpec = { ...zoom, name: 'Sony FE 100-400mm F4.5-5.6 GM OSS' };
-    expect(migrateGear({ lenses: [ranged] }, GEAR_VERSION).lenses).toEqual([ranged]);
+  it('leaves a current profile untouched', () => {
+    expect(migrateGear({ lenses: [zoom, prime] }, GEAR_VERSION).lenses).toEqual([zoom, prime]);
   });
 
   it('survives a malformed lens list', () => {

@@ -44,16 +44,3 @@ export function searchGear<T>(rows: readonly T[], hay: (r: T) => string, tokens:
     .slice(0, limit)
     .map((x) => x.r);
 }
-
-/**
- * Long-end f-number encoded in a zoom's model name — `f/4.5-5.6L`, `F5.6-8`, `mmF4.5-6.3` — or null
- * for a constant-aperture lens. A range followed by `mm` is the focal range, not the aperture.
- */
-export function longApertureOf(model: string): number | null {
-  for (const m of model.matchAll(/[fF]\/?\d+(?:\.\d+)?-(\d+(?:\.\d+)?)/g)) {
-    const end = (m.index ?? 0) + m[0].length;
-    if (model.slice(end, end + 2) === 'mm') continue;
-    return Number(m[1]);
-  }
-  return null;
-}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CAMERAS, LENSES, type CameraRow, type LensRow } from '@data/gearCatalog';
-import { gearTokens, longApertureOf, normalizeGearText, scoreGear, searchGear } from './gearSearch';
+import { gearTokens, normalizeGearText, scoreGear, searchGear } from './gearSearch';
 
 const camHay = (r: CameraRow) => `${r[0]} ${r[1]} ${r[5]}`;
 const lensHay = (r: LensRow) => `${r[0]} ${r[1]} ${r[5]}`;
@@ -77,32 +77,5 @@ describe('catalogue queries', () => {
 
   it('returns nothing for an empty query', () => {
     expect(findCameras('')).toEqual([]);
-  });
-});
-
-describe('longApertureOf', () => {
-  it('reads the long end out of both spellings', () => {
-    expect(longApertureOf('EF 100-400mm f/4.5-5.6L IS II USM')).toBe(5.6);
-    expect(longApertureOf('RF 100-400mm F5.6-8 IS USM')).toBe(8);
-    expect(longApertureOf('RF 15-30mm F4.5-6.3 IS STM')).toBe(6.3);
-    expect(longApertureOf('FE 200-600mm F5.6-6.3 G OSS')).toBe(6.3);
-    expect(longApertureOf('XF100-400mmF4.5-5.6 R LM OIS WR')).toBe(5.6);
-  });
-
-  it('gives nothing for a constant-aperture lens or a prime', () => {
-    expect(longApertureOf('FE 70-200mm F2.8 GM OSS II')).toBeNull();
-    expect(longApertureOf('XF16-80mmF4 R OIS WR')).toBeNull();
-    expect(longApertureOf('FE 600mm F4 GM OSS')).toBeNull();
-  });
-
-  it('never mistakes the focal range for the aperture', () => {
-    expect(longApertureOf('XF16-80mmF4 R OIS WR')).not.toBe(80);
-    expect(longApertureOf('FE 24-105mm F4 G OSS')).toBeNull();
-  });
-
-  it('agrees with every zoom row that spells a range', () => {
-    const ranged = LENSES.filter((r) => longApertureOf(r[1]) !== null);
-    expect(ranged.length).toBeGreaterThan(40);
-    expect(ranged.every((r) => longApertureOf(r[1])! > r[4] && r[3] > r[2])).toBe(true);
   });
 });

@@ -31,10 +31,8 @@ export interface LensSpec {
   minMm: number;
   /** Equals `minMm` for a prime. */
   maxMm: number;
-  /** Widest f-number at the short end. */
+  /** Widest f-number, the only aperture limit at every focal length. */
   maxAperture: number;
-  /** Widest f-number at the long end; absent on a constant-aperture lens. */
-  maxApertureLong?: number;
   mount: string;
 }
 
@@ -48,30 +46,16 @@ export function isCameraBody(sensorId: string): boolean {
   return sensorId.startsWith('cat:') || sensorId.startsWith('custom:');
 }
 
-/**
- * Widest f-number this lens reaches at `focalMm`, running straight in log2(f-number) against
- * log2(focal) and holding at the endpoints outside the range. Only the two ends are quoted data:
- * between them this is a model, and a real zoom holds its wider end for part of the range and then
- * steps. Label interior values as approximate wherever they are shown.
- */
-export function maxApertureAt(lens: LensSpec, focalMm: number): number {
-  const long = lens.maxApertureLong;
-  if (!long || lens.maxMm <= lens.minMm) return lens.maxAperture;
-  const t = (Math.log2(focalMm) - Math.log2(lens.minMm)) / (Math.log2(lens.maxMm) - Math.log2(lens.minMm));
-  const u = Math.min(1, Math.max(0, t));
-  return Math.round(2 ** (Math.log2(lens.maxAperture) + u * (Math.log2(long) - Math.log2(lens.maxAperture))) * 10) / 10;
-}
-
-/** Focal length and aperture pulled inside what the lens can do at that focal length. */
+/** Focal length and aperture pulled inside what the lens can do. */
 export function fitToLens(lens: LensSpec | null, focalMm: number, fNumber: number): { focalMm: number; fNumber: number } {
   if (!lens) return { focalMm, fNumber };
   const f = Math.round(Math.min(lens.maxMm, Math.max(lens.minMm, focalMm)) * 10) / 10;
-  return { focalMm: f, fNumber: Math.max(fNumber, maxApertureAt(lens, f)) };
+  return { focalMm: f, fNumber: Math.max(fNumber, lens.maxAperture) };
 }
 
-/** Standard stops the lens can reach, starting at its widest aperture at `focalMm`. */
-export function aperturesFor(lens: LensSpec | null, focalMm?: number, stops: readonly number[] = F_STOPS): number[] {
-  const widest = lens ? maxApertureAt(lens, focalMm ?? lens.minMm) : 0;
+/** Standard stops the lens can reach, starting at its widest aperture. */
+export function aperturesFor(lens: LensSpec | null, stops: readonly number[] = F_STOPS): number[] {
+  const widest = lens?.maxAperture ?? 0;
   return [...new Set([...(widest > 0 ? [widest] : []), ...stops.filter((f) => f > widest + 1e-9)])].toSorted((a, b) => a - b);
 }
 

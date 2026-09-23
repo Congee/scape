@@ -68,8 +68,7 @@ export function GearSettings() {
             <span>
               {l.name}{' '}
               <span className="meta">
-                {l.minMm === l.maxMm ? `${l.minMm} mm` : `${l.minMm}–${l.maxMm} mm`} f/{l.maxAperture}
-                {l.maxApertureLong ? `–${l.maxApertureLong}` : ''} · {l.mount}
+                {l.minMm === l.maxMm ? `${l.minMm} mm` : `${l.minMm}–${l.maxMm} mm`} f/{l.maxAperture} · {l.mount}
               </span>
             </span>
             <button className="link" onClick={() => gearStore.getState().removeLens(l.id)}>
