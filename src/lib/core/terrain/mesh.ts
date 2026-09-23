@@ -19,9 +19,9 @@ export const LEVEL_CELLS = 192;
 export const BLOCKS_PER_SIDE = 4;
 export const BLOCK_CELLS = LEVEL_CELLS / BLOCKS_PER_SIDE;
 /** Cell of the finest level, metres. */
-export const BASE_CELL_M = 2;
-/** Level 8 reaches 49 km, past any range the viewfinder offers. */
-export const MAX_LEVELS = 9;
+export const BASE_CELL_M = 0.5;
+/** Level 10 reaches 49 km, past any range the viewfinder offers. */
+export const MAX_LEVELS = 11;
 
 export const levelCellM = (level: number): number => BASE_CELL_M * 2 ** level;
 export const levelHalfExtentM = (level: number): number => (LEVEL_CELLS * levelCellM(level)) / 2;
@@ -117,11 +117,13 @@ export interface SelectOptions {
   heightBoundM?: (b: BlockId) => { minM: number; maxM: number };
   /** Eye height above the datum, metres; only needed alongside `heightBoundM`. */
   eyeM?: number;
+  /** A tighter bound where finer tiles are loaded, null elsewhere; it may only spend what it saves. */
+  detailBoundM?: (b: BlockId) => { minM: number; maxM: number } | null;
 }
 
 export interface Selection {
-  /** Leaves grouped by level, finest first. */
-  levels: { level: number; blocks: BlockId[] }[];
+  /** Leaves grouped by level, finest first, each with the skirt its coarsest neighbour needs. */
+  levels: { level: number; blocks: BlockId[]; skirtM: number[] }[];
   blocks: number;
   triangles: number;
   /** The in-frame target actually used; coarser than asked when the budget bit. */
@@ -130,6 +132,8 @@ export interface Selection {
   reachM: number;
   /** Cell of the finest level the budget afforded. */
   minCellM: number;
+  /** Blocks the same view costs at the caster cell with every seam balanced; nothing finer may cost more. 0 where not tried. */
+  fineCap: number;
 }
 
 const wrapPi = (a: number): number => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
@@ -196,19 +200,61 @@ const inRoot = (rootLevel: number, level: number, ix: number, iy: number): boole
   return ix >= -h && ix < h && iy >= -h && iy < h;
 };
 
-/** One descent, with no budget check; exported for tests that want a fixed target. */
-function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineRad: number, reachM: number): Map<number, BlockId> {
+/** What a block is for: drawn by the frame, only casting into it, or neither. */
+export const BlockRole = { Coarse: 0, Caster: 1, Frame: 2 } as const;
+export type BlockRole = (typeof BlockRole)[keyof typeof BlockRole];
+
+interface Leaf extends BlockId {
+  role: BlockRole;
+}
+
+/** Coarsest cell a shadow-only block may take: about the finest cascade's texel, so a finer caster buys no sharper shadow. */
+export const CASTER_CELL_M = 2;
+
+/** Half-width of the widest wedge any block of `view` is tested against, degrees: the rim splayed over the caster band. */
+export function frameWedgeHalfDeg(view: MeshView): number {
+  const azCurve = frameAzimuthHalfCurve(view.pitchDeg, 2 * Math.tan((view.hfovDeg / 2) * D2R), 2 * Math.tan((view.vfovDeg / 2) * D2R), 1);
+  const elPad = meshElPadDeg(2 * view.elHalfDeg);
+  return azCurve(view.pitchDeg - view.elHalfDeg - MESH_EL_DOWN_PAD * elPad, view.pitchDeg + view.elHalfDeg + elPad) + meshAzPadDeg(view.hfovDeg);
+}
+
+/** Role of each block for one view: the padded frame, the band below it that can shadow it, or neither. */
+function classifier(opts: SelectOptions, bound: SelectOptions['heightBoundM']): (b: BlockId) => BlockRole {
   const view = opts.view;
-  const viewMid = view ? view.azimuthDeg * D2R : 0;
-  const azPad = view ? meshAzPadDeg(view.hfovDeg) : 0;
+  if (!view) return () => BlockRole.Coarse;
+  const viewMid = view.azimuthDeg * D2R;
+  const azPad = meshAzPadDeg(view.hfovDeg);
   // Focal normalised to 1: only the frame's shape and pitch matter to how its rim splays.
-  const azCurve = view ? frameAzimuthHalfCurve(view.pitchDeg, 2 * Math.tan((view.hfovDeg / 2) * D2R), 2 * Math.tan((view.vfovDeg / 2) * D2R), 1) : null;
-  const bound = view ? opts.heightBoundM : undefined;
+  const azCurve = frameAzimuthHalfCurve(view.pitchDeg, 2 * Math.tan((view.hfovDeg / 2) * D2R), 2 * Math.tan((view.vfovDeg / 2) * D2R), 1);
   const eyeM = opts.eyeM ?? 0;
-  const elPad = view ? meshElPadDeg(2 * view.elHalfDeg) : 0;
-  const elLo = view ? (view.pitchDeg - view.elHalfDeg - MESH_EL_DOWN_PAD * elPad) * D2R : 0;
-  const elHi = view ? (view.pitchDeg + view.elHalfDeg + elPad) * D2R : 0;
-  const leaves = new Map<number, BlockId>();
+  const elPad = meshElPadDeg(2 * view.elHalfDeg);
+  const elHi = (view.pitchDeg + view.elHalfDeg + elPad) * D2R;
+  const elLo = (view.pitchDeg - view.elHalfDeg - elPad) * D2R;
+  const castLo = (view.pitchDeg - view.elHalfDeg - MESH_EL_DOWN_PAD * elPad) * D2R;
+  const within = (e0: number, n0: number, s: number, band: { loRad: number; hiRad: number } | null, lo: number, hi: number): boolean => {
+    if (band && (band.hiRad < lo || band.loRad > hi)) return false;
+    // Only the elevations the block and the frame share can splay the rim, so they set its width.
+    const viewHalf = (azCurve((band ? Math.max(band.loRad, lo) : lo) * R2D, (band ? Math.min(band.hiRad, hi) : hi) * R2D) + azPad) * D2R;
+    const span = viewHalf >= Math.PI ? null : bearingSpan(e0, n0, e0 + s, n0 + s);
+    // A null span is the eye inside the block, or a wedge that has grown to the whole circle.
+    return !span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf;
+  };
+  return (b) => {
+    const s = blockSideM(b.level);
+    const e0 = b.ix * s;
+    const n0 = b.iy * s;
+    const d = nearestDistM(e0, n0, e0 + s, n0 + s);
+    // d === 0 is the eye inside the block, where every elevation is covered.
+    const bnd = bound && d > 0 ? bound(b) : null;
+    const band = bnd ? elevationSpanRad(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s)) : null;
+    if (within(e0, n0, s, band, elLo, elHi)) return BlockRole.Frame;
+    return within(e0, n0, s, band, castLo, elHi) ? BlockRole.Caster : BlockRole.Coarse;
+  };
+}
+
+/** One descent, with no budget check. Frame and caster blocks take `fineRad` inside the reach, each down to its own floor. */
+function descend(rootLevel: number, frameFloor: number, casterFloor: number, role: (b: BlockId) => BlockRole, fineRad: number, reachM: number): Map<number, Leaf> {
+  const leaves = new Map<number, Leaf>();
   const stack = rootBlocks(rootLevel);
   while (stack.length) {
     const b = stack.pop()!;
@@ -216,64 +262,59 @@ function descend(rootLevel: number, minLevel: number, opts: SelectOptions, fineR
     const e0 = b.ix * s;
     const n0 = b.iy * s;
     const d = nearestDistM(e0, n0, e0 + s, n0 + s);
-    let target = COARSE_TARGET_RAD;
-    if (view && azCurve && d <= reachM) {
-      // d === 0 is the eye inside the block, where every elevation is covered.
-      const bnd = bound && d > 0 ? bound(b) : null;
-      const band = bnd ? elevationSpanRad(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s)) : null;
-      if (!band || (band.hiRad >= elLo && band.loRad <= elHi)) {
-        // Only the elevations the block and the frame share can splay the rim, so they set its width.
-        const lo = band ? Math.max(band.loRad, elLo) : elLo;
-        const hi = band ? Math.min(band.hiRad, elHi) : elHi;
-        const viewHalf = (azCurve(lo * R2D, hi * R2D) + azPad) * D2R;
-        const span = viewHalf >= Math.PI ? null : bearingSpan(e0, n0, e0 + s, n0 + s);
-        // A null span is the eye inside the block, or a wedge that has grown to the whole circle.
-        if (!span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf) target = fineRad;
-      }
-    }
-    if (b.level > minLevel && levelCellM(b.level) > target * d) {
+    const r = role(b);
+    const target = r !== BlockRole.Coarse && d <= reachM ? fineRad : COARSE_TARGET_RAD;
+    const floor = r === BlockRole.Frame ? frameFloor : casterFloor;
+    if (b.level > floor && levelCellM(b.level) > target * d) {
       for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) stack.push({ level: b.level - 1, ix: 2 * b.ix + dx, iy: 2 * b.iy + dy });
     } else {
-      leaves.set(blockKey(b.level, b.ix, b.iy), b);
+      leaves.set(blockKey(b.level, b.ix, b.iy), { ...b, role: r });
     }
   }
   return leaves;
 }
 
+const DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1]
+] as const;
+
+/** Leaf covering (level, ix, iy) from `level` up, if the leaves reach that far. */
+function coveringLeaf(leaves: Map<number, Leaf>, rootLevel: number, level: number, ix: number, iy: number): Leaf | undefined {
+  for (let m = level; m <= rootLevel; m++) {
+    const s = 2 ** (m - level);
+    const hit = leaves.get(blockKey(m, Math.floor(ix / s), Math.floor(iy / s)));
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 /**
- * Splits leaves until no two that share an edge differ by more than `MAX_LEVEL_STEP` levels; a raw
- * selection can put a 4 m leaf beside a 512 m one where the frame's wedge ends. Every rung the step
- * allows is one gradation ring the wedge need not nest, and `skirtDepth` pays for it.
+ * Splits frame leaves until no two that share an edge differ by more than `MAX_LEVEL_STEP` levels.
+ * Only the frame's own seams are seen, so only they are balanced; a seam into a block the frame
+ * cannot draw is closed by a deeper skirt instead of a gradation ring. `all` balances every seam.
  */
-function balance(leaves: Map<number, BlockId>, rootLevel: number): void {
+function balance(leaves: Map<number, Leaf>, rootLevel: number, role: (b: BlockId) => BlockRole, all = false): void {
   const queue = [...leaves.values()];
-  const dirs = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1]
-  ];
   for (let qi = 0; qi < queue.length; qi++) {
     const n = queue[qi];
+    if (!all && n.role !== BlockRole.Frame) continue;
     if (!leaves.has(blockKey(n.level, n.ix, n.iy))) continue;
-    for (const [dx, dy] of dirs) {
+    for (const [dx, dy] of DIRS) {
       const nx = n.ix + dx;
       const ny = n.iy + dy;
       if (!inRoot(rootLevel, n.level, nx, ny)) continue;
-      // The leaves tile the root square, so a same-level neighbour is the covering leaf: none is coarser.
-      if (leaves.has(blockKey(n.level, nx, ny))) continue;
       // Walk up until the leaf covering the neighbour cell turns up, splitting it while it is too coarse.
       for (;;) {
-        let hit: BlockId | undefined;
-        for (let m = n.level + 1; m <= rootLevel && !hit; m++) {
-          const s = 2 ** (m - n.level);
-          hit = leaves.get(blockKey(m, Math.floor(nx / s), Math.floor(ny / s)));
-        }
-        if (!hit || hit.level <= n.level + MAX_LEVEL_STEP) break;
+        const hit = coveringLeaf(leaves, rootLevel, n.level, nx, ny);
+        if (!hit || hit.level <= n.level + MAX_LEVEL_STEP || (!all && hit.role !== BlockRole.Frame)) break;
         leaves.delete(blockKey(hit.level, hit.ix, hit.iy));
         for (let cy = 0; cy < 2; cy++)
           for (let cx = 0; cx < 2; cx++) {
-            const child = { level: hit.level - 1, ix: 2 * hit.ix + cx, iy: 2 * hit.iy + cy };
+            const c = { level: hit.level - 1, ix: 2 * hit.ix + cx, iy: 2 * hit.iy + cy };
+            const child = { ...c, role: role(c) };
             leaves.set(blockKey(child.level, child.ix, child.iy), child);
             queue.push(child);
           }
@@ -282,14 +323,28 @@ function balance(leaves: Map<number, BlockId>, rootLevel: number): void {
   }
 }
 
+/** Coarsest level among a leaf's edge neighbours, at least its own; sets how deep its skirt must hang. */
+function coarsestNeighbour(leaves: Map<number, Leaf>, rootLevel: number, b: BlockId): number {
+  let worst = b.level;
+  for (const [dx, dy] of DIRS) {
+    const nx = b.ix + dx;
+    const ny = b.iy + dy;
+    if (!inRoot(rootLevel, b.level, nx, ny)) continue;
+    const hit = coveringLeaf(leaves, rootLevel, b.level, nx, ny);
+    if (hit && hit.level > worst) worst = hit.level;
+  }
+  return worst;
+}
+
 /**
  * Leaves of the quadtree, finest first. A cell is split while it subtends more than the target angle
  * at the eye, so the ground the frame looks at holds a fixed pixel size whatever the focal length,
  * while everything outside the frame's wedge keeps the old clipmap's resolution for shadows and
  * skyline. Holding that target over the whole range costs tens of millions of triangles at a long
  * focal, so the budget is spent nearest first: the reach shrinks until the mesh fits, then whatever
- * the reach left over buys a finer cell down to the DEM's own posts, and only once both have
- * bottomed out does the target itself coarsen.
+ * the reach left over buys a finer cell down to `CASTER_CELL_M`. Below that only the frame refines,
+ * and only while it costs no more blocks than the caster cell would have, so it is never slower.
+ * Only once the reach has bottomed out does the target itself coarsen.
  */
 export function selectBlocks(opts: SelectOptions): Selection {
   const rootLevel = levelsForRange(opts.rangeM) - 1;
@@ -301,13 +356,26 @@ export function selectBlocks(opts: SelectOptions): Selection {
   /** The DEM's own level: below it refining is pure interpolation. */
   const dataLevel = levelFor(opts.demCellM);
   let minLevel = levelFor(Math.max(opts.demCellM, MESH_START_CELL_M));
+  /** Shadow-only blocks stop here: past it a caster is finer than the shadow map that samples it. */
+  const casterLevel = levelFor(Math.max(opts.demCellM, CASTER_CELL_M));
   const budget = opts.maxTriangles ?? MAX_MESH_TRIANGLES;
+  const coarse = opts.heightBoundM;
+  const detail = opts.detailBoundM;
+  const tight: SelectOptions['heightBoundM'] =
+    coarse && detail
+      ? (b) => {
+          const c = coarse(b);
+          const d = detail(b);
+          return d ? { minM: Math.max(c.minM, d.minM), maxM: Math.min(c.maxM, d.maxM) } : c;
+        }
+      : coarse;
+  const role = classifier(opts, tight);
   const walk = (reach: number, target: number, floor: number) => {
-    const l = descend(rootLevel, floor, opts, target, reach);
-    balance(l, rootLevel);
+    const l = descend(rootLevel, floor, Math.max(floor, casterLevel), role, target, reach);
+    balance(l, rootLevel, role);
     return l;
   };
-  const fits = (l: Map<number, BlockId>) => l.size * TRIANGLES_PER_BLOCK <= budget;
+  const fits = (l: Map<number, Leaf>) => l.size * TRIANGLES_PER_BLOCK <= budget;
   let targetRad = opts.view ? Math.min(opts.view.targetRad, COARSE_TARGET_RAD) : COARSE_TARGET_RAD;
   let reachM = opts.rangeM;
   let leaves = walk(reachM, targetRad, minLevel);
@@ -325,11 +393,24 @@ export function selectBlocks(opts: SelectOptions): Selection {
     } else hi = mid;
   }
   // Reach is never traded back for cell size: this only spends what the reach ladder left over.
-  while (fits(leaves) && minLevel > dataLevel) {
+  while (fits(leaves) && minLevel > Math.max(dataLevel, casterLevel)) {
     const finer = walk(reachM, targetRad, minLevel - 1);
     if (!fits(finer)) break;
     minLevel--;
     leaves = finer;
+  }
+  let fineCap = 0;
+  if (opts.view && fits(leaves) && minLevel > dataLevel && minLevel === casterLevel) {
+    // Past the caster cell the frame only spends what the tight bound and the frame-only ring saved, so it is never slower.
+    const plain = descend(rootLevel, minLevel, minLevel, classifier(opts, coarse), targetRad, reachM);
+    balance(plain, rootLevel, role, true);
+    fineCap = Math.min(plain.size, Math.floor(budget / TRIANGLES_PER_BLOCK));
+    while (minLevel > dataLevel) {
+      const finer = walk(reachM, targetRad, minLevel - 1);
+      if (finer.size > fineCap) break;
+      minLevel--;
+      leaves = finer;
+    }
   }
   // Only once the reach has bottomed out does the target itself give way.
   while (!fits(leaves) && targetRad < COARSE_TARGET_RAD) {
@@ -337,15 +418,18 @@ export function selectBlocks(opts: SelectOptions): Selection {
     leaves = walk(reachM, targetRad, minLevel);
   }
   const byLevel = new Map<number, BlockId[]>();
-  for (const b of leaves.values()) {
-    const list = byLevel.get(b.level);
-    if (list) list.push(b);
-    else byLevel.set(b.level, [b]);
+  for (const { level, ix, iy } of leaves.values()) {
+    const list = byLevel.get(level);
+    if (list) list.push({ level, ix, iy });
+    else byLevel.set(level, [{ level, ix, iy }]);
   }
   const levels = [...byLevel.entries()]
     .toSorted((a, b) => a[0] - b[0])
-    .map(([level, blocks]) => ({ level, blocks: blocks.toSorted((a, b) => a.iy - b.iy || a.ix - b.ix) }));
-  return { levels, blocks: leaves.size, triangles: leaves.size * TRIANGLES_PER_BLOCK, targetRad, reachM, minCellM: levelCellM(minLevel) };
+    .map(([level, list]) => {
+      const blocks = list.toSorted((a, b) => a.iy - b.iy || a.ix - b.ix);
+      return { level, blocks, skirtM: blocks.map((b) => seamSkirtM(b.level, coarsestNeighbour(leaves, rootLevel, b))) };
+    });
+  return { levels, blocks: leaves.size, triangles: leaves.size * TRIANGLES_PER_BLOCK, targetRad, reachM, minCellM: levelCellM(minLevel), fineCap };
 }
 
 /**
@@ -420,12 +504,14 @@ export function samplePoint(pin: LngLat, e: number, n: number): LngLat {
  * The floor covers the levels finer than a metre.
  */
 export const skirtDepth = (cellM: number) => Math.max(8, 3 * cellM * 2 ** MAX_LEVEL_STEP);
+/** The same sag rule against the coarsest neighbour a leaf really has, which past the frame `balance` leaves unbounded. */
+export const seamSkirtM = (level: number, neighbourLevel: number) => Math.max(skirtDepth(levelCellM(level)), 3 * levelCellM(neighbourLevel));
 
 /**
  * One level's blocks. Heights come from `sample` over a one-cell halo so every vertex normal is a
  * central difference, and every block is rimmed with a downward skirt so a level seam cannot crack.
  */
-export function buildLevel(pin: LngLat, eyeM: number, level: number, blocks: readonly BlockId[], sample: HeightSampler): MeshLevel {
+export function buildLevel(pin: LngLat, eyeM: number, level: number, blocks: readonly BlockId[], sample: HeightSampler, skirtM?: readonly number[]): MeshLevel {
   const cellM = levelCellM(level);
   const side = BLOCK_CELLS + 1;
   const halo = BLOCK_CELLS + 3;
@@ -436,13 +522,13 @@ export function buildLevel(pin: LngLat, eyeM: number, level: number, blocks: rea
   const blockStart = new Int32Array(blocks.length + 1);
   const blockBox = new Float32Array(blocks.length * 6);
   const u = new Float64Array(halo * halo);
-  const drop = skirtDepth(cellM);
   let vBase = 0;
   let ii = 0;
   let missing = 0;
 
   for (const [b, { ix, iy }] of blocks.entries()) {
     blockStart[b] = ii;
+    const drop = skirtM?.[b] ?? skirtDepth(cellM);
     const i0 = ix * BLOCK_CELLS;
     const j0 = iy * BLOCK_CELLS;
     for (let j = 0; j < halo; j++) {

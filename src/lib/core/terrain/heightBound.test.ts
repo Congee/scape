@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DemSource, DemTile } from './dem';
-import { buildHeightBound, RELIEF_PAD_POSTS } from './heightBound';
-import { BLOCKS_PER_SIDE, blockSideM, samplePoint } from './mesh';
+import { buildDetailBound, buildHeightBound, DETAIL_MAX_TILES, planDetailBound, RELIEF_PAD_POSTS } from './heightBound';
+import { BLOCKS_PER_SIDE, blockSideM, samplePoint, type MeshView } from './mesh';
 import { lngLatToTilePixel, metersPerPixel } from './tiles';
 
 const PIN = { lat: 46.0207, lng: 7.7491 };
@@ -154,5 +154,69 @@ describe('buildHeightBound memoisation', () => {
     expect(buildHeightBound(PIN, src, ZOOM, POST_M, ROOT)({ level: 0, ix: 0, iy: 0 })).toEqual({ minM: -Infinity, maxM: Infinity });
     loaded = true;
     expect(buildHeightBound(PIN, src, ZOOM, POST_M, ROOT)({ level: 0, ix: 0, iy: 0 }).maxM).toBeCloseTo(900 + RELIEF_PAD_POSTS * POST_M, 6);
+  });
+});
+
+const DETAIL_ZOOM = 13;
+const DETAIL_POST_M = metersPerPixel(PIN.lat, DETAIL_ZOOM, SIZE);
+
+describe('buildDetailBound', () => {
+  const ridge = (lng: number, lat: number) => 1500 + 600 * Math.sin((lng - PIN.lng) * 700) * Math.cos((lat - PIN.lat) * 500);
+
+  it('brackets the relief inside every block it answers for, and tighter than the coarse pyramid', () => {
+    const coarse = buildHeightBound(PIN, source(ridge), ZOOM, POST_M, ROOT);
+    const detail = buildDetailBound(PIN, source(ridge), DETAIL_ZOOM, DETAIL_POST_M);
+    let tighter = 0;
+    for (const level of [0, 2, 4])
+      for (const ix of [-3, 0, 2])
+        for (const iy of [-2, 1]) {
+          const b = { level, ix, iy };
+          const d = detail(b);
+          expect(d).not.toBeNull();
+          const s = blockSideM(level);
+          for (let u = 0; u <= 1; u += 0.125)
+            for (let v = 0; v <= 1; v += 0.125) {
+              const h = groundAt(ridge, (ix + u) * s, (iy + v) * s);
+              expect(h).toBeLessThanOrEqual(d!.maxM);
+              expect(h).toBeGreaterThanOrEqual(d!.minM);
+            }
+          if (d!.maxM - d!.minM < coarse(b).maxM - coarse(b).minM) tighter++;
+        }
+    expect(tighter).toBeGreaterThan(0);
+  });
+
+  it('pads by its own posts, and clamps water to the datum', () => {
+    expect(buildDetailBound(PIN, source(() => 800), DETAIL_ZOOM, DETAIL_POST_M)({ level: 1, ix: 0, iy: 0 })).toEqual({
+      minM: 800 - RELIEF_PAD_POSTS * DETAIL_POST_M,
+      maxM: 800 + RELIEF_PAD_POSTS * DETAIL_POST_M
+    });
+    expect(buildDetailBound(PIN, source(() => -50), DETAIL_ZOOM, DETAIL_POST_M)({ level: 1, ix: 0, iy: 0 })!.maxM).toBeCloseTo(RELIEF_PAD_POSTS * DETAIL_POST_M, 6);
+  });
+
+  it('answers null where a tile is missing, so the coarse bound stands', () => {
+    const full = source(() => 900);
+    const hole = lngLatToTilePixel(PIN.lng, PIN.lat, DETAIL_ZOOM, 1);
+    const holed: DemSource = { get: (z, x, y) => (x === hole.x && y === hole.y ? null : full.get(z, x, y)) };
+    expect(buildDetailBound(PIN, holed, DETAIL_ZOOM, DETAIL_POST_M)({ level: 0, ix: 0, iy: 0 })).toBeNull();
+  });
+});
+
+const wedge = (hfovDeg: number): MeshView => ({ azimuthDeg: 220, hfovDeg, vfovDeg: (hfovDeg * 2) / 3, pitchDeg: 0, elHalfDeg: hfovDeg / 3, targetRad: 1e-4 });
+
+describe('planDetailBound', () => {
+
+  it('buys the finest zoom whose tiles over the wedge fit the cap', () => {
+    const narrow = planDetailBound(PIN, wedge(0.86), 100_000, 12, 14, SIZE);
+    const wide = planDetailBound(PIN, wedge(20), 100_000, 12, 14, SIZE);
+    expect(narrow).not.toBeNull();
+    expect(narrow!.tiles.length).toBeLessThanOrEqual(DETAIL_MAX_TILES);
+    expect(narrow!.zoom).toBeGreaterThan(wide?.zoom ?? 11);
+    // Each planned tile is at the planned zoom and distinct.
+    expect(new Set(narrow!.tiles.map((t) => `${t.z}/${t.x}/${t.y}`)).size).toBe(narrow!.tiles.length);
+    for (const t of narrow!.tiles) expect(t.z).toBe(narrow!.zoom);
+  });
+
+  it('gives up rather than wait on more tiles than the cap', () => {
+    expect(planDetailBound(PIN, wedge(120), 100_000, 14, 14, SIZE)).toBeNull();
   });
 });

@@ -5,9 +5,10 @@
  * to the block quadtree: one O(1) lookup per block, built once per mesh request.
  */
 
-import type { LngLat } from '@core/geo/geodesy';
-import { elevationAt, type DemSource } from './dem';
-import { BLOCKS_PER_SIDE, blockSideM, samplePoint, type BlockId } from './mesh';
+import { destination, type LngLat } from '@core/geo/geodesy';
+import { lngLatToTilePixel, metersPerPixel, tileKey, type TileCoord } from '@core/terrain/tiles';
+import { elevationAt, type DemSource, type DemTile } from './dem';
+import { BLOCKS_PER_SIDE, BASE_CELL_M, blockSideM, blockUnitBounds, frameWedgeHalfDeg, samplePoint, type BlockId, type MeshView } from './mesh';
 
 /**
  * Vertical slack for the relief the coarse posts step over: a 2:1 slope across the worst-case gap
@@ -15,6 +16,12 @@ import { BLOCKS_PER_SIDE, blockSideM, samplePoint, type BlockId } from './mesh';
  * direction — it would coarsen ground the picture actually shows.
  */
 export const RELIEF_PAD_POSTS = 1.5;
+
+/**
+ * Level the pyramid's grid starts at: the one whose cell is 2 m. A finer mesh floor would otherwise
+ * make the grid 4x denser per rung; blocks below it read their covering ancestor, looser, never unsafe.
+ */
+export const BOUND_BASE_LEVEL = Math.max(0, Math.round(Math.log2(2 / BASE_CELL_M)));
 
 /** A block whose footprint had no coverage at all, so it can never be coarsened away. */
 const UNBOUNDED = { minM: -Infinity, maxM: Infinity };
@@ -82,21 +89,25 @@ export function buildHeightBound(pin: LngLat, src: DemSource, zoom: number, post
   }
 
   const { maxAt, minAt, padM } = p;
+  const base = Math.min(BOUND_BASE_LEVEL, rootLevel);
   return (b) => {
     if (b.level < 0 || b.level > rootLevel) return UNBOUNDED;
-    const d = BLOCKS_PER_SIDE * 2 ** (rootLevel - b.level);
-    const x = b.ix + d / 2;
-    const y = b.iy + d / 2;
+    const up = Math.max(0, base - b.level);
+    const level = b.level + up;
+    const d = BLOCKS_PER_SIDE * 2 ** (rootLevel - level);
+    const x = Math.floor(b.ix / 2 ** up) + d / 2;
+    const y = Math.floor(b.iy / 2 ** up) + d / 2;
     if (x < 0 || y < 0 || x >= d || y >= d) return UNBOUNDED;
     const i = y * d + x;
-    return { minM: minAt[b.level][i] - padM, maxM: maxAt[b.level][i] + padM };
+    return { minM: minAt[level - base][i] - padM, maxM: maxAt[level - base][i] + padM };
   };
 }
 
 function buildPyramid(pin: LngLat, src: DemSource, zoom: number, postM: number, rootLevel: number): Pyramid {
-  const halfBlocks = (BLOCKS_PER_SIDE / 2) * 2 ** rootLevel;
-  const per = Math.max(1, Math.ceil(blockSideM(0) / postM));
-  const stepM = blockSideM(0) / per;
+  const base = Math.min(BOUND_BASE_LEVEL, rootLevel);
+  const halfBlocks = (BLOCKS_PER_SIDE / 2) * 2 ** (rootLevel - base);
+  const per = Math.max(1, Math.ceil(blockSideM(base) / postM));
+  const stepM = blockSideM(base) / per;
   const ns = 2 * halfBlocks * per + 3;
   const padM = RELIEF_PAD_POSTS * postM;
   const h = new Float64Array(ns * ns);
@@ -137,11 +148,11 @@ function buildPyramid(pin: LngLat, src: DemSource, zoom: number, postM: number, 
     }
   maxAt.push(mx);
   minAt.push(mn);
-  for (let l = 1; l <= rootLevel; l++) {
+  for (let l = base + 1; l <= rootLevel; l++) {
     const wide = side;
     side /= 2;
-    const pmx = maxAt[l - 1];
-    const pmn = minAt[l - 1];
+    const pmx = maxAt[l - 1 - base];
+    const pmn = minAt[l - 1 - base];
     const nmx = new Float32Array(side * side);
     const nmn = new Float32Array(side * side);
     for (let y = 0; y < side; y++)
@@ -155,4 +166,125 @@ function buildPyramid(pin: LngLat, src: DemSource, zoom: number, postM: number, 
   }
 
   return { maxAt, minAt, padM, complete };
+}
+
+/** Most mip texels a block reads across each axis of a tile; coarser mips loosen the bound enough to cost a cell size. */
+const DETAIL_MIP_SPAN = 64;
+
+/** Max and min of one tile's posts over 2^k-post squares, finest first. */
+interface TileMips {
+  size: number;
+  max: Float32Array[];
+  min: Float32Array[];
+}
+
+function tileMips(t: DemTile): TileMips {
+  // The mesh clamps water to the datum, so the bound does too.
+  const base = t.elev.map((v) => Math.max(v, 0));
+  const max = [base];
+  const min = [base];
+  for (let s = t.size; s > 1; ) {
+    const ps = s;
+    s = Math.ceil(s / 2);
+    const pmx = max[max.length - 1];
+    const pmn = min[min.length - 1];
+    const mx = new Float32Array(s * s);
+    const mn = new Float32Array(s * s);
+    for (let y = 0; y < s; y++)
+      for (let x = 0; x < s; x++) {
+        const x1 = Math.min(2 * x + 1, ps - 1);
+        const y1 = Math.min(2 * y + 1, ps - 1);
+        const a = 2 * y * ps;
+        const b = y1 * ps;
+        mx[y * s + x] = Math.max(pmx[a + 2 * x], pmx[a + x1], pmx[b + 2 * x], pmx[b + x1]);
+        mn[y * s + x] = Math.min(pmn[a + 2 * x], pmn[a + x1], pmn[b + 2 * x], pmn[b + x1]);
+      }
+    max.push(mx);
+    min.push(mn);
+  }
+  return { size: t.size, max, min };
+}
+
+/**
+ * Tighter bounds where finer tiles are loaded: the extremes of every post under a block, read from
+ * each tile's max/min mips, padded by `RELIEF_PAD_POSTS` of that zoom. Null where a tile is missing,
+ * so the caller keeps the coarse bound there. Built per view, so it only covers what the view asks for.
+ */
+export function buildDetailBound(pin: LngLat, src: DemSource, zoom: number, postM: number): (b: BlockId) => { minM: number; maxM: number } | null {
+  const mips = new Map<string, TileMips | null>();
+  const mipsOf = (x: number, y: number): TileMips | null => {
+    const k = `${x}/${y}`;
+    let m = mips.get(k);
+    if (m === undefined) {
+      const t = src.get(zoom, x, y);
+      m = t ? tileMips(t) : null;
+      mips.set(k, m);
+    }
+    return m;
+  };
+  const n = 2 ** zoom;
+  const padM = RELIEF_PAD_POSTS * postM;
+  const seen = new Map<string, { minM: number; maxM: number } | null>();
+  return (b) => {
+    const key = `${b.level}/${b.ix}/${b.iy}`;
+    let r = seen.get(key);
+    if (r === undefined) seen.set(key, (r = detailAt(b)));
+    return r;
+  };
+  function detailAt(b: BlockId): { minM: number; maxM: number } | null {
+    const u = blockUnitBounds(pin, b, postM);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let ty = Math.floor(u.y0 * n); ty <= Math.floor(u.y1 * n); ty++)
+      for (let tx = Math.floor(u.x0 * n); tx <= Math.floor(u.x1 * n); tx++) {
+        const m = mipsOf(((tx % n) + n) % n, ty);
+        if (!m) return null;
+        const s = m.size;
+        // Posts sit at pixel centres: take every post whose bilinear cell touches the footprint.
+        const x0 = Math.max(0, Math.floor((u.x0 * n - tx) * s - 0.5));
+        const x1 = Math.min(s - 1, Math.ceil((u.x1 * n - tx) * s - 0.5));
+        const y0 = Math.max(0, Math.floor((u.y0 * n - ty) * s - 0.5));
+        const y1 = Math.min(s - 1, Math.ceil((u.y1 * n - ty) * s - 0.5));
+        let k = 0;
+        while ((x1 >> k) - (x0 >> k) >= DETAIL_MIP_SPAN || (y1 >> k) - (y0 >> k) >= DETAIL_MIP_SPAN) k++;
+        const w = Math.ceil(s / 2 ** k);
+        const mx = m.max[k];
+        const mn = m.min[k];
+        for (let y = y0 >> k; y <= y1 >> k; y++)
+          for (let x = x0 >> k; x <= x1 >> k; x++) {
+            if (mx[y * w + x] > hi) hi = mx[y * w + x];
+            if (mn[y * w + x] < lo) lo = mn[y * w + x];
+          }
+      }
+    return { minM: lo - padM, maxM: hi + padM };
+  }
+}
+
+/** How far out the detail bound reaches; past it the coarse pad is already small beside any frame's own pad. */
+export const DETAIL_RANGE_M = 16_000;
+/** Most tiles the detail bound may wait for, the same as the coarse prepass. */
+export const DETAIL_MAX_TILES = 16;
+
+/**
+ * Coverage for the detail bound: the finest zoom in [minZoom, maxZoom] whose tiles over the frame's
+ * widest wedge still number at most `DETAIL_MAX_TILES`. Sampled at a third of a tile so the sector,
+ * not its bounding box, is paid for; a tile it misses only leaves the coarse bound in place.
+ */
+export function planDetailBound(pin: LngLat, view: MeshView, rangeM: number, minZoom: number, maxZoom: number, tileSize: number): { zoom: number; tiles: TileCoord[] } | null {
+  const halfDeg = Math.min(180, frameWedgeHalfDeg(view));
+  const reachM = Math.min(rangeM, DETAIL_RANGE_M);
+  for (let z = maxZoom; z >= minZoom; z--) {
+    const stepM = (metersPerPixel(pin.lat, z, tileSize) * tileSize) / 3;
+    const tiles = new Map<string, TileCoord>();
+    for (let r = stepM / 2; r < reachM + stepM && tiles.size <= DETAIL_MAX_TILES; r += stepM) {
+      const n = Math.max(2, Math.ceil((2 * halfDeg * (Math.PI / 180) * r) / stepM));
+      for (let i = 0; i <= n; i++) {
+        const p = destination(pin, view.azimuthDeg - halfDeg + (2 * halfDeg * i) / n, Math.min(r, reachM));
+        const t = lngLatToTilePixel(p.lng, p.lat, z);
+        tiles.set(tileKey(z, t.x, t.y), { z, x: t.x, y: t.y });
+      }
+    }
+    if (tiles.size <= DETAIL_MAX_TILES) return { zoom: z, tiles: [...tiles.values()] };
+  }
+  return null;
 }

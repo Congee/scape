@@ -10,6 +10,7 @@ import {
   BLOCKS_PER_SIDE,
   BLOCK_CELLS,
   blockSideM,
+  CASTER_CELL_M,
   blockUnitBounds,
   buildLevel,
   COARSE_TARGET_RAD,
@@ -22,6 +23,7 @@ import {
   MESH_PX_PER_CELL,
   MESH_START_CELL_M,
   samplePoint,
+  seamSkirtM,
   selectBlocks,
   skirtDepth,
   TRIANGLES_PER_BLOCK,
@@ -37,6 +39,7 @@ const RANGE = 100_000;
 const DEM = metersPerPixel(PIN.lat, 15);
 const ROOT = levelsForRange(RANGE) - 1;
 const PX_H = 1013;
+const CASTER_LEVEL = Math.log2(CASTER_CELL_M / BASE_CELL_M);
 
 const view = (focalMm: number, frameWmm = 36, frameHmm = 24, pitchDeg = 0): MeshView => {
   const span = frameElevationSpanDeg(pitchDeg, frameWmm, frameHmm, focalMm);
@@ -50,6 +53,12 @@ const view = (focalMm: number, frameWmm = 36, frameHmm = 24, pitchDeg = 0): Mesh
   };
 };
 
+/** A flat plain, so the whole mesh sits on one plane a known angle from the eye. */
+const plain = (heightM: number) => () => ({ minM: heightM, maxM: heightM });
+
+/** No bound at all: every elevation is possible. */
+const loose = () => ({ minM: -Infinity, maxM: Infinity });
+
 const allBlocks = (s: { levels: { level: number; blocks: BlockId[] }[] }) => s.levels.flatMap((l) => l.blocks);
 /** Distance from the eye to the nearest point of a block, metres. */
 function nearest(b: BlockId): number {
@@ -57,6 +66,32 @@ function nearest(b: BlockId): number {
   const e0 = b.ix * s;
   const n0 = b.iy * s;
   return Math.hypot(Math.max(e0, -(e0 + s), 0), Math.max(n0, -(n0 + s), 0));
+}
+const key = (b: BlockId) => `${b.level}/${b.ix}/${b.iy}`;
+const skirtOf = (s: ReturnType<typeof selectBlocks>) => new Map(s.levels.flatMap((l) => l.blocks.map((b, i) => [key(b), l.skirtM[i]] as const)));
+/** Each leaf with the leaf across each of its edges, where that one is at least as coarse. */
+function* edgePairs(s: ReturnType<typeof selectBlocks>, root: number): Generator<[BlockId, BlockId]> {
+  const at = new Map(allBlocks(s).map((b) => [key(b), b]));
+  for (const b of at.values())
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1]
+    ]) {
+      const h = (BLOCKS_PER_SIDE / 2) * 2 ** (root - b.level);
+      const nx = b.ix + dx;
+      const ny = b.iy + dy;
+      if (nx < -h || nx >= h || ny < -h || ny >= h) continue;
+      for (let m = b.level; m <= root; m++) {
+        const t = 2 ** (m - b.level);
+        const n = at.get(`${m}/${Math.floor(nx / t)}/${Math.floor(ny / t)}`);
+        if (n) {
+          yield [b, n];
+          break;
+        }
+      }
+    }
 }
 const centreBearingDeg = (b: BlockId): number => {
   const s = blockSideM(b.level);
@@ -66,14 +101,15 @@ const angleTo = (deg: number, to: number) => Math.abs(((deg - to + 540) % 360) -
 
 describe('quadtree layout', () => {
   it('doubles cell and extent per level and reaches 49 km', () => {
-    expect(levelCellM(0)).toBe(2);
-    expect(levelCellM(4)).toBe(32);
-    expect(levelHalfExtentM(0)).toBe(192);
+    expect(levelCellM(0)).toBe(BASE_CELL_M);
+    expect(levelCellM(4)).toBe(16 * BASE_CELL_M);
+    expect(levelHalfExtentM(0)).toBe(96 * BASE_CELL_M);
     expect(levelHalfExtentM(MAX_LEVELS - 1)).toBeGreaterThan(49_000);
   });
 
   it('picks the fewest levels that reach the range', () => {
-    expect(levelsForRange(100)).toBe(1);
+    expect(levelHalfExtentM(levelsForRange(100) - 1)).toBeGreaterThanOrEqual(100);
+    expect(levelHalfExtentM(levelsForRange(100) - 2)).toBeLessThan(100);
     expect(levelHalfExtentM(levelsForRange(20_000) - 1)).toBeGreaterThanOrEqual(20_000);
     expect(levelHalfExtentM(levelsForRange(20_000) - 2)).toBeLessThan(20_000);
     expect(levelsForRange(1e9)).toBe(MAX_LEVELS);
@@ -86,9 +122,9 @@ describe('quadtree layout', () => {
 });
 
 describe('selectBlocks', () => {
-  it('reproduces the old fixed clipmap when nothing looks at it', () => {
+  it('reproduces the old fixed clipmap, at the caster cell, when nothing looks at it', () => {
     const sel = selectBlocks({ rangeM: RANGE, demCellM: 0, view: null });
-    expect(sel.levels.map((l) => l.level)).toEqual([...Array(MAX_LEVELS).keys()]);
+    expect(sel.levels.map((l) => l.level)).toEqual([...Array(MAX_LEVELS).keys()].slice(CASTER_LEVEL));
     // A full 4x4 grid at the finest level, then a ring of 12 around each coarser one.
     expect(sel.levels[0].blocks).toHaveLength(BLOCKS_PER_SIDE ** 2);
     for (const l of sel.levels.slice(1)) expect(l.blocks).toHaveLength(BLOCKS_PER_SIDE ** 2 - 4);
@@ -126,11 +162,34 @@ describe('selectBlocks', () => {
     expect(sel.minCellM).toBe(MESH_START_CELL_M);
   });
 
-  it('descends to the DEM posts and no further when the budget is generous', () => {
+  it('stops at the caster cell when nothing pays for a finer frame, however generous the budget', () => {
     const finer = metersPerPixel(PIN.lat, 17, 512);
-    const sel = selectBlocks({ rangeM: RANGE, demCellM: finer, view: view(2400), maxTriangles: 1e9 });
+    for (const focalMm of [24, 600, 2400]) {
+      const sel = selectBlocks({ rangeM: RANGE, demCellM: finer, view: view(focalMm), maxTriangles: 1e9 });
+      expect(sel.minCellM, `${focalMm} mm`).toBe(CASTER_CELL_M);
+    }
+  });
+
+  it('descends to the DEM posts where a tight bound pays for it, and never past what it saved', () => {
+    const finer = metersPerPixel(PIN.lat, 17, 512);
+    const v = view(600, 36, 24, -20);
+    const sel = selectBlocks({ rangeM: RANGE, demCellM: finer, view: v, heightBoundM: loose, detailBoundM: plain(1000), eyeM: 1600 });
     expect(sel.minCellM).toBe(BASE_CELL_M);
     expect(sel.minCellM).toBeGreaterThanOrEqual(finer);
+    expect(sel.blocks).toBeLessThanOrEqual(sel.fineCap);
+    // The cap is what the loose bound alone costs at the caster cell.
+    const plainSel = selectBlocks({ rangeM: RANGE, demCellM: CASTER_CELL_M, view: v, heightBoundM: loose, eyeM: 1600 });
+    expect(sel.fineCap).toBeGreaterThanOrEqual(plainSel.blocks);
+  });
+
+  it('a detail bound that is null everywhere changes nothing', () => {
+    const finer = metersPerPixel(PIN.lat, 17, 512);
+    for (const focalMm of [24, 600, 2400]) {
+      const opts = { rangeM: RANGE, demCellM: finer, view: view(focalMm, 36, 24, -5), heightBoundM: plain(1000), eyeM: 1600 };
+      const a = selectBlocks(opts);
+      const b = selectBlocks({ ...opts, detailBoundM: () => null });
+      expect(allBlocks(b)).toEqual(allBlocks(a));
+    }
   });
 
   it('takes the cap from the DEM, not from the level floor, when the posts are coarse', () => {
@@ -147,27 +206,32 @@ describe('selectBlocks', () => {
     }
   });
 
-  it('no two leaves that share an edge differ by more than one level', () => {
-    const sel = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: view(600) });
-    const at = new Map(allBlocks(sel).map((b) => [`${b.level}/${b.ix}/${b.iy}`, b]));
-    for (const b of at.values())
-      for (const [dx, dy] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1]
-      ]) {
-        const nx = b.ix + dx;
-        const ny = b.iy + dy;
-        const h = (BLOCKS_PER_SIDE / 2) * 2 ** (ROOT - b.level);
-        if (nx < -h || nx >= h || ny < -h || ny >= h) continue;
-        let found = -1;
-        for (let m = b.level; m <= ROOT && found < 0; m++) {
-          const s = 2 ** (m - b.level);
-          if (at.has(`${m}/${Math.floor(nx / s)}/${Math.floor(ny / s)}`)) found = m;
+  it('balances the frame: no two leaves inside it that share an edge differ by more than the step', () => {
+    for (const focalMm of [24, 600, 2400]) {
+      const v = view(focalMm);
+      const sel = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v });
+      const inFrame = (b: BlockId) => angleTo(centreBearingDeg(b), v.azimuthDeg) <= v.hfovDeg / 2;
+      let seen = 0;
+      for (const [b, n] of edgePairs(sel, ROOT))
+        if (inFrame(b) && inFrame(n)) {
+          seen++;
+          expect(Math.abs(n.level - b.level), `${focalMm} mm`).toBeLessThanOrEqual(MAX_LEVEL_STEP);
         }
-        expect(found - b.level).toBeLessThanOrEqual(MAX_LEVEL_STEP);
-      }
+      expect(seen).toBeGreaterThan(0);
+    }
+  });
+
+  it('kills the gradation ring outside the frame, and hangs a skirt deep enough over every seam instead', () => {
+    const v = view(600);
+    const sel = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: v });
+    const skirt = skirtOf(sel);
+    let wide = 0;
+    for (const [b, n] of edgePairs(sel, ROOT)) {
+      if (n.level - b.level > MAX_LEVEL_STEP) wide++;
+      if (n.level > b.level) expect(skirt.get(key(b))).toBeGreaterThanOrEqual(seamSkirtM(b.level, n.level));
+    }
+    // Without the ring some seams outside the frame skip more levels than the balance allows.
+    expect(wide).toBeGreaterThan(0);
   });
 
   it('the leaves stay one partition of the root square, over a sweep of options', () => {
@@ -182,11 +246,14 @@ describe('selectBlocks', () => {
         rangeM,
         demCellM: [0, 0.4148, 3.3, 12, 30][Math.floor(rnd() * 5)],
         view: focalMm ? view(focalMm, 36, 24, (rnd() - 0.5) * 90) : null,
-        maxTriangles: rnd() < 0.3 ? 100_000 + rnd() * 4_000_000 : undefined
+        maxTriangles: rnd() < 0.3 ? 100_000 + rnd() * 4_000_000 : undefined,
+        ...(rnd() < 0.5 ? { heightBoundM: plain(1000 + rnd() * 1000), detailBoundM: rnd() < 0.5 ? plain(1500) : () => null, eyeM: 1600 } : {})
       });
       const root = levelsForRange(rangeM) - 1;
       const at = new Map(allBlocks(sel).map((b) => [`${b.level}/${b.ix}/${b.iy}`, b.level]));
+      const skirt = skirtOf(sel);
       const where = `${Math.round(rangeM)} m, ${focalMm} mm`;
+      if (sel.minCellM < CASTER_CELL_M) expect(sel.blocks, where).toBeLessThanOrEqual(sel.fineCap);
       expect(at.size, where).toBe(sel.blocks);
       const area = allBlocks(sel).reduce((a, b) => a + blockSideM(b.level) ** 2, 0);
       expect(area / (BLOCKS_PER_SIDE * blockSideM(root)) ** 2, where).toBeCloseTo(1, 9);
@@ -208,7 +275,8 @@ describe('selectBlocks', () => {
             if (at.has(`${m}/${Math.floor(nx / t)}/${Math.floor(ny / t)}`)) covers.push(m);
           }
           expect(covers.length, `${where} at ${b.level}/${b.ix}/${b.iy}`).toBeLessThanOrEqual(1);
-          if (covers.length === 1) expect(covers[0] - b.level, where).toBeLessThanOrEqual(MAX_LEVEL_STEP);
+          // A seam the balance let through is closed by the finer side's skirt.
+          if (covers.length === 1) expect(skirt.get(key(b)), where).toBeGreaterThanOrEqual(seamSkirtM(b.level, covers[0]));
         }
     }
   });
@@ -296,7 +364,8 @@ const tooth = (sign: number, cellM: number) => (lng: number, lat: number) => {
 
 describe('a seam to the coarsest neighbour the balance allows', () => {
   // Edge-adjacent across MAX_LEVEL_STEP levels: the fine block's east edge is the coarse one's west.
-  const fineLevel = 0;
+  // The first level whose skirt is set by the slope rather than by its floor.
+  const fineLevel = CASTER_LEVEL;
   const coarseLevel = fineLevel + MAX_LEVEL_STEP;
   const ratio = 2 ** MAX_LEVEL_STEP;
   const fine: BlockId = { level: fineLevel, ix: ratio - 1, iy: 0 };
@@ -324,6 +393,44 @@ describe('a seam to the coarsest neighbour the balance allows', () => {
       // A rim above its neighbour's chord is hidden by its own skirt, so each side pays for its own case.
       expect(aboveM).toBeLessThanOrEqual(skirtDepth(cellF) + 0.2);
       expect(belowM).toBeLessThanOrEqual(skirtDepth(cellC) + 0.2);
+    });
+  }
+});
+
+describe('a seam the ring no longer balances', () => {
+  const fineLevel = CASTER_LEVEL;
+  const coarseLevel = fineLevel + 2 * MAX_LEVEL_STEP;
+  const ratio = 2 ** (coarseLevel - fineLevel);
+  const fine: BlockId = { level: fineLevel, ix: ratio - 1, iy: 0 };
+  const coarse: BlockId = { level: coarseLevel, ix: 1, iy: 0 };
+  const cellC = levelCellM(coarseLevel);
+  const cellF = levelCellM(fineLevel);
+
+  for (const sign of [1, -1]) {
+    it(`is closed by the deeper skirt when the relief ${sign > 0 ? 'rises' : 'falls'} between the coarse posts`, () => {
+      const sample = tooth(sign, cellC);
+      const drop = seamSkirtM(fineLevel, coarseLevel);
+      const lf = buildLevel(PIN, 1200, fineLevel, [fine], sample, [drop]);
+      const lc = buildLevel(PIN, 1200, coarseLevel, [coarse], sample);
+      let gapM = 0;
+      for (let t = 0; t <= BLOCK_CELLS; t++) {
+        const q = (t * cellF) / cellC;
+        const i0 = Math.floor(q);
+        const chord = rimU(lc, 0, i0) + (rimU(lc, 0, i0 + 1) - rimU(lc, 0, i0)) * (q - i0);
+        gapM = Math.max(gapM, Math.abs(rimU(lf, BLOCK_CELLS, t) - chord));
+      }
+      // The plain skirt would crack; the seam skirt covers the worst the coarse chord can sag.
+      expect(gapM).toBeGreaterThan(skirtDepth(cellF) + 1);
+      expect(gapM).toBeLessThanOrEqual(drop + 0.2);
+      // And the skirt really hangs that far below the grid.
+      const grid = (BLOCK_CELLS + 1) ** 2;
+      let rimLow = Infinity;
+      let low = Infinity;
+      for (let v = 0; v < lf.pos.length / 3; v++) {
+        low = Math.min(low, lf.pos[v * 3 + 2]);
+        if (v < grid) rimLow = Math.min(rimLow, lf.pos[v * 3 + 2]);
+      }
+      expect(low).toBeCloseTo(rimLow - drop, 3);
     });
   }
 });
@@ -527,8 +634,9 @@ describe('blockUnitBounds', () => {
 
 describe('block count against the old clipmap', () => {
   it('costs more triangles than the fixed clipmap but stays inside the budget', () => {
-    const old = (BLOCKS_PER_SIDE ** 2 + (MAX_LEVELS - 1) * (BLOCKS_PER_SIDE ** 2 - 4)) * TRIANGLES_PER_BLOCK;
-    expect(old).toBe(112 * (BLOCK_CELLS * BLOCK_CELLS * 2 + 8 * BLOCK_CELLS));
+    const levels = levelsForRange(RANGE) - CASTER_LEVEL;
+    const old = (BLOCKS_PER_SIDE ** 2 + (levels - 1) * (BLOCKS_PER_SIDE ** 2 - 4)) * TRIANGLES_PER_BLOCK;
+    expect(old).toBe(selectBlocks({ rangeM: RANGE, demCellM: 0, view: null }).triangles);
     for (const focalMm of [24, 135, 600, 2400]) {
       const sel = selectBlocks({ rangeM: RANGE, demCellM: DEM, view: view(focalMm) });
       expect(sel.triangles).toBeGreaterThan(old);
@@ -537,11 +645,8 @@ describe('block count against the old clipmap', () => {
   });
 });
 
-/**
- * The selection with no height bound must not have moved at all: the elevation test is the only new
- * behaviour, and it is gated on a bound being supplied. These are the numbers from before it existed.
- */
-describe('azimuth-only selection is untouched', () => {
+/** The azimuth-only selection at a 2 m base cell with every seam balanced, as it stood before the fine region. */
+describe('azimuth-only selection against the balanced 2 m mesh', () => {
   const EXPECTED: [number, number, number, string, number, number, number, number][] = [
     [20000, 4, 0, '1:16 2:12 3:12 4:12 5:12 6:12 7:12', 88, 439296, 0.020833333333333332, 20000],
     [20000, 4, 24, '1:184 2:138 3:138 4:74 5:22 6:19 7:8', 583, 2910336, 0.003948667324777887, 12500],
@@ -573,17 +678,21 @@ describe('azimuth-only selection is untouched', () => {
     [100000, 30, 2400, '4:140 5:37 6:30 7:16 8:9', 232, 1158144, 0.00003948667324777888, 100000]
   ];
 
-  it('matches block for block, level for level, over range, DEM post and focal length', () => {
-    for (const [rangeM, demCellM, focalMm, levels, blocks, triangles, targetRad, reachM] of EXPECTED) {
+  it('never regresses: no less reach, no coarser target or floor, no more blocks, at any focal length', () => {
+    for (const [rangeM, demCellM, focalMm, levels, blocks, , targetRad, reachM] of EXPECTED) {
       const sel = selectBlocks({ rangeM, demCellM, view: focalMm ? view(focalMm) : null });
-      const got = [sel.levels.map((l) => `${l.level}:${l.blocks.length}`).join(' '), sel.blocks, sel.triangles, sel.targetRad, sel.reachM];
-      expect(got, `${rangeM} m, ${demCellM} m posts, ${focalMm} mm`).toEqual([levels, blocks, triangles, targetRad, reachM]);
+      const at = `${rangeM} m, ${demCellM} m posts, ${focalMm} mm`;
+      // The table was taken at a 2 m base cell.
+      const oldFloorM = 2 * 2 ** Number(levels.split(':')[0]);
+      expect(sel.reachM, at).toBeGreaterThanOrEqual(reachM);
+      expect(sel.targetRad, at).toBeLessThanOrEqual(targetRad);
+      expect(sel.minCellM, at).toBeLessThanOrEqual(oldFloorM);
+      // The ring's savings go to reach first; only a view that gained none must cost no more.
+      if (sel.reachM === reachM) expect(sel.blocks, at).toBeLessThanOrEqual(blocks);
     }
   });
 });
 
-/** A flat plain, so the whole mesh sits on one plane a known angle from the eye. */
-const plain = (heightM: number) => () => ({ minM: heightM, maxM: heightM });
 
 describe('the frame elevation band', () => {
   it('coarsens ground below the frame instead of dropping it, so the tiling still closes', () => {
