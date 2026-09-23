@@ -56,6 +56,8 @@ const view = (focalMm: number, frameWmm = 36, frameHmm = 24, pitchDeg = 0): Mesh
 /** A flat plain, so the whole mesh sits on one plane a known angle from the eye. */
 const plain = (heightM: number) => () => ({ minM: heightM, maxM: heightM });
 
+const band800to1200 = () => ({ minM: 800, maxM: 1200 });
+
 /** No bound at all: every elevation is possible. */
 const loose = () => ({ minM: -Infinity, maxM: Infinity });
 
@@ -180,6 +182,24 @@ describe('selectBlocks', () => {
     // The cap is what the loose bound alone costs at the caster cell.
     const plainSel = selectBlocks({ rangeM: RANGE, demCellM: CASTER_CELL_M, view: v, heightBoundM: loose, eyeM: 1600 });
     expect(sel.fineCap).toBeGreaterThanOrEqual(plainSel.blocks);
+  });
+
+  it('asks for the detail tiles only where some bound inside the coarse one could pay for them', () => {
+    const finer = metersPerPixel(PIN.lat, 17, 512);
+    let asked = 0;
+    for (const focalMm of [24, 70, 200, 600, 1200, 2400])
+      for (const pitchDeg of [-20, -5, 0]) {
+        const opts = { rangeM: RANGE, demCellM: finer, view: view(focalMm, 36, 24, pitchDeg), heightBoundM: band800to1200, eyeM: 1600 };
+        const base = selectBlocks(opts);
+        if (base.detailMayPay) asked++;
+        else
+          for (const h of [800, 1000, 1200])
+            expect(selectBlocks({ ...opts, detailBoundM: plain(h) }).minCellM, `${focalMm} mm, ${pitchDeg}°, ${h} m`).toBe(base.minCellM);
+      }
+    expect(asked).toBeGreaterThan(0);
+    const v = view(600, 36, 24, -20);
+    expect(selectBlocks({ rangeM: RANGE, demCellM: finer, view: v, heightBoundM: loose, eyeM: 1600 }).detailMayPay).toBe(true);
+    expect(selectBlocks({ rangeM: RANGE, demCellM: finer, view: v, heightBoundM: loose, detailBoundM: plain(1000), eyeM: 1600 }).detailMayPay).toBe(false);
   });
 
   it('a detail bound that is null everywhere changes nothing', () => {

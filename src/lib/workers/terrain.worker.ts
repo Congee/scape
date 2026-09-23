@@ -154,25 +154,33 @@ async function mesh(req: MeshRequest): Promise<null> {
   const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
   const rootLevel = levelsForRange(req.rangeM) - 1;
   const plan = planHeightBound(req.pin, rootLevel);
-  const detail = req.view ? planDetailBound(req.pin, req.view, req.rangeM, DETAIL_ZOOMS[0], DETAIL_ZOOMS[1], TERRAIN_TILE_SIZE) : null;
   const releasePlan = cache.retain(plan.tiles);
-  const releaseDetail = cache.retain(detail?.tiles ?? []);
   let sel: Selection;
   try {
-    await Promise.all([cache.loadAll(plan.tiles), cache.loadAll(detail?.tiles ?? [])]);
+    await cache.loadAll(plan.tiles);
     if (latest.Mesh !== req.id) return null;
-    sel = selectBlocks({
+    const opts = {
       rangeM: req.rangeM,
       demCellM: metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE),
       view: req.view,
       heightBoundM: buildHeightBound(req.pin, cache, plan.zoom, metersPerPixel(req.pin.lat, plan.zoom, TERRAIN_TILE_SIZE), rootLevel),
-      // Read lazily while selecting, so its tiles stay retained until the selection is done.
-      detailBoundM: detail ? buildDetailBound(req.pin, cache, detail.zoom, metersPerPixel(req.pin.lat, detail.zoom, TERRAIN_TILE_SIZE)) : undefined,
       eyeM
-    });
+    };
+    sel = selectBlocks(opts);
+    // The detail tiles cost a load and their mips, so only where even the tightest bound could buy a finer frame.
+    const detail = sel.detailMayPay && req.view ? planDetailBound(req.pin, req.view, req.rangeM, DETAIL_ZOOMS[0], DETAIL_ZOOMS[1], TERRAIN_TILE_SIZE) : null;
+    if (detail) {
+      const releaseDetail = cache.retain(detail.tiles);
+      try {
+        await cache.loadAll(detail.tiles);
+        if (latest.Mesh !== req.id) return null;
+        sel = selectBlocks({ ...opts, detailBoundM: buildDetailBound(req.pin, cache, detail.zoom, metersPerPixel(req.pin.lat, detail.zoom, TERRAIN_TILE_SIZE)) });
+      } finally {
+        releaseDetail();
+      }
+    }
   } finally {
     releasePlan();
-    releaseDetail();
   }
   const plans = sel.levels.map(({ level, blocks, skirtM }) => {
     const zoom = zoomForResolution(req.pin.lat, levelCellM(level), demZoom(8), TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);

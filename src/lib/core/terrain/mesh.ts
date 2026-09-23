@@ -134,6 +134,8 @@ export interface Selection {
   minCellM: number;
   /** Blocks the view costs on the coarse bound with every seam balanced, capped by the budget; no selection costs more. */
   fineCap: number;
+  /** Without a detail bound: whether even the tightest one could buy a finer frame, so it is worth loading. */
+  detailMayPay: boolean;
 }
 
 const wrapPi = (a: number): number => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
@@ -250,6 +252,13 @@ function classifier(opts: SelectOptions, bound: SelectOptions['heightBoundM']): 
     if (within(e0, n0, s, band, elLo, elHi)) return BlockRole.Frame;
     return within(e0, n0, s, band, castLo, elHi) ? BlockRole.Caster : BlockRole.Coarse;
   };
+}
+
+/** The fewest roles any bound inside `bound` could give: the block's terrain may sit at either end of it. */
+function leastRole(opts: SelectOptions, bound: NonNullable<SelectOptions['heightBoundM']>): (b: BlockId) => BlockRole {
+  const low = classifier(opts, (b) => ({ minM: bound(b).minM, maxM: bound(b).minM }));
+  const high = classifier(opts, (b) => ({ minM: bound(b).maxM, maxM: bound(b).maxM }));
+  return (b) => Math.min(low(b), high(b)) as BlockRole;
 }
 
 /** One descent, with no budget check. Frame and caster blocks take `fineRad` inside the reach, each down to its own floor. */
@@ -420,7 +429,15 @@ export function selectBlocks(opts: SelectOptions): Selection {
   const { reachM, targetRad } = picked;
   let { leaves, minLevel } = picked;
   const casterFloor = Math.max(minLevel, casterLevel);
-  if (opts.view && detail && targetRad === startRad && leaves.size <= cap) {
+  const canRefine = !!opts.view && targetRad === startRad && leaves.size <= cap && minLevel > dataLevel;
+  let detailMayPay = false;
+  if (canRefine && !detail && coarse) {
+    const least = leastRole(opts, coarse);
+    const l = descend(rootLevel, minLevel - 1, casterFloor, least, targetRad, reachM);
+    balance(l, rootLevel, least);
+    detailMayPay = l.size <= cap;
+  }
+  if (canRefine && detail) {
     // Past the caster floor only the frame refines, on what the tight bound and the frame-only ring saved.
     while (minLevel > dataLevel) {
       const finer = walk(reachM, targetRad, minLevel - 1, casterFloor);
@@ -441,7 +458,7 @@ export function selectBlocks(opts: SelectOptions): Selection {
       const blocks = list.toSorted((a, b) => a.iy - b.iy || a.ix - b.ix);
       return { level, blocks, skirtM: blocks.map((b) => seamSkirtM(b.level, coarsestNeighbour(leaves, rootLevel, b))) };
     });
-  return { levels, blocks: leaves.size, triangles: leaves.size * TRIANGLES_PER_BLOCK, targetRad, reachM, minCellM: levelCellM(minLevel), fineCap };
+  return { levels, blocks: leaves.size, triangles: leaves.size * TRIANGLES_PER_BLOCK, targetRad, reachM, minCellM: levelCellM(minLevel), fineCap, detailMayPay };
 }
 
 /**
