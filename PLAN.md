@@ -574,8 +574,8 @@ it does not bind at Midtown, so its case is still 21's own.
    now known: roughly 85% of the built blocks touch neither the frame nor its shadow cascades, so
    cutting the fine region to the subject should recover most of the latency and leave the picture
    intact. It composes with a finer constant rather than replacing it, and it still changes what the
-   foreground looks like — a picture decision, not a number. **Needs a user decision**: crops at
-   `scratchpad/ref05/summit-2400.png`, `frame-600.png` and `wide-24.png`. Raising the cap alone is not
+   foreground looks like — a picture decision, not a number. Under way on `wip/fine-region`.
+   Raising the cap alone is not
    worth doing — at long focal it is already slack, and where it does bind (600 mm) bounding is the
    cheaper answer.
 
@@ -1143,7 +1143,8 @@ it does not bind at Midtown, so its case is still 21's own.
 
 **Answered by the user**
 
-19. **Variable zoom apertures — removed** (2026-09-23, `c8dbd97`). The user's call: every zoom
-    steps differently and there is no per-focal database, so a lens's `maxAperture` is its only limit
-    at every focal and the photographer stops down themselves. Gear persist v3 strips the stored field.
+19. **Variable zoom apertures — only the two ends** (2026-09-23, `97a55fe`). No per-focal database,
+    so no interpolation: `maxAperture` (f/5.6) only at the short end, `maxApertureLong` (f/6.3) at any
+    longer focal. Zooming in raises the f-number; zooming back never opens it. Gear persist v4
+    re-derives the long value from the lens name for v0–v3 blobs.
 20. **Hiding the Sun hides its glow too** — kept as shipped (2026-09-23), same `uSun.w > 0.0` branch.
