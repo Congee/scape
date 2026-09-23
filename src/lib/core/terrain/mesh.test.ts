@@ -253,7 +253,7 @@ describe('selectBlocks', () => {
       const at = new Map(allBlocks(sel).map((b) => [`${b.level}/${b.ix}/${b.iy}`, b.level]));
       const skirt = skirtOf(sel);
       const where = `${Math.round(rangeM)} m, ${focalMm} mm`;
-      if (sel.minCellM < CASTER_CELL_M) expect(sel.blocks, where).toBeLessThanOrEqual(sel.fineCap);
+      expect(sel.blocks, where).toBeLessThanOrEqual(sel.fineCap);
       expect(at.size, where).toBe(sel.blocks);
       const area = allBlocks(sel).reduce((a, b) => a + blockSideM(b.level) ** 2, 0);
       expect(area / (BLOCKS_PER_SIDE * blockSideM(root)) ** 2, where).toBeCloseTo(1, 9);

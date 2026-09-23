@@ -132,7 +132,7 @@ export interface Selection {
   reachM: number;
   /** Cell of the finest level the budget afforded. */
   minCellM: number;
-  /** Blocks the same view costs at the caster cell with every seam balanced; nothing finer may cost more. 0 where not tried. */
+  /** Blocks the view costs on the coarse bound with every seam balanced, capped by the budget; no selection costs more. */
   fineCap: number;
 }
 
@@ -342,8 +342,8 @@ function coarsestNeighbour(leaves: Map<number, Leaf>, rootLevel: number, b: Bloc
  * while everything outside the frame's wedge keeps the old clipmap's resolution for shadows and
  * skyline. Holding that target over the whole range costs tens of millions of triangles at a long
  * focal, so the budget is spent nearest first: the reach shrinks until the mesh fits, then whatever
- * the reach left over buys a finer cell down to `CASTER_CELL_M`. Below that only the frame refines,
- * and only while it costs no more blocks than the caster cell would have, so it is never slower.
+ * the reach left over buys a finer cell down to `CASTER_CELL_M`. Below that only the frame refines.
+ * Every step is held to what the coarse bound with every seam balanced costs, so it is never slower.
  * Only once the reach has bottomed out does the target itself coarsen.
  */
 export function selectBlocks(opts: SelectOptions): Selection {
@@ -355,7 +355,7 @@ export function selectBlocks(opts: SelectOptions): Selection {
   };
   /** The DEM's own level: below it refining is pure interpolation. */
   const dataLevel = levelFor(opts.demCellM);
-  let minLevel = levelFor(Math.max(opts.demCellM, MESH_START_CELL_M));
+  const startLevel = levelFor(Math.max(opts.demCellM, MESH_START_CELL_M));
   /** Shadow-only blocks stop here: past it a caster is finer than the shadow map that samples it. */
   const casterLevel = levelFor(Math.max(opts.demCellM, CASTER_CELL_M));
   const budget = opts.maxTriangles ?? MAX_MESH_TRIANGLES;
@@ -370,52 +370,64 @@ export function selectBlocks(opts: SelectOptions): Selection {
         }
       : coarse;
   const role = classifier(opts, tight);
-  const walk = (reach: number, target: number, floor: number) => {
-    const l = descend(rootLevel, floor, Math.max(floor, casterLevel), role, target, reach);
-    balance(l, rootLevel, role);
-    return l;
-  };
-  const fits = (l: Map<number, Leaf>) => l.size * TRIANGLES_PER_BLOCK <= budget;
-  let targetRad = opts.view ? Math.min(opts.view.targetRad, COARSE_TARGET_RAD) : COARSE_TARGET_RAD;
-  let reachM = opts.rangeM;
-  let leaves = walk(reachM, targetRad, minLevel);
-  // Halve the reach until the mesh fits, then bisect back up for what the budget really affords.
-  while (!fits(leaves) && reachM > MIN_MESH_REACH_M) {
-    reachM = Math.max(MIN_MESH_REACH_M, reachM / 2);
-    leaves = walk(reachM, targetRad, minLevel);
-  }
-  for (let i = 0, hi = Math.min(opts.rangeM, reachM * 2); i < 3 && fits(leaves) && reachM < opts.rangeM; i++) {
-    const mid = (reachM + hi) / 2;
-    const wider = walk(mid, targetRad, minLevel);
-    if (fits(wider)) {
-      reachM = mid;
-      leaves = wider;
-    } else hi = mid;
-  }
-  // Reach is never traded back for cell size: this only spends what the reach ladder left over.
-  while (fits(leaves) && minLevel > Math.max(dataLevel, casterLevel)) {
-    const finer = walk(reachM, targetRad, minLevel - 1);
-    if (!fits(finer)) break;
-    minLevel--;
-    leaves = finer;
-  }
-  let fineCap = 0;
-  if (opts.view && detail && fits(leaves) && minLevel > dataLevel && minLevel === casterLevel) {
-    // Past the caster cell the frame only spends what the tight bound and the frame-only ring saved, so it is never slower.
-    const plain = descend(rootLevel, minLevel, minLevel, classifier(opts, coarse), targetRad, reachM);
-    balance(plain, rootLevel, role, true);
-    fineCap = Math.min(plain.size, Math.floor(budget / TRIANGLES_PER_BLOCK));
-    while (minLevel > dataLevel) {
-      const finer = walk(reachM, targetRad, minLevel - 1);
-      if (finer.size > fineCap) break;
+  const walkWith =
+    (r: (b: BlockId) => BlockRole, all: boolean) =>
+    (reach: number, target: number, floor: number, casterFloor = Math.max(floor, casterLevel)) => {
+      const l = descend(rootLevel, floor, casterFloor, r, target, reach);
+      balance(l, rootLevel, r, all);
+      return l;
+    };
+  const walk = walkWith(role, false);
+  const budgetBlocks = Math.floor(budget / TRIANGLES_PER_BLOCK);
+  const startRad = opts.view ? Math.min(opts.view.targetRad, COARSE_TARGET_RAD) : COARSE_TARGET_RAD;
+  const ladder = (w: typeof walk, cap: number) => {
+    const fits = (l: Map<number, Leaf>) => l.size <= cap;
+    let reachM = opts.rangeM;
+    let minLevel = startLevel;
+    let leaves = w(reachM, startRad, minLevel);
+    // Halve the reach until the mesh fits, then bisect back up for what the budget really affords.
+    while (!fits(leaves) && reachM > MIN_MESH_REACH_M) {
+      reachM = Math.max(MIN_MESH_REACH_M, reachM / 2);
+      leaves = w(reachM, startRad, minLevel);
+    }
+    for (let i = 0, hi = Math.min(opts.rangeM, reachM * 2); i < 3 && fits(leaves) && reachM < opts.rangeM; i++) {
+      const mid = (reachM + hi) / 2;
+      const wider = w(mid, startRad, minLevel);
+      if (fits(wider)) {
+        reachM = mid;
+        leaves = wider;
+      } else hi = mid;
+    }
+    // Reach is never traded back for cell size: this only spends what the reach ladder left over.
+    while (fits(leaves) && minLevel > Math.max(dataLevel, casterLevel)) {
+      const finer = w(reachM, startRad, minLevel - 1);
+      if (!fits(finer)) break;
       minLevel--;
       leaves = finer;
     }
-  }
-  // Only once the reach has bottomed out does the target itself give way.
-  while (!fits(leaves) && targetRad < COARSE_TARGET_RAD) {
-    targetRad = Math.min(COARSE_TARGET_RAD, targetRad * 2);
-    leaves = walk(reachM, targetRad, minLevel);
+    // Only once the reach has bottomed out does the target itself give way.
+    let targetRad = startRad;
+    while (!fits(leaves) && targetRad < COARSE_TARGET_RAD) {
+      targetRad = Math.min(COARSE_TARGET_RAD, targetRad * 2);
+      leaves = w(reachM, targetRad, minLevel);
+    }
+    return { leaves, reachM, minLevel, targetRad };
+  };
+  // The coarse bound with every seam balanced is what the view used to cost; nothing here may cost more.
+  const fineCap = opts.view ? ladder(walkWith(classifier(opts, coarse), true), budgetBlocks).leaves.size : budgetBlocks;
+  const cap = Math.min(budgetBlocks, fineCap);
+  const picked = ladder(walk, cap);
+  const { reachM, targetRad } = picked;
+  let { leaves, minLevel } = picked;
+  const casterFloor = Math.max(minLevel, casterLevel);
+  if (opts.view && detail && targetRad === startRad && leaves.size <= cap) {
+    // Past the caster floor only the frame refines, on what the tight bound and the frame-only ring saved.
+    while (minLevel > dataLevel) {
+      const finer = walk(reachM, targetRad, minLevel - 1, casterFloor);
+      if (finer.size > cap) break;
+      minLevel--;
+      leaves = finer;
+    }
   }
   const byLevel = new Map<number, BlockId[]>();
   for (const { level, ix, iy } of leaves.values()) {
