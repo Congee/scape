@@ -5,9 +5,11 @@ import { registerLocalPmtiles } from '@data/pmtiles';
 import { useMapStatus } from '@state/mapStatus';
 import { useOffline } from '@state/offline';
 import { settingsStore, useSettings, type Settings } from '@state/settings';
+import { OrbitPivot, useUi } from '@state/ui';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 const LIGHT_LABEL: Record<LightMode, string> = { [LightMode.Auto]: 'Sun by day, moon by night', [LightMode.Sun]: 'Sun only', [LightMode.Moon]: 'Moon only' };
+const ORBIT_LABEL: Record<OrbitPivot, string> = { [OrbitPivot.Off]: 'Off', [OrbitPivot.Target]: 'Around the target', [OrbitPivot.Camera]: 'Around the camera' };
 const GROUPS: BasemapGroup[] = [BasemapGroup.Vector, BasemapGroup.Raster, BasemapGroup.Downloaded, BasemapGroup.Custom];
 
 export function LayersPanel() {
@@ -24,6 +26,9 @@ export function LayersPanel() {
   const showShadow = useSettings((s) => s.showShadow);
   const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
   const lightSource = useSettings((s) => s.lightSource);
+  const orbit = useUi((s) => s.orbit);
+  const orbitSpin = useUi((s) => s.orbitSpin);
+  const setOrbit = useUi((s) => s.setOrbit);
 
   const addUrl = () => {
     const u = url.trim();
@@ -144,6 +149,22 @@ export function LayersPanel() {
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
       <Toggle k="showHillshade" label="Hillshade" />
       <Toggle k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)" />
+      <label className="toggle">
+        <span>Orbit</span>
+        <select aria-label="Orbit the 3D map" value={orbit} onChange={(e) => setOrbit(e.target.value as OrbitPivot, true)}>
+          {Object.values(OrbitPivot).map((o) => (
+            <option key={o} value={o}>
+              {ORBIT_LABEL[o]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {orbit !== OrbitPivot.Off && (
+        <label className="toggle">
+          <input type="checkbox" checked={orbitSpin} onChange={(e) => setOrbit(orbit, e.target.checked)} />
+          <span>Turn slowly (stops when you grab the map)</span>
+        </label>
+      )}
       <Toggle k="terrainHorizon" label="Terrain horizon: skyline on the chart, rise and set behind terrain" />
       <label className="toggle">
         <span>Horizon range</span>

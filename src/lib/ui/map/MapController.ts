@@ -42,7 +42,7 @@ import { modelsStore } from '@state/models';
 import { currentBasemap, offlineStore } from '@state/offline';
 import { settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
-import { MarkersView, PanelTab, uiStore } from '@state/ui';
+import { OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { paintHeat } from './heat';
@@ -95,6 +95,12 @@ const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: 
 const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
 const PROBE_COLOR = '#ffc94a';
+const MAX_PITCH = 60;
+// Short of 90° so the ground and the lines drawn on it stay in view.
+const ORBIT_MAX_PITCH = 80;
+const ORBIT_PITCH = 65;
+const ORBIT_DEG_PER_S = 6;
+const ORBIT_STEP_DEG = 90;
 const FOV_COLOR = '#5aa9ff';
 const REGION_COLOR = '#5aa9ff';
 const DEFAULT_FOV_RANGE_M = 5_000;
@@ -163,7 +169,7 @@ export class MapController {
       style: styleFor(bm),
       center: [w.view.center.lng, w.view.center.lat],
       zoom: w.view.zoom,
-      maxPitch: 60,
+      maxPitch: MAX_PITCH,
       attributionControl: { compact: true }
     });
     this.map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
@@ -212,6 +218,12 @@ export class MapController {
       o.setDraft(bbox);
       o.setDrawing(false);
     });
+    for (const type of ['mousedown', 'touchstart', 'wheel'] as const) {
+      this.map.on(type, () => {
+        const u = uiStore.getState();
+        if (u.orbit !== OrbitPivot.Off && u.orbitSpin) u.setOrbit(u.orbit, false);
+      });
+    }
     window.addEventListener('keydown', this.onKeyDown);
     this.unsubs.push(() => window.removeEventListener('keydown', this.onKeyDown));
 
@@ -240,7 +252,8 @@ export class MapController {
       this.updateRay();
       this.renderAll();
     });
-    this.map.on('moveend', () => {
+    this.map.on('moveend', (e) => {
+      if ((e as { orbit?: boolean }).orbit) this.orbitStep();
       this.updateRay();
       this.renderAll();
       this.scheduleShadows();
@@ -323,6 +336,9 @@ export class MapController {
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
       alignStore.subscribe((st) => [st.result, st.opacity] as const, () => this.renderHeat(), { equalityFn: shallow }),
       alignStore.subscribe((st) => st.candidate, (c) => this.syncCandidate(c)),
+      uiStore.subscribe((st, prev) => {
+        if (st.orbit !== prev.orbit || st.orbitSpin !== prev.orbitSpin) this.applyOrbit();
+      }),
       lightProbeStore.subscribe((st, prev) => {
         if (st.point !== prev.point) this.syncProbe(st.point);
         if (st.picking !== prev.picking) this.map.getCanvas().style.cursor = st.picking ? 'crosshair' : '';
@@ -388,6 +404,42 @@ export class MapController {
       return;
     }
     if (!this.dragging2) this.pin2.setLngLat([p.lng, p.lat]);
+  }
+
+  private orbitPivot(): LngLat {
+    const w = worldStore.getState();
+    return uiStore.getState().orbit === OrbitPivot.Target && w.pin2 ? w.pin2 : w.pin;
+  }
+
+  private orbitGroundM(): number | null {
+    const t = terrainStore.getState();
+    return uiStore.getState().orbit === OrbitPivot.Target && worldStore.getState().pin2 ? t.pin2GroundM : t.pinGroundM;
+  }
+
+  /** Tilts onto the pivot when the orbit starts, then hands over to the spin. */
+  private applyOrbit() {
+    const { orbit } = uiStore.getState();
+    if (orbit === OrbitPivot.Off) {
+      this.map.stop();
+      this.map.setCenterClampedToGround(true);
+      this.map.setMaxPitch(MAX_PITCH);
+      return;
+    }
+    const s = settingsStore.getState();
+    if (!s.terrain3d) s.update({ terrain3d: true });
+    this.map.setMaxPitch(ORBIT_MAX_PITCH);
+    const p = this.orbitPivot();
+    this.map.setCenterClampedToGround(false);
+    this.map.easeTo({ center: [p.lng, p.lat], pitch: Math.max(this.map.getPitch(), ORBIT_PITCH), duration: 800 }, { orbit: true });
+  }
+
+  private orbitStep() {
+    const { orbit, orbitSpin } = uiStore.getState();
+    if (orbit === OrbitPivot.Off || !orbitSpin || this.map.isMoving()) return;
+    const p = this.orbitPivot();
+    // The camera turns about the centre's height, which the map's own terrain sample can get far wrong at a summit.
+    this.map.jumpTo({ elevation: this.orbitGroundM() ?? this.map.queryTerrainElevation([p.lng, p.lat]) ?? 0 });
+    this.map.rotateTo(this.map.getBearing() + ORBIT_STEP_DEG, { duration: (ORBIT_STEP_DEG / ORBIT_DEG_PER_S) * 1000, easing: (t) => t, freezeElevation: true }, { orbit: true });
   }
 
   private syncProbe(p: LngLat | null) {
