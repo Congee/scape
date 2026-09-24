@@ -135,6 +135,8 @@ export const isComplete = (set: readonly MeshResult[]) => set.length > 0 && set.
 
 const setBusy = (kind: TerrainKind, on: boolean) => terrainStore.setState((st) => ({ busy: { ...st.busy, [kind]: on } }));
 
+const pointMarkers = () => markersStore.getState().markers.filter((m) => m.showInViewfinder);
+
 /** Keeps pin elevations, the sightline profile and the horizon sweep in step with the world. */
 export function startTerrainSync(): () => void {
   const worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' });
@@ -145,6 +147,15 @@ export function startTerrainSync(): () => void {
   const timers: Partial<Record<TerrainKind, ReturnType<typeof setTimeout>>> = {};
 
   const post = (req: TerrainRequest) => worker.postMessage(req);
+
+  const keyOf: Record<TerrainKind, () => string> = {
+    Elevation: () => elevationKeyFor(worldStore.getState(), settingsStore.getState()),
+    Profile: () => profileKeyFor(worldStore.getState(), settingsStore.getState()),
+    Horizon: () => horizonKeyFor(worldStore.getState(), settingsStore.getState()),
+    View: () => viewKeyFor(worldStore.getState(), settingsStore.getState(), viewfinderStore.getState().window),
+    Mesh: () => meshKeyFor(worldStore.getState(), settingsStore.getState(), viewfinderStore.getState().meshWindow),
+    Points: () => (settingsStore.getState().terrain && viewfinderStore.getState().window ? pointMarkers().map((m) => `${m.id}@${k5(m)}`).join(';') : '')
+  };
 
   worker.addEventListener('message', (e: MessageEvent<TerrainResponse>) => {
     const res = e.data;
@@ -188,8 +199,7 @@ export function startTerrainSync(): () => void {
 
   const syncElevation = () => {
     const w = worldStore.getState();
-    const s = settingsStore.getState();
-    const key = elevationKeyFor(w, s);
+    const key = keyOf.Elevation();
     if (key === pending.Elevation) return;
     pending.Elevation = key;
     if (!key) {
@@ -202,8 +212,7 @@ export function startTerrainSync(): () => void {
 
   const syncProfile = () => {
     const w = worldStore.getState();
-    const s = settingsStore.getState();
-    const key = profileKeyFor(w, s);
+    const key = keyOf.Profile();
     if (key === pending.Profile) return;
     pending.Profile = key;
     if (!key || !w.pin2) {
@@ -226,7 +235,7 @@ export function startTerrainSync(): () => void {
   const syncHorizon = () => {
     const w = worldStore.getState();
     const s = settingsStore.getState();
-    const key = horizonKeyFor(w, s);
+    const key = keyOf.Horizon();
     if (key === pending.Horizon) return;
     pending.Horizon = key;
     if (!key) {
@@ -240,9 +249,8 @@ export function startTerrainSync(): () => void {
 
   const syncView = () => {
     const w = worldStore.getState();
-    const s = settingsStore.getState();
     const win = viewfinderStore.getState().window;
-    const key = viewKeyFor(w, s, win);
+    const key = keyOf.View();
     if (key === pending.View) return;
     pending.View = key;
     if (!key || !win) {
@@ -256,9 +264,8 @@ export function startTerrainSync(): () => void {
 
   const syncMesh = () => {
     const w = worldStore.getState();
-    const s = settingsStore.getState();
     const win = viewfinderStore.getState().meshWindow;
-    const key = meshKeyFor(w, s, win);
+    const key = keyOf.Mesh();
     if (key === pending.Mesh) return;
     const moved = !key || !pending.Mesh.startsWith(`${meshAnchorFor(w)}|`);
     pending.Mesh = key;
@@ -277,9 +284,8 @@ export function startTerrainSync(): () => void {
   };
 
   const syncPoints = () => {
-  const s = settingsStore.getState();
-  const ms = markersStore.getState().markers.filter((m) => m.showInViewfinder);
-  const key = s.terrain && viewfinderStore.getState().window ? ms.map((m) => `${m.id}@${k5(m)}`).join(';') : '';
+  const ms = pointMarkers();
+  const key = keyOf.Points();
   if (key === pending.Points) return;
   pending.Points = key;
   if (!key) {
@@ -294,6 +300,8 @@ export function startTerrainSync(): () => void {
 
   // Cheap lookups trail the pin closely; the sweeps wait until the pin settles.
   const schedule = (kind: TerrainKind, fn: () => void, waitMs: number) => {
+    // A clock tick changes no key; arming nothing keeps an idle page timer-free.
+    if (keyOf[kind]() === pending[kind]) return;
     clearTimeout(timers[kind]);
     timers[kind] = setTimeout(fn, waitMs);
   };

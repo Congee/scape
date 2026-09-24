@@ -47,11 +47,19 @@ export function startDayDataSync(): () => void {
     dayDataStore.setState({ loading: false, events: e.data.events, curve: e.data.curve, milkyWay: e.data.milkyWay });
   });
 
-  const compute = () => {
-    last = performance.now();
+  let day: { tz: string; start: number; end: number; b: ReturnType<typeof dayBounds> } | null = null;
+  const boundsOf = (time: number, tz: string) => {
+    if (!day || day.tz !== tz || time < day.start || time >= day.end) {
+      const b = dayBounds(new Date(time), tz);
+      day = { tz, start: b.start.getTime(), end: b.end.getTime(), b };
+    }
+    return day.b;
+  };
+
+  const snapshot = () => {
     const w = worldStore.getState();
     const s = settingsStore.getState();
-    const b = dayBounds(new Date(w.time), w.tz);
+    const b = boundsOf(w.time, w.tz);
     // Only a horizon swept for the current pin may shape the events; a stale one is left out.
     const t = terrainStore.getState();
     const hk = horizonKeyFor(w, s);
@@ -59,6 +67,12 @@ export function startDayDataSync(): () => void {
     const milkyWay = { sunMaxAltDeg: s.mwSunMaxAlt, gcMinAltDeg: s.mwGcMinAlt, moonRule: s.mwMoonRule, moonMaxIllumination: s.mwMoonMaxIllum };
     const groundM = t.pinGroundM === null || Number.isNaN(t.pinGroundM) ? null : Math.round(t.pinGroundM);
     const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, groundM, w.tz, b.isoDate, s.goldenAltitude, ...Object.values(milkyWay), horizon ? hk : '-'].join('|');
+    return { w, s, b, horizon, milkyWay, groundM, key };
+  };
+
+  const compute = () => {
+    last = performance.now();
+    const { w, s, b, horizon, milkyWay, groundM, key } = snapshot();
     if (key === dayDataStore.getState().key) return;
     seq++;
     const startMs = b.start.getTime();
@@ -80,6 +94,8 @@ export function startDayDataSync(): () => void {
 
   // Throttle with a trailing call so pin drags recompute smoothly but not per frame.
   const schedule = () => {
+    // Within the day a clock tick changes no key; arm nothing.
+    if (snapshot().key === dayDataStore.getState().key) return;
     clearTimeout(timer);
     const wait = Math.max(0, MIN_INTERVAL_MS - (performance.now() - last));
     timer = setTimeout(compute, wait);
