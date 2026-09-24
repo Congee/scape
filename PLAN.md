@@ -545,8 +545,6 @@ visible errors are design choices, each waiting on a decision (recommendation in
 
 **Known code glitches (2026-09-24).**
 
-- Path hour labels can cover the Sun/Moon disc at wide focal lengths (the 24 mm moon check now
-  hides the overlay). Skip a label overlapping a disc, nudge it off, or keep?
 - Smoke scripts pass `--cdp` but no `AGENT_BROWSER_SESSION`, so parallel agents share the default
   session and can drive each other's tabs; models-p2 also inherits the saved camera and its first
   building lookup after reload can time out at 15 s (set camera and warm up first).
