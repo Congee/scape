@@ -792,4 +792,33 @@ describe('the frame elevation band', () => {
     expect(down).toBeGreaterThan(edge(selectBlocks({ ...opts, view: view(24, 24, 36) })) + 5);
     expect(down).toBeGreaterThan(v.hfovDeg);
   });
+
+  describe('the ground under the eye', () => {
+    // A standing eye 1.6 m over a plain: the near ground sits a couple of degrees down.
+    const opts = { rangeM: RANGE, demCellM: DEM, heightBoundM: plain(1000), eyeM: 1001.6 };
+    const nearEl = Math.atan2(-1.6, blockSideM(0));
+    const area = (s: ReturnType<typeof selectBlocks>) => allBlocks(s).reduce((a, b) => a + blockSideM(b.level) ** 2, 0);
+
+    it('stops refining the eye chain when a raised frame cannot see the ground at its feet', () => {
+      const v = view(600, 36, 24, 5);
+      const held = selectBlocks({ ...opts, view: v });
+      const freed = selectBlocks({ ...opts, view: v, nearGroundElRad: nearEl });
+      expect(freed.blocks).toBeLessThan(held.blocks);
+      // Pinned: the saving never buys a finer or longer mesh, which would change the picture.
+      expect(freed.reachM).toBe(held.reachM);
+      expect(freed.minCellM).toBe(held.minCellM);
+      expect(area(freed)).toBeCloseTo((BLOCKS_PER_SIDE * blockSideM(ROOT)) ** 2, -3);
+    });
+
+    it('keeps the eye chain when the near ground is in the frame or unknown', () => {
+      for (const [v, el] of [
+        [view(600, 36, 24, -20), nearEl],
+        [view(600, 36, 24, 5), Infinity]
+      ] as const) {
+        const held = selectBlocks({ ...opts, view: v });
+        const same = selectBlocks({ ...opts, view: v, nearGroundElRad: el });
+        expect(same.levels).toEqual(held.levels);
+      }
+    });
+  });
 });
