@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Terrain drag smoke: CPU, mesh rebuilds, frame pacing and holes over an aim drag, plus settled pictures against a baseline.
-# Usage: scripts/smoke/terrain-drag.sh [dev-port] [cdp] [shot-dir] [baseline-dir|-] [gpu-lock-dir|-] [quick|drag|stills] [scene[-mm],...]
+# Usage: scripts/smoke/terrain-drag.sh [dev-port] [cdp] [shot-dir] [baseline-dir|-] [gpu-lock-dir|-] [quick|drag|bare|stills] [scene[-mm],...]
 # Needs a dev server on the port and a background Brave with remote debugging on the CDP port.
 set -uo pipefail
 

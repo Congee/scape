@@ -1,14 +1,16 @@
 // Terrain drag smoke: CPU per thread, mesh rebuilds and frame pacing over a scripted aim drag, holes mid-drag, and settled pictures against a baseline.
 /* oxlint-disable no-await-in-loop -- smoke steps run one after another */
-// Usage: bun scripts/smoke/terrain-drag.ts <cdp> <dev-port> <shot-dir> [baseline-dir|-] [gpu-lock-dir|-] [quick|drag|stills] [scene[-mm],...]
-import { existsSync, mkdirSync, rmdirSync } from 'node:fs';
+// Usage: bun scripts/smoke/terrain-drag.ts <cdp> <dev-port> <shot-dir> [baseline-dir|-] [gpu-lock-dir|-] [quick|drag|bare|stills] [scene[-mm],...]
+import { existsSync, mkdirSync, rmdirSync, writeFileSync } from 'node:fs';
 import { Tab } from './cdp';
 
 const [cdp = '9408', port = '5408', shots = '/tmp/terrain-drag', baseline = '-', lock = '-', mode = '', only = ''] = process.argv.slice(2);
 const BASE = `http://localhost:${port}`;
 const QUICK = mode === 'quick';
 const DRAG = mode !== 'stills';
-const STILLS = mode !== 'drag';
+// The drag alone, without profiler, screenshots or per-step evals: the harness's own renderer cost.
+const BARE = mode === 'bare';
+const STILLS = mode !== 'drag' && !BARE;
 const ONLY = only ? only.split(',') : [];
 mkdirSync(shots, { recursive: true });
 
@@ -176,7 +178,8 @@ type Cpu = { thread: string; ms: number; top: string; incl: string };
 /** Entry points whose inclusive time says which job a thread spent its time on. */
 const ENTRIES = ['mesh', 'view', 'horizon', 'buildBlock', 'joinBlocks', 'selectBlocks', 'buildDetailBound', 'sweepView', 'occludes', 'PrismOccluder', 'MeshOccluder', 'occluder', 'prismTiles', 'buildPrisms', 'sync', 'upload', 'drawSceneGl', 'drawOverlay', 'frame', 'tick', 'render', 'performWorkUntilDeadline'];
 /** Sampling profiles of the page and every worker over `fn`: busy ms per thread and its hottest functions. */
-async function profiled(fn: () => Promise<void>): Promise<Cpu[]> {
+async function profiled(fn: () => Promise<void>, tag: string): Promise<Cpu[]> {
+  if (BARE) return fn().then(() => []);
   const sessions: [string | undefined, string][] = [[undefined, 'main'], ...tab.workerSessions().map(([s, u]): [string, string] => [s, u.split('/').pop()?.split('?')[0] ?? u])];
   for (const [s] of sessions) {
     await tab.send('Profiler.enable', {}, s);
@@ -187,6 +190,7 @@ async function profiled(fn: () => Promise<void>): Promise<Cpu[]> {
   const out: Cpu[] = [];
   for (const [s, name] of sessions) {
     const { profile } = (await tab.send('Profiler.stop', {}, s)) as { profile: { nodes: { id: number; callFrame: { functionName: string }; children?: number[] }[]; samples: number[]; timeDeltas: number[] } };
+    writeFileSync(`${shots}/${tag}-${name}.cpuprofile`, JSON.stringify(profile));
     const fnOf = new Map(profile.nodes.map((n) => [n.id, n.callFrame.functionName || '(anon)']));
     const parent = new Map<number, number>();
     for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
@@ -242,7 +246,7 @@ async function drag(f: { x: number; y: number; w: number; h: number }, midShots:
     const p = at(t);
     if (!p.held) await mouse('mouseMoved', p.x, p.y);
     else if (shot < midShots.length && Math.floor(t / 1000) === shot + 1) await tab.shot(midShots[shot++]);
-    if (!holeShot0 && (await tab.eval<number>('window.__scape.prism?.terrain?.levels ?? 0')) === 0) {
+    if (!BARE && !holeShot0 && (await tab.eval<number>('window.__scape.prism?.terrain?.levels ?? 0')) === 0) {
       holeShot0 = true;
       await tab.shot(holeShot);
     }
@@ -289,7 +293,7 @@ try {
       const frame = await tab.eval<{ x: number; y: number; w: number; h: number }>('window.__td.frame()');
       const c0 = await tab.eval<{ meshReq: number; meshRes: number; viewReq: number; blocks: number; reused: number; cacheMB: number }>('(({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }) => ({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }))(window.__td)');
       const a0 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.prism.cam)');
-      const mid = [1, 2, 3].map((i) => `${shots}/mid-${s}-${f}-${i}.png`);
+      const mid = (BARE ? [] : [1, 2, 3]).map((i) => `${shots}/mid-${s}-${f}-${i}.png`);
       const p0 = await processCpu();
       const w0 = performance.now();
       let rec = { rafP50: 0, rafP95: 0, frames: 0, draws: 0, holes: 0, minLevels: 0, gpuP50: 0, gpuP95: 0 };
@@ -297,7 +301,7 @@ try {
         await tab.eval('window.__td.start()');
         await drag(frame, mid, `${shots}/hole-${s}-${f}.png`);
         rec = await tab.eval('window.__td.stop()');
-      });
+      }, `profile-${s}-${f}`);
       const wall = performance.now() - w0;
       const p1 = await processCpu();
       const delta = (type: string) => Math.max(0, ...p1.filter((p) => p.type === type).map((p) => p.cpuTime - (p0.find((q) => q.id === p.id)?.cpuTime ?? 0)));
