@@ -23,3 +23,9 @@ export function bodyVisible(b: SkyBody, c: { showSun: boolean; showMoon: boolean
 export function makeObserver(p: LngLat, heightM = 0): Observer {
   return new Observer(p.lat, p.lng, heightM);
 }
+
+/** Observer height above sea level for a site; unknown ground is sea level, and astronomy-engine's atmosphere stops at −500 m. */
+export function siteHeightM(groundM: number | null, aboveGroundM: number): number {
+  const g = groundM === null || Number.isNaN(groundM) ? 0 : Math.max(groundM, -500);
+  return g + aboveGroundM;
+}

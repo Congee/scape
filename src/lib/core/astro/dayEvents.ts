@@ -44,7 +44,7 @@ export interface DayEventOptions {
   goldenAltitude?: number;
   /** Sun altitude that bounds the blue hour on the daylight side, degrees; civil dawn/dusk bounds the other. */
   blueAltitude?: number;
-  /** Observer height above local ground, metres; lowers the apparent horizon. */
+  /** Eye height above local ground, metres; dips the horizon as over a flat plateau, refraction scaled to the ground's air density (astronomy-engine). */
   heightAboveGroundM?: number;
 }
 

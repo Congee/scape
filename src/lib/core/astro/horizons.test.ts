@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeObserver, SkyBody } from './bodies';
+import { makeObserver, siteHeightM, SkyBody } from './bodies';
 import { dayEvents, EventKind } from './dayEvents';
 import { position } from './positions';
 import { applyStar, horizontalOf, starFrame } from './skyFrame';
@@ -59,5 +59,25 @@ describe('rise/set vs JPL Horizons', () => {
     const ev = dayEvents(makeObserver({ lat, lng }), t - 6 * 3600e3, t + 6 * 3600e3).find((e) => e.body === body && e.kind === kind);
     expect(ev).toBeDefined();
     expect(Math.abs(ev!.time - t)).toBeLessThan(5000);
+  });
+});
+
+// Horizons AIRLESS upper limb at 46° N 7.75° E, 3000 m, crossing −dip(1.6 m) − 34′·ρ(3000 m) = −0.4643°.
+describe('rise/set on a 3000 m plateau vs JPL Horizons', () => {
+  const obs = makeObserver({ lat: 46, lng: 7.75 }, siteHeightM(3000, 1.6));
+  it.each([
+    [EventKind.Rise, '2026-06-21T03:38:55.596Z'],
+    [EventKind.Set, '2026-06-21T19:22:41.659Z']
+  ] as const)('sun %s within 2 s', (kind, iso) => {
+    const t = Date.parse(iso);
+    const ev = dayEvents(obs, t - 6 * 3600e3, t + 6 * 3600e3, { heightAboveGroundM: 1.6 }).find((e) => e.body === SkyBody.Sun && e.kind === kind);
+    expect(ev).toBeDefined();
+    expect(Math.abs(ev!.time - t)).toBeLessThan(2000);
+  });
+
+  it('finds rise/set below sea level', () => {
+    const dead = makeObserver({ lat: 31.5, lng: 35.5 }, siteHeightM(-600, 1.6));
+    const t = Date.parse('2026-06-21T12:00:00Z');
+    expect(dayEvents(dead, t - 12 * 3600e3, t + 12 * 3600e3, { heightAboveGroundM: 1.6 }).some((e) => e.kind === EventKind.Set)).toBe(true);
   });
 });

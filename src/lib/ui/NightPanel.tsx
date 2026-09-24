@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { makeObserver, SkyBody } from '@core/astro/bodies';
+import { makeObserver, siteHeightM, SkyBody } from '@core/astro/bodies';
 import { dayEvents, EventKind, type DayEvent } from '@core/astro/dayEvents';
 import { activeShowers, radiantHorizontal, upcomingPeaks, type ShowerStatus } from '@core/astro/meteors';
 import { milkyWayStatus, MoonRule } from '@core/astro/milkyWay';
@@ -17,7 +17,7 @@ import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { useDayData } from '@state/dayData';
 import { sensorById, useGear } from '@state/gear';
 import { settingsStore, useSettings } from '@state/settings';
-import { horizonKeyFor, targetAngleFor, useTerrain } from '@state/terrain';
+import { EYE_HEIGHT_M, horizonKeyFor, targetAngleFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
 
@@ -55,12 +55,13 @@ interface Tonight {
 
 // The panel re-renders on every clock tick; the searches only depend on the night, not the instant.
 let nightCache: Tonight | null = null;
-function tonightFor(obs: ReturnType<typeof makeObserver>, time: number, tz: string, pin: LngLat, heightM: number, goldenAltitude: number): Tonight {
+function tonightFor(time: number, tz: string, pin: LngLat, groundM: number | null, eyeM: number, goldenAltitude: number): Tonight {
   const startMs = withLocalTime(new Date(time), NOON_S, tz).getTime();
   const endMs = withLocalTime(addLocalDays(new Date(time), 1, tz), NOON_S, tz).getTime();
-  const key = [startMs, pin.lat.toFixed(4), pin.lng.toFixed(4), heightM, goldenAltitude].join('|');
+  const g = groundM === null || Number.isNaN(groundM) ? null : Math.round(groundM);
+  const key = [startMs, pin.lat.toFixed(4), pin.lng.toFixed(4), g, eyeM, goldenAltitude].join('|');
   if (!nightCache || nightCache.key !== key) {
-    nightCache = { key, startMs, endMs, events: dayEvents(obs, startMs, endMs, { goldenAltitude, heightAboveGroundM: heightM }) };
+    nightCache = { key, startMs, endMs, events: dayEvents(makeObserver(pin, siteHeightM(g, eyeM)), startMs, endMs, { goldenAltitude, heightAboveGroundM: eyeM }) };
   }
   return nightCache;
 }
@@ -130,7 +131,7 @@ export function NightPanel() {
   const setTime = worldStore.getState().setTime;
   const comp = compositionStore.getState().update;
 
-  const tonight = tonightFor(obs, time, tz, pin, pinHeightM, s.goldenAltitude);
+  const tonight = tonightFor(time, tz, pin, pinGroundM, pinHeightM + EYE_HEIGHT_M, s.goldenAltitude);
   const night = nightWindow(tonight.events, time);
   const hasNight = night.endMs > night.startMs;
   const at = (body: SkyBody, kind: EventKind) => {

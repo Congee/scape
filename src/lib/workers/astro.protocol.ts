@@ -7,6 +7,9 @@ import type { HorizonProfile } from '@core/terrain/horizon';
 export interface AstroRequest {
   id: number;
   pin: LngLat;
+  /** Sampled ground under the pin, metres; null when unknown. */
+  groundM: number | null;
+  /** Eye height above that ground, metres. */
   heightAboveGroundM: number;
   startMs: number;
   endMs: number;

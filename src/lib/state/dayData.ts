@@ -5,7 +5,7 @@ import type { MilkyWayWindow } from '@core/astro/milkyWay';
 import { dayBounds } from '@core/time/localDay';
 import type { AstroRequest, AstroResponse } from '@workers/astro.protocol';
 import { settingsStore } from './settings';
-import { horizonKeyFor, terrainStore } from './terrain';
+import { EYE_HEIGHT_M, horizonKeyFor, terrainStore } from './terrain';
 import { worldStore } from './world';
 
 export interface DayDataState {
@@ -57,7 +57,8 @@ export function startDayDataSync(): () => void {
     const hk = horizonKeyFor(w, s);
     const horizon = hk && t.horizon && t.horizonKey === hk ? t.horizon.profile : undefined;
     const milkyWay = { sunMaxAltDeg: s.mwSunMaxAlt, gcMinAltDeg: s.mwGcMinAlt, moonRule: s.mwMoonRule, moonMaxIllumination: s.mwMoonMaxIllum };
-    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, w.tz, b.isoDate, s.goldenAltitude, ...Object.values(milkyWay), horizon ? hk : '-'].join('|');
+    const groundM = t.pinGroundM === null || Number.isNaN(t.pinGroundM) ? null : Math.round(t.pinGroundM);
+    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, groundM, w.tz, b.isoDate, s.goldenAltitude, ...Object.values(milkyWay), horizon ? hk : '-'].join('|');
     if (key === dayDataStore.getState().key) return;
     seq++;
     const startMs = b.start.getTime();
@@ -66,7 +67,8 @@ export function startDayDataSync(): () => void {
     const req: AstroRequest = {
       id: seq,
       pin: w.pin,
-      heightAboveGroundM: w.pinHeightM,
+      groundM,
+      heightAboveGroundM: w.pinHeightM + EYE_HEIGHT_M,
       startMs,
       endMs,
       goldenAltitude: s.goldenAltitude,
