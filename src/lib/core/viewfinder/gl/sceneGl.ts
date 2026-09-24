@@ -188,10 +188,29 @@ vec3 skyAt(float alt) {
   return mix(c, DUSK_GLOW, glow * 0.6);
 }
 
+/** Mirrors refractionDeg in astro/refraction.ts. */
+float refrDeg(float g) {
+  float h = max(g, -1.0);
+  return max(0.0, 1.02 / tan((h + 10.3 / (h + 5.11)) * D2R) / 60.0) * sstep(-3.0, -1.5, g);
+}
+
+/** Geometric altitude that refracts to apparent a, by Newton. */
+float geomAlt(float a) {
+  float g = a - refrDeg(a);
+  for (int i = 0; i < 2; i++) {
+    float d = 1.0 + (refrDeg(g + 0.01) - refrDeg(g - 0.01)) * 50.0;
+    g -= (g + refrDeg(g) - a) / d;
+  }
+  return g;
+}
+
 vec3 skyPixel(float alt, vec3 v, float len) {
   vec3 c0 = skyAt(alt);
   if (uHasMw == 0) return c0;
   vec3 d = v / len;
+  float ch = length(d.xy);
+  float g = geomAlt(alt) * D2R;
+  if (ch > 1e-6) d = vec3(d.xy * (cos(g) / ch), sin(g));
   vec3 q = vec3(dot(uEqj0, d), dot(uEqj1, d), dot(uEqj2, d));
   float fu = 0.5 - atan(q.y, q.x) / (2.0 * PI);
   fu -= floor(fu);

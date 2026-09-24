@@ -3,7 +3,7 @@ import { shallow } from 'zustand/shallow';
 import { BODIES, bodyVisible, makeObserver, SkyBody } from '@core/astro/bodies';
 import type { PreparedConstellations } from '@core/astro/constellations';
 import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
-import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
+import { applyStar, enuToEqj, horizontalOf, poleEnu, refractEnu, starFrame, type StarFrame } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { lightAt, type Light } from '@core/astro/lightSource';
 import { moonView } from '@core/astro/moonSim';
@@ -52,6 +52,7 @@ import { CATEGORY_COLORS } from '../map/overlays';
 const D2R = Math.PI / 180;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
+const LIFT = new Float64Array(3);
 const MAX_COLUMNS = 2400;
 /** Sun travel that may shift the sky colours and the shading by a step; about 12 s of clock. */
 const SUN_STEP_DEG = 0.05;
@@ -735,8 +736,8 @@ export class ViewfinderController {
   }
 
   /**
-   * Frame position of a local direction. Low directions take the exact path with refraction;
-   * the rest project straight through the camera basis, which is what makes 9k stars cheap.
+   * Frame position of a local direction. Low directions take the exact path; the rest, refracted,
+   * project straight through the camera basis, which is what makes 9k stars cheap.
    */
   private placeEnu(sc: Scene, e: number, n: number, u: number, slack: number): Placed | null {
     const len = Math.hypot(e, n, u);
@@ -752,12 +753,16 @@ export class ViewfinderController {
       p = this.toPx(sc, az, alt);
     } else {
       const { forward: F, right: R, up: U } = sc.basis;
-      const depth = (e * F.x + n * F.y + u * F.z) / len;
+      refractEnu(e / len, n / len, uz, LIFT);
+      const le = LIFT[0];
+      const ln = LIFT[1];
+      const lu = LIFT[2];
+      alt = Math.asin(lu) / D2R;
+      const depth = le * F.x + ln * F.y + lu * F.z;
       if (depth <= 1e-6) return null;
-      const xs = ((e * R.x + n * R.y + u * R.z) / len / depth) * sc.cam.focalMm;
-      const ys = ((e * U.x + n * U.y + u * U.z) / len / depth) * sc.cam.focalMm;
+      const xs = ((le * R.x + ln * R.y + lu * R.z) / depth) * sc.cam.focalMm;
+      const ys = ((le * U.x + ln * U.y + lu * U.z) / depth) * sc.cam.focalMm;
       p = { x: sc.frame.x + sc.frame.w / 2 + xs * sc.frame.pxPerMm, y: sc.frame.y + sc.frame.h / 2 - ys * sc.frame.pxPerMm };
-      alt = Math.asin(uz) / D2R;
     }
     if (!this.inFrame(sc, p, slack)) return null;
     let hidden = false;
@@ -798,7 +803,7 @@ export class ViewfinderController {
     return clamp(4.6 + 60 / sc.hfov, 4.5, 6.5) - 1.5 * sc.moonFactor;
   }
 
-  private drawStars(sc: Scene, M: Mat3, cat: StarCatalog, names: boolean) {
+  private drawStars(sc: Scene, M: StarFrame, cat: StarCatalog, names: boolean) {
     const { ctx } = this;
     const { groups, polaris } = this.groupsFor(cat);
     const limit = this.magLimit(sc);
@@ -809,7 +814,7 @@ export class ViewfinderController {
       ctx.fillStyle = g.style;
       for (const i of g.idx) {
         if (cat.mag[i] > limit) break;
-        apply(M, cat.x[i], cat.y[i], cat.z[i], out);
+        applyStar(M, cat.x[i], cat.y[i], cat.z[i], out);
         const p = this.placeEnu(sc, out[0], out[1], out[2], 4);
         if (!p || p.hidden) continue;
         const r = starRadiusPx(cat.mag[i]);
@@ -830,7 +835,7 @@ export class ViewfinderController {
     ctx.globalAlpha = 1;
   }
 
-  private drawConstellations(sc: Scene, M: Mat3, pc: PreparedConstellations) {
+  private drawConstellations(sc: Scene, M: StarFrame, pc: PreparedConstellations) {
     const { ctx } = this;
     const a = new Float64Array(3);
     const b = new Float64Array(3);
@@ -840,8 +845,8 @@ export class ViewfinderController {
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let s = 0; s < seg.length; s += 6) {
-      apply(M, seg[s], seg[s + 1], seg[s + 2], a);
-      apply(M, seg[s + 3], seg[s + 4], seg[s + 5], b);
+      applyStar(M, seg[s], seg[s + 1], seg[s + 2], a);
+      applyStar(M, seg[s + 3], seg[s + 4], seg[s + 5], b);
       const p = this.placeEnu(sc, a[0], a[1], a[2], 600);
       const q = this.placeEnu(sc, b[0], b[1], b[2], 600);
       if (!p || !q || p.hidden || q.hidden) continue;
@@ -855,7 +860,7 @@ export class ViewfinderController {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       for (let i = 0; i < pc.ids.length; i++) {
-        apply(M, pc.centres[i * 3], pc.centres[i * 3 + 1], pc.centres[i * 3 + 2], a);
+        applyStar(M, pc.centres[i * 3], pc.centres[i * 3 + 1], pc.centres[i * 3 + 2], a);
         const p = this.placeEnu(sc, a[0], a[1], a[2], 0);
         if (p && !p.hidden) haloText(ctx, pc.names[i], p.x, p.y);
       }
@@ -893,8 +898,8 @@ export class ViewfinderController {
     const c = compositionStore.getState();
     const steps = clamp(Math.round(c.trailMinutes / 3), 6, 40);
     const dtMs = (c.trailMinutes * 60_000) / steps;
-    const mats: Mat3[] = [];
-    for (let k = 0; k <= steps; k++) mats.push(eqjToEnu(new Date(sc.time.getTime() + k * dtMs), sc.obs));
+    const mats: StarFrame[] = [];
+    for (let k = 0; k <= steps; k++) mats.push(starFrame(new Date(sc.time.getTime() + k * dtMs), sc.obs, mats[0]?.beta));
     const limit = Math.min(4.5, this.magLimit(sc));
     const out = new Float64Array(3);
     ctx.lineCap = 'round';
@@ -905,7 +910,7 @@ export class ViewfinderController {
       ctx.beginPath();
       let started = false;
       for (const m of mats) {
-        apply(m, cat.x[i], cat.y[i], cat.z[i], out);
+        applyStar(m, cat.x[i], cat.y[i], cat.z[i], out);
         const p = this.placeEnu(sc, out[0], out[1], out[2], 40);
         if (!p || p.hidden) {
           started = false;
@@ -921,7 +926,7 @@ export class ViewfinderController {
     ctx.globalAlpha = 1;
   }
 
-  private drawRadiants(sc: Scene, M: Mat3) {
+  private drawRadiants(sc: Scene, M: StarFrame) {
     const t = sc.time.getTime();
     const day = Math.floor(t / DAY_MS);
     if (!this.showers || this.showers.day !== day) this.showers = { day, list: activeShowers(t) };
@@ -935,7 +940,7 @@ export class ViewfinderController {
     for (const st of this.showers.list) {
       const { raDeg, decDeg } = radiantEquatorial({ ...st, daysFromPeak: (t - st.peakMs) / DAY_MS });
       const [x, y, z] = eqjVector(raDeg, decDeg);
-      apply(M, x, y, z, out);
+      applyStar(M, x, y, z, out);
       const p = this.placeEnu(sc, out[0], out[1], out[2], 20);
       if (!p) continue;
       ctx.globalAlpha = (p.hidden ? 0.35 : 0.9) * sc.night;
@@ -965,7 +970,7 @@ export class ViewfinderController {
     ctx.beginPath();
     ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
     ctx.clip();
-    const M = eqjToEnu(sc.time, sc.obs);
+    const M = starFrame(sc.time, sc.obs);
     if (c.showConstellations && sky.constellations) this.drawConstellations(sc, M, sky.constellations);
     if (c.showTrails && sky.stars) this.drawTrails(sc, sky.stars);
     if (c.showStars && sky.stars) this.drawStars(sc, M, sky.stars, c.showStarNames);
