@@ -450,3 +450,22 @@ export function groupRowsAt<T extends RowBatch & { group: Int32Array }>(batch: T
   if (hit.size === 0) return null;
   return pickRows(batch, (i) => hit.has(batch.group[i]));
 }
+
+/** Feature ids of the rows `suppressRows` would drop. */
+export function suppressedIds(batch: RowBatch & { featureId: (string | null)[] }, rings: readonly SuppressRing[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < batch.count; i++) {
+    const id = batch.featureId[i];
+    if (id !== null && rings.some((s) => inSuppressRing(s, batch.cLng[i], batch.cLat[i]))) out.push(id);
+  }
+  return out;
+}
+
+/** The z tiles a ring's bounding box touches. */
+export function suppressRingTiles(s: SuppressRing, z: number): TileCoord[] {
+  const nw = lngLatToTilePixel(s.lng0, s.lat1, z);
+  const se = lngLatToTilePixel(s.lng1, s.lat0, z);
+  const out: TileCoord[] = [];
+  for (let x = nw.x; x <= se.x; x++) for (let y = nw.y; y <= se.y; y++) out.push({ z, x, y });
+  return out;
+}

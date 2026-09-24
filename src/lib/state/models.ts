@@ -3,10 +3,11 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
 import { modelTriangles } from '@core/geo/modelPlace';
 import { modelOutlines, partsFootprint, type SavedModel } from '@core/model';
+import { drawnModel } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
 import { exportModelGlb, modelFileName } from '@core/model/share';
 import { deleteOne, listAll, putOne } from '@data/db';
-import { setBuildingModels } from './buildings';
+import { buildingHeightAt, groundUnder, setBuildingModels } from './buildings';
 
 export interface ModelsState {
   models: SavedModel[];
@@ -14,6 +15,14 @@ export interface ModelsState {
   /** Bumps on every change the renderers and workers must rebuild for. */
   rev: number;
   selectedId: string | null;
+  /** The part the map shows handles for and the nudges raise. */
+  selectedPartId: string | null;
+  /** Map taps add footprint vertices, lng/lat; null when not drawing. */
+  draft: [number, number][] | null;
+  /** Drawing squares each corner to the one before. */
+  rightAngles: boolean;
+  /** Arrow keys in the viewfinder nudge the selected model instead of aiming. */
+  adjusting: boolean;
   /** Next map click seeds a model from the Overture building under it. */
   picking: boolean;
   /** Why the last pick made no model; cleared by the next pick. */
@@ -28,7 +37,11 @@ export interface ModelsState {
   /** One model as a GLB download; throws GltfError when it has no mesh. */
   exportGlb(id: string, withParts?: boolean): { fileName: string; glb: ArrayBuffer } | null;
   select(id: string | null): void;
+  selectPart(id: string | null): void;
   setPicking(on: boolean): void;
+  setDraft(draft: [number, number][] | null): void;
+  setRightAngles(on: boolean): void;
+  setAdjusting(on: boolean): void;
 }
 
 const CHANNEL = 'scape.models';
@@ -40,6 +53,10 @@ export const modelsStore = create<ModelsState>()(
     loaded: false,
     rev: 0,
     selectedId: null,
+    selectedPartId: null,
+    draft: null,
+    rightAngles: true,
+    adjusting: false,
     picking: false,
     pickError: null,
     load: async () => {
@@ -65,17 +82,12 @@ export const modelsStore = create<ModelsState>()(
       await get().load();
       channel?.postMessage('changed');
     },
-    importDraft: async (m) => {
-      const saved = await get().save({ ...m, updatedAt: Date.now() });
-      set({ selectedId: saved.id });
-      return saved;
-    },
-    exportGlb: (id, withParts) => {
-      const m = get().models.find((x) => x.id === id);
-      return m ? { fileName: modelFileName(m), glb: exportModelGlb(m, withParts) } : null;
-    },
-    select: (selectedId) => set({ selectedId }),
-    setPicking: (picking) => set(picking ? { picking, pickError: null } : { picking })
+    select: (selectedId) => set((s) => (s.selectedId === selectedId ? {} : { selectedId, selectedPartId: null })),
+    selectPart: (selectedPartId) => set({ selectedPartId }),
+    setPicking: (picking) => set(picking ? { picking, pickError: null, draft: null } : { picking }),
+    setDraft: (draft) => set(draft ? { draft, picking: false } : { draft }),
+    setRightAngles: (rightAngles) => set({ rightAngles }),
+    setAdjusting: (adjusting) => set({ adjusting })
   }))
 );
 
@@ -83,6 +95,27 @@ export const modelsStore = create<ModelsState>()(
 channel?.addEventListener('message', () => void modelsStore.getState().load());
 
 export const useModels = modelsStore;
+
+/** Without an Overture building under the draft to copy. */
+const DRAWN_HEIGHT_M = 10;
+
+/** Saves the draft as a Drawn model standing on the DEM, as tall as the Overture building it traces, and selects its part. */
+export async function finishDraft(): Promise<SavedModel | null> {
+  const st = modelsStore.getState();
+  const draft = st.draft;
+  if (!draft || draft.length < 3) return null;
+  st.setDraft(null);
+  const pts = draft.map(([lng, lat]) => ({ lng, lat }));
+  const c = { lng: pts.reduce((a, p) => a + p.lng, 0) / pts.length, lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length };
+  const [heightM, groundM] = await Promise.all([buildingHeightAt(c).catch(() => null), groundUnder(pts).catch(() => null)]);
+  const m = drawnModel(pts, `Model ${st.models.length + 1}`, heightM ?? DRAWN_HEIGHT_M);
+  if (!m) return null;
+  m.groundM = groundM ?? NaN;
+  await modelsStore.getState().save(m);
+  modelsStore.getState().select(m.id);
+  modelsStore.getState().selectPart(m.parts![0].id);
+  return m;
+}
 
 /** A hidden model gives the Overture rows back. */
 const suppresses = (m: SavedModel) => m.visible && m.suppressOverture && m.footprint.length >= 3;

@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import type { MaskRect } from '@core/geo/shadowMask';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 
 /** Decoded tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
@@ -90,7 +90,7 @@ function ensureWorker(): Worker {
       else waiter.resolve(res);
       return;
     }
-    if (res.kind === BuildingsKind.Height || res.kind === BuildingsKind.Rows) return; // its waiter already timed out
+    if (res.kind === BuildingsKind.Height || res.kind === BuildingsKind.Rows || res.kind === BuildingsKind.Ids || res.kind === BuildingsKind.Ground) return; // its waiter already timed out
     if (res.id !== tilesId) return;
     if (res.kind === BuildingsKind.Tiles) {
       buildingsStore.setState((st) => {
@@ -170,7 +170,7 @@ interface Waiter {
 const waiters = new Map<number, Waiter>();
 
 /** One request, one response; null on a timeout or an unexpected reply. */
-function ask<T>(req: HeightAtRequest | RowsAtRequest, read: (res: BuildingsResponse) => T | null): Promise<T | null> {
+function ask<T>(req: HeightAtRequest | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest, read: (res: BuildingsResponse) => T | null): Promise<T | null> {
   return new Promise<T | null>((resolve, reject) => {
     const timer = setTimeout(() => {
       waiters.delete(req.id);
@@ -189,4 +189,14 @@ export function buildingHeightAt(p: LngLat): Promise<number | null> {
 /** Every Overture row of the building under `p`, with its ground; null when nothing stands there. */
 export function buildingRowsAt(p: LngLat): Promise<BuildingBatch | null> {
   return ask({ kind: BuildingsKind.RowsAt, id: ++seq, point: p }, (res) => (res.kind === BuildingsKind.Rows ? res.batch : null));
+}
+
+/** Overture feature ids the models hide, after the latest `setBuildingModels`; null on a timeout. */
+export function suppressedBuildingIds(): Promise<string[] | null> {
+  return ask({ kind: BuildingsKind.SuppressedIds, id: ++seq }, (res) => (res.kind === BuildingsKind.Ids ? res.ids : null));
+}
+
+/** The lowest DEM ground under `points`, metres; null on a timeout or no data. */
+export function groundUnder(points: LngLat[]): Promise<number | null> {
+  return ask({ kind: BuildingsKind.GroundAt, id: ++seq, points }, (res) => (res.kind === BuildingsKind.Ground ? res.groundM : null));
 }

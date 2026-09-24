@@ -1,6 +1,6 @@
 import type { LngLat } from '@core/geo/geodesy';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** OSM Simple 3D Buildings roof families the rasteriser draws; Other renders flat at the apex. */
@@ -67,7 +67,20 @@ export interface RowsAtRequest {
   point: LngLat;
 }
 
-export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest;
+/** Overture feature ids the current models hide, so the map can drop the same buildings. */
+export interface SuppressedIdsRequest {
+  kind: typeof BuildingsKind.SuppressedIds;
+  id: number;
+}
+
+/** The lowest ground under a drawn footprint, on the surface building bases use. */
+export interface GroundAtRequest {
+  kind: typeof BuildingsKind.GroundAt;
+  id: number;
+  points: LngLat[];
+}
+
+export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest;
 
 /** Worker name the map's mask instance runs under; it sizes its caches for the map rect. */
 export const MASK_WORKER_NAME = 'buildings-mask';
@@ -108,5 +121,7 @@ export type BuildingsResponse =
   | { kind: typeof BuildingsKind.Done; id: number; tiles: number; missing: number }
   | { kind: typeof BuildingsKind.Height; id: number; heightM: number | null }
   | { kind: typeof BuildingsKind.Rows; id: number; batch: BuildingBatch | null }
+  | { kind: typeof BuildingsKind.Ids; id: number; ids: string[] }
+  | { kind: typeof BuildingsKind.Ground; id: number; groundM: number | null }
   | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; ms: number }
   | { kind: typeof BuildingsKind.Error; id: number; error: string };

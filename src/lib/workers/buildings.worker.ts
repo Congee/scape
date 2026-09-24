@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { groundForRows, groupRowsAt, heightAtPoint, pickRows, suppressRing, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
+import { groundForRows, groupRowsAt, heightAtPoint, pickRows, suppressedIds, suppressRing, suppressRingTiles, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
 import type { LngLat } from '@core/geo/geodesy';
 import { frameOf, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
 import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStitch';
@@ -8,7 +8,7 @@ import { cubicStencilTiles, demRowAt, elevationAtCubic } from '@core/terrain/dem
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** The map's mask runs in a second instance of this module, so its caches are sized for the map rect. */
@@ -239,6 +239,26 @@ async function rowsAt(req: RowsAtRequest): Promise<void> {
   scope.postMessage({ kind: BuildingsKind.Rows, id: req.id, batch } satisfies BuildingsResponse, transfer);
 }
 
+async function hiddenIds(req: SuppressedIdsRequest): Promise<void> {
+  const tiles = new Map<string, TileCoord>();
+  for (const s of suppress) for (const t of suppressRingTiles(s, BUILDINGS_ZOOM)) tiles.set(tileKey(t.z, t.x, t.y), t);
+  const batches = await Promise.all([...tiles.values()].map((t) => fetchBuildingBatch(t)));
+  const ids = [...new Set(batches.flatMap((b) => (b ? suppressedIds(b, suppress) : [])))];
+  scope.postMessage({ kind: BuildingsKind.Ids, id: req.id, ids } satisfies BuildingsResponse);
+}
+
+async function groundAt(req: GroundAtRequest): Promise<void> {
+  const need = new Map<string, TileCoord>();
+  for (const p of req.points) for (const t of cubicStencilTiles(p.lng, p.lat, BUILDING_GROUND_ZOOM, TERRAIN_TILE_SIZE)) need.set(tileKey(t.z, t.x, t.y), t);
+  await dem.loadAll([...need.values()]);
+  let groundM: number | null = null;
+  for (const p of req.points) {
+    const g = elevationAtCubic(dem, p.lng, p.lat, BUILDING_GROUND_ZOOM);
+    if (!Number.isNaN(g) && (groundM === null || g < groundM)) groundM = g;
+  }
+  scope.postMessage({ kind: BuildingsKind.Ground, id: req.id, groundM } satisfies BuildingsResponse);
+}
+
 scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
   const req = e.data;
   const fail = (err: unknown) => {
@@ -256,6 +276,14 @@ scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
   }
   if (req.kind === BuildingsKind.RowsAt) {
     rowsAt(req).catch(fail);
+    return;
+  }
+  if (req.kind === BuildingsKind.GroundAt) {
+    groundAt(req).catch(fail);
+    return;
+  }
+  if (req.kind === BuildingsKind.SuppressedIds) {
+    hiddenIds(req).catch(fail);
     return;
   }
   if (req.kind === BuildingsKind.Mask) {

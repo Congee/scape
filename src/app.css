@@ -973,6 +973,30 @@ label.file input {
   background: var(--accent);
 }
 
+.map-vertex {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 2px solid var(--accent);
+  background: rgb(15 18 22 / 0.85);
+  cursor: grab;
+  touch-action: none;
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.35);
+}
+
+.map-vertex.first {
+  background: var(--accent);
+}
+
+/* A finger needs a bigger target than the square it sees. */
+@media (pointer: coarse) {
+  .map-vertex::after {
+    content: '';
+    position: absolute;
+    inset: -12px;
+  }
+}
+
 /* Markers */
 .marker-list li {
   display: grid;

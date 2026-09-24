@@ -30,7 +30,7 @@ import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
-import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask } from '@state/buildings';
+import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask, suppressedBuildingIds } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
@@ -44,6 +44,7 @@ import { MarkersView, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { paintHeat } from './heat';
+import { ModelDrawer } from './ModelDrawer';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 
 const EVENTS_SRC = 'sky-events';
@@ -141,6 +142,9 @@ export class MapController {
   private dragging2 = false;
   private draggingFov = false;
   private shadowTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  private drawer: ModelDrawer;
+  /** Overture feature ids a visible model stands in for. */
+  private hiddenIds: string[] = [];
 
   constructor(container: HTMLElement) {
     const w = worldStore.getState();
@@ -167,9 +171,10 @@ export class MapController {
 
     this.pin = this.makeMarker({ at: w.pin, color: PIN_COLOR, scale: 1 }, (p) => worldStore.getState().setPin(p), (d) => (this.dragging = d));
     this.syncPin2(w.pin2);
+    this.drawer = new ModelDrawer(this.map, () => [BLD_LAYER, BLD_PART_LAYER]);
 
     this.map.on('click', (e: MapMouseEvent) => {
-      if (this.drawingRegion) return;
+      if (this.drawingRegion || this.drawer.onClick(e)) return;
       const p = { lng: e.lngLat.lng, lat: e.lngLat.lat };
       const al = alignStore.getState();
       if ((al.mode === HeatMode.Align || al.mode === HeatMode.Time) && al.result && cellOf(al.result.grid, p)) return al.pick(p);
@@ -224,6 +229,7 @@ export class MapController {
       this.applyTerrain();
       this.applyNightLights();
       this.applyBuildings();
+      this.drawer.addLayers(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
       this.applyShadows();
       this.updateRay();
       this.renderAll();
@@ -238,6 +244,8 @@ export class MapController {
 
     this.unsubs.push(
       () => clearTimeout(this.shadowTimer),
+      () => this.drawer.dispose(),
+      modelsStore.subscribe((st) => st.rev, () => void this.refreshSuppression()),
       buildingsStore.subscribe((st) => st.shadowMask, () => this.paintShadowMask()),
       worldStore.subscribe(
         (st) => st.pin,
@@ -441,6 +449,8 @@ export class MapController {
 
   /** Escape leaves drawing mode and drops the half-drawn rectangle. */
   private onKeyDown = (e: KeyboardEvent) => {
+    const typing = e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]');
+    if (!typing && this.drawer.onKey(e)) return;
     if (e.key !== 'Escape' || !this.drawingRegion) return;
     if (this.drawStart) offlineStore.getState().setDraft(this.draftBefore);
     this.drawStart = null;
@@ -699,13 +709,13 @@ export class MapController {
           'source-layer': 'building',
           minzoom: BLD_MIN_ZOOM,
           // Overture replaces a building that has parts with those parts; drawing both double-draws it.
-          filter: ['all', ['!=', ['get', 'has_parts'], true], NOT_UNDERGROUND],
+          filter: this.buildingFilter(BLD_LAYER),
           paint
         },
         before
       );
       this.map.addLayer(
-        { id: BLD_PART_LAYER, type: 'fill-extrusion', source: BLD_SRC, 'source-layer': 'building_part', minzoom: BLD_MIN_ZOOM, filter: NOT_UNDERGROUND, paint },
+        { id: BLD_PART_LAYER, type: 'fill-extrusion', source: BLD_SRC, 'source-layer': 'building_part', minzoom: BLD_MIN_ZOOM, filter: this.buildingFilter(BLD_PART_LAYER), paint },
         before
       );
     } else if (!on) {
@@ -713,6 +723,21 @@ export class MapController {
     }
     this.setBasemapBuildings(!on);
     this.scheduleShadows();
+  }
+
+  /** Overture replaces a building that has parts with those parts; drawing both double-draws it. A model hides what it stands in for. */
+  private buildingFilter(layer: string): ExpressionSpecification {
+    const own: ExpressionSpecification[] = layer === BLD_LAYER ? [['!=', ['get', 'has_parts'], true], NOT_UNDERGROUND] : [NOT_UNDERGROUND];
+    return this.hiddenIds.length ? ['all', ...own, ['!', ['in', ['get', 'id'], ['literal', this.hiddenIds]]]] : ['all', ...own];
+  }
+
+  /** The worker knows which Overture rows the models suppress; the map hides the same ones. */
+  private async refreshSuppression() {
+    const ids = (await suppressedBuildingIds()) ?? this.hiddenIds;
+    if (ids.length === this.hiddenIds.length && ids.every((id, i) => id === this.hiddenIds[i])) return;
+    this.hiddenIds = ids;
+    if (!this.styleReady) return;
+    for (const id of [BLD_LAYER, BLD_PART_LAYER]) if (this.map.getLayer(id)) this.map.setFilter(id, this.buildingFilter(id));
   }
 
   /** The basemap's own extrusions are hidden, not removed: `applyRenderedHeight` still queries them. */

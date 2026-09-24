@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { at, batchOf, PIN, rect, square } from './batchFixture';
-import { groupRowsAt, heightAtPoint, pickRows, suppressRing, suppressRows } from './buildingTiles';
+import { groupRowsAt, heightAtPoint, pickRows, suppressedIds, suppressRing, suppressRingTiles, suppressRows } from './buildingTiles';
 
 const ll = (e: number, n: number): [number, number] => {
   const p = at(e, n);
@@ -66,5 +66,16 @@ describe('pickRows', () => {
     expect(none.count).toBe(0);
     expect(none.ringStart).toEqual(Int32Array.from([0]));
     expect(none.lng.length).toBe(0);
+  });
+});
+
+describe('suppressedIds', () => {
+  it('names the features a ring hides', () => {
+    const ring = suppressRing(square(0, 0, 50).map(([e, n]) => ll(e, n)));
+    expect(suppressedIds({ ...rows, featureId: ['podium', 'tower', 'crown', 'neighbour'] }, [ring])).toEqual(['podium', 'tower', 'crown']);
+  });
+  it('lists every tile a ring reaches', () => {
+    const t = suppressRingTiles(suppressRing([[-0.001, -0.001], [0.001, -0.001], [0.001, 0.001]]), 14);
+    expect(t).toHaveLength(4);
   });
 });
