@@ -5,7 +5,7 @@ import { curvatureDropM, destination, distanceM, type LngLat } from '@core/geo/g
 import type { GltfWorld } from '@core/model/gltf';
 import { geodeticToEcef } from './ecef';
 import { LOD2_REGIONS, type Lod2Region } from './regions';
-import { lod2BuildingAt, lod2Tile, lod2Triangles, placeLod2 } from './tile';
+import { lod2BuildingAt, lod2HeightAboveM, lod2Tile, lod2Triangles, placeLod2 } from './tile';
 
 const PIN: LngLat = { lng: 4.4868, lat: 51.9091 };
 const REGION: Lod2Region = { ...LOD2_REGIONS[0], groundProperty: undefined, idProperty: undefined, geoidM: 40 };
@@ -112,6 +112,31 @@ describe('lod2Tile', () => {
     expect(lod2Tile(w, transform, REGION, {}, () => 12)).toMatchObject({ datumM: 12, geoidGrid: true });
     expect(lod2Tile(w, transform, REGION)).toMatchObject({ datumM: 40, geoidGrid: false });
   });
+
+  it('falls back to the region constant for the whole tile when any vertex is off the grid', () => {
+    const a = box(90, 500, 45, 30, 0);
+    const c = box(270, 500, 45, 30, 1);
+    const { w, transform } = world([...a.pts, ...c.pts], [...a.feature, ...c.feature], [...a.idx, ...c.idx.map((i) => i + a.pts.length)]);
+    // Only the eastern box is covered, as on a coast next to 999 nodes.
+    const geoid = (_: number, lng: number) => {
+      if (lng < PIN.lng) throw new Error('No geoid data');
+      return 12;
+    };
+    const t = lod2Tile(w, transform, REGION, {}, geoid);
+    expect(t).toMatchObject({ datumM: 40, geoidGrid: false });
+    for (const b of t.buildings) expect(b.baseM).toBeCloseTo(5, 6);
+  });
+
+  it('never reads the geoid at the tile centre, which may lie over water', () => {
+    const a = box(90, 500, 45, 30, 0);
+    const c = box(270, 500, 45, 30, 1);
+    const { w, transform } = world([...a.pts, ...c.pts], [...a.feature, ...c.feature], [...a.idx, ...c.idx.map((i) => i + a.pts.length)]);
+    const centreFree = (_: number, lng: number) => {
+      if (Math.abs(lng - PIN.lng) < 1e-5) throw new Error('No geoid data');
+      return 12;
+    };
+    expect(lod2Tile(w, transform, REGION, {}, centreFree)).toMatchObject({ datumM: 12, geoidGrid: true });
+  });
 });
 
 describe('placeLod2', () => {
@@ -152,5 +177,18 @@ describe('placeLod2', () => {
       expect(nx * cx + ny * cy).toBeGreaterThan(0);
       expect(Math.abs(nz)).toBeLessThan(1e-3);
     }
+  });
+});
+
+describe('lod2HeightAboveM', () => {
+  it('measures the apex from the ground, not from walls buried below it', () => {
+    const b = box(90, 500, 40, 30, 0);
+    const { w, transform } = world(b.pts, b.feature, b.idx);
+    const [bldg] = lod2Tile(w, transform, { ...REGION, geoidM: 0 }).buildings;
+    // The walls start 3 m under a 43 m terrain, as Prime Tower's do.
+    expect(lod2HeightAboveM(bldg, 43)).toBeCloseTo(27, 6);
+    expect(lod2HeightAboveM(bldg, null)).toBeCloseTo(30, 6);
+    expect(lod2HeightAboveM(bldg, Number.NaN)).toBeCloseTo(30, 6);
+    expect(lod2HeightAboveM(bldg, 80)).toBe(0);
   });
 });

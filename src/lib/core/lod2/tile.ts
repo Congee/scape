@@ -28,12 +28,33 @@ export interface Lod2Tile {
   /** Index into `buildings` per vertex; -1 for a vertex outside any feature. */
   building: Int32Array;
   buildings: Lod2Building[];
-  /** Metres subtracted from ellipsoidal heights to reach sea level; at the bbox centre when a geoid grid sets it per vertex. */
+  /** Metres subtracted from ellipsoidal heights to reach sea level; the vertices' mid-range when a geoid grid sets it per vertex. */
   datumM: number;
   /** Heights went through an imported geoid grid. */
   geoidGrid: boolean;
   /** lng0, lat0, lng1, lat1 over every vertex. */
   bbox: [number, number, number, number];
+}
+
+/** N per vertex; null when any vertex falls off the grid, so a tile never mixes grid and constant heights. */
+function geoidPerVertex(geo: Float64Array, geoid: (lat: number, lng: number) => number): Float64Array | null {
+  const n = new Float64Array(geo.length / 3);
+  try {
+    for (let v = 0; v < n.length; v++) n[v] = geoid(geo[v * 3 + 1], geo[v * 3]);
+  } catch {
+    return null;
+  }
+  return n;
+}
+
+function midRange(v: Float64Array): number {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const x of v) {
+    lo = Math.min(lo, x);
+    hi = Math.max(hi, x);
+  }
+  return (lo + hi) / 2;
 }
 
 function median(v: number[]): number {
@@ -91,7 +112,6 @@ export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Regi
   }
   const offs: number[] = [];
   if (ground) for (let b = 0; b < fid.length; b++) if (typeof ground[fid[b]] === 'number' && Number.isFinite(ground[fid[b]])) offs.push(lo[b] - (ground[fid[b]] as number));
-  const perVertex = offs.length === 0 ? geoid : undefined;
   const bbox: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
   for (let v = 0; v < nv; v++) {
     bbox[0] = Math.min(bbox[0], geo[v * 3]);
@@ -99,8 +119,10 @@ export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Regi
     bbox[2] = Math.max(bbox[2], geo[v * 3]);
     bbox[3] = Math.max(bbox[3], geo[v * 3 + 1]);
   }
-  const datumM = offs.length > 0 ? median(offs) : perVertex ? perVertex((bbox[1] + bbox[3]) / 2, (bbox[0] + bbox[2]) / 2) : region.geoidM;
-  for (let v = 0; v < nv; v++) geo[v * 3 + 2] -= perVertex ? perVertex(geo[v * 3 + 1], geo[v * 3]) : datumM;
+  const gridN = offs.length === 0 && geoid ? geoidPerVertex(geo, geoid) : null;
+  const perVertex = gridN !== null;
+  const datumM = offs.length > 0 ? median(offs) : gridN && nv > 0 ? midRange(gridN) : region.geoidM;
+  for (let v = 0; v < nv; v++) geo[v * 3 + 2] -= gridN ? gridN[v] : datumM;
   if (perVertex) {
     lo.fill(Infinity);
     hi.fill(-Infinity);
@@ -123,7 +145,7 @@ export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Regi
     const id = ids?.[fid[b]];
     return { id: typeof id === 'string' ? id : `${fid[b]}`, hull, baseM: lo[b] - shift, apexM: hi[b] - shift, c: { lng: cx, lat: cy } };
   });
-  return { world: geo, idx: w.idx, building, buildings, datumM, geoidGrid: perVertex !== undefined, bbox };
+  return { world: geo, idx: w.idx, building, buildings, datumM, geoidGrid: perVertex, bbox };
 }
 
 /** The triangles in the frame `buildPrisms` uses: one surface each, one sphere row per building. */
@@ -212,6 +234,11 @@ export function lod2Triangles(t: Lod2Tile): Float64Array {
   const out = new Float64Array(t.idx.length * 3);
   for (let i = 0; i < t.idx.length; i++) out.set(t.world.subarray(t.idx[i] * 3, t.idx[i] * 3 + 3), i * 3);
   return out;
+}
+
+/** Apex above the ground at the target; walls often reach below the terrain, so the lowest vertex stands in only without a DEM. */
+export function lod2HeightAboveM(b: Lod2Building, groundM: number | null): number {
+  return Math.max(0, b.apexM - (groundM != null && Number.isFinite(groundM) ? groundM : b.baseM));
 }
 
 /** Index of the building whose hull holds `p`, nearest centroid first when hulls overlap; -1 for none. */
