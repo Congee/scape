@@ -100,6 +100,8 @@ const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
 const PROBE_COLOR = '#ffc94a';
 const MAX_PITCH = 60;
+// Read at load: the route rewrites the URL without it.
+const ZOOM_PROBE = new URLSearchParams(location.search).has('zoomprobe');
 // Short of 90° so the ground and the lines drawn on it stay in view.
 const ORBIT_MAX_PITCH = 80;
 const ORBIT_PITCH = 65;
@@ -184,6 +186,17 @@ export class MapController {
     this.scale = new ScaleControl({ unit: s.units });
     this.map.addControl(this.scale, 'bottom-left');
     if (import.meta.env.DEV) Object.assign(window, { __scapeMap: this.map, __scapeMapCtl: this });
+    if (import.meta.env.DEV || ZOOM_PROBE) {
+      let off: (() => void) | undefined;
+      let gone = false;
+      void import('./zoomProbe').then((p) => {
+        if (!gone) off = p.installZoomProbe(this.map, ZOOM_PROBE);
+      });
+      this.unsubs.push(() => {
+        gone = true;
+        off?.();
+      });
+    }
 
     this.pin = this.makeMarker({ at: w.pin, color: PIN_COLOR, scale: 1 }, (p) => worldStore.getState().setPin(p), (d) => (this.dragging = d));
     this.syncPin2(w.pin2);

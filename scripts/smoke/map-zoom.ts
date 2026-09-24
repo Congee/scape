@@ -1,19 +1,28 @@
-// Frame pacing of the Map tab under a trackpad pinch: ctrl-wheel events at trackpad rate, zooming in, out and back.
-/* oxlint-disable no-await-in-loop -- input steps are paced one event at a time */
-// Usage: bun scripts/smoke/map-zoom.ts <cdp> <dev-port> <scene> <layers> [--runs n] [--viewport WxH] [--profile <out.json>] [--shot <out.png>]
-// Prints one JSON line per run.
+// How a Map-tab zoom feels: replays a realistic trackpad stream (or a trace recorded with ?zoomprobe) and scores what reached the screen.
+/* oxlint-disable no-await-in-loop -- input is paced one event at a time */
+// Usage: bun scripts/smoke/map-zoom.ts <cdp> <port> <scene> <layers> [--stream pinch|scroll|flick] [--trace scape-zoom.json] [--inject block|ease]
+//   [--seed n] [--zooms n] [--runs n] [--depth n] [--viewport WxH] [--profile <out.json>] [--shot <out.png>] [--save <trace.json>]
+// Works on dev and preview builds alike. Prints one JSON line per run.
+import { analyze, pipelineFrames, StreamKind, trackpadStream, wheelPixels, type StreamEvent, type TraceEvent, type ZoomTrace } from '../../src/lib/ui/map/zoomTrace';
 import { Tab } from './cdp';
 
 const args = process.argv.slice(2);
-const [cdp = '9426', port = '5426', sceneName = 'rotterdam', layersName = 'default'] = args;
+const [cdp = '9426', port = '5426', sceneName = 'hoboken', layersName = 'default'] = args;
 const opt = (k: string, d: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
-const runs = Number(opt('--runs', '2'));
+const runs = Number(opt('--runs', '1'));
 const [vw, vh] = opt('--viewport', '1400x900').split('x').map(Number);
 const profileOut = args.includes('--profile') ? opt('--profile', '') : null;
 const shot = args.includes('--shot') ? opt('--shot', '') : null;
+const saveTo = args.includes('--save') ? opt('--save', '') : null;
+const traceFile = args.includes('--trace') ? opt('--trace', '') : null;
+const kind = opt('--stream', StreamKind.Pinch) as StreamKind;
+const injectName = opt('--inject', '');
+const depth = Number(opt('--depth', '3'));
 
 const DAY = '2026-06-21T13:00Z';
-const Scenes: Record<string, { at: string; z: number }> = {
+const Scenes: Record<string, { at: string; z: number; pitch?: number; bearing?: number }> = {
+  // Across the Hudson from Hoboken at the Midtown skyline, where the lag was felt.
+  hoboken: { at: '40.7450,-74.0300', z: 15.5, pitch: 60, bearing: 90 },
   rotterdam: { at: '51.9091,4.4868', z: 15.5 },
   manhattan: { at: '40.7549,-73.9840', z: 15.5 },
   zermatt: { at: '45.9900,7.7200', z: 12.5 },
@@ -27,109 +36,98 @@ const Layers: Record<string, Record<string, boolean>> = {
   noshadow: { showSunShadows: false },
   nolines: { showEventLines: false, showLiveLines: false },
   hillshade: { showHillshade: true },
-  terrain3d: { terrain3d: true },
-  models: {}
+  terrain3d: { terrain3d: true }
 };
 const DEFAULTS = { terrain: true, showBuildings: true, showSunShadows: true, showEventLines: true, showLiveLines: true, showHillshade: false, terrain3d: false };
+const Injects: Record<string, object> = { block: { blockMs: 30, everyMs: 300 }, ease: { ease: true } };
 
 const scene = Scenes[sceneName];
 const layers = Layers[layersName];
 if (!scene || !layers) throw new Error(`unknown scene ${sceneName} or layers ${layersName}`);
+if (injectName && !Injects[injectName]) throw new Error(`unknown inject ${injectName}`);
 
-const tab = await Tab.open(Number(cdp), `http://localhost:${port}`);
+let stream: (StreamEvent & { shift?: boolean })[];
+if (traceFile) {
+  const tr = (await Bun.file(traceFile).json()) as ZoomTrace;
+  const w = tr.wheel.filter((e) => e.dy);
+  stream = w.map((e) => ({ dt: e.t - w[0].t, dy: wheelPixels({ ...e, shift: false }), ctrl: e.ctrl, shift: e.shift }));
+} else stream = trackpadStream(kind, { seed: Number(opt('--seed', '1')), zooms: Number(opt('--zooms', '1.5')) });
+
+const origin = `http://localhost:${port}`;
+const url = `${origin}/?zoomprobe&camera=${scene.at}&t=${DAY}&z=${scene.z}`;
+const tab = await Tab.open(Number(cdp), origin);
 await tab.viewport(vw, vh);
-await tab.navigate(`http://localhost:${port}/?camera=${scene.at}&t=${DAY}&z=${scene.z}`);
-await tab.until('window.__scapeMap && window.__scapeMap.isStyleLoaded()', 60_000);
+await tab.navigate(url);
+// Settings through storage, so a preview build (no dev hooks) takes them too.
+await tab.eval(`(() => {
+  const k = 'scape.settings';
+  const v = JSON.parse(localStorage.getItem(k) ?? '{"state":{},"version":0}');
+  Object.assign(v.state, ${JSON.stringify({ ...DEFAULTS, ...layers })});
+  localStorage.setItem(k, JSON.stringify(v));
+  return 1;
+})()`);
+await tab.navigate(url);
+const MAP = 'window.__scape?.zoomProbe?.map';
+await tab.until(`${MAP}?.isStyleLoaded()`, 60_000);
+const build = (await tab.eval<boolean>('!!window.__scapeMap')) ? 'dev' : 'preview';
+const camera = `{ zoom: ${scene.z}, center: [${scene.at.split(',').toReversed().join(',')}], pitch: ${scene.pitch ?? 0}, bearing: ${scene.bearing ?? 0} }`;
+await tab.eval(`(() => { ${MAP}.jumpTo(${camera}); return 1; })()`);
 
 const IDLE = `(async () => {
-  const m = window.__scapeMap;
+  const m = ${MAP};
   const once = () => new Promise((r) => { const t = setTimeout(() => r(false), 30000); m.once('idle', () => { clearTimeout(t); r(true); }); m.triggerRepaint(); });
   await once();
-  for (let i = 0; i < 60 && window.__scape.buildings.getState().busy; i++) await new Promise((r) => setTimeout(r, 250));
+  for (let i = 0; i < 60 && window.__scape.buildings?.getState().busy; i++) await new Promise((r) => setTimeout(r, 250));
   await new Promise((r) => setTimeout(r, 400));
   return await once();
 })()`;
-
-await tab.eval(`(() => { window.__scape.settings.getState().update(${JSON.stringify({ ...DEFAULTS, ...layers })}); return 1; })()`);
-if (layersName === 'models') {
-  // Ten Drawn boxes around the camera, as geojson extrusions on the map.
-  await tab.eval(`(async () => {
-    const imp = (p) => import(performance.getEntriesByType('resource').map((e) => e.name).find((n) => new URL(n).pathname === p) ?? p);
-    const seed = await imp('/src/lib/core/model/seed.ts');
-    const b = await imp('/src/lib/state/buildings.ts');
-    const ms = window.__scape.models ?? (await imp('/src/lib/state/models.ts')).modelsStore;
-    const [lat, lng] = ${JSON.stringify(scene.at)}.split(',').map(Number);
-    for (let i = 0; i < 10; i++) {
-      const rows = await b.buildingRowsAt({ lat: lat + (i % 5) * 0.0008, lng: lng + Math.floor(i / 5) * 0.0012 });
-      const m = rows && seed.seedModel(rows, 'Smoke ' + i);
-      if (m) await ms.getState().save(m);
-    }
-    return ms.getState().models.length;
-  })()`, 120_000);
-}
 const idle = await tab.eval<boolean>(IDLE, 90_000);
-
-// Frame intervals from our own rAF loop, long tasks, long animation frames with their scripts, and MapLibre's own render time.
-const START = `(() => {
-  const m = window.__scapeMap;
-  const r = window.__mz = { t: [], long: [], loaf: [], render: [], stop: false, z0: m.getZoom(), zs: [] };
-  const tick = (t) => { r.t.push(t); r.zs.push(m.getZoom()); if (!r.stop) requestAnimationFrame(tick); };
-  requestAnimationFrame(tick);
-  if (!m.__mzWrapped) {
-    const orig = m._render;
-    m._render = function (...a) { const s = performance.now(); const out = orig.apply(this, a); window.__mz?.render.push(performance.now() - s); return out; };
-    m.__mzWrapped = true;
-  }
-  r.obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) r.long.push(Math.round(e.duration)); });
-  r.obs.observe({ type: 'longtask' });
-  r.lobs = new PerformanceObserver((l) => {
-    for (const e of l.getEntries()) r.loaf.push({ d: Math.round(e.duration), block: Math.round(e.blockingDuration), scripts: e.scripts.map((s) => ({ d: Math.round(s.duration), inv: s.invoker, src: (s.sourceURL || '').replace(/^.*\\/(src|node_modules)\\//, '$1/').replace(/\\?.*$/, '') + ':' + (s.sourceFunctionName || '') })) });
-  });
-  r.lobs.observe({ type: 'long-animation-frame' });
-  return document.visibilityState;
-})()`;
-const STOP = `(() => {
-  const r = window.__mz; r.stop = true; r.obs.disconnect(); r.lobs.disconnect();
-  const q = (xs, p) => { const d = xs.slice().sort((a, b) => a - b); return d.length ? +d[Math.min(d.length - 1, Math.floor(p * d.length))].toFixed(1) : -1; };
-  const d = r.t.slice(1).map((t, i) => t - r.t[i]);
-  const scripts = {};
-  for (const f of r.loaf) for (const s of f.scripts) scripts[s.inv + ' ' + s.src] = (scripts[s.inv + ' ' + s.src] ?? 0) + s.d;
-  const top = Object.entries(scripts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => v + 'ms ' + k);
-  const zs = r.zs;
-  // Per-frame zoom steps while moving; their spread is visible judder even at full frame rate.
-  const steps = zs.slice(1).map((z, i) => Math.abs(z - zs[i])).filter((x) => x > 1e-4);
-  const mean = steps.reduce((a, b) => a + b, 0) / (steps.length || 1);
-  const stepCv = +(Math.sqrt(steps.reduce((a, b) => a + (b - mean) ** 2, 0) / (steps.length || 1)) / (mean || 1)).toFixed(2);
-  return { frames: d.length, p50: q(d, 0.5), p95: q(d, 0.95), max: q(d, 1), over17: d.filter((x) => x > 17.5).length, dropped: d.filter((x) => x > 1.5 * q(d, 0.5)).length, long: r.long, loaf: r.loaf.length, loafMax: r.loaf.reduce((a, f) => Math.max(a, f.d), 0), loafScripts: top, renderP50: q(r.render, 0.5), renderP95: q(r.render, 0.95), renders: r.render.length, stepCv, overflow: document.documentElement.scrollWidth > innerWidth, zoom: [+r.z0.toFixed(2), +Math.max(...zs).toFixed(2), +Math.min(...zs).toFixed(2), +zs[zs.length - 1].toFixed(2)] };
-})()`;
 
 const box = await tab.eval<{ x: number; y: number }>('(() => { const r = document.querySelector(".map canvas").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()');
 const CTRL = 2;
-// A Mac trackpad pinch reaches the page as ctrl-wheel events, deltaY = -100 ln(scale), at the trackpad's 120 Hz.
-const EVENT_MS = Number(opt('--event-ms', '8'));
-const PHASE_MS = Number(opt('--phase', '1000'));
-// A pause past MapLibre's 200 ms wheel timeout ends the gesture, so moveend work lands mid-pinch.
-const PAUSE_MS = Number(opt('--pause', '0'));
-async function wheelPinch(scale: number) {
-  const n = Math.round((PAUSE_MS ? PHASE_MS / 4 : PHASE_MS) / EVENT_MS);
-  const dy = (-100 * Math.log(scale)) / n;
+const SHIFT = 8;
+const acks: number[] = [];
+async function play(events: typeof stream) {
   const t0 = performance.now();
-  // Not awaited one by one: each ack waits for a frame, which would halve the event rate.
-  const sent: Promise<unknown>[] = [];
-  for (let i = 0; i < n; i++) {
-    sent.push(tab.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: dy, modifiers: CTRL }));
-    const wait = t0 + (i + 1) * EVENT_MS - performance.now();
+  // A few events in flight until the page acks them, the rest merged while they wait, as Chrome's own wheel queue does; CDP would queue them all.
+  type Wheel = { dy: number; modifiers: number; at: number };
+  let inflight = 0;
+  const waiting: Wheel[] = [];
+  let drained: (() => void) | null = null;
+  // Stamped when generated, so time spent queued counts as latency.
+  const send = (w: Wheel) => {
+    const s = performance.now();
+    inflight++;
+    void tab.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: w.dy, modifiers: w.modifiers, timestamp: w.at / 1000 }).then(() => {
+      acks.push(performance.now() - s);
+      inflight--;
+      const next = waiting.shift();
+      if (next) send(next);
+      else if (!inflight) drained?.();
+    });
+  };
+  for (const e of events) {
+    const wait = t0 + e.dt - performance.now();
     if (wait > 0) await Bun.sleep(wait);
+    const w = { dy: e.dy, modifiers: (e.ctrl ? CTRL : 0) | (e.shift ? SHIFT : 0), at: performance.timeOrigin + performance.now() };
+    const last = waiting.at(-1);
+    if (inflight < depth) send(w);
+    else if (last?.modifiers === w.modifiers) last.dy += w.dy;
+    else waiting.push(w);
   }
-  await Promise.all(sent);
+  if (inflight) await new Promise<void>((r) => (drained = r));
 }
-async function pausedPinch(scale: number) {
-  for (let i = 0; i < 4; i++) {
-    await wheelPinch(scale ** 0.25);
-    await Bun.sleep(PAUSE_MS);
-  }
-}
-const pinch = PAUSE_MS ? pausedPinch : wheelPinch;
+
+// Presented frames straight from the compositor, next to the probe's main-thread view.
+const ws = (tab as unknown as { ws: WebSocket }).ws;
+let traceEvents: TraceEvent[] = [];
+let traceDone: (() => void) | null = null;
+ws.addEventListener('message', (e) => {
+  const m = JSON.parse(String(e.data)) as { method?: string; params?: { value?: TraceEvent[] } };
+  if (m.method === 'Tracing.dataCollected') traceEvents.push(...m.params!.value!);
+  if (m.method === 'Tracing.tracingComplete') traceDone?.();
+});
+const CATEGORIES = ['benchmark', 'cc', 'viz', 'gpu', 'disabled-by-default-devtools.timeline.frame', 'devtools.timeline', 'blink.user_timing', 'input', 'latencyInfo'];
 
 type Node = { id: number; callFrame: { functionName: string; url: string; lineNumber: number } };
 function hotspots(profile: { nodes: Node[]; samples: number[]; timeDeltas: number[] }): string[] {
@@ -137,36 +135,63 @@ function hotspots(profile: { nodes: Node[]; samples: number[]; timeDeltas: numbe
   const byId = new Map(profile.nodes.map((n) => [n.id, n]));
   for (const [i, id] of profile.samples.entries()) {
     const f = byId.get(id)!.callFrame;
-    const k = `${f.functionName || '(anon)'} ${f.url.replace(/^.*\/(src|node_modules)\//, '$1/').replace(/\?.*$/, '')}:${f.lineNumber + 1}`;
+    const k = `${f.functionName || '(anon)'} ${f.url.replace(/^.*\/(src|node_modules|assets)\//, '$1/').replace(/\?.*$/, '')}:${f.lineNumber + 1}`;
     self.set(k, (self.get(k) ?? 0) + (profile.timeDeltas[i] ?? 0) / 1000);
   }
   return [...self].toSorted((a, b) => b[1] - a[1]).slice(0, 15).map(([k, v]) => `${v.toFixed(0)}ms ${k}`);
 }
 
 for (let run = 1; run <= runs; run++) {
+  traceEvents = [];
   if (profileOut) {
     await tab.send('Profiler.enable');
     await tab.send('Profiler.setSamplingInterval', { interval: 200 });
     await tab.send('Profiler.start');
   }
-  const vis = await tab.eval<string>(START);
-  // 16x in, 256x out, 16x in: about two zooms in, four out, two in, back where it started.
-  await pinch(16);
-  await pinch(1 / 256);
-  await pinch(16);
-  await Bun.sleep(300);
-  const r = await tab.eval<Record<string, unknown>>(STOP);
+  await tab.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: CATEGORIES } });
+  await tab.eval(`(() => { const p = window.__scape.zoomProbe; p.inject(${JSON.stringify(Injects[injectName] ?? null)}); p.start(); return 1; })()`);
+  await play(stream);
+  await Bun.sleep(700);
+  const tr = await tab.eval<ZoomTrace>('(() => { const p = window.__scape.zoomProbe; const t = p.stop(); p.inject(null); return t; })()', 60_000);
+  const traced = new Promise<void>((r) => (traceDone = r));
+  await tab.send('Tracing.end');
+  await traced;
   let hot: string[] | undefined;
   if (profileOut) {
     const { profile } = (await tab.send('Profiler.stop')) as { profile: Parameters<typeof hotspots>[0] };
-    await Bun.write(profileOut.replace(/\.json$/, `-${sceneName}-${layersName}-${run}.cpuprofile`), JSON.stringify(profile));
+    await Bun.write(profileOut.replace(/\.json$/, `-${sceneName}-${layersName}-${build}-${run}.cpuprofile`), JSON.stringify(profile));
     hot = hotspots(profile);
   }
-  console.log(JSON.stringify({ scene: sceneName, layers: layersName, viewport: `${vw}x${vh}`, run, idle, vis, ...r, ...(hot && { hot }) }));
+  if (saveTo) await Bun.write(saveTo.replace(/\.json$/, `-${run}.json`), JSON.stringify(tr));
+  const mark = traceEvents.find((e) => e.name === 'zoomprobe:start');
+  // The mark's trace time against its performance.now time lines the two clocks up.
+  const toUs = (t: number) => (mark ? mark.ts + (t - tr.meta.t0) * 1000 : 0);
+  const lastInput = tr.wheel.at(-1)?.t ?? tr.meta.t0;
+  const pipeline = pipelineFrames(traceEvents, toUs(tr.meta.t0), toUs(lastInput + 300));
+  const zs = tr.frames.map((f) => f.z);
+  const overflow = await tab.eval<boolean>('document.documentElement.scrollWidth > innerWidth');
+  const button = await tab.eval<boolean>(`(() => { const r = document.querySelector('[data-testid=zoomprobe]')?.getBoundingClientRect(); return !!r && r.width > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })()`);
+  console.log(
+    JSON.stringify({
+      scene: sceneName,
+      layers: layersName,
+      build,
+      viewport: `${vw}x${vh}`,
+      stream: traceFile ? `trace:${traceFile.split('/').pop()}` : kind,
+      inject: injectName || null,
+      run,
+      idle,
+      ...analyze(tr),
+      pipeline,
+      ackMs: [0.5, 0.95].map((q) => Math.round(acks.toSorted((a, b) => a - b)[Math.floor(q * (acks.length - 1))] ?? 0)),
+      zoom: zs.length ? [zs[0], Math.max(...zs), Math.min(...zs)].map((z) => +z.toFixed(2)) : [],
+      overflow,
+      button,
+      ...(hot && { hot })
+    })
+  );
+  await tab.eval(`(() => { ${MAP}.jumpTo(${camera}); return 1; })()`);
   await tab.eval(IDLE, 90_000);
 }
-if (shot) {
-  const { data } = (await tab.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
-  await Bun.write(shot, Buffer.from(data, 'base64'));
-}
+if (shot) await tab.shot(shot);
 tab.close();
