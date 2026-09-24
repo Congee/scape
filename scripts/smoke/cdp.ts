@@ -16,7 +16,7 @@ type Msg = { id?: number; method?: string; params?: Record<string, unknown>; res
 export class Tab {
   private seq = 0;
   private waiters = new Map<number, (m: Msg) => void>();
-  private workers = new Set<string>();
+  private workers = new Map<string, string>();
   private offline = false;
   private logging = false;
   /** False keeps the tab in the background: Page.bringToFront can raise the window over the user's. */
@@ -32,7 +32,10 @@ export class Tab {
       const m = JSON.parse(String(e.data)) as Msg;
       if (m.id != null) this.waiters.get(m.id)?.(m);
       if (m.method === 'Network.requestWillBeSent' && this.logging) this.requests.push(String((m.params as { request: { url: string } }).request.url));
-      if (m.method === 'Target.attachedToTarget') void this.adopt(String((m.params as { sessionId: string }).sessionId)).catch(() => {});
+      if (m.method === 'Target.attachedToTarget') {
+        const p = m.params as { sessionId: string; targetInfo?: { url?: string } };
+        void this.adopt(String(p.sessionId), p.targetInfo?.url ?? '').catch(() => {});
+      }
       if (m.method === 'Target.detachedFromTarget') this.workers.delete(String((m.params as { sessionId: string }).sessionId));
     });
   }
@@ -64,8 +67,8 @@ export class Tab {
     });
   }
 
-  private async adopt(sessionId: string) {
-    this.workers.add(sessionId);
+  private async adopt(sessionId: string, url: string) {
+    this.workers.set(sessionId, url);
     if (this.offline) await this.emulate(true, sessionId);
     if (this.logging) await this.send('Network.enable', {}, sessionId);
     await this.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
@@ -150,12 +153,17 @@ export class Tab {
   async setOffline(on: boolean) {
     this.offline = on;
     await this.emulate(on);
-    for (const s of this.workers) await this.emulate(on, s).catch(() => {});
+    for (const s of this.workers.keys()) await this.emulate(on, s).catch(() => {});
   }
 
   private async emulate(offline: boolean, sessionId?: string) {
     await this.send('Network.enable', {}, sessionId);
     await this.send('Network.emulateNetworkConditions', { offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }, sessionId);
+  }
+
+  /** Attached worker sessions and their script URLs. */
+  workerSessions(): [string, string][] {
+    return [...this.workers];
   }
 
   close() {
