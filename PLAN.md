@@ -479,7 +479,7 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Basemap source for a deployed origin: OpenFreeMap per-tile PBFs packed into PMTiles, Liberty style,
   sprites and glyphs cached (merged 2026-09-24). Joins the terrain download by default up to 100 tiles;
   Liberty's shaded relief is dropped offline.
-- Official LoD2 buildings (merged 2026-09-24): 3DBAG (meshopt), swissBUILDINGS3D and PLATEAU Tokyo 23 wards (Draco, decoder lazy-loaded only for those tiles); worker-built BVH occluder. Open: PLATEAU geoid is fixed at 36.7 m (Tokyo); a location lookup needs GSI 測量法 approval to ship GSIGEO2011.
+- Official LoD2 buildings (merged 2026-09-24): 3DBAG (meshopt), swissBUILDINGS3D and PLATEAU Tokyo 23 wards (Draco, decoder lazy-loaded only for those tiles); worker-built BVH occluder. PLATEAU heights use a user-imported GSIGEO2011 `.asc` (OPFS, bilinear per vertex; never bundled, GSI 測量法); without it, 36.7 m and a note. Ask GSI before a public release.
 - Target height on a model: apex (shipped default) or the roof under the target point.
 - Tools tab (Phase 7 calculators, merged): name "Tools" after Night; tab min width 62 px so 9 tabs
   fit two rows; Rainbow overlay off by default; RAW size 14-bit uncompressed (worst case); rainbow
