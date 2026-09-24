@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ancestorTile, cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, lowestGroundAt, overzoomTile, sampleGridCubic, sampleTile, type DemSource, type DemTile, type RetainingDemSource } from './dem';
+import { ancestorTile, cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, lowestGroundAt, memoSource, overzoomTile, sampleGridCubic, sampleTile, type DemSource, type DemTile, type RetainingDemSource } from './dem';
 import { evictionKeys, Holds } from './holds';
 import { tileKey, tilePixelToLngLat, type TileCoord } from './tiles';
 
@@ -139,6 +139,18 @@ describe('elevationAtCubic', () => {
     const lng = 30;
     expect(elevationAtCubic(src, lng, lat, 1)).toBeCloseTo(elevationAt(src, lng, lat, 1), -1);
     expect(elevationAtCubic(src, lng, lat, 3)).toBeNaN();
+  });
+});
+
+describe('memoSource', () => {
+  it('samples bit for bit like its source and asks it once per tile', () => {
+    const src = fieldSrc((x, y) => !(x === 1 && y === 1));
+    const asked = new Map<string, number>();
+    const counted: DemSource = { get: (z, x, y) => (asked.set(tileKey(z, x, y), (asked.get(tileKey(z, x, y)) ?? 0) + 1), src.get(z, x, y)) };
+    const memo = memoSource(counted);
+    for (let gy = 0.25; gy < 2 * SIZE; gy += 0.7) for (let gx = 0.25; gx < 2 * SIZE; gx += 0.7) expect(Object.is(sampleGridCubic(memo, 1, SIZE, gx, gy), sampleGridCubic(src, 1, SIZE, gx, gy))).toBe(true);
+    expect(memo.get(1, 1, 1)).toBe(src.get(1, 1, 1));
+    expect([...asked.values()].every((n) => n === 1)).toBe(true);
   });
 });
 

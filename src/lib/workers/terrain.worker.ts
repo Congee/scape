@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
-import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
+import { cubicStencilTiles, elevationAt, elevationAtCubic, memoSource } from '@core/terrain/dem';
 import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
 import { BlockCache } from '@core/terrain/blockCache';
 import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
@@ -139,7 +139,7 @@ async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   try {
     await cache.loadAll(tiles);
     if (latest.View !== req.id) return null;
-    const swept = sweepView(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
+    const swept = sweepView(memoSource(cache), plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
     const at = new Map(fresh.map((k, i) => [k, i]));
     const layers = fresh.length === nAz ? swept : assembleView(step, k0, nAz, req.rangeM, (k) => (held(k) ? { v: prev!.v, col: k - prev!.k0 } : { v: swept, col: at.get(k)! }));
     const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
@@ -232,7 +232,8 @@ async function mesh(req: MeshRequest): Promise<null> {
       await cache.loadAll(want);
       if (latest.Mesh !== req.id) return null;
       // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
-      const sample = (lng: number, lat: number) => elevationAtCubic(cache, lng, lat, zoom);
+      const src = memoSource(cache);
+      const sample = (lng: number, lat: number) => elevationAtCubic(src, lng, lat, zoom);
       let reused = 0;
       const parts = blocks.map((b, i) => {
         const drop = skirtM[i];

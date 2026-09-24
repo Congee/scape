@@ -19,6 +19,27 @@ export interface DemSource {
   get(z: number, x: number, y: number): DemTile | null | undefined;
 }
 
+/** `src` with each tile resolved once, for a synchronous burst of samples: a cache `get` builds a key and touches the LRU. */
+export function memoSource(src: DemSource): DemSource {
+  const seen = new Map<number, DemTile | null | undefined>();
+  let lastK = NaN;
+  let lastT: DemTile | null | undefined;
+  return {
+    get(z, x, y) {
+      const k = (z * 2 ** 24 + y) * 2 ** 24 + x;
+      if (k === lastK) return lastT;
+      let t = seen.get(k);
+      if (t === undefined && !seen.has(k)) {
+        t = src.get(z, x, y);
+        seen.set(k, t);
+      }
+      lastK = k;
+      lastT = t;
+      return t;
+    }
+  };
+}
+
 /** Terrarium carries bathymetry as well as land, so the physical envelope runs Challenger Deep to Everest. */
 export const DEM_MIN_M = -11_500;
 export const DEM_MAX_M = 9_000;
