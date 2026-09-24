@@ -8,6 +8,7 @@ import { modelFootprint, modelMesh } from '@core/model/mesh';
 import { exportModelGlb, modelFileName } from '@core/model/share';
 import { deleteOne, listAll, putOne } from '@data/db';
 import { buildingHeightAt, groundUnder, setBuildingModels } from './buildings';
+import { groundKey, groundRefresher } from './modelGround';
 
 export interface ModelsState {
   models: SavedModel[];
@@ -73,6 +74,20 @@ function sameGlb(m: SavedModel, old: ArrayBuffer | undefined): SavedModel {
   return { ...m, glb: old };
 }
 
+/** Coalesces a nudge burst into one ground read. */
+const GROUND_DEBOUNCE_MS = 250;
+
+const refreshGround = groundRefresher({
+  resolve: (footprint) => groundUnder(footprint.map(([lng, lat]) => ({ lng, lat }))),
+  current: (id) => modelsStore.getState().models.find((m) => m.id === id),
+  apply: (m, groundM) => {
+    // An unreadable DEM here gets the load-time heal's retry.
+    healTried.delete(m.id);
+    return modelsStore.getState().save({ ...m, groundM });
+  },
+  delayMs: GROUND_DEBOUNCE_MS
+});
+
 const CHANNEL = 'scape.models';
 const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(CHANNEL);
 
@@ -107,7 +122,10 @@ export const modelsStore = create<ModelsState>()(
       if (!old) return null;
       const next: SavedModel = { ...old, ...patch, updatedAt: Date.now() };
       if (next.parts || next.glb) next.footprint = modelFootprint(next);
-      return get().save(next);
+      const saved = await get().save(next);
+      const key = groundKey(next);
+      if (key !== null && key !== groundKey(old)) refreshGround(id);
+      return saved;
     },
     remove: async (id) => {
       await deleteOne('models', id);
