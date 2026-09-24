@@ -11,13 +11,15 @@ const DRAG = mode !== 'stills';
 const STILLS = mode !== 'drag';
 mkdirSync(shots, { recursive: true });
 
-const Scene = { Alps: 'alps', Flat: 'flat' } as const;
+const Scene = { Alps: 'alps', Flat: 'flat', Lod2: 'lod2' } as const;
 type Scene = (typeof Scene)[keyof typeof Scene];
 const SCENES: Record<Scene, { camera: string; target: string; day: string; low: string; night: string }> = {
   // Zermatt facing the Matterhorn.
   alps: { camera: '46.0207,7.7491', target: '45.9766,7.6586', day: '2026-10-18T09:00Z', low: '2026-10-13T16:30Z', night: '2026-10-25T21:00Z' },
   // Rotterdam, Erasmusbrug towards the Maastoren: flat control.
-  flat: { camera: '51.9050,4.4830', target: '51.9153,4.4890', day: '2026-10-18T11:00Z', low: '2026-10-13T16:10Z', night: '2026-10-25T21:00Z' }
+  flat: { camera: '51.9050,4.4830', target: '51.9153,4.4890', day: '2026-10-18T11:00Z', low: '2026-10-13T16:10Z', night: '2026-10-25T21:00Z' },
+  // De Rotterdam from the Maas, as the LoD2 smoke frames it: 3DBAG tiles in and around the frame.
+  lod2: { camera: '51.9091,4.4868', target: '51.90664,4.48805', day: '2026-06-21T13:00Z', low: '2026-06-21T19:30Z', night: '2026-06-21T23:00Z' }
 };
 const FOCALS = QUICK ? [24, 2400] : [24, 200, 600, 2400];
 const DRAG_MS = 5000;
@@ -85,7 +87,7 @@ const HELPERS = `(() => {
   td.settled = () => {
     const t = S.terrain.getState();
     const p = S.prism;
-    return !t.busy.Mesh && !t.busy.View && t.mesh.length > 0 && t.mesh.length === t.mesh[0].levels && !!p?.terrain && p.terrain.levels === t.mesh.length && !S.buildings.getState().busy;
+    return !t.busy.Mesh && !t.busy.View && t.mesh.length > 0 && t.mesh.length === t.mesh[0].levels && !!p?.terrain && p.terrain.levels === t.mesh.length && !S.buildings.getState().busy && !p.lod2?.busy;
   };
   td.start = () => {
     const r = { dt: [], levels: [], gpu: [], draws: 0, holes: 0, last: performance.now(), prism: S.prism, stop: false };
@@ -118,16 +120,24 @@ const HELPERS = `(() => {
     return { x: r.left + f.x, y: r.top + f.y, w: f.w, h: f.h };
   };
   const decode = (b64) => new Promise((res) => { const i = new Image(); i.onload = () => { const c = new OffscreenCanvas(i.width, i.height).getContext('2d'); c.drawImage(i, 0, 0); res(c.getImageData(0, 0, i.width, i.height)); }; i.src = 'data:image/png;base64,' + b64; });
+  /** Whole page, and the viewfinder canvas alone: page chrome can raster a hair apart between runs. */
   td.diff = async (a, b) => {
     const [x, y] = await Promise.all([decode(a), decode(b)]);
-    if (x.width !== y.width || x.height !== y.height) return { size: true, px: -1, max: 255 };
-    let px = 0, max = 0;
+    if (x.width !== y.width || x.height !== y.height) return { size: true, px: -1, max: 255, vfPx: -1, vfMax: 255 };
+    const r = document.querySelector('canvas.vf').getBoundingClientRect(), s = x.width / window.innerWidth;
+    const x0 = Math.floor(r.left * s), x1 = Math.ceil(r.right * s), y0 = Math.floor(r.top * s), y1 = Math.ceil(r.bottom * s);
+    let px = 0, max = 0, vfPx = 0, vfMax = 0;
     for (let k = 0; k < x.data.length; k += 4) {
       const d = Math.max(Math.abs(x.data[k] - y.data[k]), Math.abs(x.data[k + 1] - y.data[k + 1]), Math.abs(x.data[k + 2] - y.data[k + 2]));
-      if (d > 0) px++;
+      if (d === 0) continue;
+      px++;
       if (d > max) max = d;
+      const i = k / 4, cx = i % x.width, cy = (i - cx) / x.width;
+      if (cx < x0 || cx >= x1 || cy < y0 || cy >= y1) continue;
+      vfPx++;
+      if (d > vfMax) vfMax = d;
     }
-    return { size: false, px, max, share: px / (x.width * x.height) };
+    return { size: false, px, max, share: px / (x.width * x.height), vfPx, vfMax };
   };
   /** Share of the frame's pixels that show ground: not the sky gradient's blue-dominant colours. */
   td.ground = async (b64, f) => {
@@ -150,6 +160,8 @@ const go = async (url: string) => {
   await tab.navigate(url);
   await tab.until('!!(window.__scape && document.querySelector("canvas.vf"))', 30_000, 250);
   await tab.eval(HELPERS);
+  // A background tab gets no rAF; close the other tab in its window rather than raise it.
+  if ((await tab.eval<string>('document.visibilityState')) !== 'visible') throw new Error('smoke tab is hidden: another tab is active in its window');
 };
 const settle = async () => {
   const ok = await tab.until('window.__td.settled()', 90_000, 250);
@@ -157,7 +169,9 @@ const settle = async () => {
   return !!ok && (await tab.eval<boolean>('window.__td.settled()'));
 };
 
-type Cpu = { thread: string; ms: number; top: string };
+type Cpu = { thread: string; ms: number; top: string; incl: string };
+/** Entry points whose inclusive time says which job a thread spent its time on. */
+const ENTRIES = ['mesh', 'view', 'horizon', 'buildBlock', 'joinBlocks', 'selectBlocks', 'buildDetailBound', 'sweepView', 'occludes', 'PrismOccluder', 'MeshOccluder', 'occluder', 'prismTiles', 'buildPrisms', 'sync', 'upload', 'drawSceneGl', 'drawOverlay', 'frame', 'tick', 'render', 'performWorkUntilDeadline'];
 /** Sampling profiles of the page and every worker over `fn`: busy ms per thread and its hottest functions. */
 async function profiled(fn: () => Promise<void>): Promise<Cpu[]> {
   const sessions: [string | undefined, string][] = [[undefined, 'main'], ...tab.workerSessions().map(([s, u]): [string, string] => [s, u.split('/').pop()?.split('?')[0] ?? u])];
@@ -169,9 +183,12 @@ async function profiled(fn: () => Promise<void>): Promise<Cpu[]> {
   await fn();
   const out: Cpu[] = [];
   for (const [s, name] of sessions) {
-    const { profile } = (await tab.send('Profiler.stop', {}, s)) as { profile: { nodes: { id: number; callFrame: { functionName: string } }[]; samples: number[]; timeDeltas: number[] } };
+    const { profile } = (await tab.send('Profiler.stop', {}, s)) as { profile: { nodes: { id: number; callFrame: { functionName: string }; children?: number[] }[]; samples: number[]; timeDeltas: number[] } };
     const fnOf = new Map(profile.nodes.map((n) => [n.id, n.callFrame.functionName || '(anon)']));
+    const parent = new Map<number, number>();
+    for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
     const self = new Map<string, number>();
+    const incl = new Map<string, number>();
     let busy = 0;
     profile.samples.forEach((id, i) => {
       const f = fnOf.get(id) ?? '?';
@@ -179,13 +196,26 @@ async function profiled(fn: () => Promise<void>): Promise<Cpu[]> {
       if (f === '(idle)') return;
       busy += dt;
       self.set(f, (self.get(f) ?? 0) + dt);
+      const seen = new Set<string>();
+      let occBy = '';
+      for (let n: number | undefined = id; n != null; n = parent.get(n)) {
+        const g = fnOf.get(n) ?? '?';
+        if (!occBy && seen.has('occludes') && g.startsWith('draw')) occBy = `occludes<${g}`;
+        seen.add(g);
+      }
+      if (occBy) incl.set(occBy, (incl.get(occBy) ?? 0) + dt);
+      for (const e of ENTRIES) if (seen.has(e)) incl.set(e, (incl.get(e) ?? 0) + dt);
     });
     const top = [...self.entries()]
       .toSorted((a, b) => b[1] - a[1])
       .slice(0, 4)
       .map(([f, ms]) => `${f} ${ms.toFixed(0)}`)
       .join(', ');
-    out.push({ thread: name, ms: busy, top });
+    const inc = [...incl.entries()]
+      .toSorted((a, b) => b[1] - a[1])
+      .map(([f, ms]) => `${f} ${ms.toFixed(0)}`)
+      .join(', ');
+    out.push({ thread: name, ms: busy, top, incl: inc });
   }
   return out;
 }
@@ -238,14 +268,14 @@ const b64Of = async (path: string) => Buffer.from(await Bun.file(path).arrayBuff
 const compare = async (name: string, path: string) => {
   const ref = `${baseline}/${name}`;
   if (baseline === '-' || !existsSync(ref)) return;
-  const d = await tab.eval<{ size: boolean; px: number; max: number; share: number }>(`window.__td.diff(${JSON.stringify(await b64Of(ref))}, ${JSON.stringify(await b64Of(path))})`);
-  check(`settled ${name} vs baseline`, !d.size && d.px === 0, d.size ? 'size differs' : `${d.px} px differ (${(d.share * 100).toFixed(3)}%), max Δ ${d.max}`);
+  const d = await tab.eval<{ size: boolean; px: number; max: number; share: number; vfPx: number; vfMax: number }>(`window.__td.diff(${JSON.stringify(await b64Of(ref))}, ${JSON.stringify(await b64Of(path))})`);
+  check(`settled ${name} vs baseline`, !d.size && d.vfPx === 0, d.size ? 'size differs' : `viewfinder ${d.vfPx} px differ, max Δ ${d.vfMax}; page ${d.px} px (${(d.share * 100).toFixed(3)}%), max Δ ${d.max}`);
 };
 
 const table: string[] = ['| scene | mm | renderer CPU% | GPU-proc CPU% | terrain worker ms/s | main ms/s | mesh req / res | view req | rAF p50/p95 ms | draws | hole frames | GPU ms p50/p95 | min ground share mid-drag | blocks reused / sent | block cache MB |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
 const release = await takeLock();
 try {
-  for (const s of !DRAG ? [] : QUICK ? [Scene.Alps] : [Scene.Alps, Scene.Flat]) {
+  for (const s of !DRAG ? [] : QUICK ? [Scene.Alps] : [Scene.Alps, Scene.Flat, Scene.Lod2]) {
     for (const f of FOCALS) {
       await go(url(s, f, 'l', 'day'));
       if (!(await settle())) {
@@ -274,7 +304,7 @@ try {
       for (const m of mid) if (existsSync(m)) shares.push(await tab.eval<number>(`window.__td.ground(${JSON.stringify(await b64Of(m))}, ${JSON.stringify(frame)})`));
       table.push(`| ${s} | ${f} | ${((delta('renderer') / secs) * 100).toFixed(0)} | ${((delta('GPU') / secs) * 100).toFixed(0)} | ${(terrainMs / secs).toFixed(0)} | ${(mainMs / secs).toFixed(0)} | ${c1.meshReq - c0.meshReq} / ${c1.meshRes - c0.meshRes} | ${c1.viewReq - c0.viewReq} | ${rec.rafP50.toFixed(1)} / ${rec.rafP95.toFixed(1)} | ${rec.draws} | ${rec.holes} | ${rec.gpuP50.toFixed(1)} / ${rec.gpuP95.toFixed(1)} | ${shares.length ? Math.min(...shares).toFixed(2) : '-'} | ${c1.reused - c0.reused} / ${c1.blocks - c0.blocks} | ${c1.cacheMB.toFixed(1)} |`);
       console.error(table.at(-1));
-      for (const c of cpu) console.error(`  ${c.thread}: ${(c.ms / secs).toFixed(0)} ms/s — ${c.top}`);
+      for (const c of cpu) console.error(`  ${c.thread}: ${(c.ms / secs).toFixed(0)} ms/s — ${c.top} | incl ${c.incl}`);
       check(`${s} ${f}mm no hole frames mid-drag`, rec.holes === 0, `${rec.holes} of ${rec.draws} draws without terrain`);
       await settle();
       // Wall-clock pointer timing ends the drag a hair off; snap to a grid so both runs frame the same picture.
