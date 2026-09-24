@@ -34,6 +34,7 @@ import { tideStation, tideStations, type TideStationRef } from '@data/tides';
 import { compositionStore, useComposition } from '@state/composition';
 import { sensorById, useGear } from '@state/gear';
 import { useSettings } from '@state/settings';
+import { LightPointSummary, LightPointTools, MoonSummary, MoonTools } from './LightTools';
 import { timelapseStore, useTimelapse } from '@state/timelapse';
 import { useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
@@ -560,8 +561,12 @@ export function ToolsPanel() {
         </div>
         <p className="muted hint">For a cloud overhead; clouds toward the sunset stay lit a little longer. Geometric, without refraction.</p>
       </Group>
-
-      <TidesGroup />
+      <Group id="moon" summary={<MoonSummary />}>
+        <MoonTools />
+      </Group>
+      <Group id="light-point" summary={<LightPointSummary />}>
+        <LightPointTools />
+      </Group>
     </div>
   );
 }

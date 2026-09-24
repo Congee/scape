@@ -35,6 +35,7 @@ import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask, su
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
+import { lightProbeStore } from '@state/lightProbe';
 import { mapStatusStore } from '@state/mapStatus';
 import { markersStore } from '@state/markers';
 import { modelsStore } from '@state/models';
@@ -93,6 +94,7 @@ const NOT_UNDERGROUND: ExpressionSpecification = ['!=', ['get', 'is_underground'
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
+const PROBE_COLOR = '#ffc94a';
 const FOV_COLOR = '#5aa9ff';
 const REGION_COLOR = '#5aa9ff';
 const DEFAULT_FOV_RANGE_M = 5_000;
@@ -128,6 +130,7 @@ export class MapController {
   private map: MaplibreMap;
   private pin: Marker;
   private pin2: Marker | null = null;
+  private probe: Marker | null = null;
   private candidate: Marker | null = null;
   private fovHandle: Marker | null = null;
   private fovEdgeHandle: Marker | null = null;
@@ -176,6 +179,8 @@ export class MapController {
     this.map.on('click', (e: MapMouseEvent) => {
       if (this.drawingRegion || this.drawer.onClick(e)) return;
       const p = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+      const lp = lightProbeStore.getState();
+      if (lp.picking) return lp.setPoint(p);
       const al = alignStore.getState();
       if ((al.mode === HeatMode.Align || al.mode === HeatMode.Time) && al.result && cellOf(al.result.grid, p)) return al.pick(p);
       if (this.map.getLayer('markers-circle') && this.map.queryRenderedFeatures(e.point, { layers: ['markers-circle'] }).length) return;
@@ -317,7 +322,11 @@ export class MapController {
       settingsStore.subscribe((st) => st.showLightPollution, () => this.applyNightLights()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
       alignStore.subscribe((st) => [st.result, st.opacity] as const, () => this.renderHeat(), { equalityFn: shallow }),
-      alignStore.subscribe((st) => st.candidate, (c) => this.syncCandidate(c))
+      alignStore.subscribe((st) => st.candidate, (c) => this.syncCandidate(c)),
+      lightProbeStore.subscribe((st, prev) => {
+        if (st.point !== prev.point) this.syncProbe(st.point);
+        if (st.picking !== prev.picking) this.map.getCanvas().style.cursor = st.picking ? 'crosshair' : '';
+      })
     );
 
     this.showBothPins();
@@ -381,31 +390,14 @@ export class MapController {
     if (!this.dragging2) this.pin2.setLngLat([p.lng, p.lat]);
   }
 
-  /** Seeds a Drawn model from the Overture building under `p` and opens it in the editor. */
-  private modelBuildingAt(p: LngLat) {
-    const models = modelsStore.getState();
-    models.setPicking(false);
-    void buildingRowsAt(p).then(async (rows) => {
-      const m = rows ? seedModel(rows, `Model ${models.models.length + 1}`) : null;
-      if (!m) {
-        modelsStore.setState({ pickError: 'No Overture building there.' });
-        return;
-      }
-      await modelsStore.getState().save(m);
-      modelsStore.getState().select(m.id);
-    });
-    const ui = uiStore.getState();
-    ui.setPanelTab(PanelTab.Markers);
-    ui.setMarkersView(MarkersView.Models);
-  }
-
-  /** Hands the import sheet the centre of the Overture building under `p`. */
-  private importOnBuildingAt(p: LngLat) {
-    modelsStore.getState().setImportPick(false);
-    void buildingRowsAt(p).then((rows) => {
-      const c = rows && rowsCentre(rows);
-      modelsStore.setState(c ? { importAt: c } : { pickError: 'No Overture building there.' });
-    });
+  private syncProbe(p: LngLat | null) {
+    if (!p) {
+      this.probe?.remove();
+      this.probe = null;
+      return;
+    }
+    if (!this.probe) this.probe = this.makeMarker({ at: p, color: PROBE_COLOR, scale: 0.7 }, (q, final) => final && lightProbeStore.getState().setPoint(q), () => {});
+    else this.probe.setLngLat([p.lng, p.lat]);
   }
 
   /** A target placed through the map also picks up the height of the building under it. */

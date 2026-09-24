@@ -33,13 +33,15 @@ export interface FirstLastLight {
   litNow: boolean;
 }
 
+/** Some of the sun's disc clears the point's skyline. */
+export function sunLitAt(obs: Observer, horizon: HorizonProfile, ms: number): boolean {
+  const p = position(SkyBody.Sun, new Date(ms), obs);
+  return p.altitude + SEMIDIAMETER_DEG.Sun - horizonAngleAt(horizon, p.azimuth) >= 0;
+}
+
 /** First and last direct sun at a point over one day, against that point's own skyline. */
 export function firstLastLight(obs: Observer, curve: DayCurve, horizon: HorizonProfile, endMs: number, nowMs: number): FirstLastLight {
-  const r = SEMIDIAMETER_DEG.Sun;
-  const litAt = (ms: number) => {
-    const p = position(SkyBody.Sun, new Date(ms), obs);
-    return p.altitude + r - horizonAngleAt(horizon, p.azimuth) >= 0;
-  };
+  const litAt = (ms: number) => sunLitAt(obs, horizon, ms);
   const events = terrainRiseSet(obs, curve, horizon, endMs).filter((e) => e.body === SkyBody.Sun);
   const startLit = litAt(curve.startMs);
   let litMs = 0;

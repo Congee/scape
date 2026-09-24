@@ -1564,7 +1564,8 @@ label.file input {
   color: var(--accent);
 }
 
-.tl-sim {
+.tl-sim,
+.tool-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

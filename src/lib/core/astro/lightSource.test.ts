@@ -4,7 +4,7 @@ import { dayBounds } from '@core/time/localDay';
 import { makeObserver, SkyBody } from './bodies';
 import { dayCurve } from './dayCurve';
 import { dayEvents, EventKind } from './dayEvents';
-import { firstLastLight, LightMode, pickLight } from './lightSource';
+import { firstLastLight, LightMode, pickLight, sunLitAt } from './lightSource';
 
 const profile = (f: (az: number) => number): HorizonProfile => ({
   azStepDeg: 1,
@@ -61,5 +61,15 @@ describe('firstLastLight', () => {
     expect(l.first).toBeNull();
     expect(l.last).toBeNull();
     expect(l.litMs).toBe(0);
+  });
+});
+
+describe('sunLitAt', () => {
+  it('puts a noon sun in shade behind a wall to the south only', () => {
+    const obs = makeObserver({ lat: 46, lng: 7.75 });
+    const noon = Date.parse('2026-10-18T11:10Z');
+    expect(sunLitAt(obs, profile(() => 0), noon)).toBe(true);
+    expect(sunLitAt(obs, profile((az) => (az > 150 && az < 210 ? 45 : 0)), noon)).toBe(false);
+    expect(sunLitAt(obs, profile((az) => (az < 30 || az > 330 ? 45 : 0)), noon)).toBe(true);
   });
 });
