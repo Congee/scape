@@ -17,7 +17,8 @@ const CHIPS: [BoolKey, string, string][] = [
   ['showStarNames', 'Names', 'Names of the brightest stars'],
   ['showConstellations', 'Lines', 'Constellation figures'],
   ['showTrails', 'Trails', 'Star trails over the duration set in the Night tab'],
-  ['showRadiants', 'Radiants', 'Radiants of the active meteor showers']
+  ['showRadiants', 'Radiants', 'Radiants of the active meteor showers'],
+  ['showRainbow', 'Rainbow', 'Where a rainbow would stand: the 42° and 51° arcs opposite the sun']
 ];
 
 /** Layer chips for the viewfinder page; the aim chip makes the target lock visible and reversible. */

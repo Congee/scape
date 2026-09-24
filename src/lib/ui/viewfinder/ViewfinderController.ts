@@ -6,6 +6,7 @@ import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro
 import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
+import { arcWindow, rainbowArc, rainbowRadiusDeg, rainbowTop, WATER_N } from '@core/astro/rainbow';
 import { distance, height } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { PrismOccluder } from '@core/geo/prismOcclude';
@@ -39,6 +40,9 @@ const MAX_COLUMNS = 2400;
 /** Buildings are only worth fetching and drawing this far out. */
 const BUILDING_RANGE_M = 20_000;
 const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
+/** Red to violet; each colour's own index sets its radius, so the secondary comes out reversed. */
+const BOW_COLORS = ['#e8453c', '#f59a23', '#f2dc3c', '#4cc35a', '#3a8ee8', '#8a5cd6'];
+const BOW_STEPS = 240;
 /** Text inside the picture: a dark outline keeps it readable over sun-lit white towers. */
 const haloText = (ctx: CanvasRenderingContext2D, text: string, x: number, y: number) => {
   ctx.save();
@@ -776,6 +780,50 @@ export class ViewfinderController {
     ctx.setLineDash([]);
   }
 
+  /** Primary and secondary bows as colour bands; dashed and dim where terrain or a building is in front. */
+  private drawRainbow(sc: Scene) {
+    const { ctx } = this;
+    const minAlt = flatHorizonDeg(sc.eyeAboveGroundM) - 0.5;
+    const seen = { clear: 0, dim: 0 };
+    for (const [k, alpha] of [[1, 0.8], [2, 0.45]] as const) {
+      const mid = rainbowRadiusDeg(WATER_N.Yellow, k);
+      if (!rainbowTop(sc.sunAz, sc.sunAlt, mid).possible) continue;
+      const width = Math.abs(rainbowRadiusDeg(WATER_N.Red, k) - rainbowRadiusDeg(WATER_N.Violet, k));
+      // Sample only what the frame can show, so long lenses keep a smooth arc.
+      const range = arcWindow(sc.sunAz, sc.sunAlt, mid, sc.aim.azimuthDeg, sc.aim.elevationDeg, Math.hypot(sc.hfov, sc.vfov) / 2 + width);
+      if (!range) continue;
+      const centre = rainbowArc(sc.sunAz, sc.sunAlt, mid, -90, BOW_STEPS, range);
+      const hidden = centre.map((p) => p.altitudeDeg < minAlt || this.hiddenBySkyline(sc, p.azimuthDeg, p.altitudeDeg) || this.behindBuilding(p.azimuthDeg, p.altitudeDeg, Infinity));
+      ctx.lineWidth = Math.max(1.5, (sc.frame.pxPerMm * sc.cam.focalMm * width * D2R) / (BOW_COLORS.length - 1));
+      BOW_COLORS.forEach((color, ci) => {
+        const n = WATER_N.Red + ((WATER_N.Violet - WATER_N.Red) * ci) / (BOW_COLORS.length - 1);
+        const pts = rainbowArc(sc.sunAz, sc.sunAlt, rainbowRadiusDeg(n, k), -90, BOW_STEPS, range);
+        ctx.strokeStyle = color;
+        let prev: { x: number; y: number } | null = null;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i].altitudeDeg >= minAlt ? this.toPx(sc, pts[i].azimuthDeg, pts[i].altitudeDeg) : null;
+          if (p && prev && (this.inFrame(sc, p, 40) || this.inFrame(sc, prev, 40))) {
+            const dim = hidden[i] || hidden[i - 1];
+            if (this.inFrame(sc, p)) seen[dim ? 'dim' : 'clear']++;
+            ctx.globalAlpha = dim ? alpha * 0.35 : alpha;
+            ctx.setLineDash(dim ? [3, 4] : []);
+            ctx.beginPath();
+            ctx.moveTo(prev.x, prev.y);
+            ctx.lineTo(p.x, p.y);
+            ctx.stroke();
+          }
+          prev = p;
+        }
+      });
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    if (import.meta.env.DEV) {
+      const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
+      if (dev) dev.rainbow = { ...seen, at: Date.now() };
+    }
+  }
+
   private drawBody(sc: Scene, body: SkyBody, date: Date): BodyLabel | null {
     const w = worldStore.getState();
     const pos = position(body, date, makeObserver(w.pin, w.pinHeightM));
@@ -1101,6 +1149,7 @@ export class ViewfinderController {
     }
     ctx.stroke();
     ctx.setLineDash([]);
+    if (c.showRainbow) this.drawRainbow(sc);
     if (c.showPaths) {
       for (const b of BODIES) {
         if (!bodyVisible(b, c, s)) continue;

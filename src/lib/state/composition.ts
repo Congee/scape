@@ -43,6 +43,8 @@ export interface Composition {
   showBuildings: boolean;
   /** Shadows the sun casts, from the terrain and from the buildings. */
   showSunShadows: boolean;
+  /** Primary and secondary rainbow arcs around the antisolar point. */
+  showRainbow: boolean;
   /** Lens from the gear list constraining focal length and aperture; null for free values. */
   lensId: string | null;
 }
@@ -81,6 +83,7 @@ export const DEFAULT_COMPOSITION: Composition = {
   showRadiants: true,
   showBuildings: true,
   showSunShadows: true,
+  showRainbow: false,
   lensId: null
 };
 
