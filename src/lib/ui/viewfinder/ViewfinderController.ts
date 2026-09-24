@@ -302,7 +302,8 @@ export class ViewfinderController {
       }
     }
     const win: ViewWindow = {
-      azFromDeg: (((sc.aim.azimuthDeg - wantSpan / 2) % 360) + 360) % 360,
+      // On the step's grid, so the worker keeps the columns a pan still covers.
+      azFromDeg: Math.round(((((sc.aim.azimuthDeg - wantSpan / 2) % 360) + 360) % 360) / stepForSpan) * stepForSpan,
       azSpanDeg: wantSpan,
       azStepDeg: stepForSpan,
       rangeM,

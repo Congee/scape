@@ -4,9 +4,9 @@ import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/
 import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
 import { BlockCache } from '@core/terrain/blockCache';
 import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
-import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
+import { planSweep, requiredTiles, sweepColumns, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
-import { sweepView } from '@core/terrain/view';
+import { assembleView, sweepView, type ViewProfile } from '@core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, tileKey, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
@@ -116,19 +116,34 @@ async function horizon(req: HorizonRequest): Promise<TerrainResponse | null> {
   }
 }
 
+/** Last view swept with every tile present, so a pan sweeps only the columns it newly needs. */
+let lastView: { key: string; k0: number; v: ViewProfile } | null = null;
+
 /** Finer and closer than the horizon sweep: the viewfinder shows the near ground too. */
 async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   const g = await groundAt(req.pin);
   const groundM = Number.isNaN(g) ? 0 : g;
-  const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, azFromDeg: req.azFromDeg, azSpanDeg: req.azSpanDeg, minDistM: 20, minZoom: demZoom(8), maxZoom: demZoom(15), tileSize: TERRAIN_TILE_SIZE });
+  const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+  const step = req.azStepDeg;
+  // Columns sit on a grid of the step, so one azimuth is swept the same way from any window.
+  const k0 = Math.round(req.azFromDeg / step);
+  const nAz = sweepColumns(req.azSpanDeg, step);
+  const key = `${req.pin.lng},${req.pin.lat}|${eyeM}|${req.eyeAboveGroundM}|${step}|${req.rangeM}|${req.minStepDeg}`;
+  const prev = lastView?.key === key ? lastView : null;
+  const held = (k: number) => !!prev && k >= prev.k0 && k < prev.k0 + prev.v.nAz;
+  const fresh: number[] = [];
+  for (let k = k0; k < k0 + nAz; k++) if (!held(k)) fresh.push(k);
+  const plan = planSweep(req.pin, req.rangeM, { azStepDeg: step, columns: fresh, minDistM: 20, minZoom: demZoom(8), maxZoom: demZoom(15), tileSize: TERRAIN_TILE_SIZE });
   const tiles = requiredTiles(plan);
   const release = cache.retain(tiles);
   try {
     await cache.loadAll(tiles);
     if (latest.View !== req.id) return null;
-    const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
-    const layers = sweepView(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
+    const swept = sweepView(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
+    const at = new Map(fresh.map((k, i) => [k, i]));
+    const layers = fresh.length === nAz ? swept : assembleView(step, k0, nAz, req.rangeM, (k) => (held(k) ? { v: prev!.v, col: k - prev!.k0 } : { v: swept, col: at.get(k)! }));
     const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
+    if (missing === 0) lastView = { key, k0, v: layers };
     return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length, missing } };
   } finally {
     release();

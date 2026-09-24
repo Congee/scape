@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DemSource, DemTile } from './dem';
 import { planSweep } from './horizon';
 import { TILE_SIZE, tileKey, tilePixelToLngLat } from './tiles';
-import { columnAt, occluded, surfaceAt, sweepView } from './view';
+import { assembleView, columnAt, occluded, surfaceAt, sweepView } from './view';
 
 const pin = { lng: -74.1553, lat: 40.7463 };
 
@@ -70,5 +70,21 @@ describe('sweepView', () => {
     expect(occluded(v, 90, 4, 3_000)).toBe(false);
     expect(occluded(v, 90, 2, 4_000)).toBe(true);
     expect(occluded(v, 90, 7, 7_500)).toBe(false);
+  });
+});
+
+const cols = (from: number, n: number) => Array.from({ length: n }, (_, i) => from + i);
+
+describe('assembleView', () => {
+  const src = wallsSource();
+  const sweep = (ks: number[]) => sweepView(src, planSweep(pin, 8_000, { azStepDeg: 1, columns: ks }), 1.6, 1.6, 8_000, 0.02);
+
+  it('matches a whole sweep when a pan keeps half the columns', () => {
+    const whole = sweep(cols(80, 21));
+    const old = sweep(cols(70, 21));
+    const fresh = sweep(cols(91, 10));
+    const v = assembleView(1, 80, 21, 8_000, (k) => (k < 91 ? { v: old, col: k - 70 } : { v: fresh, col: k - 91 }));
+    expect(v).toEqual(whole);
+    expect(v.azFromDeg).toBe(80);
   });
 });

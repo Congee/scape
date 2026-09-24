@@ -89,3 +89,25 @@ export function occluded(v: ViewProfile, azDeg: number, altDeg: number, distM: n
   for (let m = v.start[col]; m < v.start[col + 1] && v.distM[m] < distM; m++) maxBefore = v.angleDeg[m];
   return altDeg < maxBefore;
 }
+
+/**
+ * A view over grid columns `k0`..`k0 + nAz - 1`, each copied from the profile `pick` names; columns
+ * only depend on their own azimuth, so a pan keeps the ones it already swept.
+ */
+export function assembleView(azStepDeg: number, k0: number, nAz: number, rangeM: number, pick: (k: number) => { v: ViewProfile; col: number }): ViewProfile {
+  const src = Array.from({ length: nAz }, (_, i) => pick(k0 + i));
+  const start = new Int32Array(nAz + 1);
+  for (let i = 0; i < nAz; i++) start[i + 1] = start[i] + src[i].v.start[src[i].col + 1] - src[i].v.start[src[i].col];
+  const angleDeg = new Float32Array(start[nAz]);
+  const distM = new Float32Array(start[nAz]);
+  const skylineDeg = new Float32Array(nAz);
+  const skylineDistM = new Float32Array(nAz);
+  for (let i = 0; i < nAz; i++) {
+    const { v, col } = src[i];
+    angleDeg.set(v.angleDeg.subarray(v.start[col], v.start[col + 1]), start[i]);
+    distM.set(v.distM.subarray(v.start[col], v.start[col + 1]), start[i]);
+    skylineDeg[i] = v.skylineDeg[col];
+    skylineDistM[i] = v.skylineDistM[col];
+  }
+  return { azFromDeg: k0 * azStepDeg, azStepDeg, nAz, start, angleDeg, distM, skylineDeg, skylineDistM, rangeM };
+}

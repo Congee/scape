@@ -40,13 +40,20 @@ export interface SweepOptions {
   /** Azimuth window; defaults to the full circle. */
   azFromDeg?: number;
   azSpanDeg?: number;
+  /** Grid columns to plan instead of the window, each at index × azStepDeg; ascending. */
+  columns?: ArrayLike<number>;
+}
+
+/** Columns a window of `spanDeg` holds at `stepDeg`; a full circle does not repeat its first. */
+export function sweepColumns(spanDeg: number, stepDeg: number): number {
+  return spanDeg >= 360 ? Math.round(360 / stepDeg) : Math.floor(spanDeg / stepDeg + 1e-9) + 1;
 }
 
 export function planSweep(pin: LngLat, rangeM: number, o: SweepOptions = {}): SweepPlan {
   const azStepDeg = o.azStepDeg ?? 0.5;
-  const azFromDeg = o.azFromDeg ?? 0;
-  const span = o.azSpanDeg ?? 360;
-  const nAz = span >= 360 ? Math.round(360 / azStepDeg) : Math.floor(span / azStepDeg + 1e-9) + 1;
+  const cols = o.columns;
+  const azFromDeg = cols ? (cols.length > 0 ? cols[0] * azStepDeg : 0) : (o.azFromDeg ?? 0);
+  const nAz = cols ? cols.length : sweepColumns(o.azSpanDeg ?? 360, azStepDeg);
   const minD = o.minDistM ?? 50;
   const minZ = o.minZoom ?? 8;
   const maxZ = o.maxZoom ?? 14;
@@ -75,7 +82,7 @@ export function planSweep(pin: LngLat, rangeM: number, o: SweepOptions = {}): Sw
     zoom: new Uint8Array(total)
   };
   for (let i = 0; i < nAz; i++) {
-    const az = azFromDeg + i * azStepDeg;
+    const az = cols ? cols[i] * azStepDeg : azFromDeg + i * azStepDeg;
     const base = i * perAz;
     plan.start[i] = base;
     for (let j = 0; j < perAz; j++) {
