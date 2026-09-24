@@ -122,6 +122,7 @@ export class ModelDrawer {
   }
 
   private squared(draft: readonly [number, number][], tap: [number, number]): [number, number] {
+    if (draft.length < 2) return tap;
     const f = frameAt(draft[0]);
     const ring = draft.map(([lng, lat]) => lngLatToLocal(f, { lng, lat }));
     const [e, n] = snapRightAngle(ring, lngLatToLocal(f, { lng: tap[0], lat: tap[1] }));
