@@ -1,4 +1,4 @@
-/** glTF 2.0 / GLB import and export for precise building models: positions only, no dependency. */
+/** glTF 2.0 / GLB import and export for precise building models: positions only; meshopt through an injected decoder. */
 
 import { convexHull, type ModelMesh } from '@core/model';
 
@@ -23,6 +23,16 @@ export const COMPRESSED_MESSAGE =
   'Compressed mesh (Draco/meshopt) is not supported. Re-export from Blender with Compression off, or run `gltf-transform copy in.glb out.glb`.';
 
 const COMPRESSION_EXTENSIONS = new Set(['KHR_draco_mesh_compression', 'EXT_meshopt_compression', 'KHR_meshopt_compression']);
+const MESHOPT = 'EXT_meshopt_compression';
+const QUANTIZATION = 'KHR_mesh_quantization';
+const FEATURE_ID = '_FEATURE_ID_0';
+const NO_EXTENSIONS: ReadonlySet<string> = new Set();
+const WORLD_EXTENSIONS: ReadonlySet<string> = new Set([MESHOPT, QUANTIZATION]);
+
+/** The part of meshoptimizer's decoder the reader needs. */
+export interface MeshoptDecoder {
+  decodeGltfBuffer(target: Uint8Array, count: number, size: number, source: Uint8Array, mode: string, filter?: string): void;
+}
 
 export const MAX_TRIANGLES = 500_000;
 
@@ -56,13 +66,29 @@ interface GltfAccessor {
   componentType: number;
   count: number;
   type: string;
+  normalized?: boolean;
   sparse?: unknown;
+}
+interface MeshoptView {
+  buffer: number;
+  byteOffset?: number;
+  byteLength: number;
+  byteStride: number;
+  count: number;
+  mode: string;
+  filter?: string;
 }
 interface GltfBufferView {
   buffer: number;
   byteOffset?: number;
   byteLength: number;
   byteStride?: number;
+  extensions?: { EXT_meshopt_compression?: MeshoptView };
+}
+interface GltfBuffer {
+  uri?: string;
+  byteLength: number;
+  extensions?: { EXT_meshopt_compression?: { fallback?: boolean } };
 }
 interface GltfJson {
   asset?: { version?: string; extras?: { scape?: unknown } };
@@ -74,7 +100,17 @@ interface GltfJson {
   meshes?: { primitives: GltfPrimitive[] }[];
   accessors?: GltfAccessor[];
   bufferViews?: GltfBufferView[];
-  buffers?: { uri?: string; byteLength: number }[];
+  buffers?: GltfBuffer[];
+  extensions?: { EXT_structural_metadata?: StructuralMetadata };
+}
+interface MetadataProperty {
+  type: string;
+  componentType?: string;
+  noData?: number;
+}
+interface StructuralMetadata {
+  schema?: { classes?: Record<string, { properties?: Record<string, MetadataProperty> }> };
+  propertyTables?: { class: string; count: number; properties?: Record<string, { values: number; stringOffsets?: number; stringOffsetType?: string }> }[];
 }
 
 const GLB_MAGIC = 0x46546c67;
@@ -184,7 +220,7 @@ export function packGltf(json: unknown, resources: ReadonlyMap<string, ArrayBuff
   return assembleGlb(chunks);
 }
 
-function parseDoc(json: unknown): GltfJson {
+function parseDoc(json: unknown, supported: ReadonlySet<string> = NO_EXTENSIONS): GltfJson {
   let doc: GltfJson;
   try {
     doc = (typeof json === 'string' ? JSON.parse(json) : json) as GltfJson;
@@ -194,7 +230,7 @@ function parseDoc(json: unknown): GltfJson {
   if (!doc || typeof doc !== 'object') throw new GltfError('Not a glTF document.');
   const ver = doc.asset?.version;
   if (typeof ver !== 'string' || !ver.startsWith('2.')) throw new GltfError('Only glTF 2.0 is supported.');
-  const required = doc.extensionsRequired ?? [];
+  const required = (doc.extensionsRequired ?? []).filter((e) => !supported.has(e));
   if (required.some((e) => COMPRESSION_EXTENSIONS.has(e))) throw new GltfError(COMPRESSED_MESSAGE);
   if (required.length > 0) throw new GltfError(`Unsupported required extension: ${required.join(', ')}.`);
   return doc;
@@ -219,7 +255,20 @@ export function parseGltf(json: unknown, resources: ReadonlyMap<string, ArrayBuf
 function readDoc(doc: GltfJson, resources: ReadonlyMap<string, ArrayBuffer>, opts: ImportOptions, glbBin?: ArrayBuffer): GltfImport {
   const warnings: string[] = [];
   const buffers = (doc.buffers ?? []).map((b, i) => loadBuffer(b, i, resources, glbBin));
-  const chunks: { pos: Float64Array; idx: number[] }[] = [];
+  const { chunks, skipped } = collect(doc, buffers, false);
+  if (skipped > 0) warnings.push(`Skipped ${skipped} point, line or position-less primitive${skipped === 1 ? '' : 's'}.`);
+  return { mesh: toEnu(chunks, opts), warnings, scape: doc.asset?.extras?.scape };
+}
+
+interface WorldChunk {
+  pos: Float64Array;
+  idx: number[];
+  feature?: Float64Array;
+}
+
+/** Every triangle primitive of the scene, through its node matrices, in the file's own axes. */
+function collect(doc: GltfJson, buffers: ArrayBuffer[], quantized: boolean): { chunks: WorldChunk[]; skipped: number } {
+  const chunks: WorldChunk[] = [];
   let skipped = 0;
 
   const nodes = doc.nodes ?? [];
@@ -245,10 +294,12 @@ function readDoc(doc: GltfJson, resources: ReadonlyMap<string, ArrayBuffer>, opt
           skipped++;
           continue;
         }
-        const local = readPositions(doc, buffers, posAcc);
+        const local = readPositions(doc, buffers, posAcc, quantized);
         const count = local.length / 3;
         const order = prim.indices === undefined ? Array.from({ length: count }, (_, i) => i) : readIndices(doc, buffers, prim.indices, count);
-        chunks.push({ pos: transform(local, m), idx: triangulate(order, mode, flip) });
+        const fid = prim.attributes[FEATURE_ID];
+        const feature = quantized && fid !== undefined ? readFeatureIds(doc, buffers, fid, count) : undefined;
+        chunks.push({ pos: transform(local, m), idx: triangulate(order, mode, flip), feature });
       }
     }
     for (const c of node.children ?? []) visit(c, m, seen);
@@ -265,14 +316,104 @@ function readDoc(doc: GltfJson, resources: ReadonlyMap<string, ArrayBuffer>, opt
     roots = nodes.map((_, i) => i).filter((i) => !child.has(i));
   }
   for (const r of roots) visit(r, IDENTITY, new Set());
-  if (skipped > 0) warnings.push(`Skipped ${skipped} point, line or position-less primitive${skipped === 1 ? '' : 's'}.`);
-
-  return { mesh: toEnu(chunks, opts), warnings, scape: doc.asset?.extras?.scape };
+  return { chunks, skipped };
 }
 
-function loadBuffer(b: { uri?: string; byteLength: number }, i: number, resources: ReadonlyMap<string, ArrayBuffer>, glbBin?: ArrayBuffer): ArrayBuffer {
+export interface GltfWorld {
+  /** Vertices in glTF axes after every node matrix, unrounded. */
+  pos: Float64Array;
+  idx: Uint32Array;
+  /** `_FEATURE_ID_0` per vertex; -1 where the primitive has none. */
+  feature: Int32Array;
+  doc: GltfJson;
+  buffers: ArrayBuffer[];
+}
+
+/** A 3D Tiles GLB (meshopt, quantized) as one Float64 triangle soup with feature ids. */
+export function readGlbWorld(buf: ArrayBuffer, decoder: MeshoptDecoder): GltfWorld {
+  const { json, bin } = readGlb(buf);
+  const doc = parseDoc(json, WORLD_EXTENSIONS);
+  const buffers = (doc.buffers ?? []).map((b, i) => loadBuffer(b, i, new Map(), bin));
+  decodeMeshopt(doc, buffers, decoder);
+  const { chunks } = collect(doc, buffers, true);
+  let nv = 0;
+  let ni = 0;
+  for (const c of chunks) {
+    nv += c.pos.length / 3;
+    ni += c.idx.length;
+  }
+  const pos = new Float64Array(nv * 3);
+  const feature = new Int32Array(nv).fill(-1);
+  const idx = new Uint32Array(ni);
+  let base = 0;
+  let at = 0;
+  for (const c of chunks) {
+    pos.set(c.pos, base * 3);
+    if (c.feature) for (let i = 0; i < c.feature.length; i++) feature[base + i] = c.feature[i];
+    for (const v of c.idx) idx[at++] = v + base;
+    base += c.pos.length / 3;
+  }
+  return { pos, idx, feature, doc, buffers };
+}
+
+/** Replace each meshopt view with its decoded bytes, so accessors read it like any other view. */
+function decodeMeshopt(doc: GltfJson, buffers: ArrayBuffer[], decoder: MeshoptDecoder): void {
+  (doc.bufferViews ?? []).forEach((bv, i) => {
+    const ext = bv.extensions?.EXT_meshopt_compression;
+    if (!ext) return;
+    const src = buffers[ext.buffer];
+    const start = ext.byteOffset ?? 0;
+    if (!src || start + ext.byteLength > src.byteLength) throw new GltfError(`Buffer view ${i} meshopt source runs past its buffer.`);
+    const out = new Uint8Array(ext.count * ext.byteStride);
+    try {
+      decoder.decodeGltfBuffer(out, ext.count, ext.byteStride, new Uint8Array(src, start, ext.byteLength), ext.mode, ext.filter);
+    } catch (e) {
+      throw new GltfError(`Buffer view ${i} meshopt data is not valid: ${e instanceof Error ? e.message : e}.`);
+    }
+    bv.buffer = buffers.push(out.buffer) - 1;
+    bv.byteOffset = 0;
+    bv.byteLength = out.length;
+    bv.byteStride = ext.mode === 'ATTRIBUTES' ? ext.byteStride : bv.byteStride;
+  });
+}
+
+/** One `EXT_structural_metadata` property-table column: numbers (noData as NaN) or strings. */
+export function propertyColumn(w: GltfWorld, table: number, name: string): (number | string)[] | undefined {
+  const meta = w.doc.extensions?.EXT_structural_metadata;
+  const t = meta?.propertyTables?.[table];
+  const col = t?.properties?.[name];
+  const def = t && meta?.schema?.classes?.[t.class]?.properties?.[name];
+  if (!t || !col || !def) return undefined;
+  const bytes = (v: number): DataView => {
+    const bv = w.doc.bufferViews?.[v];
+    const buf = bv && w.buffers[bv.buffer];
+    if (!bv || !buf || (bv.byteOffset ?? 0) + bv.byteLength > buf.byteLength) throw new GltfError(`Property ${name} buffer view ${v} is not valid.`);
+    return new DataView(buf, bv.byteOffset ?? 0, bv.byteLength);
+  };
+  const values = bytes(col.values);
+  if (def.type === 'STRING') {
+    if (col.stringOffsets === undefined) return undefined;
+    const offs = bytes(col.stringOffsets);
+    const ob = COMPONENT[STRUCT_COMPONENT[col.stringOffsetType ?? 'UINT32']];
+    if (!ob || offs.byteLength < (t.count + 1) * ob.bytes) throw new GltfError(`Property ${name} string offsets are not valid.`);
+    const dec = new TextDecoder();
+    const u8 = new Uint8Array(values.buffer, values.byteOffset, values.byteLength);
+    return Array.from({ length: t.count }, (_, i) => dec.decode(u8.subarray(ob.get(offs, i * ob.bytes), ob.get(offs, (i + 1) * ob.bytes))));
+  }
+  const c = def.type === 'SCALAR' ? COMPONENT[STRUCT_COMPONENT[def.componentType ?? '']] : undefined;
+  if (!c) return undefined;
+  if (values.byteLength < t.count * c.bytes) throw new GltfError(`Property ${name} is shorter than its table.`);
+  return Array.from({ length: t.count }, (_, i) => {
+    const v = c.get(values, i * c.bytes);
+    return v === def.noData || (def.noData !== undefined && Math.fround(v) === Math.fround(def.noData)) ? NaN : v;
+  });
+}
+
+function loadBuffer(b: GltfBuffer, i: number, resources: ReadonlyMap<string, ArrayBuffer>, glbBin?: ArrayBuffer): ArrayBuffer {
   let data: ArrayBuffer | undefined;
   if (b.uri === undefined) {
+    // A meshopt fallback holds nothing; its views are decoded into new buffers.
+    if (b.extensions?.EXT_meshopt_compression?.fallback) return new ArrayBuffer(0);
     if (i !== 0 || !glbBin) throw new GltfError(`Buffer ${i} has no data.`);
     data = glbBin;
   } else if (b.uri.startsWith('data:')) {
@@ -324,17 +465,53 @@ function view(doc: GltfJson, buffers: ArrayBuffer[], a: number, elemBytes: numbe
   return { acc, dv: new DataView(buf, bvStart + off, Math.max(0, bv.byteLength - off)), stride };
 }
 
-function readPositions(doc: GltfJson, buffers: ArrayBuffer[], a: number): Float64Array {
+interface Component {
+  bytes: number;
+  get: (dv: DataView, o: number) => number;
+  /** The normalized divisor; signed values clamp at -1. */
+  norm: number;
+}
+
+const COMPONENT: Record<number, Component> = {
+  5120: { bytes: 1, get: (dv, o) => dv.getInt8(o), norm: 127 },
+  5121: { bytes: 1, get: (dv, o) => dv.getUint8(o), norm: 255 },
+  5122: { bytes: 2, get: (dv, o) => dv.getInt16(o, true), norm: 32767 },
+  5123: { bytes: 2, get: (dv, o) => dv.getUint16(o, true), norm: 65535 },
+  5125: { bytes: 4, get: (dv, o) => dv.getUint32(o, true), norm: 4294967295 },
+  5126: { bytes: 4, get: (dv, o) => dv.getFloat32(o, true), norm: 1 },
+  5130: { bytes: 8, get: (dv, o) => dv.getFloat64(o, true), norm: 1 },
+  // Metadata only.
+  5124: { bytes: 4, get: (dv, o) => dv.getInt32(o, true), norm: 2147483647 }
+};
+
+const STRUCT_COMPONENT: Record<string, number> = { INT8: 5120, UINT8: 5121, INT16: 5122, UINT16: 5123, INT32: 5124, UINT32: 5125, FLOAT32: 5126, FLOAT64: 5130 };
+
+/** `comps` numbers per element, normalized when the accessor says so. */
+function readNumbers(doc: GltfJson, buffers: ArrayBuffer[], a: number, comps: number, c: Component, what: string): Float64Array {
+  const { acc, dv, stride } = view(doc, buffers, a, comps * c.bytes, what);
+  const out = new Float64Array(acc.count * comps);
+  const norm = acc.normalized && c.norm !== 1;
+  for (let i = 0; i < acc.count; i++)
+    for (let k = 0; k < comps; k++) {
+      const v = c.get(dv, i * stride + k * c.bytes);
+      out[i * comps + k] = norm ? Math.max(v / c.norm, -1) : v;
+    }
+  return out;
+}
+
+/** `quantized` also takes KHR_mesh_quantization's byte and short positions. */
+function readPositions(doc: GltfJson, buffers: ArrayBuffer[], a: number, quantized: boolean): Float64Array {
   const acc = doc.accessors?.[a];
-  if (acc && (acc.componentType !== FLOAT || acc.type !== 'VEC3')) throw new GltfError('POSITION must be FLOAT VEC3.');
-  const { acc: ac, dv, stride } = view(doc, buffers, a, 12, 'POSITION');
-  const out = new Float64Array(ac.count * 3);
-  for (let i = 0; i < ac.count; i++) {
-    const o = i * stride;
-    out[i * 3] = dv.getFloat32(o, true);
-    out[i * 3 + 1] = dv.getFloat32(o + 4, true);
-    out[i * 3 + 2] = dv.getFloat32(o + 8, true);
-  }
+  const ok = quantized ? [5120, 5121, 5122, 5123, FLOAT] : [FLOAT];
+  if (acc && (!ok.includes(acc.componentType) || acc.type !== 'VEC3')) throw new GltfError(quantized ? 'POSITION must be float, byte or short VEC3.' : 'POSITION must be FLOAT VEC3.');
+  return readNumbers(doc, buffers, a, 3, COMPONENT[acc?.componentType ?? FLOAT], 'POSITION');
+}
+
+function readFeatureIds(doc: GltfJson, buffers: ArrayBuffer[], a: number, vertices: number): Float64Array {
+  const acc = doc.accessors?.[a];
+  if (!acc || ![5121, 5123, FLOAT].includes(acc.componentType) || acc.type !== 'SCALAR') throw new GltfError('_FEATURE_ID_0 must be ubyte, ushort or float SCALAR.');
+  const out = readNumbers(doc, buffers, a, 1, COMPONENT[acc.componentType], 'Feature id');
+  if (out.length !== vertices) throw new GltfError('_FEATURE_ID_0 count does not match POSITION.');
   return out;
 }
 

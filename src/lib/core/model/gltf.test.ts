@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { COMPRESSED_MESSAGE, GltfError, ModelOrigin, ModelUnit, parseGlb, parseGltf, validateMesh, writeGlb, type ImportOptions } from './gltf';
+import { MeshoptDecoder } from 'meshoptimizer/decoder';
+import { MeshoptEncoder } from 'meshoptimizer/encoder';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { COMPRESSED_MESSAGE, GltfError, ModelOrigin, ModelUnit, parseGlb, parseGltf, propertyColumn, readGlbWorld, validateMesh, writeGlb, type ImportOptions } from './gltf';
 import type { ModelMesh } from '@core/model';
 
 const KEEP: ImportOptions = { units: ModelUnit.M, zUp: false, origin: ModelOrigin.Keep };
@@ -340,5 +342,114 @@ describe('writeGlb', () => {
     const doc = JSON.parse(new TextDecoder().decode(new Uint8Array(out, 20, jl)));
     expect(doc.accessors[0]).toMatchObject({ min: [0, 0, -2], max: [1, 3, 0] });
     expect(doc.asset).toEqual({ version: '2.0', generator: 'Scape', extras: { scape: null } });
+  });
+});
+
+/** A 3D Tiles-style GLB: meshopt views over a fallback buffer, int16 positions, float feature ids, one property table. */
+function worldGlb(): ArrayBuffer {
+  // Two triangles, positions normalized int16 scaled by 100 through the node; stride 8 for alignment.
+  const q = [
+    [0, 0, 0],
+    [32767, 0, 0],
+    [0, 32767, 0],
+    [0, 0, -32767],
+    [-32768, 0, 0],
+    [0, 0, 16384]
+  ];
+  const pos = new Int16Array(q.length * 4);
+  q.forEach((v, i) => pos.set(v, i * 4));
+  const fid = new Float32Array([0, 0, 0, 1, 1, 1]);
+  const idx = new Uint32Array([0, 1, 2, 3, 4, 5]);
+  const height = new Float32Array([12.5, -9999]);
+  const names = new TextEncoder().encode('NL.1NL.22');
+  const offsets = new Uint32Array([0, 4, 9]);
+  const bytes: number[] = [];
+  const views: object[] = [];
+  const put = (data: Uint8Array) => {
+    while (bytes.length % 4) bytes.push(0);
+    const byteOffset = bytes.length;
+    for (const b of data) bytes.push(b);
+    return byteOffset;
+  };
+  const meshopt = (raw: ArrayBufferView, count: number, byteStride: number, mode: string, target?: number) => {
+    const enc = MeshoptEncoder.encodeGltfBuffer(new Uint8Array(raw.buffer), count, byteStride, mode);
+    const byteOffset = put(enc);
+    views.push({ buffer: 1, byteLength: count * byteStride, byteStride: mode === 'ATTRIBUTES' ? byteStride : undefined, target, extensions: { EXT_meshopt_compression: { buffer: 0, byteOffset, byteLength: enc.length, byteStride, count, mode } } });
+    return views.length - 1;
+  };
+  const plain = (raw: ArrayBufferView) => {
+    const u8 = new Uint8Array(raw.buffer);
+    views.push({ buffer: 0, byteOffset: put(u8), byteLength: u8.length });
+    return views.length - 1;
+  };
+  const vPos = meshopt(pos, q.length, 8, 'ATTRIBUTES');
+  const vFid = meshopt(fid, fid.length, 4, 'ATTRIBUTES');
+  const vIdx = meshopt(idx, idx.length, 4, 'TRIANGLES');
+  const vH = plain(height);
+  const vN = plain(names);
+  const vO = plain(offsets);
+  while (bytes.length % 4) bytes.push(0);
+  const json = {
+    asset: { version: '2.0' },
+    extensionsUsed: ['EXT_meshopt_compression', 'KHR_mesh_quantization', 'EXT_structural_metadata', 'EXT_mesh_features'],
+    extensionsRequired: ['EXT_meshopt_compression', 'KHR_mesh_quantization'],
+    buffers: [{ byteLength: bytes.length }, { byteLength: 1024, extensions: { EXT_meshopt_compression: { fallback: true } } }],
+    bufferViews: views,
+    accessors: [
+      { bufferView: vPos, componentType: 5122, normalized: true, count: q.length, type: 'VEC3' },
+      { bufferView: vFid, componentType: 5126, count: fid.length, type: 'SCALAR' },
+      { bufferView: vIdx, componentType: 5125, count: idx.length, type: 'SCALAR' }
+    ],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, _FEATURE_ID_0: 1 }, indices: 2 }] }],
+    nodes: [{ mesh: 0, matrix: [100, 0, 0, 0, 0, 100, 0, 0, 0, 0, 100, 0, 1000, 0, 0, 1] }],
+    scenes: [{ nodes: [0] }],
+    extensions: {
+      EXT_structural_metadata: {
+        schema: { classes: { b: { properties: { h: { type: 'SCALAR', componentType: 'FLOAT32', noData: -9999 }, id: { type: 'STRING' } } } } },
+        propertyTables: [{ class: 'b', count: 2, properties: { h: { values: vH }, id: { values: vN, stringOffsets: vO, stringOffsetType: 'UINT32' } } }]
+      }
+    }
+  };
+  return glb(json, new Uint8Array(bytes));
+}
+
+describe('readGlbWorld', () => {
+  beforeAll(async () => {
+    await MeshoptEncoder.ready;
+    await MeshoptDecoder.ready;
+  });
+
+  it('decodes meshopt views, dequantizes positions through the node, and keeps feature ids', () => {
+    const w = readGlbWorld(worldGlb(), MeshoptDecoder);
+    expect(Array.from(w.idx)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(Array.from(w.feature)).toEqual([0, 0, 0, 1, 1, 1]);
+    const v = (i: number) => Array.from(w.pos.subarray(i * 3, i * 3 + 3));
+    expect(v(0)).toEqual([1000, 0, 0]);
+    expect(v(1)).toEqual([1100, 0, 0]);
+    expect(v(3)).toEqual([1000, 0, -100]);
+    // -32768 clamps to -1.
+    expect(v(4)).toEqual([900, 0, 0]);
+    expect(v(5)[2]).toBeCloseTo((16384 / 32767) * 100, 9);
+  });
+
+  it('reads property columns, noData as NaN, strings by offset', () => {
+    const w = readGlbWorld(worldGlb(), MeshoptDecoder);
+    expect(propertyColumn(w, 0, 'h')).toEqual([12.5, NaN]);
+    expect(propertyColumn(w, 0, 'id')).toEqual(['NL.1', 'NL.22']);
+    expect(propertyColumn(w, 0, 'missing')).toBeUndefined();
+    expect(propertyColumn(w, 1, 'h')).toBeUndefined();
+  });
+
+  it('wraps a corrupt meshopt stream in GltfError', () => {
+    const buf = worldGlb();
+    const u8 = new Uint8Array(buf);
+    // Clobber the start of the binary chunk, where the first meshopt stream lives.
+    const jl = new DataView(buf).getUint32(12, true);
+    u8.fill(0xff, 28 + jl, 28 + jl + 8);
+    expectError(() => readGlbWorld(buf, MeshoptDecoder), /meshopt data is not valid/);
+  });
+
+  it('still refuses meshopt and quantization on the model import path', () => {
+    expectError(() => parseGlb(worldGlb(), KEEP), COMPRESSED_MESSAGE);
   });
 });
