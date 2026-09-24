@@ -107,6 +107,14 @@ export function partsFootprint(anchor: ModelAnchor, parts: readonly ModelPart[])
   });
 }
 
+/** Local e, n points to lng/lat at the anchor. */
+export function hullFootprint(anchor: ModelAnchor, hull: readonly [number, number][]): [number, number][] {
+  return hull.map(([e, n]) => {
+    const g = localToLngLat(anchor, e, n);
+    return [g.lng, g.lat];
+  });
+}
+
 const cross = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
 
 /**

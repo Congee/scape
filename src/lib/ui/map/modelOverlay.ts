@@ -38,8 +38,7 @@ export function modelFeatures(models: readonly SavedModel[], selectedId: string 
         features.push({ type: 'Feature', properties: props, geometry: { type: 'Polygon', coordinates: [ring] } });
       }
     } else if (m.footprint.length >= 3) {
-      const box = modelMesh(m)?.box;
-      if (!box) continue;
+      const { box } = modelMesh(m);
       const ring = [...m.footprint, m.footprint[0]];
       const props = { model: m.id, part: '', base: lift + box[2] * s, top: lift + box[5] * s, selected, current: false };
       features.push({ type: 'Feature', properties: props, geometry: { type: 'Polygon', coordinates: [ring] } });

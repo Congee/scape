@@ -1,6 +1,7 @@
 /** A Drawn model seeded from the Overture rows of one building, and the part edits the editor offers. */
 
 import { AltitudeRef, lngLatToLocal, ModelSource, partsFootprint, type ModelAnchor, type ModelPart, type SavedModel } from '@core/model';
+import type { LngLat } from '@core/geo/geodesy';
 import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
 
 /** The rows a seed reads; a `BuildingBatch` or any subset of one. */
@@ -12,8 +13,8 @@ const SPIRE_RISE_M = 20;
 
 const newId = () => crypto.randomUUID();
 
-/** One part per row, in a frame anchored at the rows' bounding-box centre. */
-export function seedModel(rows: SeedRows, name: string, now = Date.now()): SavedModel | null {
+/** The rows' bounding-box centre; null without vertices. */
+export function rowsCentre(rows: Pick<SeedRows, 'count' | 'ringStart' | 'lng' | 'lat'>): LngLat | null {
   let lng0 = Infinity;
   let lng1 = -Infinity;
   let lat0 = Infinity;
@@ -24,8 +25,14 @@ export function seedModel(rows: SeedRows, name: string, now = Date.now()): Saved
     lat0 = Math.min(lat0, rows.lat[j]);
     lat1 = Math.max(lat1, rows.lat[j]);
   }
-  if (!(lng1 >= lng0)) return null;
-  const anchor: ModelAnchor = { lat: (lat0 + lat1) / 2, lng: (lng0 + lng1) / 2, altRef: AltitudeRef.Ground, altM: 0, headingDeg: 0, scale: 1 };
+  return lng1 >= lng0 ? { lat: (lat0 + lat1) / 2, lng: (lng0 + lng1) / 2 } : null;
+}
+
+/** One part per row, in a frame anchored at the rows' bounding-box centre. */
+export function seedModel(rows: SeedRows, name: string, now = Date.now()): SavedModel | null {
+  const c = rowsCentre(rows);
+  if (!c) return null;
+  const anchor: ModelAnchor = { ...c, altRef: AltitudeRef.Ground, altM: 0, headingDeg: 0, scale: 1 };
   const parts: ModelPart[] = [];
   let groundM = NaN;
   for (let i = 0; i < rows.count; i++) {

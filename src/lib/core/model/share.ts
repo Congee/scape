@@ -1,6 +1,6 @@
 /** Sharing precise models: placement in `asset.extras.scape`, picked files as drafts, and `.scape.json` records. */
 
-import { AltitudeRef, localToLngLat, ModelSource, partsFootprint, type ModelAnchor, type ModelPart, type SavedModel } from '@core/model';
+import { AltitudeRef, hullFootprint, ModelSource, partsFootprint, type ModelAnchor, type ModelPart, type SavedModel } from '@core/model';
 import { RoofShape } from '@workers/buildings.protocol';
 import { DEFAULT_IMPORT, GltfError, ModelOrigin, ModelUnit, packGltf, parseGlb, readGlb, replaceGlbJson, validateMesh, writeGlb, type ImportOptions, type MeshStats } from './gltf';
 import { partsMesh } from './mesh';
@@ -101,6 +101,8 @@ export interface ModelImport {
   /** Plan-view convex hull in local e, n; the footprint once placed. */
   hull: [e: number, n: number][];
   stats: MeshStats;
+  /** Degenerate triangles dropped. */
+  degenerate: number;
   warnings: string[];
 }
 
@@ -125,12 +127,6 @@ async function toGlb(input: readonly ModelFile[] | ArrayBuffer): Promise<{ glb: 
   return { glb: packGltf(new TextDecoder().decode(bytes), resources), name };
 }
 
-const hullFootprint = (anchor: ModelAnchor, hull: readonly [number, number][]): [number, number][] =>
-  hull.map(([e, n]) => {
-    const g = localToLngLat(anchor, e, n);
-    return [g.lng, g.lat];
-  });
-
 /**
  * A draft model and its stats from picked files; throws GltfError when unusable. `opts` overrides the
  * file's own Scape import options. Scape extras with parts come back as a Drawn model.
@@ -152,7 +148,7 @@ export async function importModelFile(input: readonly ModelFile[] | ArrayBuffer,
   const draft: ModelDraft = parts
     ? { ...common, source: ModelSource.Drawn, parts }
     : { ...common, source: ModelSource.Imported, glb, importOptions: options };
-  return { draft, hull: v.hull, stats: v.stats, warnings };
+  return { draft, hull: v.hull, stats: v.stats, degenerate: v.degenerate, warnings };
 }
 
 /** The draft stood at `anchor`, its footprint re-derived there. */

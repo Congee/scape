@@ -2,9 +2,9 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
 import { modelTriangles } from '@core/geo/modelPlace';
-import { modelOutlines, partsFootprint, type SavedModel } from '@core/model';
+import { modelOutlines, type SavedModel } from '@core/model';
 import { drawnModel } from '@core/model/draw';
-import { modelMesh } from '@core/model/mesh';
+import { modelFootprint, modelMesh } from '@core/model/mesh';
 import { exportModelGlb, modelFileName } from '@core/model/share';
 import { deleteOne, listAll, putOne } from '@data/db';
 import { buildingHeightAt, groundUnder, setBuildingModels } from './buildings';
@@ -27,9 +27,13 @@ export interface ModelsState {
   picking: boolean;
   /** Why the last pick made no model; cleared by the next pick. */
   pickError: string | null;
+  /** Next map click puts the import being placed on the Overture building under it. */
+  importPick: boolean;
+  /** Where that click put it; the sheet reads and clears it. */
+  importAt: { lng: number; lat: number } | null;
   load(): Promise<void>;
   save(m: SavedModel): Promise<SavedModel>;
-  /** Applies `patch`, re-deriving the footprint from the parts. */
+  /** Applies `patch`, re-deriving the footprint from the parts or the mesh at the new anchor. */
   update(id: string, patch: Partial<SavedModel>): Promise<SavedModel | null>;
   remove(id: string): Promise<void>;
   /** Saves a placed import draft and selects it. */
@@ -39,9 +43,19 @@ export interface ModelsState {
   select(id: string | null): void;
   selectPart(id: string | null): void;
   setPicking(on: boolean): void;
+  setImportPick(on: boolean): void;
   setDraft(draft: [number, number][] | null): void;
   setRightAngles(on: boolean): void;
   setAdjusting(on: boolean): void;
+}
+
+/** Keeps the buffer already loaded when the bytes match, so the mesh parse cache survives a reload of the store. */
+function sameGlb(m: SavedModel, old: ArrayBuffer | undefined): SavedModel {
+  if (!m.glb || !old || old.byteLength !== m.glb.byteLength) return m;
+  const a = new Uint8Array(m.glb);
+  const b = new Uint8Array(old);
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return m;
+  return { ...m, glb: old };
 }
 
 const CHANNEL = 'scape.models';
@@ -59,8 +73,11 @@ export const modelsStore = create<ModelsState>()(
     adjusting: false,
     picking: false,
     pickError: null,
+    importPick: false,
+    importAt: null,
     load: async () => {
-      const models = await listAll('models');
+      const prev = new Map(get().models.map((m) => [m.id, m.glb]));
+      const models = (await listAll('models')).map((m) => sameGlb(m, prev.get(m.id)));
       set((s) => ({ models, loaded: true, rev: s.rev + 1 }));
     },
     save: async (m) => {
@@ -73,7 +90,7 @@ export const modelsStore = create<ModelsState>()(
       const old = get().models.find((m) => m.id === id);
       if (!old) return null;
       const next: SavedModel = { ...old, ...patch, updatedAt: Date.now() };
-      if (next.parts) next.footprint = partsFootprint(next.anchor, next.parts);
+      if (next.parts || next.glb) next.footprint = modelFootprint(next);
       return get().save(next);
     },
     remove: async (id) => {
@@ -93,7 +110,8 @@ export const modelsStore = create<ModelsState>()(
     },
     select: (selectedId) => set((s) => (s.selectedId === selectedId ? {} : { selectedId, selectedPartId: s.models.find((m) => m.id === selectedId)?.parts?.[0]?.id ?? null })),
     selectPart: (selectedPartId) => set({ selectedPartId }),
-    setPicking: (picking) => set(picking ? { picking, pickError: null, draft: null } : { picking }),
+    setPicking: (picking) => set(picking ? { picking, pickError: null, draft: null, importPick: false } : { picking }),
+    setImportPick: (importPick) => set(importPick ? { importPick, pickError: null, draft: null, picking: false } : { importPick }),
     setDraft: (draft) => set(draft ? { draft, picking: false } : { draft }),
     setRightAngles: (rightAngles) => set({ rightAngles }),
     setAdjusting: (adjusting) => set({ adjusting })

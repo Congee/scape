@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { compass, distance, height } from '@core/format';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
-import { modelBaseM, type ModelPart, type SavedModel } from '@core/model';
+import { modelBaseM, ModelSource, type ModelPart, type SavedModel } from '@core/model';
 import { apexOf, applyNudge, azElTo, NUDGE_STEPS, NudgeKind, ringEdges, withEdgeBearing, withEdgeLength, withPart } from '@core/model/draw';
-import { modelMesh } from '@core/model/mesh';
-import { modelApexM, newPart, spirePart } from '@core/model/seed';
+import { importedMesh, modelMesh, modelTopM } from '@core/model/mesh';
+import { newPart, spirePart } from '@core/model/seed';
 import { endpointHeightM } from '@core/terrain/los';
 import { finishDraft, useModels, modelsStore } from '@state/models';
 import { useSettings } from '@state/settings';
 import { EYE_HEIGHT_M, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 import { RoofShape } from '@workers/buildings.protocol';
+import { downloadBlob } from './download';
+import { ModelImportSheet } from './ModelImport';
 import { useMedia } from './useMedia';
 
 const ROOFS = Object.entries(RoofShape) as [keyof typeof RoofShape, RoofShape][];
@@ -55,6 +57,7 @@ export function ModelsPanel() {
   const ms = modelsStore.getState();
   const selected = models.find((m) => m.id === selectedId) ?? null;
   const sorted = models.map((m) => ({ m, d: distanceM(pin, m.anchor) })).toSorted((a, b) => a.d - b.d);
+  const [files, setFiles] = useState<File[] | null>(null);
 
   return (
     <div className="models">
@@ -65,7 +68,22 @@ export function ModelsPanel() {
         <button className={draft ? 'on' : ''} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
           Draw a building
         </button>
+        <label className="button file-pick" title="A .glb, a .gltf, or a .gltf with its .bin files picked together">
+          Import GLB…
+          <input
+            type="file"
+            className="model-file"
+            accept=".glb,.gltf,.bin,model/gltf-binary,model/gltf+json"
+            multiple
+            onChange={(e) => {
+              const picked = [...(e.currentTarget.files ?? [])];
+              e.currentTarget.value = '';
+              if (picked.length) setFiles(picked);
+            }}
+          />
+        </label>
       </div>
+      {files && <ModelImportSheet key={files.map((f) => f.name + f.lastModified).join('|')} files={files} onClose={() => setFiles(null)} />}
       {pickError && <p className="error">{pickError}</p>}
       {draft && (
         <div className="model-draft">
@@ -110,12 +128,19 @@ export function ModelsPanel() {
 }
 
 /** Where the model's top stands and how high above the geoid. */
-function modelApex(m: SavedModel): { at: { lng: number; lat: number }; aboveGroundM: number; absM: number } | null {
-  const mesh = modelMesh(m);
-  const a = mesh && apexOf(m, mesh.pos);
+function modelApex(m: SavedModel): {
+  at: { lng: number; lat: number };
+  aboveGroundM: number;
+  absM: number;
+} | null {
+  const a = apexOf(m, modelMesh(m).pos);
   if (!a) return null;
   const absM = modelBaseM(m.anchor, m.groundM) - m.anchor.altM + a.aboveGroundM;
-  return { at: a.at, absM, aboveGroundM: absM - Math.max(Number.isNaN(m.groundM) ? 0 : m.groundM, 0) };
+  return {
+    at: a.at,
+    absM,
+    aboveGroundM: absM - Math.max(Number.isNaN(m.groundM) ? 0 : m.groundM, 0)
+  };
 }
 
 function NudgePad({ m, partId }: { m: SavedModel; partId: string | null }) {
@@ -230,6 +255,20 @@ function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
   const parts = m.parts ?? [];
   const setPart = (id: string, p: Partial<ModelPart>) => patch({ parts: withPart(parts, id, p) });
   const current = parts.find((p) => p.id === selectedPartId) ?? null;
+  const drawn = m.source === ModelSource.Drawn;
+  const [withParts, setWithParts] = useState(true);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportGlb = () => {
+    setExportError(null);
+    try {
+      const out = ms.exportGlb(m.id, drawn && withParts);
+      if (!out) return;
+      const { fileName, glb } = out;
+      downloadBlob(fileName, new Blob([glb], { type: 'model/gltf-binary' }));
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : String(e));
+    }
+  };
   const targetTop = () => {
     const a = modelApex(m);
     if (!a) return;
@@ -248,8 +287,18 @@ function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
         </b>
         <span className="k">Top</span>
         <b className="v">
-          {height(modelApexM(parts) * m.anchor.scale + m.anchor.altM, units)} <span className="muted">above ground{Number.isNaN(m.groundM) ? '' : ` · ground ${height(m.groundM, units)}`}</span>
+          {height(modelTopM(m) * m.anchor.scale + m.anchor.altM, units)}{' '}
+          <span className="muted">
+            above ground
+            {Number.isNaN(m.groundM) ? '' : ` · ground ${height(m.groundM, units)}`}
+          </span>
         </b>
+        {!drawn && m.glb && (
+          <>
+            <span className="k">Mesh</span>
+            <b className="v">{(importedMesh(m.glb, m.importOptions).mesh.idx.length / 3).toLocaleString('en')} triangles</b>
+          </>
+        )}
         <span className="k">Lift</span>
         <b className="v">
           <input type="number" step={0.1} value={m.anchor.altM} onChange={(e) => patch({ anchor: { ...m.anchor, altM: num(e.target.value, 0) } })} aria-label="Model base above ground, metres" />
@@ -268,66 +317,107 @@ function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
           </label>
         </b>
       </div>
-      <h3>
-        {parts.length} part{parts.length === 1 ? '' : 's'}
-      </h3>
-      <table className="parts">
-        <thead>
-          <tr>
-            <th title="Bottom above the model's base, metres">Base</th>
-            <th title="Top above the model's base, metres">Top</th>
-            <th>Roof</th>
-            <th title="Roof height, metres; blank picks one">Roof h</th>
-            <th title="Roof direction, degrees from north; blank picks one">Dir</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {parts.map((p, i) => (
-            <tr key={p.id} className={p.id === selectedPartId ? 'current' : ''} onClick={() => ms.selectPart(p.id)}>
-              <td>
-                <input type="number" step={1} value={p.baseM} onChange={(e) => setPart(p.id, { baseM: num(e.target.value, 0) })} aria-label={`Part ${i + 1} base, metres`} />
-              </td>
-              <td>
-                <input type="number" step={1} value={p.heightM} onChange={(e) => setPart(p.id, { heightM: num(e.target.value, p.heightM) })} aria-label={`Part ${i + 1} top, metres`} />
-              </td>
-              <td>
-                <select value={p.roof} onChange={(e) => setPart(p.id, { roof: Number(e.target.value) as RoofShape })} aria-label={`Part ${i + 1} roof shape`}>
-                  {ROOFS.map(([name, code]) => (
-                    <option key={code} value={code}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td>
-                <input type="number" min={0} step={1} value={p.roofHeightM || ''} placeholder="auto" onChange={(e) => setPart(p.id, { roofHeightM: Math.max(0, num(e.target.value, 0)) })} aria-label={`Part ${i + 1} roof height, metres`} />
-              </td>
-              <td>
-                <input type="number" step={1} value={Number.isNaN(p.roofDirDeg) ? '' : p.roofDirDeg} placeholder="auto" onChange={(e) => setPart(p.id, { roofDirDeg: num(e.target.value, NaN) })} aria-label={`Part ${i + 1} roof direction, degrees`} />
-              </td>
-              <td>
-                <button className="link" onClick={() => patch({ parts: parts.filter((q) => q.id !== p.id) })} aria-label={`Delete part ${i + 1}`} disabled={parts.length <= 1}>
-                  ✕
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="actions">
-        <button onClick={() => patch({ parts: [...parts, newPart(parts[0] ?? null)] })} title="A copy of the tallest part to reshape">
-          Add part
-        </button>
-        <button onClick={() => patch({ parts: [...parts, spirePart(parts)] })} title="A thin pyramid on top of the tallest part">
-          Add spire
-        </button>
-      </div>
-      {current && (
-        <details className="edges-box" open={!compact}>
-          <summary>Edges of part {parts.indexOf(current) + 1}</summary>
-          <EdgeTable m={m} part={current} />
-        </details>
+      {drawn && (
+        <>
+          <h3>
+            {parts.length} part{parts.length === 1 ? '' : 's'}
+          </h3>
+          <table className="parts">
+            <thead>
+              <tr>
+                <th title="Bottom above the model's base, metres">Base</th>
+                <th title="Top above the model's base, metres">Top</th>
+                <th>Roof</th>
+                <th title="Roof height, metres; blank picks one">Roof h</th>
+                <th title="Roof direction, degrees from north; blank picks one">Dir</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {parts.map((p, i) => (
+                <tr key={p.id} className={p.id === selectedPartId ? 'current' : ''} onClick={() => ms.selectPart(p.id)}>
+                  <td>
+                    <input type="number" step={1} value={p.baseM} onChange={(e) => setPart(p.id, { baseM: num(e.target.value, 0) })} aria-label={`Part ${i + 1} base, metres`} />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      step={1}
+                      value={p.heightM}
+                      onChange={(e) =>
+                        setPart(p.id, {
+                          heightM: num(e.target.value, p.heightM)
+                        })
+                      }
+                      aria-label={`Part ${i + 1} top, metres`}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={p.roof}
+                      onChange={(e) =>
+                        setPart(p.id, {
+                          roof: Number(e.target.value) as RoofShape
+                        })
+                      }
+                      aria-label={`Part ${i + 1} roof shape`}
+                    >
+                      {ROOFS.map(([name, code]) => (
+                        <option key={code} value={code}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={p.roofHeightM || ''}
+                      placeholder="auto"
+                      onChange={(e) =>
+                        setPart(p.id, {
+                          roofHeightM: Math.max(0, num(e.target.value, 0))
+                        })
+                      }
+                      aria-label={`Part ${i + 1} roof height, metres`}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      step={1}
+                      value={Number.isNaN(p.roofDirDeg) ? '' : p.roofDirDeg}
+                      placeholder="auto"
+                      onChange={(e) => setPart(p.id, { roofDirDeg: num(e.target.value, NaN) })}
+                      aria-label={`Part ${i + 1} roof direction, degrees`}
+                    />
+                  </td>
+                  <td>
+                    <button className="link" onClick={() => patch({ parts: parts.filter((q) => q.id !== p.id) })} aria-label={`Delete part ${i + 1}`} disabled={parts.length <= 1}>
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="actions">
+            <button onClick={() => patch({ parts: [...parts, newPart(parts[0] ?? null)] })} title="A copy of the tallest part to reshape">
+              Add part
+            </button>
+            <button onClick={() => patch({ parts: [...parts, spirePart(parts)] })} title="A thin pyramid on top of the tallest part">
+              Add spire
+            </button>
+          </div>
+          {current && (
+            <details className="edges-box" open={!compact}>
+              <summary>Edges of part {parts.indexOf(current) + 1}</summary>
+              <EdgeTable m={m} part={current} />
+            </details>
+          )}
+        </>
       )}
       {!compact && pad}
       <ApexReadout m={m} />
@@ -340,6 +430,18 @@ function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
           Delete model
         </button>
       </div>
+      <div className="actions">
+        <button onClick={exportGlb} title="A .glb with its place in it, for Blender or another Scape">
+          Export GLB
+        </button>
+        {drawn && (
+          <label className="toggle">
+            <input type="checkbox" checked={withParts} onChange={(e) => setWithParts(e.target.checked)} />
+            <span>with parts</span>
+          </label>
+        )}
+      </div>
+      {exportError && <p className="error">{exportError}</p>}
       <p className="muted hint">{m.attribution}</p>
     </div>
   );

@@ -2,7 +2,9 @@
 
 import { buildRoof } from '@core/geo/roofs';
 import { boxOf, earClip, flatten } from '@core/geo/surfaces';
-import type { ModelMesh, ModelPart, SavedModel } from '@core/model';
+import { hullFootprint, partsFootprint, type ModelMesh, type ModelPart, type SavedModel } from '@core/model';
+import { DEFAULT_IMPORT, GltfError, parseGlb, validateMesh, type ImportOptions, type ValidMesh } from './gltf';
+import { modelApexM } from './seed';
 
 /** Walls, roof faces, and a floor under any part that stands clear of the ground. */
 export function partsMesh(parts: readonly ModelPart[]): ModelMesh {
@@ -81,7 +83,41 @@ export function partsMesh(parts: readonly ModelPart[]): ModelMesh {
   return { pos: Float32Array.from(pos), idx: Uint32Array.from({ length: pos.length / 3 }, (_, i) => i), box: boxOf(pos) };
 }
 
-/** The mesh a saved model draws; null for an Imported one until its parser lands. */
-export function modelMesh(m: SavedModel): ModelMesh | null {
-  return m.parts ? partsMesh(m.parts) : null;
+const parsed = new WeakMap<ArrayBuffer, Map<string, ValidMesh | GltfError>>();
+
+/** An Imported model's bytes parsed and cleaned once per buffer and options; throws GltfError. */
+export function importedMesh(glb: ArrayBuffer, opts: ImportOptions = DEFAULT_IMPORT): ValidMesh {
+  const key = `${opts.units}|${opts.zUp}|${opts.origin}`;
+  let byOpts = parsed.get(glb);
+  if (!byOpts) parsed.set(glb, (byOpts = new Map()));
+  let v = byOpts.get(key);
+  if (!v) {
+    try {
+      v = validateMesh(parseGlb(glb, opts).mesh);
+    } catch (e) {
+      v = e instanceof GltfError ? e : new GltfError(String(e));
+    }
+    byOpts.set(key, v);
+  }
+  if (v instanceof GltfError) throw v;
+  return v;
+}
+
+/** The mesh a saved model draws; throws GltfError when an Imported model's bytes do not parse. */
+export function modelMesh(m: SavedModel): ModelMesh {
+  if (m.parts) return partsMesh(m.parts);
+  if (!m.glb) throw new GltfError(`Model “${m.name}” has neither parts nor a mesh.`);
+  return importedMesh(m.glb, m.importOptions).mesh;
+}
+
+/** Plan-view outline at the model's anchor: the parts' hull, or the mesh's. */
+export function modelFootprint(m: SavedModel): [number, number][] {
+  if (m.parts) return partsFootprint(m.anchor, m.parts);
+  if (!m.glb) throw new GltfError(`Model “${m.name}” has neither parts nor a mesh.`);
+  return hullFootprint(m.anchor, importedMesh(m.glb, m.importOptions).hull);
+}
+
+/** Highest point above the local frame's U = 0, unscaled. */
+export function modelTopM(m: SavedModel): number {
+  return m.parts ? modelApexM(m.parts) : modelMesh(m).box[5];
 }

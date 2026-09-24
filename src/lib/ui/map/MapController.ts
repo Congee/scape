@@ -15,7 +15,7 @@ import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
 import { modelHeightAt } from '@core/model/heightAt';
-import { seedModel } from '@core/model/seed';
+import { rowsCentre, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
@@ -181,6 +181,7 @@ export class MapController {
       if (this.map.getLayer('markers-circle') && this.map.queryRenderedFeatures(e.point, { layers: ['markers-circle'] }).length) return;
       const models = modelsStore.getState();
       if (models.picking) return this.modelBuildingAt(p);
+      if (models.importPick) return this.importOnBuildingAt(p);
       const ms = markersStore.getState();
       if (ms.placing || e.originalEvent.altKey) {
         ms.setPlacing(false);
@@ -289,7 +290,7 @@ export class MapController {
       gearStore.subscribe(() => this.renderFov()),
       markersStore.subscribe((st) => [st.markers, st.selectedId] as const, () => this.renderMarkers(), { equalityFn: shallow }),
       markersStore.subscribe((st) => st.placing, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
-      modelsStore.subscribe((st) => st.picking, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
+      modelsStore.subscribe((st) => st.picking || st.importPick, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
       settingsStore.subscribe(
         (st) => [st.basemapId, st.customBasemaps, st.offlineFlavor] as const,
         () => this.setBasemap(currentBasemap()),
@@ -395,6 +396,15 @@ export class MapController {
     const ui = uiStore.getState();
     ui.setPanelTab(PanelTab.Markers);
     ui.setMarkersView(MarkersView.Models);
+  }
+
+  /** Hands the import sheet the centre of the Overture building under `p`. */
+  private importOnBuildingAt(p: LngLat) {
+    modelsStore.getState().setImportPick(false);
+    void buildingRowsAt(p).then((rows) => {
+      const c = rows && rowsCentre(rows);
+      modelsStore.setState(c ? { importAt: c } : { pickError: 'No Overture building there.' });
+    });
   }
 
   /** A target placed through the map also picks up the height of the building under it. */
