@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { depressionForHeightDeg, lastLightMs, litHeightM } from '@core/astro/earthShadow';
 import { moonInfo, position } from '@core/astro/positions';
@@ -28,11 +28,14 @@ import {
 import { effectiveOptics, sensorPixels } from '@core/optics/fov';
 import { rawBytesPerShot, timelapse, TimelapseSolve } from '@core/optics/timelapse';
 import { formatTime } from '@core/time/format';
+import { dayBounds } from '@core/time/localDay';
+import { nearestStation, NEAREST_STATION_MAX_M, tideCurve, tideExtremes, tideHeight, tideRate, type TideExtreme, type TideStation } from '@core/tides/predict';
+import { tideStation, tideStations, type TideStationRef } from '@data/tides';
 import { compositionStore, useComposition } from '@state/composition';
 import { sensorById, useGear } from '@state/gear';
 import { useSettings } from '@state/settings';
 import { timelapseStore, useTimelapse } from '@state/timelapse';
-import { useWorld } from '@state/world';
+import { useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
 
 const ExposureSolve = { Ev: 'Ev', Aperture: 'Aperture', Shutter: 'Shutter', Iso: 'Iso' } as const;
@@ -82,6 +85,117 @@ function lastLightFor(pin: LngLat, pinHeightM: number, time: number, heightM: nu
   const key = [Math.floor(time / 60_000), pin.lat.toFixed(4), pin.lng.toFixed(4), pinHeightM, heightM].join('|');
   if (!lightCache || lightCache.key !== key) lightCache = { key, ms: lastLightMs(makeObserver(pin, pinHeightM), time, heightM) };
   return lightCache.ms;
+}
+
+const tideText = (m: number, units: Units) => (units === Units.Imperial ? `${(m / FT).toFixed(1)} ft` : `${m.toFixed(2)} m`);
+
+// One local day of predictions per station; the panel re-renders every clock tick.
+let tideDayCache: { key: string; extremes: TideExtreme[]; curve: Float32Array } | null = null;
+function tideDay(st: TideStation, startMs: number, endMs: number) {
+  const key = `${st.id}|${startMs}|${endMs}`;
+  if (tideDayCache?.key !== key) tideDayCache = { key, extremes: tideExtremes(st, startMs, endMs), curve: tideCurve(st, startMs, endMs) };
+  return tideDayCache;
+}
+
+const CURVE_W = 300;
+const CURVE_H = 72;
+
+function TideCurve({ curve, extremes, startMs, endMs, time }: { curve: Float32Array; extremes: TideExtreme[]; startMs: number; endMs: number; time: number }) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of curve) {
+    lo = Math.min(lo, v);
+    hi = Math.max(hi, v);
+  }
+  const pad = (hi - lo) * 0.12 || 0.1;
+  const x = (ms: number) => ((ms - startMs) / (endMs - startMs)) * CURVE_W;
+  const y = (m: number) => CURVE_H - ((m - lo + pad) / (hi - lo + 2 * pad)) * CURVE_H;
+  const step = (endMs - startMs) / (curve.length - 1);
+  const points = Array.from(curve, (v, i) => `${x(startMs + i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return (
+    <svg className="tide-curve" viewBox={`0 0 ${CURVE_W} ${CURVE_H}`} role="img" aria-label="Tide height over the day">
+      {lo < 0 && <line className="datum" x1={0} x2={CURVE_W} y1={y(0)} y2={y(0)} />}
+      <polyline points={points} />
+      {extremes.map((e) => (
+        <circle key={e.timeMs} className={e.high ? 'high' : 'low'} cx={x(e.timeMs)} cy={y(e.heightM)} r={3} />
+      ))}
+      {time >= startMs && time < endMs && <line className="now" x1={x(time)} x2={x(time)} y1={0} y2={CURVE_H} />}
+    </svg>
+  );
+}
+
+function TidesGroup() {
+  const time = useWorld((s) => s.time);
+  const tz = useWorld((s) => s.tz);
+  const pin = useWorld((s) => s.pin);
+  const units = useSettings((s) => s.units);
+  const hour12 = useSettings((s) => s.hour12);
+  const [stations, setStations] = useState<TideStationRef[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    tideStations().then(setStations, () => setFailed(true));
+  }, []);
+
+  const hit = stations ? nearestStation(stations, pin) : null;
+  const st = hit ? tideStation(hit.station) : null;
+  const day = dayBounds(new Date(time), tz);
+  const [startMs, endMs] = [day.start.getTime(), day.end.getTime()];
+  const today = st ? tideDay(st, startMs, endMs) : null;
+  const next = today?.extremes.find((e) => e.timeMs > time);
+  const summary = failed
+    ? 'Tides · station data unavailable'
+    : !stations
+      ? 'Tides · loading stations'
+      : !st
+        ? `Tides · no station within ${distance(NEAREST_STATION_MAX_M, units)}`
+        : `Tides · ${st.name}${next ? ` · next ${next.high ? 'high' : 'low'} ${formatTime(next.timeMs, tz, hour12)} ${tideText(next.heightM, units)}` : ''}`;
+
+  return (
+    <Group id="tides" summary={summary}>
+      {failed ? (
+        <div className="tl-sim">
+          <button
+            onClick={() => {
+              setFailed(false);
+              tideStations().then(setStations, () => setFailed(true));
+            }}
+          >
+            Retry
+          </button>
+          <span className="muted">The bundled station table did not load.</span>
+        </div>
+      ) : !stations ? null : !st || !hit || !today ? (
+        <p className="muted hint">No harmonic tide station within {distance(NEAREST_STATION_MAX_M, units)} of the camera.</p>
+      ) : (
+        <>
+          <div className="kv">
+            <span className="k">Station</span>
+            <b className="v">
+              {st.name} <span className="muted">· {st.id} · {distance(hit.distM, units)} away</span>
+            </b>
+            <span className="k">Now</span>
+            <b className="v">
+              {tideText(tideHeight(st, time), units)} <span className="muted">{tideRate(st, time) > 0 ? 'rising' : 'falling'}</span>
+            </b>
+          </div>
+          <TideCurve curve={today.curve} extremes={today.extremes} startMs={startMs} endMs={endMs} time={time} />
+          <table className="nd-table">
+            <tbody>
+              {today.extremes.map((e) => (
+                <tr key={e.timeMs} className={e === next ? 'on' : ''} onClick={() => worldStore.getState().setTime(e.timeMs)}>
+                  <td>{e.high ? 'High' : 'Low'}</td>
+                  <td>{formatTime(e.timeMs, tz, hour12)}</td>
+                  <td>{tideText(e.heightM, units)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted hint">Heights above MLLW from NOAA CO-OPS harmonic constants. Harmonic stations only; subordinate stations are left out.</p>
+        </>
+      )}
+    </Group>
+  );
 }
 
 export function ToolsPanel() {
@@ -446,6 +560,8 @@ export function ToolsPanel() {
         </div>
         <p className="muted hint">For a cloud overhead; clouds toward the sunset stay lit a little longer. Geometric, without refraction.</p>
       </Group>
+
+      <TidesGroup />
     </div>
   );
 }
