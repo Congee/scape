@@ -1,6 +1,7 @@
 /** Precise building models: drawn from parts in the app, or imported meshes. */
 
-import { bearingDeg, destination, distanceM, type LngLat } from './geo/geodesy';
+import type { LngLat } from './geo/geodesy';
+import { frameAt } from './geo/pinFrame';
 import type { RoofShape } from '@workers/buildings.protocol';
 import type { ImportOptions } from './model/gltf';
 
@@ -70,7 +71,6 @@ export interface SavedModel {
 }
 
 const D2R = Math.PI / 180;
-const R2D = 180 / Math.PI;
 
 /** Sea-level altitude of the local frame's U = 0. */
 export function modelBaseM(anchor: ModelAnchor, groundM: number): number {
@@ -93,15 +93,16 @@ export function localToLngLat(anchor: ModelAnchor, e: number, n: number): LngLat
   const s = Math.sin(h);
   const E = anchor.scale * (e * c + n * s);
   const N = anchor.scale * (n * c - e * s);
-  const d = Math.hypot(E, N);
-  return d === 0 ? { lng: anchor.lng, lat: anchor.lat } : destination(anchor, Math.atan2(E, N) * R2D, d);
+  return E === 0 && N === 0 ? { lng: anchor.lng, lat: anchor.lat } : frameAt(anchor).fromEn(E, N);
 }
 
 /** Inverse of `localToLngLat`. */
 export function lngLatToLocal(anchor: ModelAnchor, p: LngLat): [e: number, n: number] {
-  const d = distanceM(anchor, p) / anchor.scale;
-  const az = bearingDeg(anchor, p) * D2R - anchor.headingDeg * D2R;
-  return [d * Math.sin(az), d * Math.cos(az)];
+  const [E, N] = frameAt(anchor).toEn(p.lng, p.lat);
+  const h = anchor.headingDeg * D2R;
+  const c = Math.cos(h) / anchor.scale;
+  const s = Math.sin(h) / anchor.scale;
+  return [E * c - N * s, E * s + N * c];
 }
 
 /** Convex hull of the parts' rings, in lng/lat, counter-clockwise. */
@@ -144,15 +145,17 @@ export function modelOutlines(m: Pick<SavedModel, 'anchor' | 'parts' | 'footprin
 export function convexHull(pts: readonly [number, number][]): [number, number][] {
   const p = pts.toSorted((a, b) => a[0] - b[0] || a[1] - b[1]);
   if (p.length < 3) return p;
+  // Round-off twins (one vertex at two heights through ECEF) must not survive as a sliver.
+  const EPS = 1e-18;
   const lower: [number, number][] = [];
   for (const q of p) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= EPS) lower.pop();
     lower.push(q);
   }
   const upper: [number, number][] = [];
   for (let i = p.length - 1; i >= 0; i--) {
     const q = p[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= EPS) upper.pop();
     upper.push(q);
   }
   return lower.slice(0, -1).concat(upper.slice(0, -1));

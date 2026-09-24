@@ -1,10 +1,10 @@
 /** A model's local mesh placed in the viewfinder's eye-relative frame, the way `buildPrisms` places a footprint. */
 
 import { localToLngLat, modelBaseM, type ModelAnchor, type ModelMesh } from '@core/model';
-import { bearingDeg, curvatureDropM, distanceM, type LngLat } from './geodesy';
+import { curvatureDropM, type LngLat } from './geodesy';
+import { frameAt } from './pinFrame';
 import { boxOf, type SurfaceMesh } from './surfaces';
 
-const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 
 /** Per vertex: lng, lat, and sea-level altitude, in Float64. */
@@ -38,17 +38,14 @@ export function placeModel(mesh: ModelMesh, anchor: ModelAnchor, groundM: number
   const w = modelWorld(mesh, anchor, groundM);
   const nv = w.length / 3;
   const eye = new Float64Array(nv * 3);
+  const frame = frameAt(pin);
   for (let v = 0; v < nv; v++) {
-    const p = { lng: w[v * 3], lat: w[v * 3 + 1] };
-    const d = distanceM(pin, p);
-    const az = bearingDeg(pin, p) * D2R;
-    const ve = d * Math.sin(az);
-    const vn = d * Math.cos(az);
+    const [ve, vn] = frame.toEn(w[v * 3], w[v * 3 + 1]);
     eye[v * 3] = ve;
     eye[v * 3 + 1] = vn;
     eye[v * 3 + 2] = w[v * 3 + 2] - eyeM - curvatureDropM(Math.hypot(ve, vn));
   }
-  const dist = distanceM(pin, anchor);
+  const dist = Math.hypot(...frame.toEn(anchor.lng, anchor.lat));
   const pos: number[] = [];
   const plane: number[] = [];
   const surf: number[] = [];

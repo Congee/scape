@@ -2,10 +2,10 @@
 
 import type { CameraBasis } from '@core/optics/projection';
 import type { BuildingBatch } from '@workers/buildings.protocol';
-import { bearingDeg, curvatureDropM, distanceM, type LngLat } from './geodesy';
+import { curvatureDropM, type LngLat } from './geodesy';
+import { frameAt } from './pinFrame';
 import { buildRoof } from './roofs';
 
-const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 /** Faces are clipped in front of this depth along the optical axis, so nothing beside or behind the eye projects. */
 export const NEAR_M = 0.5;
@@ -81,6 +81,7 @@ export interface PrismShading {
  */
 export function buildPrisms(batch: BuildingBatch, pin: LngLat, eyeM: number): PrismTile {
   const nb = batch.count;
+  const frame = frameAt(pin);
   const ringStart = new Int32Array(nb + 1);
   const faceStart = new Int32Array(nb + 1);
   const cE = new Float32Array(nb);
@@ -130,11 +131,7 @@ export function buildPrisms(batch: BuildingBatch, pin: LngLat, eyeM: number): Pr
     rn.length = 0;
     let ok = true;
     for (let j = batch.ringStart[i]; j < batch.ringStart[i + 1]; j++) {
-      const p = { lng: batch.lng[j], lat: batch.lat[j] };
-      const d = distanceM(pin, p);
-      const az = bearingDeg(pin, p) * D2R;
-      const ve = d * Math.sin(az);
-      const vn = d * Math.cos(az);
+      const [ve, vn] = frame.toEn(batch.lng[j], batch.lat[j]);
       if (!Number.isFinite(ve) || !Number.isFinite(vn)) {
         ok = false;
         break;
@@ -270,7 +267,7 @@ export function buildPrisms(batch: BuildingBatch, pin: LngLat, eyeM: number): Pr
     radiusM[i] = Math.hypot(e1 - e0, n1 - n0, u1 - u0) / 2;
     spanM[i] = Math.hypot(e1 - e0, n1 - n0);
     riseM[i] = u1 - u0;
-    distM[i] = distanceM(pin, { lng: batch.cLng[i], lat: batch.cLat[i] });
+    distM[i] = Math.hypot(...frame.toEn(batch.cLng[i], batch.cLat[i]));
     if (e0 < he0) he0 = e0;
     if (e1 > he1) he1 = e1;
     if (n0 < hn0) hn0 = n0;

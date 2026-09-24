@@ -11,7 +11,8 @@ import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro
 import { arcWindow, rainbowArc, rainbowRadiusDeg, rainbowTop, WATER_N } from '@core/astro/rainbow';
 import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
 import { distance, height } from '@core/format';
-import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
+import { bearingDeg, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
+import { pinFrame } from '@core/geo/pinFrame';
 import { suppressRows } from '@core/geo/buildingTiles';
 import { anyOccluder, MeshOccluder, type Occluder } from '@core/geo/meshOcclude';
 import { placeModel } from '@core/geo/modelPlace';
@@ -19,7 +20,7 @@ import { lod2CoverOf } from '@core/lod2/cover';
 import { PrismOccluder } from '@core/geo/prismOcclude';
 import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
-import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
+import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
@@ -1270,9 +1271,9 @@ export class ViewfinderController {
     const pin = worldStore.getState().pin;
     const toCam = bearingDeg(m, pin) * D2R;
     const eye = { e: distM * Math.sin(toCam), n: distM * Math.cos(toCam), u: sc.eyeM - groundM };
+    const local = pinFrame(m);
     const pts = solid.vertices.map((v) => {
-      const pol = polarOf(v);
-      const gp = pol.distM > 1e-6 ? destination(m, pol.bearingDeg, pol.distM) : m;
+      const gp = local.fromEn(v.e, v.n);
       const dv = distanceM(pin, gp);
       if (dv < 1e-6) return null;
       return this.toPx(sc, bearingDeg(pin, gp), elevationAngleDeg(dv, groundM + v.u - sc.eyeM));

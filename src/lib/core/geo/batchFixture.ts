@@ -1,12 +1,13 @@
 /** Synthetic Overture batches for the tests, laid out in local metres around a pin. */
 
 import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
-import { destination, type LngLat } from './geodesy';
+import type { LngLat } from './geodesy';
+import { pinFrame } from './pinFrame';
 
 export const PIN: LngLat = { lng: -74, lat: 40.75 };
 
 /** Local east/north metres to lng/lat around the pin. */
-export const at = (e: number, n: number) => destination(PIN, (Math.atan2(e, n) * 180) / Math.PI, Math.hypot(e, n));
+export const at = (e: number, n: number) => pinFrame(PIN).fromEn(e, n);
 
 export interface Box {
   /** Footprint in local east/north metres. */

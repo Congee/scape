@@ -58,4 +58,4 @@ describe('prismSurfaces', () => {
   });
 });
 
-const GOLDEN = ['6f463a34', 'f344f66f', '37254cea', '7c321ba1', '5aea10d6', 'a000dea3'];
+const GOLDEN = ['3706896c', 'be9694bb', 'c8f518d6', 'b129f11d', '1adaca45', 'a000dea3'];

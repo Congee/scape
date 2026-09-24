@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
+import { bearingDeg, distanceM, geodesicBetween, normalizeLng, type LngLat } from '@core/geo/geodesy';
 import { cubicStencilTiles, elevationAt, elevationAtCubic, memoSource } from '@core/terrain/dem';
 import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
 import { BlockCache } from '@core/terrain/blockCache';
@@ -61,8 +61,10 @@ async function profile(req: ProfileRequest): Promise<TerrainResponse | null> {
   const lat = new Float32Array(n);
   const distM = new Float32Array(n);
   const tiles = new Map<string, TileCoord>();
+  const along = geodesicBetween(a, b);
   for (let i = 0; i < n; i++) {
-    const p = intermediatePoint(a, b, i / (n - 1));
+    const q = along(i / (n - 1));
+    const p = { lng: normalizeLng(q.lng), lat: q.lat };
     lng[i] = p.lng;
     lat[i] = p.lat;
     distM[i] = (totalM * i) / (n - 1);

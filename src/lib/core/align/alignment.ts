@@ -1,5 +1,5 @@
 import { horizontalFast, separationDeg, type SkySample } from '@core/astro/fastHorizon';
-import { bearingDeg, distanceM, elevationAngleDeg, intermediatePoint, type LngLat } from '@core/geo/geodesy';
+import { bearingDeg, distanceM, elevationAngleDeg, geodesicBetween, normalizeLng, type LngLat } from '@core/geo/geodesy';
 import { cellCentre, cellSizeM, type HeatGrid } from '@core/geo/grid';
 import { elevationAt, type DemSource } from '@core/terrain/dem';
 
@@ -40,11 +40,12 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 /** Terrain between the eye and the target rises above the sightline; samples within `skipM` of either end are ignored. */
 export function sightlineBlocked(src: DemSource, zoom: number, from: LngLat, to: LngLat, eyeM: number, targetAngleDeg: number, distM: number, skipM: number, samples: number): boolean {
+  const along = geodesicBetween(from, to);
   for (let k = 1; k < samples; k++) {
     const d = (distM * k) / samples;
     if (d < skipM || d > distM - skipM) continue;
-    const p = intermediatePoint(from, to, k / samples);
-    const g = elevationAt(src, p.lng, p.lat, zoom);
+    const p = along(k / samples);
+    const g = elevationAt(src, normalizeLng(p.lng), p.lat, zoom);
     if (Number.isNaN(g)) continue;
     if (elevationAngleDeg(d, Math.max(g, 0) - eyeM) > targetAngleDeg) return true;
   }

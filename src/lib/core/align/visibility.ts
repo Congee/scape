@@ -1,5 +1,6 @@
 import { horizontalFast, type SkySample } from '@core/astro/fastHorizon';
-import { EARTH_RADIUS_M, elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
+import { elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
+import { frameAt } from '@core/geo/pinFrame';
 import { cellCentre, cellOf, type HeatGrid } from '@core/geo/grid';
 import { elevationAt, type DemSource } from '@core/terrain/dem';
 import type { SweepPlan } from '@core/terrain/horizon';
@@ -7,7 +8,6 @@ import { flatHorizonDeg } from '@core/terrain/los';
 import { metersPerPixel, TILE_SIZE, zoomForResolution } from '@core/terrain/tiles';
 
 const D2R = Math.PI / 180;
-const R2D = 180 / Math.PI;
 /** No terrain on Earth stands higher; rays stop once even that could not reach the body. */
 const MAX_TERRAIN_M = 9000;
 
@@ -47,15 +47,16 @@ export function ladderReachM(l: RayLadder, z: number): number {
   return reach;
 }
 
-/** Terrain along the ray from `from` rises above `altDeg`; a flat-earth offset is ample over tens of kilometres. */
+/** Terrain along the ray from `from` rises above `altDeg`, walked in the eye's ENU frame like the viewfinder mesh. */
 export function rayBlocked(src: DemSource, ladder: RayLadder, from: LngLat, azDeg: number, eyeM: number, altDeg: number): boolean {
-  const cosφ = Math.cos(from.lat * D2R);
-  const dLat = (Math.cos(azDeg * D2R) / EARTH_RADIUS_M) * R2D;
-  const dLng = (Math.sin(azDeg * D2R) / (EARTH_RADIUS_M * cosφ)) * R2D;
+  const frame = frameAt(from);
+  const se = Math.sin(azDeg * D2R);
+  const cn = Math.cos(azDeg * D2R);
   for (let i = 0; i < ladder.distM.length; i++) {
     const d = ladder.distM[i];
     if (elevationAngleDeg(d, MAX_TERRAIN_M - eyeM) < altDeg) return false;
-    const g = elevationAt(src, from.lng + d * dLng, from.lat + d * dLat, ladder.zoom[i]);
+    const p = frame.fromEn(d * se, d * cn);
+    const g = elevationAt(src, p.lng, p.lat, ladder.zoom[i]);
     if (Number.isNaN(g)) continue;
     if (elevationAngleDeg(d, Math.max(g, 0) - eyeM) > altDeg) return true;
   }

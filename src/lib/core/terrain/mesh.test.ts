@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { bearingDeg, curvatureDropM, distanceM } from '@core/geo/geodesy';
+import { curvatureDropM } from '@core/geo/geodesy';
+import { frameAt } from '@core/geo/pinFrame';
 import { buildPrisms } from '@core/geo/prismRaster';
 import { frameElevationSpanDeg } from '@core/optics/fov';
 import type { BuildingBatch } from '@workers/buildings.protocol';
@@ -378,8 +379,7 @@ describe('selectBlocks', () => {
 const rimU = (lv: ReturnType<typeof buildLevel>, i: number, j: number) => lv.pos[(j * (BLOCK_CELLS + 1) + i) * 3 + 2];
 
 const tooth = (sign: number, cellM: number) => (lng: number, lat: number) => {
-  const b = bearingDeg(PIN, { lng, lat }) * D2R;
-  const n = distanceM(PIN, { lng, lat }) * Math.cos(b);
+  const n = frameAt(PIN).toEn(lng, lat)[1];
   const q = ((n % cellM) + cellM) % cellM;
   return 1200 + sign * 6 * (cellM / 2 - Math.abs(q - cellM / 2));
 };
@@ -585,10 +585,9 @@ describe('registration against the prisms', () => {
         const e = d * Math.sin(b * D2R);
         const n = d * Math.cos(b * D2R);
         const p = samplePoint(PIN, e, n);
-        const back = distanceM(PIN, p);
-        const az = bearingDeg(PIN, p) * D2R;
-        expect(back * Math.sin(az)).toBeCloseTo(e, 3);
-        expect(back * Math.cos(az)).toBeCloseTo(n, 3);
+        const [be, bn] = frameAt(PIN).toEn(p.lng, p.lat);
+        expect(be).toBeCloseTo(e, 6);
+        expect(bn).toBeCloseTo(n, 6);
       }
     }
   });

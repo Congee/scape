@@ -1,13 +1,13 @@
 /** One decoded LoD2 tile in lng/lat/sea level, and its placement in the viewfinder's eye-relative frame. */
 
-import { bearingDeg, curvatureDropM, distanceM, type LngLat } from '@core/geo/geodesy';
+import { curvatureDropM, distanceM, type LngLat } from '@core/geo/geodesy';
+import { frameAt } from '@core/geo/pinFrame';
 import { boxOf, type SurfaceMesh } from '@core/geo/surfaces';
 import { convexHull } from '@core/model';
 import { propertyColumn, type GltfWorld } from '@core/model/gltf';
 import { ecefToGeodetic } from './ecef';
 import type { Lod2Region } from './regions';
 
-const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 
 export interface Lod2Building {
@@ -152,12 +152,9 @@ export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Regi
 export function placeLod2(t: Lod2Tile, pin: LngLat, eyeM: number): SurfaceMesh {
   const nv = t.world.length / 3;
   const eye = new Float64Array(nv * 3);
+  const frame = frameAt(pin);
   for (let v = 0; v < nv; v++) {
-    const p = { lng: t.world[v * 3], lat: t.world[v * 3 + 1] };
-    const d = distanceM(pin, p);
-    const az = bearingDeg(pin, p) * D2R;
-    const e = d * Math.sin(az);
-    const n = d * Math.cos(az);
+    const [e, n] = frame.toEn(t.world[v * 3], t.world[v * 3 + 1]);
     eye[v * 3] = e;
     eye[v * 3 + 1] = n;
     eye[v * 3 + 2] = t.world[v * 3 + 2] - eyeM - curvatureDropM(Math.hypot(e, n));
@@ -165,8 +162,8 @@ export function placeLod2(t: Lod2Tile, pin: LngLat, eyeM: number): SurfaceMesh {
   // Rows for the buildings plus one for stray triangles outside any feature.
   const nb = t.buildings.length + 1;
   const dist = new Float64Array(nb);
-  for (let b = 0; b < t.buildings.length; b++) dist[b] = distanceM(pin, t.buildings[b].c);
-  dist[nb - 1] = distanceM(pin, { lng: (t.bbox[0] + t.bbox[2]) / 2, lat: (t.bbox[1] + t.bbox[3]) / 2 });
+  for (let b = 0; b < t.buildings.length; b++) dist[b] = Math.hypot(...frame.toEn(t.buildings[b].c.lng, t.buildings[b].c.lat));
+  dist[nb - 1] = Math.hypot(...frame.toEn((t.bbox[0] + t.bbox[2]) / 2, (t.bbox[1] + t.bbox[3]) / 2));
   const bb = new Float64Array(nb * 6);
   for (let b = 0; b < nb; b++) bb.set([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], b * 6);
   const pos: number[] = [];

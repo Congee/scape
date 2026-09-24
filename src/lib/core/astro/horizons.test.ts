@@ -4,6 +4,9 @@ import { dayEvents, EventKind } from './dayEvents';
 import { position } from './positions';
 import { applyStar, horizontalOf, starFrame } from './skyFrame';
 import { eqjVector } from './stars';
+import { bearingDeg, normalizeBearing } from '@core/geo/geodesy';
+import { frameAt } from '@core/geo/pinFrame';
+import { samplePoint } from '@core/terrain/mesh';
 
 // Reference values from JPL Horizons observer tables (apparent, REFRACTED; events from AIRLESS upper limb at −34′).
 const D2R = Math.PI / 180;
@@ -79,5 +82,24 @@ describe('rise/set on a 3000 m plateau vs JPL Horizons', () => {
     const dead = makeObserver({ lat: 31.5, lng: 35.5 }, siteHeightM(-600, 1.6));
     const t = Date.parse('2026-06-21T12:00:00Z');
     expect(dayEvents(dead, t - 12 * 3600e3, t + 12 * 3600e3, { heightAboveGroundM: 1.6 }).some((e) => e.kind === EventKind.Set)).toBe(true);
+  });
+});
+
+// Terrain posts sit in the pin's ENU frame; points on the WGS84 geodesic under the Sun (GeographicLib Direct) must bear its azimuth.
+describe('terrain frame vs the Sun', () => {
+  it.each([
+    [5000, 45.975921325840496, 7.721148767517071],
+    [30_000, 45.93649824734537, 7.4036615292776915],
+    [100_000, 45.82143443902048, 6.517143756531797]
+  ])('geodesic point at %d m sits on the Sun azimuth', (_, lat, lng) => {
+    const pin = { lng: 7.7847, lat: 45.9837 };
+    const az = 260.065134;
+    expect(Math.abs(position(SkyBody.Sun, new Date('2024-06-21T15:00:00Z'), makeObserver(pin, 3089)).azimuth - az)).toBeLessThan(0.01);
+    const [e, n] = frameAt(pin).toEn(lng, lat);
+    expect(Math.abs(normalizeBearing(Math.atan2(e, n) / D2R) - az)).toBeLessThan(1e-5);
+    expect(Math.abs(bearingDeg(pin, { lng, lat }) - az)).toBeLessThan(1e-6);
+    const post = samplePoint(pin, e, n);
+    expect(Math.abs(post.lat - lat)).toBeLessThan(1e-9);
+    expect(Math.abs(post.lng - lng)).toBeLessThan(1e-9);
   });
 });

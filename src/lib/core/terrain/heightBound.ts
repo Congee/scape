@@ -5,7 +5,7 @@
  * to the block quadtree: one O(1) lookup per block, built once per mesh request.
  */
 
-import { destination, type LngLat } from '@core/geo/geodesy';
+import type { LngLat } from '@core/geo/geodesy';
 import { lngLatToTilePixel, metersPerPixel, tileKey, type TileCoord } from '@core/terrain/tiles';
 import { elevationAt, type DemSource, type DemTile } from './dem';
 import { BLOCKS_PER_SIDE, BASE_CELL_M, blockSideM, blockUnitBounds, frameWedgeHalfDeg, samplePoint, type BlockId, type MeshView } from './mesh';
@@ -288,7 +288,8 @@ export function planDetailBound(pin: LngLat, view: MeshView, rangeM: number, min
     for (let r = stepM / 2; r < reachM + stepM && tiles.size <= DETAIL_MAX_TILES; r += stepM) {
       const n = Math.max(2, Math.ceil((2 * halfDeg * (Math.PI / 180) * r) / stepM));
       for (let i = 0; i <= n; i++) {
-        const p = destination(pin, view.azimuthDeg - halfDeg + (2 * halfDeg * i) / n, Math.min(r, reachM));
+        const az = ((view.azimuthDeg - halfDeg + (2 * halfDeg * i) / n) * Math.PI) / 180;
+        const p = samplePoint(pin, Math.min(r, reachM) * Math.sin(az), Math.min(r, reachM) * Math.cos(az));
         const t = lngLatToTilePixel(p.lng, p.lat, z);
         tiles.set(tileKey(z, t.x, t.y), { z, x: t.x, y: t.y });
       }

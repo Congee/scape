@@ -67,7 +67,7 @@ const processCpu = () =>
 const HELPERS = `(() => {
   if (window.__td) return true;
   const S = window.__scape;
-  const td = { meshReq: 0, meshRes: 0, viewReq: 0, blocks: 0, reused: 0, cacheMB: 0, rec: null };
+  const td = { meshReq: 0, meshRes: 0, viewReq: 0, blocks: 0, reused: 0, cacheMB: 0, meshMs: [], rec: null };
   const post = Worker.prototype.postMessage;
   const hooked = new WeakSet();
   Worker.prototype.postMessage = function (msg, ...rest) {
@@ -79,6 +79,7 @@ const HELPERS = `(() => {
           const r = e.data?.kind === 'Mesh' ? e.data.result : null;
           if (!r) return;
           td.meshRes++;
+          td.meshMs.push(r.ms);
           td.blocks += r.mesh.blockBox.length / 6;
           td.reused += r.reused ?? 0;
           td.cacheMB = (r.cacheBytes ?? 0) / 2 ** 20;
@@ -281,7 +282,7 @@ const compare = async (name: string, path: string) => {
   check(`settled ${name} vs baseline`, !d.size && d.vfPx === 0, d.size ? 'size differs' : `viewfinder ${d.vfPx} px differ, max Δ ${d.vfMax}; page ${d.px} px (${(d.share * 100).toFixed(3)}%), max Δ ${d.max}`);
 };
 
-const table: string[] = ['| scene | mm | renderer CPU% | GPU-proc CPU% | terrain worker ms/s | main ms/s | mesh req / res | view req | rAF p50/p95 ms | draws | hole frames | GPU ms p50/p95 | min ground share mid-drag | blocks reused / sent | block cache MB |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
+const table: string[] = ['| scene | mm | renderer CPU% | GPU-proc CPU% | terrain worker ms/s | main ms/s | mesh req / res | view req | rAF p50/p95 ms | draws | hole frames | GPU ms p50/p95 | min ground share mid-drag | blocks reused / sent | block cache MB | mesh build ms p50/p95 |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
 const release = await takeLock();
 try {
   for (const s of !DRAG ? [] : QUICK ? [Scene.Alps] : [Scene.Alps, Scene.Flat, Scene.Lod2]) {
@@ -296,6 +297,7 @@ try {
       const c0 = await tab.eval<{ meshReq: number; meshRes: number; viewReq: number; blocks: number; reused: number; cacheMB: number }>('(({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }) => ({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }))(window.__td)');
       const a0 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.prism.cam)');
       const mid = (BARE ? [] : [1, 2, 3]).map((i) => `${shots}/mid-${s}-${f}-${i}.png`);
+      const m0 = await tab.eval<number>('window.__td.meshMs.length');
       const p0 = await processCpu();
       const w0 = performance.now();
       let rec = { rafP50: 0, rafP95: 0, frames: 0, draws: 0, holes: 0, minLevels: 0, gpuP50: 0, gpuP95: 0 };
@@ -309,11 +311,13 @@ try {
       const delta = (type: string) => Math.max(0, ...p1.filter((p) => p.type === type).map((p) => p.cpuTime - (p0.find((q) => q.id === p.id)?.cpuTime ?? 0)));
       const c1 = await tab.eval<{ meshReq: number; meshRes: number; viewReq: number; blocks: number; reused: number; cacheMB: number }>('(({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }) => ({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }))(window.__td)');
       const secs = wall / 1000;
+      const mms = (await tab.eval<number[]>(`window.__td.meshMs.slice(${m0})`)).toSorted((a, b) => a - b);
+      const q = (p: number) => (mms.length ? mms[Math.min(mms.length - 1, Math.floor(p * mms.length))].toFixed(0) : '-');
       const terrainMs = cpu.filter((c) => c.thread.startsWith('terrain')).reduce((a, c) => a + c.ms, 0);
       const mainMs = cpu.find((c) => c.thread === 'main')?.ms ?? 0;
       const shares: number[] = [];
       for (const m of mid) if (existsSync(m)) shares.push(await tab.eval<number>(`window.__td.ground(${JSON.stringify(await b64Of(m))}, ${JSON.stringify(frame)})`));
-      table.push(`| ${s} | ${f} | ${((delta('renderer') / secs) * 100).toFixed(0)} | ${((delta('GPU') / secs) * 100).toFixed(0)} | ${(terrainMs / secs).toFixed(0)} | ${(mainMs / secs).toFixed(0)} | ${c1.meshReq - c0.meshReq} / ${c1.meshRes - c0.meshRes} | ${c1.viewReq - c0.viewReq} | ${rec.rafP50.toFixed(1)} / ${rec.rafP95.toFixed(1)} | ${rec.draws} | ${rec.holes} | ${rec.gpuP50.toFixed(1)} / ${rec.gpuP95.toFixed(1)} | ${shares.length ? Math.min(...shares).toFixed(2) : '-'} | ${c1.reused - c0.reused} / ${c1.blocks - c0.blocks} | ${c1.cacheMB.toFixed(1)} |`);
+      table.push(`| ${s} | ${f} | ${((delta('renderer') / secs) * 100).toFixed(0)} | ${((delta('GPU') / secs) * 100).toFixed(0)} | ${(terrainMs / secs).toFixed(0)} | ${(mainMs / secs).toFixed(0)} | ${c1.meshReq - c0.meshReq} / ${c1.meshRes - c0.meshRes} | ${c1.viewReq - c0.viewReq} | ${rec.rafP50.toFixed(1)} / ${rec.rafP95.toFixed(1)} | ${rec.draws} | ${rec.holes} | ${rec.gpuP50.toFixed(1)} / ${rec.gpuP95.toFixed(1)} | ${shares.length ? Math.min(...shares).toFixed(2) : '-'} | ${c1.reused - c0.reused} / ${c1.blocks - c0.blocks} | ${c1.cacheMB.toFixed(1)} | ${q(0.5)} / ${q(0.95)} |`);
       console.error(table.at(-1));
       for (const c of cpu) console.error(`  ${c.thread}: ${(c.ms / secs).toFixed(0)} ms/s — ${c.top} | incl ${c.incl}`);
       check(`${s} ${f}mm no hole frames mid-drag`, rec.holes === 0, `${rec.holes} of ${rec.draws} draws without terrain`);

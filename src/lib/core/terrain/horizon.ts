@@ -1,4 +1,5 @@
-import { destination, elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
+import { elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
+import { pinFrame } from '@core/geo/pinFrame';
 import { elevationAt, type DemSource } from './dem';
 import { flatHorizonDeg } from './los';
 import { lngLatToTilePixel, metersPerPixel, TILE_SIZE, zoomForResolution, type TileCoord } from './tiles';
@@ -81,12 +82,16 @@ export function planSweep(pin: LngLat, rangeM: number, o: SweepOptions = {}): Sw
     distM: new Float32Array(total),
     zoom: new Uint8Array(total)
   };
+  // Rays in the pin's ENU frame, like the mesh posts, so the skyline sits where the mesh draws it.
+  const frame = pinFrame(pin);
   for (let i = 0; i < nAz; i++) {
-    const az = cols ? cols[i] * azStepDeg : azFromDeg + i * azStepDeg;
+    const az = ((cols ? cols[i] * azStepDeg : azFromDeg + i * azStepDeg) * Math.PI) / 180;
+    const se = Math.sin(az);
+    const cn = Math.cos(az);
     const base = i * perAz;
     plan.start[i] = base;
     for (let j = 0; j < perAz; j++) {
-      const p = destination(pin, az, dists[j]);
+      const p = frame.fromEn(dists[j] * se, dists[j] * cn);
       plan.lng[base + j] = p.lng;
       plan.lat[base + j] = p.lat;
       plan.distM[base + j] = dists[j];

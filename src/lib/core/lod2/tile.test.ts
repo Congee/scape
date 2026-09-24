@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { geoidAt, parseGsiGeoid } from '@core/geo/geoid';
 import { gsiGeoidText } from '@core/geo/geoidFixture';
 import { curvatureDropM, destination, distanceM, type LngLat } from '@core/geo/geodesy';
+import { pinFrame } from '@core/geo/pinFrame';
 import type { GltfWorld } from '@core/model/gltf';
 import { geodeticToEcef } from './ecef';
 import { LOD2_REGIONS, type Lod2Region } from './regions';
@@ -24,9 +25,13 @@ function world(pts: [number, number, number][], feature: number[], idx: number[]
 
 /** A 20 m square box building, apex `h` above the ellipsoid ground `g`, centred `d` m from the pin toward `az`. */
 function box(az: number, d: number, g: number, h: number, f: number): { pts: [number, number, number][]; feature: number[]; idx: number[] } {
-  const c = destination(PIN, az, d);
-  const corner = (b: number) => destination(c, b, 10 * Math.SQRT2);
-  const ring = [45, 135, 225, 315].map(corner);
+  const local = pinFrame(destination(PIN, az, d));
+  const ring = [
+    [10, 10],
+    [10, -10],
+    [-10, -10],
+    [-10, 10]
+  ].map(([e, n]) => local.fromEn(e, n));
   const pts: [number, number, number][] = [...ring.map((p): [number, number, number] => [p.lng, p.lat, g]), ...ring.map((p): [number, number, number] => [p.lng, p.lat, g + h])];
   // Walls only; the ring runs clockwise seen from above, so this winds them outward.
   const idx: number[] = [];
@@ -143,7 +148,9 @@ describe('placeLod2', () => {
   it('places a vertex 10 km out to within a millimetre', () => {
     const az = 37;
     const eyeM = 12;
-    const tip = destination(PIN, az, 10_000);
+    const e = 10_000 * Math.sin(az * (Math.PI / 180));
+    const n = 10_000 * Math.cos(az * (Math.PI / 180));
+    const tip = pinFrame(PIN).fromEn(e, n);
     const pts: [number, number, number][] = [
       [tip.lng, tip.lat, 140],
       [tip.lng + 0.0001, tip.lat, 140],
@@ -151,8 +158,6 @@ describe('placeLod2', () => {
     ];
     const { w, transform } = world(pts, [0, 0, 0], [0, 1, 2]);
     const m = placeLod2(lod2Tile(w, transform, REGION), PIN, eyeM);
-    const e = 10_000 * Math.sin(az * (Math.PI / 180));
-    const n = 10_000 * Math.cos(az * (Math.PI / 180));
     expect(Math.abs(m.pos[0] - e)).toBeLessThan(1e-3);
     expect(Math.abs(m.pos[1] - n)).toBeLessThan(1e-3);
     expect(Math.abs(m.pos[2] - (100 - eyeM - curvatureDropM(10_000)))).toBeLessThan(1e-3);

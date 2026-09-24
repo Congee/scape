@@ -6,7 +6,8 @@
  * so the cell size tracks the focal length instead of the distance alone.
  */
 
-import { curvatureDropM, destination, type LngLat } from '@core/geo/geodesy';
+import { curvatureDropM, type LngLat } from '@core/geo/geodesy';
+import { frameAt } from '@core/geo/pinFrame';
 import { frameAzimuthHalfCurve } from '@core/optics/fov';
 import { lngLatToTilePixel } from '@core/terrain/tiles';
 
@@ -532,8 +533,7 @@ export interface MeshLevel {
 
 /** Eye-relative position of a mesh sample; the exact inverse of the map `buildPrisms` applies. */
 export function samplePoint(pin: LngLat, e: number, n: number): LngLat {
-  const d = Math.hypot(e, n);
-  return d < 1e-9 ? pin : destination(pin, Math.atan2(e, n) * R2D, d);
+  return frameAt(pin).fromEn(e, n);
 }
 
 /**
@@ -604,11 +604,12 @@ export function buildBlock(pin: LngLat, eyeM: number, level: number, { ix, iy }:
   let missing = 0;
   const i0 = ix * BLOCK_CELLS;
   const j0 = iy * BLOCK_CELLS;
+  const frame = frameAt(pin);
   for (let j = 0; j < HALO; j++) {
     const n = (j0 + j - 1) * cellM;
     for (let i = 0; i < HALO; i++) {
       const e = (i0 + i - 1) * cellM;
-      const p = samplePoint(pin, e, n);
+      const p = frame.fromEn(e, n);
       const g = sample(p.lng, p.lat);
       if (Number.isNaN(g)) missing++;
       // Terrarium reads water as bathymetry, and the datum is sea level.
