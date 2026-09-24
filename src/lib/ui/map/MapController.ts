@@ -50,6 +50,7 @@ import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { paintHeat } from './heat';
 import { ModelDrawer } from './ModelDrawer';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
+import { installTrackpadWheel } from './wheelZoom';
 
 const EVENTS_SRC = 'sky-events';
 const LIVE_SRC = 'sky-live';
@@ -185,6 +186,7 @@ export class MapController {
     this.map.addControl(new GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'top-right');
     this.scale = new ScaleControl({ unit: s.units });
     this.map.addControl(this.scale, 'bottom-left');
+    this.unsubs.push(installTrackpadWheel(this.map));
     if (import.meta.env.DEV) Object.assign(window, { __scapeMap: this.map, __scapeMapCtl: this });
     if (import.meta.env.DEV || ZOOM_PROBE) {
       let off: (() => void) | undefined;
