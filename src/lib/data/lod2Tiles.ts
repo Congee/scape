@@ -1,8 +1,9 @@
 import { MeshoptDecoder } from 'meshoptimizer/decoder';
+import { isB3dm, readB3dm } from '@core/lod2/b3dm';
 import { lod2Tile, type Lod2Tile } from '@core/lod2/tile';
 import { walkTileset, type TilesetJson, type WalkContent, type WalkView } from '@core/lod2/tileset';
 import type { Lod2Region } from '@core/lod2/regions';
-import { readGlbWorld } from '@core/model/gltf';
+import { gltfUsesDraco, readGlbWorld, type DracoDecoder } from '@core/model/gltf';
 
 const CONCURRENCY = 6;
 /** External tilesets a walk may still name after this many rounds are left out. */
@@ -60,6 +61,15 @@ function touch(key: string, t: Lod2Tile): void {
   while (cache.size > maxCachedTiles) cache.delete(cache.keys().next().value!);
 }
 
+let draco: Promise<DracoDecoder> | null = null;
+
+/** The Draco decoder chunk and WASM, fetched on the first tile that needs them. */
+function dracoDecoder(): Promise<DracoDecoder> {
+  draco ??= import('./draco').then((m) => m.loadDraco());
+  draco.catch(() => (draco = null));
+  return draco;
+}
+
 async function acquire(): Promise<void> {
   if (active < CONCURRENCY) {
     active++;
@@ -86,8 +96,11 @@ async function load(c: WalkContent, region: Lod2Region): Promise<Lod2Tile | null
   } finally {
     release();
   }
+  const b = isB3dm(buf) ? readB3dm(buf) : { glb: buf, rtc: undefined, batch: {} };
   await MeshoptDecoder.ready;
-  const t = lod2Tile(readGlbWorld(buf, MeshoptDecoder), c.transform, region);
+  const w = readGlbWorld(b.glb, { meshopt: MeshoptDecoder, draco: gltfUsesDraco(b.glb) ? await dracoDecoder() : undefined });
+  w.rtc ??= b.rtc;
+  const t = lod2Tile(w, c.transform, region, b.batch);
   touch(c.url, t);
   return t;
 }

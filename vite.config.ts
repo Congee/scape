@@ -32,6 +32,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,bin,jpg,json}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: 'index.html',
+        // Only CH/JP tiles need Draco; it is cached when first fetched instead.
+        globIgnores: ['**/draco*'],
         runtimeCaching: [
           {
             urlPattern: TILE_URLS,
@@ -41,7 +43,8 @@ export default defineConfig({
               expiration: { maxEntries: 6000, maxAgeSeconds: 60 * 60 * 24 * 120 },
               cacheableResponse: { statuses: [0, 200] }
             }
-          }
+          },
+          { urlPattern: /\/assets\/draco[^/]*\.(?:js|wasm)$/, handler: 'CacheFirst', options: { cacheName: 'draco', expiration: { maxEntries: 8 } } }
         ]
       },
       devOptions: { enabled: false }
