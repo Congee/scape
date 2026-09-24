@@ -4,6 +4,7 @@ import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { localParts } from '@core/time/localDay';
 import { BODY, SkyBody } from './bodies';
 import { moonInfo, position } from './positions';
+import { RISE_APPARENT_DEG } from './refraction';
 
 const D2R = Math.PI / 180;
 const MIN_MS = 60_000;
@@ -29,10 +30,10 @@ export type SkyFilter = (typeof SkyFilter)[keyof typeof SkyFilter];
 /** Sun altitude range each filter admits, degrees. */
 export const SKY_RANGES: Record<SkyFilter, readonly [number, number]> = {
   Any: [-90, 90],
-  Daylight: [-0.833, 90],
+  Daylight: [RISE_APPARENT_DEG, 90],
   GoldenHour: [0, 6],
   BlueHour: [-8, -4],
-  SunDown: [-90, -0.833],
+  SunDown: [-90, RISE_APPARENT_DEG],
   CivilDark: [-90, -6],
   NauticalDark: [-90, -12],
   AstroDark: [-90, -18]

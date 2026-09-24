@@ -1,19 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import { makeObserver, SkyBody } from './bodies';
 import { position } from './positions';
-import { apparentAltitude, HORIZON_ALT_DEG } from './refraction';
+import { apparentAltitude, HORIZON_ALT_DEG, TAPER_END_DEG } from './refraction';
 
 describe('apparentAltitude', () => {
-  it('leaves altitudes below the horizon geometric', () => {
+  it('leaves altitudes below the taper geometric', () => {
     expect(apparentAltitude(-12)).toBe(-12);
+    expect(apparentAltitude(TAPER_END_DEG)).toBe(TAPER_END_DEG);
   });
 
   it('refracts a body that is up', () => {
     expect(apparentAltitude(10)).toBeCloseTo(10.09, 2);
   });
 
-  it('steps up at the rise/set threshold without overshooting', () => {
-    expect(apparentAltitude(HORIZON_ALT_DEG)).toBeGreaterThan(apparentAltitude(-0.8334));
+  // JPL Horizons, Sun from New York 2026-10-26 21:40–22:04 UTC: airless → refracted.
+  it.each([
+    [2.755577552, 2.994816082],
+    [1.319037448, 1.65222136],
+    [0.596679122, 1.002051512],
+    [-0.128261739, 0.373838897],
+    [-0.855680078, -0.233574942],
+  ])('matches Horizons refraction at %f°', (geom, app) => {
+    expect(Math.abs(apparentAltitude(geom) - app)).toBeLessThan(0.0005);
+  });
+
+  it('is continuous and monotone through the horizon', () => {
+    let prev = apparentAltitude(-5.001);
+    for (let g = -5; g <= 5; g += 0.001) {
+      const a = apparentAltitude(g);
+      expect(a).toBeGreaterThan(prev);
+      expect(a - prev).toBeLessThan(0.002);
+      prev = a;
+    }
+  });
+
+  it('has no step at the rise/set threshold', () => {
+    expect(apparentAltitude(HORIZON_ALT_DEG) - apparentAltitude(HORIZON_ALT_DEG - 1e-4)).toBeLessThan(1e-3);
   });
 });
 
