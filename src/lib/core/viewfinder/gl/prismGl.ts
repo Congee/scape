@@ -1,6 +1,7 @@
 /** The building prisms drawn on the GPU with the viewfinder's pinhole projection. */
 
 import { HAZE_M, MIN_AREA_PX, MIN_PX, NEAR_M, ROOF_SHADE, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
+import { prismSurfaces, type SurfaceMesh } from '@core/geo/surfaces';
 import type { Camera, CameraBasis } from '@core/optics/projection';
 import { boxCastsInto, coneDepthRange, type Cascade, type SceneBounds } from './shadowFit';
 
@@ -12,9 +13,17 @@ export interface PrismGlStats {
   buildings: number;
   tiles: number;
   triangles: number;
+  /** Precise models drawn, and their triangles. */
+  models: number;
+  modelTriangles: number;
 }
 
-/** One tile's triangles, uploaded once and reused until the tile is evicted. */
+export interface PrismDepthStats {
+  triangles: number;
+  modelTriangles: number;
+}
+
+/** One surface mesh's triangles, uploaded once and reused until it is dropped. */
 interface TileMesh {
   vao: WebGLVertexArrayObject;
   indexCount: number;
@@ -27,6 +36,7 @@ interface TileMesh {
   sizeTex: WebGLTexture;
   /** minE, minN, minU, maxE, maxN, maxU, for the per-cascade caster cull. */
   box: Float32Array;
+  doubleSided: boolean;
 }
 
 const CULL_GLSL = `
@@ -58,13 +68,16 @@ bool sphereVisible(vec3 c, float r) {
 /** The per-building culls, moved off the per-frame CPU path. */
 bool buildingVisible(vec4 sphere, vec4 size) {
   if (size.w < 0.5) return false;
-  float dist = max(1.0, size.x);
-  if (dist > uRangeM) return false;
-  float k = uPxPerM / dist;
-  float wPx = size.y * k;
-  float hPx = size.z * k;
-  if (wPx < MIN_PX && hPx < MIN_PX) return false;
-  if (wPx * hPx < MIN_AREA_PX) return false;
+  // A precise model is drawn at any range and any size.
+  if (size.w < 1.5) {
+    float dist = max(1.0, size.x);
+    if (dist > uRangeM) return false;
+    float k = uPxPerM / dist;
+    float wPx = size.y * k;
+    float hPx = size.z * k;
+    if (wPx < MIN_PX && hPx < MIN_PX) return false;
+    if (wPx * hPx < MIN_AREA_PX) return false;
+  }
   return sphereVisible(sphere.xyz, sphere.w);
 }
 `;
@@ -107,6 +120,7 @@ uniform vec2 uRes;
 uniform float uLightAz;
 uniform vec3 uHazeRgb;
 uniform float uNight;
+uniform float uDouble;
 layout(location = 0) out vec4 oColor;
 layout(location = 1) out vec4 oPos;
 layout(location = 2) out vec4 oNormal;
@@ -119,9 +133,15 @@ void main() {
   vec3 d = uFwd + aMm * uRight + bMm * uUp;
   float den = dot(pl.xyz, d);
   if (den == 0.0) discard;
+  vec4 su = texelFetch(uSurf, st, 0);
+  // An open mesh shows either side, so its plane faces whichever side the eye is on.
+  if (uDouble > 0.5 && den > 0.0) {
+    pl = -pl;
+    den = -den;
+    su.y += 180.0;
+  }
   float ray = pl.w / den;
   if (!(ray > 0.0)) discard;
-  vec4 su = texelFetch(uSurf, st, 0);
   float clear = exp(-su.w / HAZE_M);
   float lit = 0.55 + 0.45 * (0.5 + 0.5 * cos((su.y - uLightAz) * D2R));
   float k = su.x > 0.5 ? (su.z < 1e-4 ? ROOF_SHADE : ROOF_SHADE + su.z * (lit - ROOF_SHADE)) : lit;
@@ -184,59 +204,6 @@ function table(gl: WebGL2RenderingContext, n: number, data: Float32Array): WebGL
   return t;
 }
 
-/** Ear clip of one face, already flattened onto its own plane; the output winds counter-clockwise in it. */
-function earClip(px: readonly number[], py: readonly number[], base: number, out: number[]): void {
-  const m = px.length;
-  if (m < 3) return;
-  const idx: number[] = [];
-  let area = 0;
-  for (let i = 0, j = m - 1; i < m; j = i++) area += px[j] * py[i] - px[i] * py[j];
-  for (let i = 0; i < m; i++) idx.push(area >= 0 ? i : m - 1 - i);
-  const cross = (a: number, b: number, c: number) => (px[b] - px[a]) * (py[c] - py[a]) - (py[b] - py[a]) * (px[c] - px[a]);
-  let guard = m * m + 8;
-  while (idx.length > 3 && guard-- > 0) {
-    let cut = -1;
-    for (let i = 0; i < idx.length; i++) {
-      const a = idx[(i + idx.length - 1) % idx.length];
-      const b = idx[i];
-      const c = idx[(i + 1) % idx.length];
-      if (cross(a, b, c) <= 0) continue;
-      let clear = true;
-      for (const q of idx) {
-        if (q === a || q === b || q === c) continue;
-        if (cross(a, b, q) >= 0 && cross(b, c, q) >= 0 && cross(c, a, q) >= 0) {
-          clear = false;
-          break;
-        }
-      }
-      if (!clear) continue;
-      cut = i;
-      break;
-    }
-    if (cut < 0) break;
-    const a = idx[(cut + idx.length - 1) % idx.length];
-    const c = idx[(cut + 1) % idx.length];
-    out.push(base + a, base + idx[cut], base + c);
-    idx.splice(cut, 1);
-  }
-  // A self-intersecting ring has no ear left; a fan still covers most of it.
-  for (let i = 1; i + 1 < idx.length; i++) out.push(base + idx[0], base + idx[i], base + idx[i + 1]);
-}
-
-/**
- * Drops the face normal's dominant axis so the ear clip runs in the plane's own two dimensions.
- * Each pair is right-handed about the axis it drops, and the pair is swapped where the normal runs
- * the other way, so the ear clip's counter-clockwise output always faces outward.
- */
-function flatten(nx: number, ny: number, nz: number, e: readonly number[], n: readonly number[], u: readonly number[]): { px: number[]; py: number[] } {
-  const ax = Math.abs(nx);
-  const ay = Math.abs(ny);
-  const az = Math.abs(nz);
-  if (az >= ax && az >= ay) return nz >= 0 ? { px: e.slice(), py: n.slice() } : { px: n.slice(), py: e.slice() };
-  if (ax >= ay) return nx >= 0 ? { px: n.slice(), py: u.slice() } : { px: u.slice(), py: n.slice() };
-  return ny >= 0 ? { px: u.slice(), py: e.slice() } : { px: e.slice(), py: u.slice() };
-}
-
 /**
  * The viewfinder's pinhole ray, written as a clip matrix. A pixel centre lands at
  * `xMm = (R·P / F·P) f`, the frame spans `wMm` across the raster, so `ndc.x = 2 f (R·P) / (wMm F·P)`;
@@ -251,16 +218,17 @@ export function prismClipMatrix(cam: Camera, basis: CameraBasis): Float32Array {
   return new Float32Array([kx * R.x, ky * U.x, -F.x, F.x, kx * R.y, ky * U.y, -F.y, F.y, kx * R.z, ky * U.z, -F.z, F.z, 0, 0, 2 * NEAR_M, 0]);
 }
 
-const MAIN_UNIFORMS = ['uProj', 'uSphere', 'uSize', 'uPlane', 'uSurf', 'uFwd', 'uRight', 'uUp', 'uFocal', 'uWmm', 'uHmm', 'uPxPerM', 'uRangeM', 'uConeRad', 'uRes', 'uLightAz', 'uHazeRgb', 'uNight'];
+const MAIN_UNIFORMS = ['uProj', 'uSphere', 'uSize', 'uPlane', 'uSurf', 'uFwd', 'uRight', 'uUp', 'uFocal', 'uWmm', 'uHmm', 'uPxPerM', 'uRangeM', 'uConeRad', 'uRes', 'uLightAz', 'uHazeRgb', 'uNight', 'uDouble'];
 
-/** Draws the cached prism tiles; the caller owns the framebuffer it draws into. */
+/** Draws the cached prism tiles and the precise models; the caller owns the framebuffer it draws into. */
 export class PrismGl {
   private readonly gl: WebGL2RenderingContext;
   private readonly prog: WebGLProgram;
   private readonly depthProg: WebGLProgram;
   private readonly uni: Record<string, WebGLUniformLocation | null>;
   private readonly depthUni: Record<string, WebGLUniformLocation | null>;
-  private readonly meshes = new WeakMap<PrismTile, TileMesh>();
+  private readonly tileMeshes = new WeakMap<PrismTile, TileMesh>();
+  private readonly meshes = new WeakMap<SurfaceMesh, TileMesh>();
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
@@ -275,15 +243,14 @@ export class PrismGl {
    * cascades cover towers that stand hundreds of metres above the terrain band. The cone range is
    * taken per tile rather than over the union, which a city-wide box would smear to nothing.
    */
-  bounds(cam: Camera, basis: CameraBasis, tiles: Iterable<PrismTile>): SceneBounds | null {
+  bounds(cam: Camera, basis: CameraBasis, tiles: Iterable<PrismTile>, models: Iterable<SurfaceMesh> = []): SceneBounds | null {
     let halfM = 1;
     let minU = Infinity;
     let maxU = -Infinity;
     let viewNearM = Infinity;
     let viewFarM = -Infinity;
     let any = false;
-    for (const tile of tiles) {
-      const mesh = this.mesh(tile);
+    for (const mesh of this.all(tiles, models)) {
       if (mesh.indexCount === 0) continue;
       const box = mesh.box;
       any = true;
@@ -301,7 +268,7 @@ export class PrismGl {
   }
 
   /** Shades every visible prism into the bound G-buffer. */
-  render(cam: Camera, basis: CameraBasis, tiles: Iterable<PrismTile>, sh: PrismShading, rw: number, rh: number): PrismGlStats {
+  render(cam: Camera, basis: CameraBasis, tiles: Iterable<PrismTile>, sh: PrismShading, rw: number, rh: number, models: Iterable<SurfaceMesh> = []): PrismGlStats {
     const gl = this.gl;
     // The prisms are closed, so the eye only ever sees the faces winding counter-clockwise at it.
     gl.enable(gl.CULL_FACE);
@@ -319,16 +286,41 @@ export class PrismGl {
     gl.uniform1i(u.uSize, 1);
     gl.uniform1i(u.uPlane, 2);
     gl.uniform1i(u.uSurf, 3);
+    gl.uniform1f(u.uDouble, 0);
 
     let buildings = 0;
     let tileCount = 0;
     let triangles = 0;
     for (const tile of tiles) {
-      const mesh = this.mesh(tile);
+      const mesh = this.tileMesh(tile);
       if (mesh.indexCount === 0) continue;
       tileCount++;
       buildings += tile.count;
-      gl.activeTexture(gl.TEXTURE0);
+      this.draw(mesh);
+      triangles += mesh.indexCount / 3;
+    }
+    // After the prisms, into the same depth, so the nearer surface wins wherever they meet.
+    let modelCount = 0;
+    let modelTriangles = 0;
+    for (const m of models) {
+      const mesh = this.upload(m);
+      if (mesh.indexCount === 0) continue;
+      modelCount++;
+      if (mesh.doubleSided) gl.disable(gl.CULL_FACE);
+      else gl.enable(gl.CULL_FACE);
+      gl.uniform1f(u.uDouble, mesh.doubleSided ? 1 : 0);
+      this.draw(mesh);
+      modelTriangles += mesh.indexCount / 3;
+    }
+    gl.bindVertexArray(null);
+    // The terrain and the shadow pass share this context and want every face.
+    gl.disable(gl.CULL_FACE);
+    return { buildings, tiles: tileCount, triangles, models: modelCount, modelTriangles };
+  }
+
+  private draw(mesh: TileMesh): void {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, mesh.sphereTex);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, mesh.sizeTex);
@@ -336,31 +328,27 @@ export class PrismGl {
       gl.bindTexture(gl.TEXTURE_2D, mesh.planeTex);
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, mesh.surfTex);
-      gl.bindVertexArray(mesh.vao);
-      gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0);
-      triangles += mesh.indexCount / 3;
-    }
-    gl.bindVertexArray(null);
-    // The terrain and the shadow pass share this context and want every face.
-    gl.disable(gl.CULL_FACE);
-    return { buildings, tiles: tileCount, triangles };
+    gl.bindVertexArray(mesh.vao);
+    gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0);
   }
 
   /** Depth only, from the light's point of view; every prism casts, whatever the camera can see. */
-  renderDepth(cascade: Cascade, light: CameraBasis, tiles: Iterable<PrismTile>): number {
+  renderDepth(cascade: Cascade, light: CameraBasis, tiles: Iterable<PrismTile>, models: Iterable<SurfaceMesh> = []): PrismDepthStats {
     const gl = this.gl;
     gl.useProgram(this.depthProg);
     gl.uniformMatrix4fv(this.depthUni.uProj, false, cascade.matrix);
-    let triangles = 0;
-    for (const tile of tiles) {
-      const mesh = this.mesh(tile);
-      if (mesh.indexCount === 0 || !boxCastsInto(mesh.box, 0, light, cascade)) continue;
+    const cast = (mesh: TileMesh) => {
+      if (mesh.indexCount === 0 || !boxCastsInto(mesh.box, 0, light, cascade)) return 0;
       gl.bindVertexArray(mesh.vao);
       gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0);
-      triangles += mesh.indexCount / 3;
-    }
+      return mesh.indexCount / 3;
+    };
+    let triangles = 0;
+    let modelTriangles = 0;
+    for (const tile of tiles) triangles += cast(this.tileMesh(tile));
+    for (const m of models) modelTriangles += cast(this.upload(m));
     gl.bindVertexArray(null);
-    return triangles;
+    return { triangles, modelTriangles };
   }
 
   dispose(): void {
@@ -382,69 +370,31 @@ export class PrismGl {
     gl.uniform1f(u.uConeRad, Math.atan(Math.hypot(cam.frameWmm, cam.frameHmm) / 2 / f));
   }
 
-  private mesh(tile: PrismTile): TileMesh {
-    const hit = this.meshes.get(tile);
+  private *all(tiles: Iterable<PrismTile>, models: Iterable<SurfaceMesh>): Generator<TileMesh> {
+    for (const tile of tiles) yield this.tileMesh(tile);
+    for (const m of models) yield this.upload(m);
+  }
+
+  private tileMesh(tile: PrismTile): TileMesh {
+    const hit = this.tileMeshes.get(tile);
+    if (hit) return hit;
+    const mesh = this.upload(prismSurfaces(tile));
+    this.tileMeshes.set(tile, mesh);
+    return mesh;
+  }
+
+  private upload(m: SurfaceMesh): TileMesh {
+    const hit = this.meshes.get(m);
     if (hit) return hit;
     const gl = this.gl;
-    const pos: number[] = [];
-    const attr: number[] = [];
-    const idx: number[] = [];
-    const plane: number[] = [];
-    const surf: number[] = [];
-    const fe: number[] = [];
-    const fn: number[] = [];
-    const fu: number[] = [];
-
-    const emit = (bldg: number, nx: number, ny: number, nz: number, pc: number, kind: number, bearing: number, hor: number, dist: number, e: readonly number[], n: readonly number[], u: readonly number[]) => {
-      const s = surf.length / 4;
-      plane.push(nx, ny, nz, pc);
-      surf.push(kind, bearing, hor, dist);
-      const base = pos.length / 3;
-      for (let j = 0; j < e.length; j++) {
-        pos.push(e[j], n[j], u[j]);
-        attr.push(s, bldg);
-      }
-      const flat = flatten(nx, ny, nz, e, n, u);
-      earClip(flat.px, flat.py, base, idx);
-    };
-
-    for (let i = 0; i < tile.count; i++) {
-      const s0 = tile.ringStart[i];
-      const len = tile.ringStart[i + 1] - s0;
-      if (len < 3) continue;
-      const dist = Math.max(1, tile.distM[i]);
-      for (let q = tile.faceStart[i]; q < tile.faceStart[i + 1]; q++) {
-        const vs = tile.faceVert[q];
-        const mv = tile.faceVert[q + 1] - vs;
-        if (mv < 3) continue;
-        fe.length = 0;
-        fn.length = 0;
-        fu.length = 0;
-        for (let j = 0; j < mv; j++) {
-          fe.push(tile.fE[vs + j]);
-          fn.push(tile.fN[vs + j]);
-          fu.push(tile.fU[vs + j]);
-        }
-        emit(i, tile.fNx[q], tile.fNy[q], tile.fNz[q], tile.fPc[q], 1, tile.fBear[q], tile.fHor[q], dist, fe, fn, fu);
-      }
-      for (let j = 0; j < len; j++) {
-        const a = s0 + j;
-        if (!tile.wOk[a]) continue;
-        const b = s0 + ((j + 1) % len);
-        const nx = tile.wNx[a];
-        const ny = tile.wNy[a];
-        emit(i, nx, ny, 0, nx * tile.e[a] + ny * tile.n[a], 0, tile.wBear[a], 0, dist, [tile.e[a], tile.e[b], tile.e[b], tile.e[a]], [tile.n[a], tile.n[b], tile.n[b], tile.n[a]], [tile.uBase[a], tile.uBase[b], tile.uTop[b], tile.uTop[a]]);
-      }
-    }
-
-    const nv = pos.length / 3;
+    const nv = m.pos.length / 3;
     const inter = new Float32Array(nv * 5);
     for (let j = 0; j < nv; j++) {
-      inter[j * 5] = pos[j * 3];
-      inter[j * 5 + 1] = pos[j * 3 + 1];
-      inter[j * 5 + 2] = pos[j * 3 + 2];
-      inter[j * 5 + 3] = attr[j * 2];
-      inter[j * 5 + 4] = attr[j * 2 + 1];
+      inter[j * 5] = m.pos[j * 3];
+      inter[j * 5 + 1] = m.pos[j * 3 + 1];
+      inter[j * 5 + 2] = m.pos[j * 3 + 2];
+      inter[j * 5 + 3] = m.surfId[j];
+      inter[j * 5 + 4] = m.bldgId[j];
     }
     // The element binding belongs to the bound VAO, so bind this mesh's own before touching buffers.
     const vao = gl.createVertexArray()!;
@@ -454,7 +404,7 @@ export class PrismGl {
     gl.bufferData(gl.ARRAY_BUFFER, inter, gl.STATIC_DRAW);
     const ibo = gl.createBuffer()!;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 20, 0);
     gl.enableVertexAttribArray(1);
@@ -463,39 +413,19 @@ export class PrismGl {
     gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16);
     gl.bindVertexArray(null);
 
-    const ns = Math.max(1, surf.length / 4);
-    const nb = Math.max(1, tile.count);
-    const sphere = new Float32Array(nb * 4);
-    const size = new Float32Array(nb * 4);
-    for (let i = 0; i < tile.count; i++) {
-      sphere[i * 4] = tile.cE[i];
-      sphere[i * 4 + 1] = tile.cN[i];
-      sphere[i * 4 + 2] = tile.cU[i];
-      sphere[i * 4 + 3] = tile.radiusM[i];
-      size[i * 4] = tile.distM[i];
-      size[i * 4 + 1] = tile.spanM[i];
-      size[i * 4 + 2] = tile.riseM[i];
-      size[i * 4 + 3] = tile.ringStart[i + 1] - tile.ringStart[i] >= 3 ? 1 : 0;
-    }
-
-    const box = new Float32Array([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]);
-    for (let j = 0; j < nv; j++)
-      for (let k = 0; k < 3; k++) {
-        const v = pos[j * 3 + k];
-        if (v < box[k]) box[k] = v;
-        if (v > box[k + 3]) box[k + 3] = v;
-      }
-
+    const ns = Math.max(1, m.surf.length / 4);
+    const nb = Math.max(1, m.sphere.length / 4);
     const mesh: TileMesh = {
       vao,
-      indexCount: idx.length,
-      box,
-      planeTex: table(gl, ns, Float32Array.from(plane)),
-      surfTex: table(gl, ns, Float32Array.from(surf)),
-      sphereTex: table(gl, nb, sphere),
-      sizeTex: table(gl, nb, size)
+      indexCount: m.idx.length,
+      box: m.box,
+      doubleSided: m.doubleSided,
+      planeTex: table(gl, ns, m.plane),
+      surfTex: table(gl, ns, m.surf),
+      sphereTex: table(gl, nb, m.sphere),
+      sizeTex: table(gl, nb, m.size)
     };
-    this.meshes.set(tile, mesh);
+    this.meshes.set(m, mesh);
     return mesh;
   }
 }

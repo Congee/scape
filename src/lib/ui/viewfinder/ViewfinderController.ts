@@ -11,6 +11,7 @@ import { distance, height } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { PrismOccluder } from '@core/geo/prismOcclude';
 import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
+import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
@@ -387,7 +388,7 @@ export class ViewfinderController {
   }
 
   /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */
-  private glPrisms(sc: Scene, hazeRgb: readonly number[]): { tiles: Iterable<PrismTile>; shading: PrismShading } | null {
+  private glPrisms(sc: Scene, hazeRgb: readonly number[]): { tiles: Iterable<PrismTile>; models: Iterable<SurfaceMesh>; shading: PrismShading } | null {
     this.prismStats = { buildings: 0, tiles: 0 };
     if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
     const tiles = this.prismTiles(sc);
@@ -395,7 +396,7 @@ export class ViewfinderController {
     this.prismStats = { buildings: 0, tiles: tiles.size };
     const lightAzDeg = sc.sunAlt > 0 ? sc.sunAz : sc.aim.azimuthDeg + 135;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    return { tiles: [...tiles.values()], shading: { lightAzDeg, hazeRgb, night: sc.night, rangeM } };
+    return { tiles: [...tiles.values()], models: [], shading: { lightAzDeg, hazeRgb, night: sc.night, rangeM } };
   }
 
   /** Index of the same prisms the picture draws; it only changes when the tiles or the camera move. */

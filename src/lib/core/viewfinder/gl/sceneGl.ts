@@ -6,6 +6,7 @@
  */
 
 import type { PrismShading, PrismTile } from '@core/geo/prismRaster';
+import type { SurfaceMesh } from '@core/geo/surfaces';
 import { cameraBasis, type Camera, type CameraBasis } from '@core/optics/projection';
 import type { MeshLevel } from '@core/terrain/mesh';
 import { GROUND_HAZE_M, SKY } from '../palette';
@@ -42,7 +43,8 @@ export interface SceneGlInput {
   groundNear: readonly number[];
   groundFar: readonly number[];
   terrain: readonly MeshLevel[];
-  prism: { tiles: Iterable<PrismTile>; shading: PrismShading } | null;
+  /** Prisms and precise models share the shading and the buildings toggle. */
+  prism: { tiles: Iterable<PrismTile>; models: Iterable<SurfaceMesh>; shading: PrismShading } | null;
   milkyWay: SceneGlTexture | null;
   /** ENU → equatorial J2000, row major; null when the Milky Way is not drawn. */
   eqj: Float64Array | null;
@@ -62,6 +64,7 @@ export interface SceneGlStats {
   shadowTriangles: number;
   /** The prisms' share of them; walls now cast from both sides, so it is worth watching. */
   shadowPrismTriangles: number;
+  shadowModelTriangles: number;
   /** Per cascade: axial far edge and the two texel sizes, metres; a long lens makes them differ a lot. */
   cascadeInfo: { farM: number; texelXM: number; texelYM: number }[];
   /** Axial depth range the view cone touches, metres, when the terrain reported one. */
@@ -332,6 +335,7 @@ export class SceneGl {
       cascades: shadow.cascades.length,
       shadowTriangles: shadow.triangles,
       shadowPrismTriangles: shadow.prismTriangles,
+      shadowModelTriangles: shadow.modelTriangles,
       cascadeInfo: shadow.cascades.map((c) => ({ farM: c.farM, texelXM: c.texelXM, texelYM: c.texelYM })),
       viewRangeM: shadow.scene?.viewNearM !== undefined && shadow.scene.viewFarM !== undefined ? [shadow.scene.viewNearM, shadow.scene.viewFarM] : null,
       gpuMs: this.lastGpuMs
@@ -367,30 +371,34 @@ export class SceneGl {
     gl.clearBufferfv(gl.DEPTH, 0, [0]);
     const lightAz = input.prism?.shading.lightAzDeg ?? input.sunAzDeg;
     const terrain = this.terrainGl.ready ? this.terrainGl.render(input.cam, input.basis, input.groundNear, input.groundFar, lightAz) : null;
-    this.lastPrism = input.prism ? this.prismGl.render(input.cam, input.basis, input.prism.tiles, input.prism.shading, vw, vh) : null;
+    this.lastPrism = input.prism ? this.prismGl.render(input.cam, input.basis, input.prism.tiles, input.prism.shading, vw, vh, input.prism.models) : null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return terrain;
   }
 
-  private shadowPass(input: SceneGlInput): { cascades: Cascade[]; triangles: number; prismTriangles: number; scene: SceneBounds | null } {
-    const none = { cascades: [], triangles: 0, prismTriangles: 0, scene: null };
+  private shadowPass(input: SceneGlInput): { cascades: Cascade[]; triangles: number; prismTriangles: number; modelTriangles: number; scene: SceneBounds | null } {
+    const none = { cascades: [], triangles: 0, prismTriangles: 0, modelTriangles: 0, scene: null };
     if (input.sunAltDeg < SUN_MIN_ALT_DEG || input.shadowGain <= 0) return none;
     if (!this.terrainGl.ready && !input.prism) return none;
     const gl = this.gl;
     const light = lightBasis(input.sunAzDeg, input.sunAltDeg, input.basis.forward);
     // Towers reach hundreds of metres above the terrain band, so the prisms must widen the fit too.
     const terrainScene = this.terrainGl.ready ? this.terrainGl.bounds(input.cam, input.basis) : null;
-    const prismScene = input.prism ? this.prismGl.bounds(input.cam, input.basis, input.prism.tiles) : null;
+    const prismScene = input.prism ? this.prismGl.bounds(input.cam, input.basis, input.prism.tiles, input.prism.models) : null;
     const scene = mergeScene(terrainScene, prismScene) ?? { halfM: 20000, minU: -1000, maxU: 1000 };
     const cascades = fitCascades(input.cam, input.basis, light, scene, this.shadowGl.res);
     let triangles = 0;
     let prismTriangles = 0;
+    let modelTriangles = 0;
     this.shadowGl.render(cascades, light, (c) => {
       triangles += this.terrainGl.renderDepth(c, light);
-      if (input.prism) prismTriangles += this.prismGl.renderDepth(c, light, input.prism.tiles);
+      if (!input.prism) return;
+      const d = this.prismGl.renderDepth(c, light, input.prism.tiles, input.prism.models);
+      prismTriangles += d.triangles;
+      modelTriangles += d.modelTriangles;
     });
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return { cascades, triangles: triangles + prismTriangles, prismTriangles, scene };
+    return { cascades, triangles: triangles + prismTriangles + modelTriangles, prismTriangles, modelTriangles, scene };
   }
 
   private composite(input: SceneGlInput, cascades: readonly Cascade[], vx: number, vy: number, vw: number, vh: number): void {
