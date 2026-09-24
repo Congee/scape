@@ -14,6 +14,7 @@ import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, t
 import { suppressRows } from '@core/geo/buildingTiles';
 import { anyOccluder, MeshOccluder, type Occluder } from '@core/geo/meshOcclude';
 import { placeModel } from '@core/geo/modelPlace';
+import { lod2CoverOf } from '@core/lod2/cover';
 import { PrismOccluder } from '@core/geo/prismOcclude';
 import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
@@ -30,7 +31,8 @@ import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
 import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
-import { buildingsStore, requestBuildings } from '@state/buildings';
+import { buildingsStore, requestBuildings, requestLod2 } from '@state/buildings';
+import { lod2Store } from '@state/lod2';
 import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
@@ -142,6 +144,12 @@ export class ViewfinderController {
   /** Eye-relative prisms per tile, rebuilt when the camera location moves. */
   private prisms = new Map<string, PrismTile>();
   private prismKey = '';
+  /** LoD2 tiles each Overture tile was rebuilt around. */
+  private prismCover = new Map<string, string>();
+  /** Overture rows the LoD2 and model footprints hid, over the tiles held. */
+  private prismHidden = new Map<string, number>();
+  /** One index per LoD2 tile, so a tile streaming in does not re-index the others. */
+  private lod2Occ = new WeakMap<SurfaceMesh, MeshOccluder>();
   private prismMs = 0;
   private prismStats = { buildings: 0, tiles: 0 };
   private rasterMs = 0;
@@ -187,6 +195,7 @@ export class ViewfinderController {
       skyStore.subscribe(() => this.schedule()),
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
       buildingsStore.subscribe((s) => s.version, () => this.schedule()),
+      lod2Store.subscribe((s) => s.version, () => this.schedule()),
       modelsStore.subscribe((s) => s.rev, () => this.schedule()),
       modelsStore.subscribe((s) => s.selectedId, () => this.schedule()),
       photoStore.subscribe(() => this.schedule())
@@ -285,7 +294,7 @@ export class ViewfinderController {
       const rel = (a: number) => (((a - cur.azFromDeg) % 360) + 360) % 360;
       const covered = cur.azSpanDeg >= 360 || (rel(needFrom) <= cur.azSpanDeg && rel(needTo) <= cur.azSpanDeg && rel(needFrom) <= rel(needTo));
       if (covered) {
-        this.askBuildings(cur);
+        this.askBuildings(cur, sc);
         return;
       }
     }
@@ -297,7 +306,7 @@ export class ViewfinderController {
       minStepDeg
     };
     viewfinderStore.getState().setWindow(win);
-    this.askBuildings(win);
+    this.askBuildings(win, sc);
   }
 
   /**
@@ -326,9 +335,14 @@ export class ViewfinderController {
   }
 
   /** Building volumes for the same wedge the terrain sweep covers, so small pans need no new fetch. */
-  private askBuildings(win: ViewWindow) {
+  private askBuildings(win: ViewWindow, sc: Scene) {
     if (!compositionStore.getState().showBuildings) return;
-    requestBuildings(worldStore.getState().pin, win.azFromDeg, win.azSpanDeg, Math.min(win.rangeM, BUILDING_RANGE_M));
+    const pin = worldStore.getState().pin;
+    const rangeM = Math.min(win.rangeM, BUILDING_RANGE_M);
+    requestBuildings(pin, win.azFromDeg, win.azSpanDeg, rangeM);
+    // An octave ladder, so zooming only asks again once the tileset's error test could change.
+    const pxPerRad = 2 ** Math.round(Math.log2(Math.max(100, sc.frame.w) / (sc.hfov * D2R)));
+    requestLod2(pin, sc.eyeM, win.azFromDeg, win.azSpanDeg, rangeM, pxPerRad);
   }
 
   private onDown = (e: PointerEvent) => {
@@ -415,8 +429,18 @@ export class ViewfinderController {
       this.prisms.clear();
     }
     const { tiles } = buildingsStore.getState();
+    const lod2 = [...lod2Store.getState().tiles.values()];
     for (const k of this.prisms.keys()) if (!tiles.has(k)) this.prisms.delete(k);
-    for (const [k, batch] of tiles) if (!this.prisms.has(k)) this.prisms.set(k, buildPrisms(suppressRows(batch, hide.rings), w.pin, sc.eyeM));
+    for (const [k, batch] of tiles) {
+      const cover = lod2CoverOf(k, lod2);
+      if (this.prisms.has(k) && this.prismCover.get(k) === cover.sig) continue;
+      const kept = suppressRows(batch, cover.rings.length > 0 ? [...hide.rings, ...cover.rings] : hide.rings);
+      this.prisms.set(k, buildPrisms(kept, w.pin, sc.eyeM));
+      this.prismCover.set(k, cover.sig);
+      this.prismHidden.set(k, batch.count - kept.count);
+    }
+    for (const k of this.prismCover.keys()) if (!this.prisms.has(k)) this.prismCover.delete(k);
+    for (const k of this.prismHidden.keys()) if (!this.prisms.has(k)) this.prismHidden.delete(k);
     return this.prisms;
   }
 
@@ -437,6 +461,11 @@ export class ViewfinderController {
       this.modelCache = { key, meshes, ids };
     }
     return this.modelCache.meshes;
+  }
+
+  /** Placed LoD2 meshes; they share the models' pass, index and shadows. */
+  private lod2Surfaces(): SurfaceMesh[] {
+    return [...lod2Store.getState().tiles.values()].map((t) => t.mesh);
   }
 
   /** Accent silhouette of the selected model, over the picture; it ignores occluders so a hidden model can still be lined up. */
@@ -523,7 +552,7 @@ export class ViewfinderController {
     this.prismStats = { buildings: 0, tiles: 0 };
     if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
     const tiles = this.prismTiles(sc);
-    const models = this.modelSurfaces(sc);
+    const models = [...this.modelSurfaces(sc), ...this.lod2Surfaces()];
     if (tiles.size === 0 && models.length === 0) return null;
     this.prismStats = { buildings: 0, tiles: tiles.size };
     const lightAzDeg = sc.light?.azimuthDeg ?? sc.aim.azimuthDeg + 135;
@@ -536,16 +565,31 @@ export class ViewfinderController {
     if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
     const tiles = this.prismTiles(sc);
     const models = this.modelSurfaces(sc);
-    if (tiles.size === 0 && models.length === 0) return null;
+    const lod2 = this.lod2Surfaces();
+    if (tiles.size === 0 && models.length === 0 && lod2.length === 0) return null;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    const key = `${this.prismKey}|${buildingsStore.getState().version}|${rangeM}`;
+    const key = `${this.prismKey}|${buildingsStore.getState().version}|${lod2Store.getState().version}|${rangeM}`;
     const modelKey = this.modelCache?.key ?? '';
     // Separate caches: tiles streaming in must not re-index a large imported mesh.
     if (this.meshOccCache?.key !== modelKey) this.meshOccCache = { key: modelKey, occ: models.length > 0 ? new MeshOccluder(models) : null };
     if (this.occCache?.key !== key) this.occCache = { key, occ: tiles.size > 0 ? new PrismOccluder(tiles.values(), rangeM) : null };
     const both = `${key}|${modelKey}`;
-    if (this.anyOccCache?.key !== both) this.anyOccCache = { key: both, occ: anyOccluder([this.occCache.occ, this.meshOccCache.occ]) };
+    if (this.anyOccCache?.key !== both) {
+      const lod2Occ = lod2.map((m) => {
+        let occ = this.lod2Occ.get(m);
+        if (!occ) this.lod2Occ.set(m, (occ = new MeshOccluder([m])));
+        return occ;
+      });
+      this.anyOccCache = { key: both, occ: anyOccluder([this.occCache.occ, this.meshOccCache.occ, ...lod2Occ]) };
+    }
     return this.anyOccCache.occ;
+  }
+
+  private lod2Stats() {
+    const l = lod2Store.getState();
+    let hiddenRows = 0;
+    for (const n of this.prismHidden.values()) hiddenRows += n;
+    return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows };
   }
 
   /** True when a building stands between the eye and a direction; `distM` is Infinity for the sky. */
@@ -605,7 +649,7 @@ export class ViewfinderController {
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       const shade = { on: stats.cascades > 0, light: sc.light?.body ?? null, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
-      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
       if (dev) dev.moonDisc = this.moonGeometry(sc);
     }
   }

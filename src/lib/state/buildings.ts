@@ -3,7 +3,8 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import type { MaskRect } from '@core/geo/shadowMask';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import { addLod2Tile, finishLod2, lod2Store } from './lod2';
 
 /** Decoded tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
@@ -63,6 +64,9 @@ let maskKey = '';
 let lastMask: Omit<MaskRequest, 'id'> | null = null;
 /** Sent to each worker as it starts and again on every change. */
 let modelsSync: ModelsSync | null = null;
+/** Id of the LoD2 request whose responses the store still wants. */
+let lod2Id = 0;
+let lod2Key = '';
 
 /** Centre of a "z/x/y" key, for distance-based eviction. */
 function tileCentre(key: string): LngLat {
@@ -91,6 +95,12 @@ function ensureWorker(): Worker {
       return;
     }
     if (res.kind === BuildingsKind.Height || res.kind === BuildingsKind.Rows || res.kind === BuildingsKind.Ids || res.kind === BuildingsKind.Ground) return; // its waiter already timed out
+    if (res.id === lod2Id) {
+      if (res.kind === BuildingsKind.Lod2Tile) addLod2Tile(res.tile);
+      else if (res.kind === BuildingsKind.Lod2Done) finishLod2(res.urls, res.tris, res.missing, res.error);
+      else if (res.kind === BuildingsKind.Error) lod2Store.setState((st) => ({ busy: false, version: st.version + 1, error: res.error }));
+      return;
+    }
     if (res.id !== tilesId) return;
     if (res.kind === BuildingsKind.Tiles) {
       buildingsStore.setState((st) => {
@@ -133,6 +143,20 @@ export function requestBuildings(pin: LngLat, azFromDeg: number, azSpanDeg: numb
   tilesId = ++seq;
   buildingsStore.setState({ busy: true, error: null });
   const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, azFromDeg, azSpanDeg, rangeM };
+  ensureWorker().postMessage(req);
+}
+
+/** Streams the wedge's LoD2 meshes, placed for `eyeM`; a new pin or eye height re-places every tile. */
+export function requestLod2(pin: LngLat, eyeM: number, azFromDeg: number, azSpanDeg: number, rangeM: number, pxPerRad: number): void {
+  const placeKey = `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}|${eyeM.toFixed(2)}`;
+  const key = `${placeKey}|${azFromDeg}|${azSpanDeg}|${rangeM}|${pxPerRad}`;
+  if (key === lod2Key) return;
+  lod2Key = key;
+  lod2Id = ++seq;
+  const st = lod2Store.getState();
+  if (st.placeKey !== placeKey) lod2Store.setState({ tiles: new Map(), placeKey, version: st.version + 1, buildMs: 0 });
+  lod2Store.setState({ busy: true, error: null });
+  const req: Lod2Request = { kind: BuildingsKind.Lod2, id: lod2Id, pin, eyeM, azFromDeg, azSpanDeg, rangeM, pxPerRad, have: [...lod2Store.getState().tiles.keys()] };
   ensureWorker().postMessage(req);
 }
 

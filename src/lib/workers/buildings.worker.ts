@@ -1,20 +1,25 @@
 /// <reference lib="webworker" />
 import { groundForRows, groupRowsAt, heightAtPoint, pickRows, suppressedIds, suppressRing, suppressRingTiles, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
 import type { LngLat } from '@core/geo/geodesy';
-import { frameOf, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
+import { frameOf, frameToLngLat, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
+import { lod2RegionsNear, type Lod2Region } from '@core/lod2/regions';
+import { lod2BuildingAt, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
+import type { WalkContent } from '@core/lod2/tileset';
 import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStitch';
 import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
 import { cubicStencilTiles, demRowAt, elevationAtCubic, lowestGroundAt, withDemTiles } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
+import { fetchLod2Tile, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type Lod2Placed, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** The map's mask runs in a second instance of this module, so its caches are sized for the map rect. */
 const isMask = scope.name === MASK_WORKER_NAME;
 const dem = new DemCache(demCacheTiles(isMask ? 320 : 512));
 if (isMask) setBuildingTileCacheSize(96);
+setLod2TileCacheSize(isMask ? 24 : 12);
 /** Zoom of the buildings archive; `tilesForWedge` enumerates the same level. */
 const BUILDINGS_ZOOM = 14;
 /** Ground under one building: short of the source's finest, which would quadruple the tiles for sub-metre posts a footprint cannot use. */
@@ -24,7 +29,17 @@ const CEILING_MIN_ZOOM = demZoom(8);
 const CEILING_MAX_ZOOM = demZoom(14);
 /** The map rect covers far more ground than the wedge at its coarsest. */
 const MASK_TILE_MAX = 256;
+/** Triangle budgets for LoD2, nearest tiles first; past them Overture stands in. */
+const LOD2_VIEW_TRIS = 1_000_000;
+const LOD2_MASK_TRIS = 2_000_000;
+/** A leaf-only tileset's parents carry no content, so this sets the range at which LoD2 appears. */
+const LOD2_MAX_ERROR_PX = 16;
+/** Tiles fetched ahead of the one being placed. */
+const LOD2_AHEAD = 4;
 let latest = 0;
+let latestLod2 = 0;
+/** Triangles per placed url, so a tile the caller holds is kept without decoding it again. */
+const lod2Tris = new Map<string, number>();
 /** Newest map-mask id; the map centre is not the camera pin, so it gets its own counter and cache. */
 let latestMask = 0;
 let models: WorkerModel[] = [];
@@ -133,6 +148,8 @@ function fillFrameTerrain(g: HeightGrid, f: MaskFrame, zoom: number): boolean {
 
 /** Raises the grid to every roof standing over it. */
 async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
+  const lod2 = await stampFrameLod2(g, f);
+  const hide = lod2.length > 0 ? [...suppress, ...lod2] : suppress;
   const tiles = tilesInBounds(frameBounds(f, g), BUILDINGS_ZOOM).slice(0, MASK_TILE_MAX);
   const decoded = await Promise.all(tiles.map((t) => fetchBuildingBatch(t)));
   const grounds = await Promise.all(decoded.map((b) => (b ? groundOf(b) : null)));
@@ -141,7 +158,7 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
   for (const [t, raw] of decoded.entries()) {
     const all = grounds[t];
     if (!raw || !all) continue;
-    const b = suppressRows({ ...raw, groundM: all }, suppress);
+    const b = suppressRows({ ...raw, groundM: all }, hide);
     const ground = b.groundM;
     for (let i = 0; i < b.count; i++) {
       const gm = ground[i];
@@ -169,6 +186,52 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
     }
     stampTriangles(g, e, n, u);
   }
+}
+
+/** Every leaf in `rangeM` of `p` all around, nearest first, with its region. */
+async function lod2Around(p: LngLat, rangeM: number): Promise<{ c: WalkContent; region: Lod2Region }[]> {
+  const out: { c: WalkContent; region: Lod2Region }[] = [];
+  for (const region of lod2RegionsNear(p, rangeM)) {
+    // oxlint-disable-next-line no-await-in-loop -- regions rarely overlap
+    const contents = await walkRegion(region, { pin: p, eyeH: region.geoidM, pxPerRad: 1e9, maxErrorPx: 1, rangeM, azFromDeg: 0, azSpanDeg: 360 });
+    for (const c of contents) out.push({ c, region });
+  }
+  return out.toSorted((a, b) => a.c.distM - b.c.distM);
+}
+
+function stampLod2(g: HeightGrid, f: MaskFrame, t: Lod2Tile): void {
+  const tris = lod2Triangles(t);
+  const nv = tris.length / 3;
+  const e = new Float64Array(nv);
+  const n = new Float64Array(nv);
+  const u = new Float64Array(nv);
+  for (let v = 0; v < nv; v++) {
+    const p = frameOf(f, { lng: tris[v * 3], lat: tris[v * 3 + 1] });
+    e[v] = p.e;
+    n[v] = p.n;
+    u[v] = tris[v * 3 + 2];
+  }
+  stampTriangles(g, e, n, u);
+}
+
+/** Stamps the LoD2 meshes over the grid and returns their hulls, which the Overture rows then give way to. */
+async function stampFrameLod2(g: HeightGrid, f: MaskFrame): Promise<SuppressRing[]> {
+  const wE = g.nx * g.cellM;
+  const wN = g.ny * g.cellM;
+  const centre = frameToLngLat(f, g.originE + wE / 2, g.originN + wN / 2);
+  const around = await lod2Around(centre, Math.hypot(wE, wN) / 2);
+  const rings: SuppressRing[] = [];
+  let tris = 0;
+  for (const { c, region } of around) {
+    // oxlint-disable-next-line no-await-in-loop -- nearest first until the budget runs out
+    const t = await fetchLod2Tile(c, region);
+    if (!t) continue;
+    if (tris + t.idx.length / 3 > LOD2_MASK_TRIS) break;
+    tris += t.idx.length / 3;
+    stampLod2(g, f, t);
+    for (const b of t.buildings) rings.push(suppressRing(b.hull));
+  }
+  return rings;
 }
 
 /** Null when a newer mask request has superseded this one. */
@@ -201,10 +264,22 @@ async function shade(req: MaskRequest): Promise<void> {
   scope.postMessage({ kind: BuildingsKind.Shade, id, centre, originE, originN, nx, ny, cellM, mask, ms: performance.now() - t0 } satisfies BuildingsResponse, [mask.buffer]);
 }
 
+/** Apex above the lowest vertex of the LoD2 building under `p`; null where none stands. */
+async function lod2HeightAt(p: LngLat): Promise<number | null> {
+  for (const { c, region } of await lod2Around(p, 1)) {
+    // oxlint-disable-next-line no-await-in-loop -- the first tile holding the point answers
+    const t = await fetchLod2Tile(c, region).catch(() => null);
+    const b = t ? lod2BuildingAt(t, p) : -1;
+    if (t && b >= 0) return t.buildings[b].apexM - t.buildings[b].baseM;
+  }
+  return null;
+}
+
 /** One-shot lookup; it shares the tile cache with the wedge, so a nearby target is usually free. */
 async function heightAt(req: HeightAtRequest): Promise<void> {
-  const decoded = await fetchBuildingBatch(tileAt(req.point, BUILDINGS_ZOOM));
-  const heightM = decoded ? heightAtPoint(suppressRows(decoded, suppress), req.point) : null;
+  const fromLod2 = await lod2HeightAt(req.point);
+  const decoded = fromLod2 == null ? await fetchBuildingBatch(tileAt(req.point, BUILDINGS_ZOOM)) : null;
+  const heightM = fromLod2 ?? (decoded ? heightAtPoint(suppressRows(decoded, suppress), req.point) : null);
   scope.postMessage({ kind: BuildingsKind.Height, id: req.id, heightM } satisfies BuildingsResponse);
 }
 
@@ -247,6 +322,68 @@ async function hiddenIds(req: SuppressedIdsRequest): Promise<void> {
   scope.postMessage({ kind: BuildingsKind.Ids, id: req.id, ids } satisfies BuildingsResponse);
 }
 
+function placed(t: Lod2Tile, c: WalkContent, region: Lod2Region, req: Lod2Request, t0: number): { tile: Lod2Placed; transfer: ArrayBuffer[] } {
+  const mesh = placeLod2(t, req.pin, req.eyeM);
+  const tris = mesh.plane.length / 4;
+  const tile: Lod2Placed = { url: c.url, region: region.id, mesh, hulls: t.buildings.map((b) => b.hull), bbox: t.bbox, tris, ms: performance.now() - t0 };
+  const transfer = [mesh.pos, mesh.surfId, mesh.bldgId, mesh.idx, mesh.plane, mesh.surf, mesh.sphere, mesh.size, mesh.box].map((a) => a.buffer as ArrayBuffer);
+  return { tile, transfer };
+}
+
+/** Streams the wedge's LoD2 tiles nearest first until the triangle budget is spent. */
+async function lod2Run(req: Lod2Request): Promise<void> {
+  const have = new Set(req.have);
+  const urls: string[] = [];
+  let tris = 0;
+  let missing = 0;
+  let error: string | null = null;
+  const list: { c: WalkContent; region: Lod2Region }[] = [];
+  for (const region of lod2RegionsNear(req.pin, req.rangeM)) {
+    const view = { pin: req.pin, eyeH: req.eyeM + region.geoidM, pxPerRad: req.pxPerRad, maxErrorPx: LOD2_MAX_ERROR_PX, rangeM: req.rangeM, azFromDeg: req.azFromDeg, azSpanDeg: req.azSpanDeg };
+    // oxlint-disable-next-line no-await-in-loop -- regions rarely overlap
+    for (const c of await walkRegion(region, view)) list.push({ c, region });
+    if (latestLod2 !== req.id) return;
+  }
+  list.sort((a, b) => a.c.distM - b.c.distM);
+  const started = new Map<number, Promise<Lod2Tile | null>>();
+  const start = (i: number) => {
+    if (i < list.length && !started.has(i) && !(have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) started.set(i, fetchLod2Tile(list[i].c, list[i].region));
+  };
+  for (let i = 0; i < list.length; i++) {
+    if (latestLod2 !== req.id) return;
+    const { c, region } = list[i];
+    const known = have.has(c.url) ? lod2Tris.get(c.url) : undefined;
+    if (known !== undefined) {
+      if (tris + known > LOD2_VIEW_TRIS) break;
+      tris += known;
+      urls.push(c.url);
+      continue;
+    }
+    for (let k = i; k <= i + LOD2_AHEAD; k++) start(k);
+    const t0 = performance.now();
+    let t: Lod2Tile | null = null;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- tiles stream nearest first, one at a time
+      t = await started.get(i)!;
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    if (latestLod2 !== req.id) return;
+    if (!t) {
+      missing++;
+      continue;
+    }
+    if (tris + t.idx.length / 3 > LOD2_VIEW_TRIS) break;
+    const { tile, transfer } = placed(t, c, region, req, t0);
+    lod2Tris.set(c.url, tile.tris);
+    tris += tile.tris;
+    urls.push(c.url);
+    scope.postMessage({ kind: BuildingsKind.Lod2Tile, id: req.id, tile } satisfies BuildingsResponse, transfer);
+  }
+  if (latestLod2 !== req.id) return;
+  scope.postMessage({ kind: BuildingsKind.Lod2Done, id: req.id, urls, tris, missing, error } satisfies BuildingsResponse);
+}
+
 async function groundAt(req: GroundAtRequest): Promise<void> {
   const groundM = await lowestGroundAt(dem, req.points, BUILDING_GROUND_ZOOM, TERRAIN_TILE_SIZE);
   scope.postMessage({ kind: BuildingsKind.Ground, id: req.id, groundM } satisfies BuildingsResponse);
@@ -277,6 +414,14 @@ scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
   }
   if (req.kind === BuildingsKind.SuppressedIds) {
     hiddenIds(req).catch(fail);
+    return;
+  }
+  if (req.kind === BuildingsKind.Lod2) {
+    latestLod2 = req.id;
+    lod2Run(req).catch((err: unknown) => {
+      if (latestLod2 !== req.id) return;
+      fail(err);
+    });
     return;
   }
   if (req.kind === BuildingsKind.Mask) {

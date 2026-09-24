@@ -1,6 +1,8 @@
 import type { LngLat } from '@core/geo/geodesy';
+import type { SurfaceMesh } from '@core/geo/surfaces';
+import type { Lod2Source } from '@core/lod2/regions';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** OSM Simple 3D Buildings roof families the rasteriser draws; Other renders flat at the apex. */
@@ -80,7 +82,37 @@ export interface GroundAtRequest {
   points: LngLat[];
 }
 
-export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest;
+/** Official LoD2 meshes for the wedge, placed eye-relative; one Lod2Tile per new tile, then Lod2Done. */
+export interface Lod2Request {
+  kind: typeof BuildingsKind.Lod2;
+  id: number;
+  pin: LngLat;
+  /** Eye altitude above sea level, the prisms' frame. */
+  eyeM: number;
+  azFromDeg: number;
+  azSpanDeg: number;
+  rangeM: number;
+  /** Screen pixels per radian, for the tileset's error test. */
+  pxPerRad: number;
+  /** Tiles the caller already holds placed for this pin and eye; they are kept, not resent. */
+  have: string[];
+}
+
+export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request;
+
+/** One LoD2 content tile placed in the viewfinder's frame. */
+export interface Lod2Placed {
+  url: string;
+  region: Lod2Source;
+  mesh: SurfaceMesh;
+  /** Per-building convex hulls, lng/lat; Overture rows with a centroid inside give way. */
+  hulls: [lng: number, lat: number][][];
+  /** lng0, lat0, lng1, lat1. */
+  bbox: [number, number, number, number];
+  tris: number;
+  /** Worker time to decode and place it, milliseconds. */
+  ms: number;
+}
 
 /** Worker name the map's mask instance runs under; it sizes its caches for the map rect. */
 export const MASK_WORKER_NAME = 'buildings-mask';
@@ -124,4 +156,6 @@ export type BuildingsResponse =
   | { kind: typeof BuildingsKind.Ids; id: number; ids: string[] }
   | { kind: typeof BuildingsKind.Ground; id: number; groundM: number | null }
   | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; ms: number }
+  | { kind: typeof BuildingsKind.Lod2Tile; id: number; tile: Lod2Placed }
+  | { kind: typeof BuildingsKind.Lod2Done; id: number; urls: string[]; tris: number; missing: number; error: string | null }
   | { kind: typeof BuildingsKind.Error; id: number; error: string };
