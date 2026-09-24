@@ -24,6 +24,10 @@ export class BlockCache {
     return b;
   }
 
+  has(key: string): boolean {
+    return this.blocks.has(key);
+  }
+
   set(key: string, b: MeshBlock) {
     const old = this.blocks.get(key);
     if (old) {
