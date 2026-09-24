@@ -545,9 +545,11 @@ visible errors are design choices, each waiting on a decision (recommendation in
 
 **Known code glitches (2026-09-24).**
 
-- extras-astro smoke "24 mm L/P night, lunar maximum: moon disc at centre" fails on master; fix in
-  progress (wip/fixflakes).
-- models-p2 NaN-heal smoke compares floats with `===` and flakes; fix in progress (wip/fixflakes).
+- Path hour labels can cover the Sun/Moon disc at wide focal lengths (the 24 mm moon check now
+  hides the overlay). Skip a label overlapping a disc, nudge it off, or keep?
+- Smoke scripts pass `--cdp` but no `AGENT_BROWSER_SESSION`, so parallel agents share the default
+  session and can drive each other's tabs; models-p2 also inherits the saved camera and its first
+  building lookup after reload can time out at 15 s (set camera and warm up first).
 - Overture prism build and `occludes` run on the main thread (170–250 ms/s dragging in Rotterdam);
   the terrain-drag work is cutting it, moving the build into the worker is still open.
 - The mask worker warns once per skipped LoD2 tile on every rebuild, so a permanently bad tile
