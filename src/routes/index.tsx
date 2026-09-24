@@ -37,11 +37,17 @@ function MapPage() {
   // store → URL, debounced; replaces history so scrubbing does not spam it.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const push = () => {
+    let last = '';
+    const searchNow = () => {
       const w = worldStore.getState();
-      void navigate({ to: '/', replace: true, search: mapSearchFor(w, w.view.zoom) });
+      return mapSearchFor(w, w.view.zoom);
     };
+    const push = () => void navigate({ to: '/', replace: true, search: searchNow() });
     const bump = () => {
+      // The live clock ticks every second but a live URL carries no time.
+      const key = JSON.stringify(searchNow());
+      if (key === last) return;
+      last = key;
       clearTimeout(timer);
       timer = setTimeout(push, 500);
     };

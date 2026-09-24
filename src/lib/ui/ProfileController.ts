@@ -33,7 +33,7 @@ export class ProfileController {
     this.resize();
     this.unsubs.push(
       terrainStore.subscribe(() => this.schedule()),
-      worldStore.subscribe(() => this.schedule()),
+      worldStore.subscribe((st) => profileKeyFor(st, settingsStore.getState()), () => this.schedule()),
       settingsStore.subscribe((s) => s.units, () => this.schedule())
     );
   }

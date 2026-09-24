@@ -1,6 +1,7 @@
 import { BODIES, makeObserver, SkyBody } from '@core/astro/bodies';
 import { EventKind } from '@core/astro/dayEvents';
 import { position } from '@core/astro/positions';
+import { onlyChanged } from '@core/drift';
 import { horizonAngleAt } from '@core/terrain/horizon';
 import { formatTime } from '@core/time/format';
 import { dayDataStore } from '@state/dayData';
@@ -46,6 +47,8 @@ export class ChartController {
   private dpr = 1;
   private dragging = false;
   private raf = 0;
+  /** What the clock alone can change in the last draw. */
+  private clockSig = '';
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -54,7 +57,9 @@ export class ChartController {
     this.resize();
     this.unsubs.push(
       dayDataStore.subscribe(() => this.schedule()),
-      worldStore.subscribe(() => this.schedule()),
+      worldStore.subscribe((st, prev) => {
+        if (!onlyChanged(st, prev, 'time') || this.clockSigNow() !== this.clockSig) this.schedule();
+      }),
       settingsStore.subscribe(() => this.schedule()),
       terrainStore.subscribe(() => this.schedule())
     );
@@ -138,7 +143,22 @@ export class ChartController {
     e.preventDefault();
   };
 
+  /** The now marker and cursor snap to whole pixels; dots move only as fast as a body climbs. */
+  private clockSigNow(): string {
+    const { dayStart, dayEnd } = dayDataStore.getState();
+    const { time, tz, pin, pinHeightM } = worldStore.getState();
+    const { hour12, showGc } = settingsStore.getState();
+    const X = (t: number) => (t >= dayStart && t < dayEnd ? Math.round(this.x(t, dayStart, dayEnd)) : NaN);
+    const sig = [X(Date.now()), X(time)];
+    if (Number.isNaN(sig[1])) return sig.join();
+    const obs = makeObserver(pin, pinHeightM);
+    const date = new Date(time);
+    for (const b of BODIES) if (b !== SkyBody.Gc || showGc) sig.push(Math.round(this.y(position(b, date, obs).altitude) * 20));
+    return `${sig.join()}|${formatTime(time, tz, hour12)}`;
+  }
+
   private draw() {
+    this.clockSig = this.clockSigNow();
     const { ctx, w, h } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);

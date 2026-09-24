@@ -44,10 +44,14 @@ function ViewfinderPage() {
   // stores → URL, debounced; replaces history so scrubbing does not spam it.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const push = () => {
-      void navigate({ to: '/viewfinder', replace: true, search: viewfinderSearchFor(worldStore.getState(), compositionStore.getState()) });
-    };
+    let last = '';
+    const searchNow = () => viewfinderSearchFor(worldStore.getState(), compositionStore.getState());
+    const push = () => void navigate({ to: '/viewfinder', replace: true, search: searchNow() });
     const bump = () => {
+      // The live clock ticks every second but a live URL carries no time.
+      const key = JSON.stringify(searchNow());
+      if (key === last) return;
+      last = key;
       clearTimeout(timer);
       timer = setTimeout(push, 500);
     };

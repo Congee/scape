@@ -9,6 +9,7 @@ import { lightAt, type Light } from '@core/astro/lightSource';
 import { moonView } from '@core/astro/moonSim';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
 import { arcWindow, rainbowArc, rainbowRadiusDeg, rainbowTop, WATER_N } from '@core/astro/rainbow';
+import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
 import { distance, height } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { suppressRows } from '@core/geo/buildingTiles';
@@ -52,6 +53,8 @@ const D2R = Math.PI / 180;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
 const MAX_COLUMNS = 2400;
+/** Sun travel that may shift the sky colours and the shading by a step; about 12 s of clock. */
+const SUN_STEP_DEG = 0.05;
 /** Buildings are only worth fetching and drawing this far out. */
 const BUILDING_RANGE_M = 20_000;
 const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
@@ -159,6 +162,8 @@ export class ViewfinderController {
   /** The GPU picture pass; null only when it could not start, which `glError` then explains. */
   private sceneGl: SceneGl | null = null;
   private glError = '';
+  /** What the live clock is measured against: the last drawn instant, sun and sky scale. */
+  private drawn: { time: number; sunAlt: number; sunAz: number; pxPerDeg: number; halfDiagDeg: number; moving: boolean } | null = null;
   /** Per-object building occlusion for the current frame; the GPU picture cannot mask objects. */
   private occ: Occluder | null = null;
   private occCache: { key: string; occ: Occluder | null } | null = null;
@@ -189,7 +194,10 @@ export class ViewfinderController {
       this.schedule();
     };
     this.unsubs.push(
-      worldStore.subscribe(bump),
+      worldStore.subscribe((st, prev) => {
+        if (!(st.live && prev.live && onlyChanged(st, prev, 'time'))) bump();
+        else if (this.clockMoved()) this.schedule();
+      }),
       compositionStore.subscribe(bump),
       gearStore.subscribe(bump),
       settingsStore.subscribe(bump),
@@ -213,6 +221,30 @@ export class ViewfinderController {
     canvas.addEventListener('dblclick', this.onDouble);
     canvas.addEventListener('keydown', this.onKey);
     this.ensureWindow();
+  }
+
+  /** A live tick redraws once the sky has drifted half a pixel, or the sun far enough to relight it. */
+  private clockMoved(): boolean {
+    const d = this.drawn;
+    if (!d) return true;
+    const w = worldStore.getState();
+    if (d.moving && skyDriftPx(w.time - d.time, d.pxPerDeg, d.halfDiagDeg) >= 0.5) return true;
+    const sun = position(SkyBody.Sun, new Date(w.time), makeObserver(w.pin, w.pinHeightM));
+    return skyAngleDeg(d.sunAlt, d.sunAz, sun.altitude, sun.azimuth) >= SUN_STEP_DEG;
+  }
+
+  /** Stars, moonlight, a bow or a body near the frame move with the sky; otherwise only the light does. */
+  private noteDrawn(sc: Scene) {
+    const c = compositionStore.getState();
+    const s = settingsStore.getState();
+    const fPx = sc.frame.w / (2 * Math.tan((sc.hfov / 2) * D2R));
+    const halfDiagDeg = Math.atan(Math.hypot(sc.frame.w, sc.frame.h) / 2 / fPx) / D2R;
+    const near = (b: SkyBody) => {
+      const p = position(b, sc.time, sc.obs);
+      return skyAngleDeg(sc.cam.elevationDeg, sc.cam.azimuthDeg, p.altitude, p.azimuth) < halfDiagDeg + 2;
+    };
+    const moving = sc.night > 0 || sc.light?.body === SkyBody.Moon || c.showRainbow || BODIES.some((b) => bodyVisible(b, c, s) && near(b));
+    this.drawn = { time: sc.time.getTime(), sunAlt: sc.sunAlt, sunAz: sc.sunAz, pxPerDeg: fPx * D2R, halfDiagDeg, moving };
   }
 
   private schedule() {
@@ -1337,6 +1369,7 @@ export class ViewfinderController {
     }
     if (w < 40 || h < 40) return;
     const sc = this.scene();
+    this.noteDrawn(sc);
     this.placePhoto(sc);
     if (!this.sceneGl) {
       this.drawGlError(sc);

@@ -15,6 +15,7 @@ import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { lightAt } from '@core/astro/lightSource';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
+import { linesShiftPx } from '@core/drift';
 import { lod2Credits, type Lod2Source } from '@core/lod2/regions';
 import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, seedModel } from '@core/model/seed';
@@ -33,7 +34,7 @@ import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
-import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask, suppressedBuildingIds } from '@state/buildings';
+import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask, suppressedBuildingIds, type ShadowMaskField } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
@@ -159,6 +160,8 @@ export class MapController {
   private dragging2 = false;
   private draggingFov = false;
   private shadowTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  private live: { src: GeoJSONSource; data: GeoJSON.FeatureCollection } | null = null;
+  private painted: { src: ImageSource; mask: ShadowMaskField } | null = null;
   private drawer: ModelDrawer;
   /** Overture feature ids a visible model stands in for. */
   private hiddenIds: string[] = [];
@@ -310,7 +313,7 @@ export class MapController {
         { equalityFn: samePoint }
       ),
       worldStore.subscribe((st) => st.time, () => {
-        this.renderLive();
+        this.renderLive(true);
         this.scheduleShadows();
       }),
       worldStore.subscribe((st) => st.pinHeightM, () => this.renderLive()),
@@ -911,6 +914,9 @@ export class MapController {
     const m = buildingsStore.getState().shadowMask;
     const src = this.styleReady ? (this.map.getSource(SHADOW_SRC) as ImageSource | undefined) : undefined;
     if (!m || !src || !this.map.getLayer(SHADOW_LAYER)) return;
+    // Every clock tick lands here; re-uploading an unchanged mask repaints the map for nothing.
+    if (this.painted?.src === src && this.painted.mask === m && this.map.getLayoutProperty(SHADOW_LAYER, 'visibility') === 'visible') return;
+    this.painted = { src, mask: m };
     const rgb = this.lightBody === SkyBody.Moon ? MOON_SHADOW_RGB : SHADOW_RGB;
     src.updateImage({ image: new ImageData(maskPixels(m.mask, m.nx, m.ny, rgb), m.nx, m.ny), coordinates: maskCorners(m.centre, m) });
     this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'visible');
@@ -1007,16 +1013,25 @@ export class MapController {
     src.setData(eventLines(pin, events, this.rayM, { showGc: s.showGc }));
   }
 
-  private renderLive() {
+  /** A clock tick redraws only once some ray has moved half a pixel since the last draw. */
+  private renderLive(tick = false) {
     const src = this.source(LIVE_SRC);
     if (!src) return;
     const s = settingsStore.getState();
-    if (!s.showLiveLines) return src.setData(EMPTY);
-    const w = worldStore.getState();
-    const obs = makeObserver(w.pin, w.pinHeightM);
-    const date = new Date(w.time);
-    const pos = { Sun: position(SkyBody.Sun, date, obs), Moon: position(SkyBody.Moon, date, obs), Gc: position(SkyBody.Gc, date, obs) };
-    src.setData(liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc, shadowHeightM: s.shadowObjectHeightM, pin2: w.pin2, pin2HeightM: w.pin2HeightM }));
+    let data: GeoJSON.FeatureCollection = EMPTY;
+    if (s.showLiveLines) {
+      const w = worldStore.getState();
+      const obs = makeObserver(w.pin, w.pinHeightM);
+      const date = new Date(w.time);
+      const pos = { Sun: position(SkyBody.Sun, date, obs), Moon: position(SkyBody.Moon, date, obs), Gc: position(SkyBody.Gc, date, obs) };
+      data = liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc, shadowHeightM: s.shadowObjectHeightM, pin2: w.pin2, pin2HeightM: w.pin2HeightM });
+    }
+    if (tick && this.live?.src === src) {
+      const c = this.map.getContainer();
+      if (linesShiftPx(this.live.data, data, (p) => this.map.project(p), c.clientWidth, c.clientHeight) < 0.5) return;
+    }
+    this.live = { src, data };
+    src.setData(data);
   }
 
   private renderGeodetic() {
