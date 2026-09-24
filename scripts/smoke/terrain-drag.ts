@@ -2,6 +2,7 @@
 /* oxlint-disable no-await-in-loop -- smoke steps run one after another */
 // Usage: bun scripts/smoke/terrain-drag.ts <cdp> <dev-port> <shot-dir> [baseline-dir|-] [gpu-lock-dir|-] [quick|drag|bare|stills] [scene[-mm],...]
 import { existsSync, mkdirSync, rmdirSync, writeFileSync } from 'node:fs';
+import { decodePng } from '../../src/lib/core/terrain/png';
 import { Tab } from './cdp';
 
 const [cdp = '9408', port = '5408', shots = '/tmp/terrain-drag', baseline = '-', lock = '-', mode = '', only = ''] = process.argv.slice(2);
@@ -123,25 +124,6 @@ const HELPERS = `(() => {
     return { x: r.left + f.x, y: r.top + f.y, w: f.w, h: f.h };
   };
   const decode = (b64) => new Promise((res) => { const i = new Image(); i.onload = () => { const c = new OffscreenCanvas(i.width, i.height).getContext('2d'); c.drawImage(i, 0, 0); res(c.getImageData(0, 0, i.width, i.height)); }; i.src = 'data:image/png;base64,' + b64; });
-  /** Whole page, and the picture frame alone: page chrome can raster a hair apart between runs. */
-  td.diff = async (a, b) => {
-    const [x, y] = await Promise.all([decode(a), decode(b)]);
-    if (x.width !== y.width || x.height !== y.height) return { size: true, px: -1, max: 255, vfPx: -1, vfMax: 255 };
-    const r = td.frame(), s = x.width / window.innerWidth;
-    const x0 = Math.floor(r.x * s), x1 = Math.ceil((r.x + r.w) * s), y0 = Math.floor(r.y * s), y1 = Math.ceil((r.y + r.h) * s);
-    let px = 0, max = 0, vfPx = 0, vfMax = 0;
-    for (let k = 0; k < x.data.length; k += 4) {
-      const d = Math.max(Math.abs(x.data[k] - y.data[k]), Math.abs(x.data[k + 1] - y.data[k + 1]), Math.abs(x.data[k + 2] - y.data[k + 2]));
-      if (d === 0) continue;
-      px++;
-      if (d > max) max = d;
-      const i = k / 4, cx = i % x.width, cy = (i - cx) / x.width;
-      if (cx < x0 || cx >= x1 || cy < y0 || cy >= y1) continue;
-      vfPx++;
-      if (d > vfMax) vfMax = d;
-    }
-    return { size: false, px, max, share: px / (x.width * x.height), vfPx, vfMax };
-  };
   /** Share of the frame's pixels that show ground: not the sky gradient's blue-dominant colours. */
   td.ground = async (b64, f) => {
     const img = await decode(b64);
@@ -272,10 +254,30 @@ const takeLock = async () => {
 
 const url = (s: Scene, f: number, orient: 'l' | 'p', time: string) => `${BASE}/viewfinder?camera=${SCENES[s].camera}&target=${SCENES[s].target}&t=${SCENES[s][time as 'day']}&f=${f}${orient === 'p' ? '&o=p' : ''}`;
 const b64Of = async (path: string) => Buffer.from(await Bun.file(path).arrayBuffer()).toString('base64');
+/** Whole page, and the picture frame alone: page chrome can raster a hair apart between runs. Decoded here, as Brave nudges canvas readback. */
+const diff = async (a: string, b: string, r: { x: number; y: number; w: number; h: number }) => {
+  const [x, y] = await Promise.all([a, b].map(async (f) => decodePng(new Uint8Array(await Bun.file(f).arrayBuffer()))));
+  if (x.width !== y.width || x.height !== y.height || x.channels !== y.channels) return { size: true, px: -1, max: 255, share: 1, vfPx: -1, vfMax: 255 };
+  const n = x.channels, s = x.width / (await tab.eval<number>('innerWidth'));
+  const x0 = Math.floor(r.x * s), x1 = Math.ceil((r.x + r.w) * s), y0 = Math.floor(r.y * s), y1 = Math.ceil((r.y + r.h) * s);
+  let px = 0, max = 0, vfPx = 0, vfMax = 0;
+  for (let k = 0; k < x.data.length; k += n) {
+    let d = 0;
+    for (let c = 0; c < Math.min(n, 3); c++) d = Math.max(d, Math.abs(x.data[k + c] - y.data[k + c]));
+    if (d === 0) continue;
+    px++;
+    if (d > max) max = d;
+    const i = k / n, cx = i % x.width, cy = (i - cx) / x.width;
+    if (cx < x0 || cx >= x1 || cy < y0 || cy >= y1) continue;
+    vfPx++;
+    if (d > vfMax) vfMax = d;
+  }
+  return { size: false, px, max, share: px / (x.width * x.height), vfPx, vfMax };
+};
 const compare = async (name: string, path: string) => {
   const ref = `${baseline}/${name}`;
   if (baseline === '-' || !existsSync(ref)) return;
-  const d = await tab.eval<{ size: boolean; px: number; max: number; share: number; vfPx: number; vfMax: number }>(`window.__td.diff(${JSON.stringify(await b64Of(ref))}, ${JSON.stringify(await b64Of(path))})`);
+  const d = await diff(ref, path, await tab.eval<{ x: number; y: number; w: number; h: number }>('window.__td.frame()'));
   check(`settled ${name} vs baseline`, !d.size && d.vfPx === 0, d.size ? 'size differs' : `viewfinder ${d.vfPx} px differ, max Δ ${d.vfMax}; page ${d.px} px (${(d.share * 100).toFixed(3)}%), max Δ ${d.max}`);
 };
 
