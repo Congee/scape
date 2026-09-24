@@ -1123,6 +1123,19 @@ label.file input {
   pointer-events: none;
 }
 
+.vf-photo {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.vf-photo img {
+  position: absolute;
+  max-width: none;
+  transform-origin: center;
+  user-select: none;
+}
+
 .vf {
   position: absolute;
   inset: 0;
@@ -1267,6 +1280,33 @@ label.file input {
 .vf-tools .hint {
   flex: 100%;
   margin: 6px 2px 0;
+}
+
+.vf-photo-tools {
+  flex: 100%;
+  align-items: center;
+  padding: 4px 0 0;
+}
+
+.vf-photo-tools .opacity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.vf-photo-tools .opacity input {
+  width: 88px;
+}
+
+.vf-photo-tools .nudges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.vf-tools .vf-photo-tools .hint {
+  margin: 2px 2px 0;
 }
 
 /* Night tab */
