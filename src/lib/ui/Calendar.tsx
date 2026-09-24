@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { makeObserver } from '@core/astro/bodies';
-import { calendarMarks, CalendarMarkKind, type CalendarMark } from '@core/astro/calendar';
+import { calendarMarks, CalendarMarkKind, ECLIPSE_LABEL, type CalendarMark } from '@core/astro/calendar';
+import { lunarCircumstances, solarCircumstances, type EclipseContact } from '@core/astro/eclipse';
+import { compass, degrees } from '@core/format';
+import { formatTime } from '@core/time/format';
 import { isoDate, localMidnight, localParts } from '@core/time/localDay';
-import { useSettings } from '@state/settings';
+import { settingsStore, useSettings } from '@state/settings';
+import { horizonKeyFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 
 const DAY_MS = 86_400_000;
@@ -32,6 +36,59 @@ function Glyph({ kind, title }: { kind: CalendarMarkKind; title?: string }) {
         </>
       )}
     </svg>
+  );
+}
+
+const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg, 1)}`;
+
+function contactNote(c: EclipseContact): string {
+  if (c.visible) return '';
+  return c.skylineDeg !== null && c.skylineDeg > 0 ? 'terrain' : 'below';
+}
+
+/** Contacts of one eclipse at the camera, each a button that moves the clock there. */
+function EclipseDetail({ mark, lat, lng }: { mark: CalendarMark; lat: number; lng: number }) {
+  const tz = useWorld((s) => s.tz);
+  const hour12 = useSettings((s) => s.hour12);
+  const time = useWorld((s) => s.time);
+  const horizon = useTerrain((s) => s.horizon);
+  const horizonKey = useTerrain((s) => s.horizonKey);
+  const fresh = horizon && horizonKey === horizonKeyFor(worldStore.getState(), settingsStore.getState()) ? horizon : null;
+
+  const solar = mark.kind === CalendarMarkKind.SolarEclipse;
+  const obs = makeObserver({ lat, lng }, fresh?.eyeM ?? 0);
+  const from = mark.timeMs - DAY_MS / 2;
+  const c = solar ? solarCircumstances(obs, from, fresh?.profile) : lunarCircumstances(obs, from, fresh?.profile);
+  const title = `${ECLIPSE_LABEL[c.kind]} ${solar ? 'solar' : 'lunar'} eclipse`;
+  const stats =
+    'magnitude' in c
+      ? `magnitude ${c.magnitude.toFixed(3)} · ${(c.obscuration * 100).toFixed(1)} % covered`
+      : `umbral ${c.umbralMagnitude.toFixed(3)} · penumbral ${c.penumbralMagnitude.toFixed(3)}`;
+  return (
+    <div className="cal-eclipse">
+      <div className="cal-eclipse-head">
+        <strong>{title}</strong>
+        <span className="muted">{stats}</span>
+      </div>
+      <table>
+        <tbody>
+          {c.contacts.map((x) => (
+            <tr key={x.kind} className={`${x.visible ? '' : 'hidden'}${Math.abs(time - x.timeMs) < 1000 ? ' on' : ''}`} onClick={() => worldStore.getState().setTime(x.timeMs)} title={`Set the clock to ${x.kind}`}>
+              <td>{x.kind}</td>
+              <td>{formatTime(x.timeMs, tz, hour12, true)}</td>
+              <td>{signed(x.altitude)}</td>
+              <td>
+                {degrees(x.azimuth, 0)} {compass(x.azimuth)}
+              </td>
+              <td className="muted">{contactNote(x)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted">
+        {solar ? 'Sun' : 'Moon'} altitude and azimuth at each contact{fresh ? '; checked against the terrain skyline' : '; sea-level horizon (no terrain sweep)'}.
+      </p>
+    </div>
   );
 }
 
@@ -93,6 +150,7 @@ export function Calendar() {
     return map;
   }, [open, year, month, lat, lng, tz, hour12]);
 
+  const eclipses = [...byDay.values()].flat().filter((m) => (m.kind === CalendarMarkKind.SolarEclipse || m.kind === CalendarMarkKind.LunarEclipse) && m.day.startsWith(ym));
   const today = isoDate(localParts(new Date(), tz));
   const lead = (utcDay(year, month, 1).getUTCDay() + 6) % 7;
   const days = utcDay(year, month + 1, 0).getUTCDate();
@@ -157,6 +215,9 @@ export function Calendar() {
               );
             })}
           </div>
+          {eclipses.map((m) => (
+            <EclipseDetail key={m.timeMs} mark={m} lat={lat} lng={lng} />
+          ))}
           <div className="cal-legend">
             <Glyph kind={CalendarMarkKind.NewMoon} /> new
             <Glyph kind={CalendarMarkKind.FullMoon} /> full

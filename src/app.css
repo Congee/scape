@@ -1537,3 +1537,54 @@ label.file input {
   fill: var(--bg);
   stroke: var(--accent);
 }
+
+.cal-eclipse {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.cal-eclipse-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+}
+
+.cal-eclipse table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-eclipse td {
+  padding: 2px 3px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.cal-eclipse td:first-child {
+  text-align: left;
+  color: var(--sun);
+}
+
+.cal-eclipse tr {
+  cursor: pointer;
+}
+
+.cal-eclipse tr:hover {
+  background: var(--bg-3);
+}
+
+.cal-eclipse tr.on {
+  color: var(--accent);
+}
+
+.cal-eclipse tr.hidden {
+  color: var(--fg-3);
+}
+
+.cal-eclipse p {
+  margin: 4px 0 0;
+}

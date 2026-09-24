@@ -50,7 +50,7 @@ const QUARTER_NAME = ['New moon', 'First quarter', 'Full moon', 'Last quarter'];
 
 const MINUTE_MS = 60_000;
 
-const ECLIPSE_LABEL: Record<EclipseKind, string> = {
+export const ECLIPSE_LABEL: Record<EclipseKind, string> = {
   [EclipseKind.Penumbral]: 'Penumbral',
   [EclipseKind.Partial]: 'Partial',
   [EclipseKind.Annular]: 'Annular',

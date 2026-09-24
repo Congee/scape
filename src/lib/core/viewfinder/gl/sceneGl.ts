@@ -212,6 +212,13 @@ void main() {
 
   // A body behind geometry stays faintly visible, the way the overlay used to ghost it.
   float ghost = onSky ? 1.0 : 0.35;
+  if (uSun.w > 0.0) {
+    vec2 o = discOffset(v, uSun.xyz) / uSun.w;
+    float r = length(o);
+    if (r < 4.0) c = mix(c, c + SUN_GLOW_RGB * 0.55 * (1.0 - clamp((r - 0.5) / 3.5, 0.0, 1.0)), ghost);
+    if (r <= 1.0) c = mix(c, SUN_RGB, ghost);
+  }
+  // Moon after sun, so an eclipse shows the covered disc.
   if (uMoon.w > 0.0) {
     vec2 o = discOffset(v, uMoon.xyz) / uMoon.w;
     float rr = dot(o, o);
@@ -221,12 +228,6 @@ void main() {
       bool lit = uMoonTerm.z > 0.0 ? o.x > edge : -o.x > edge;
       c = mix(c, lit ? MOON_LIT_RGB : MOON_DARK_RGB, ghost);
     }
-  }
-  if (uSun.w > 0.0) {
-    vec2 o = discOffset(v, uSun.xyz) / uSun.w;
-    float r = length(o);
-    if (r < 4.0) c = mix(c, c + SUN_GLOW_RGB * 0.55 * (1.0 - clamp((r - 0.5) / 3.5, 0.0, 1.0)), ghost);
-    if (r <= 1.0) c = mix(c, SUN_RGB, ghost);
   }
   oColor = vec4(c / 255.0, 1.0);
 }
