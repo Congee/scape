@@ -15,7 +15,7 @@ import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { lightAt } from '@core/astro/lightSource';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
-import { LOD2_REGIONS, type Lod2Source } from '@core/lod2/regions';
+import { lod2Credits, type Lod2Source } from '@core/lod2/regions';
 import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
@@ -876,7 +876,7 @@ export class MapController {
 
   private creditShadow(ids: readonly Lod2Source[]) {
     if (!this.styleReady) return;
-    const text = LOD2_REGIONS.filter((r) => ids.includes(r.id))
+    const text = lod2Credits(ids)
       .map((r) => `<a href="${r.attributionUrl}">${r.attribution}</a>`)
       .join(' · ');
     const src = this.map.getSource(SHADOW_CREDIT_SRC);

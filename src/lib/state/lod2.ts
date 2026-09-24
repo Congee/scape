@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
-import { LOD2_REGIONS, type Lod2Region } from '@core/lod2/regions';
+import { lod2Credits, type Lod2Region } from '@core/lod2/regions';
 import type { Lod2Placed } from '@workers/buildings.protocol';
 
 /** A placed LoD2 tile and the rings its buildings hide Overture rows with. */
@@ -64,5 +64,5 @@ export function finishLod2(urls: readonly string[], tris: number, missing: numbe
 /** The regions whose tiles are drawn now, for their attribution. */
 export function lod2Drawn(tiles: ReadonlyMap<string, Lod2View>): Lod2Region[] {
   const ids = new Set([...tiles.values()].map((t) => t.region));
-  return LOD2_REGIONS.filter((r) => ids.has(r.id));
+  return lod2Credits(ids);
 }
