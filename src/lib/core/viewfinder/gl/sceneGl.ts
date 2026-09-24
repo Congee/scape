@@ -83,6 +83,14 @@ export interface SceneGlStats {
   viewRangeM: [number, number] | null;
   /** GPU time of the whole picture when EXT_disjoint_timer_query_webgl2 is present, else -1. */
   gpuMs: number;
+  /** The same split by pass, when timed. */
+  gpuPassMs: GpuPassMs | null;
+}
+
+export interface GpuPassMs {
+  geometry: number;
+  shadow: number;
+  composite: number;
 }
 
 /** The only part of EXT_disjoint_timer_query_webgl2 this uses; it is not in lib.dom. */
@@ -308,8 +316,8 @@ export class SceneGl {
   private readonly shadowGl: ShadowGl;
   private readonly dummy2d: WebGLTexture;
   private readonly timer: TimerExt | null;
-  private query: WebGLQuery | null = null;
   private lastGpuMs = -1;
+  private lastPassMs: GpuPassMs | null = null;
   private mw: { key: SceneGlTexture; tex: WebGLTexture } | null = null;
   private moonMap: { key: SceneGlTexture; tex: WebGLTexture } | null = null;
   private fbo: WebGLFramebuffer | null = null;
@@ -354,15 +362,24 @@ export class SceneGl {
 
   render(input: SceneGlInput, vx: number, vy: number, vw: number, vh: number): SceneGlStats {
     const gl = this.gl;
-    if (this.timer) {
-      this.query = gl.createQuery();
-      gl.beginQuery(this.timer.TIME_ELAPSED_EXT, this.query!);
-    }
+    // Only one TIME_ELAPSED query may be open, so each pass gets its own in turn.
+    const queries: WebGLQuery[] = [];
+    const lap = () => {
+      if (!this.timer) return;
+      if (queries.length > 0) gl.endQuery(this.timer.TIME_ELAPSED_EXT);
+      if (queries.length === 3) return;
+      const q = gl.createQuery()!;
+      queries.push(q);
+      gl.beginQuery(this.timer.TIME_ELAPSED_EXT, q);
+    };
+    lap();
     this.resizeTargets(vw, vh);
     this.terrainGl.sync(input.terrain);
 
     const terrain = this.geometryPass(input, vw, vh);
+    lap();
     const shadow = this.shadowPass(input);
+    lap();
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.disable(gl.SCISSOR_TEST);
@@ -374,14 +391,18 @@ export class SceneGl {
     gl.viewport(vx, vy, vw, vh);
     this.composite(input, shadow.cascades, vx, vy, vw, vh);
 
-    if (this.timer && this.query) {
-      gl.endQuery(this.timer.TIME_ELAPSED_EXT);
-      const q = this.query;
-      this.query = null;
+    lap();
+    if (queries.length === 3) {
       const poll = () => {
         if (gl.isContextLost()) return;
-        if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) this.lastGpuMs = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
-        else setTimeout(poll, 1);
+        if (!gl.getQueryParameter(queries[2], gl.QUERY_RESULT_AVAILABLE)) return void setTimeout(poll, 1);
+        const [geometry, shadowMs, composite] = queries.map((q) => {
+          const ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+          gl.deleteQuery(q);
+          return ms;
+        });
+        this.lastPassMs = { geometry, shadow: shadowMs, composite };
+        this.lastGpuMs = geometry + shadowMs + composite;
       };
       poll();
     }
@@ -394,7 +415,8 @@ export class SceneGl {
       shadowModelTriangles: shadow.modelTriangles,
       cascadeInfo: shadow.cascades.map((c) => ({ farM: c.farM, texelXM: c.texelXM, texelYM: c.texelYM })),
       viewRangeM: shadow.scene?.viewNearM !== undefined && shadow.scene.viewFarM !== undefined ? [shadow.scene.viewNearM, shadow.scene.viewFarM] : null,
-      gpuMs: this.lastGpuMs
+      gpuMs: this.lastGpuMs,
+      gpuPassMs: this.lastPassMs
     };
   }
 
