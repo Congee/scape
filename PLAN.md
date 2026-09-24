@@ -510,6 +510,10 @@ doing, and the thin dark lines turned out to be real rock gullies.
   checkbox; long-press 600 ms deletes a vertex; "Set target to model top" replaces "Use as target";
   phone sheet puts the nudge pad first (collapse the sheet while drawing, as a follow-up?); the outline
   ignores occluders; meshes have no bottom face.
+- Models P4 (photo overlay + model occlusion): photo controls live in the viewfinder chips panel
+  (vs a floating toolbar?); the photo is kept in memory only (IndexedDB per plan?); a photo without
+  EXIF spans the frame width (lock to the current lens?); nudges step 0.002 photo widths / 0.1°;
+  a body behind a building stays ghosted at 35% (hide it fully?).
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
