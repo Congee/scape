@@ -3,6 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import type { MaskRect } from '@core/geo/shadowMask';
+import type { Lod2Source } from '@core/lod2/regions';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, finishLod2, lod2Store } from './lod2';
 
@@ -32,6 +33,8 @@ export interface BuildingsState {
 export interface ShadowMaskField extends MaskRect {
   centre: LngLat;
   mask: Uint8Array;
+  /** LoD2 sources stamped into the mask, for their attribution. */
+  lod2: Lod2Source[];
 }
 
 export const buildingsStore = create<BuildingsState>()(
@@ -124,8 +127,8 @@ function ensureMaskWorker(): Worker {
   maskWorker.addEventListener('message', (e: MessageEvent<BuildingsResponse>) => {
     const res = e.data;
     if (res.kind === BuildingsKind.Shade) {
-      const { centre, originE, originN, nx, ny, cellM, mask } = res;
-      if (res.id === maskId) buildingsStore.setState({ shadowMask: { centre, originE, originN, nx, ny, cellM, mask }, shadowMaskMs: res.ms });
+      const { centre, originE, originN, nx, ny, cellM, mask, lod2 } = res;
+      if (res.id === maskId) buildingsStore.setState({ shadowMask: { centre, originE, originN, nx, ny, cellM, mask, lod2 }, shadowMaskMs: res.ms });
     } else if (res.kind === BuildingsKind.Error) {
       buildingsStore.setState({ error: res.error });
     }

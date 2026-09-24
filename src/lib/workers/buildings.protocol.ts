@@ -155,7 +155,7 @@ export type BuildingsResponse =
   | { kind: typeof BuildingsKind.Rows; id: number; batch: BuildingBatch | null }
   | { kind: typeof BuildingsKind.Ids; id: number; ids: string[] }
   | { kind: typeof BuildingsKind.Ground; id: number; groundM: number | null }
-  | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; ms: number }
+  | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; lod2: Lod2Source[]; ms: number }
   | { kind: typeof BuildingsKind.Lod2Tile; id: number; tile: Lod2Placed }
   | { kind: typeof BuildingsKind.Lod2Done; id: number; urls: string[]; tris: number; missing: number; error: string | null }
   | { kind: typeof BuildingsKind.Error; id: number; error: string };

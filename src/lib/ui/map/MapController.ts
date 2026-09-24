@@ -15,6 +15,7 @@ import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { lightAt } from '@core/astro/lightSource';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
+import { LOD2_REGIONS, type Lod2Source } from '@core/lod2/regions';
 import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
@@ -72,6 +73,8 @@ const BLD_LAYER = 'overture-building';
 const BLD_PART_LAYER = 'overture-building-part';
 const SHADOW_SRC = 'sun-shadow';
 const SHADOW_LAYER = 'sun-shadow';
+// An empty, invisible source that only carries the mask's LoD2 credit while the mask uses it.
+const SHADOW_CREDIT_SRC = 'sun-shadow-credit';
 const BLD_MIN_ZOOM = 14;
 /** Below this the mask's cell outgrows the coarsest DEM zoom and its tile count runs away: 12 tiles here, 108 two zooms out. */
 const SHADOW_MIN_ZOOM = 8;
@@ -767,6 +770,7 @@ export class MapController {
       );
     } else if (!on && this.map.getLayer(SHADOW_LAYER)) {
       this.map.removeLayer(SHADOW_LAYER);
+      this.creditShadow([]);
     }
     this.scheduleShadows();
   }
@@ -867,6 +871,23 @@ export class MapController {
 
   private hideShadows() {
     if (this.map.getLayer(SHADOW_LAYER)) this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'none');
+    this.creditShadow([]);
+  }
+
+  private creditShadow(ids: readonly Lod2Source[]) {
+    if (!this.styleReady) return;
+    const text = LOD2_REGIONS.filter((r) => ids.includes(r.id))
+      .map((r) => `<a href="${r.attributionUrl}">${r.attribution}</a>`)
+      .join(' · ');
+    const src = this.map.getSource(SHADOW_CREDIT_SRC);
+    if ((src?.attribution ?? '') === text) return;
+    if (src) {
+      this.map.removeLayer(SHADOW_CREDIT_SRC);
+      this.map.removeSource(SHADOW_CREDIT_SRC);
+    }
+    if (!text) return;
+    this.map.addSource(SHADOW_CREDIT_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: text });
+    this.map.addLayer({ id: SHADOW_CREDIT_SRC, type: 'fill', source: SHADOW_CREDIT_SRC, paint: { 'fill-opacity': 0 } });
   }
 
   /** Keeps the previous image on screen until the worker answers. */
@@ -877,6 +898,7 @@ export class MapController {
     const rgb = this.lightBody === SkyBody.Moon ? MOON_SHADOW_RGB : SHADOW_RGB;
     src.updateImage({ image: new ImageData(maskPixels(m.mask, m.nx, m.ny, rgb), m.nx, m.ny), coordinates: maskCorners(m.centre, m) });
     this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'visible');
+    this.creditShadow(m.lod2);
   }
 
   /**

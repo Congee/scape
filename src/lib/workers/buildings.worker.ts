@@ -2,7 +2,7 @@
 import { groundForRows, groupRowsAt, heightAtPoint, pickRows, suppressedIds, suppressRing, suppressRingTiles, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
 import type { LngLat } from '@core/geo/geodesy';
 import { frameOf, frameToLngLat, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
-import { lod2RegionsNear, type Lod2Region } from '@core/lod2/regions';
+import { lod2RegionsNear, type Lod2Region, type Lod2Source } from '@core/lod2/regions';
 import { lod2BuildingAt, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
 import type { WalkContent } from '@core/lod2/tileset';
 import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStitch';
@@ -126,7 +126,7 @@ function frameBounds(f: MaskFrame, g: HeightGrid): { x0: number; x1: number; y0:
 }
 
 /** Height grid for the map's shadow rect; only the sun march is redone while the map stays put. */
-let cachedMask: { key: string; frame: MaskFrame; grid: HeightGrid } | null = null;
+let cachedMask: { key: string; frame: MaskFrame; grid: HeightGrid; lod2: Lod2Source[] } | null = null;
 
 /** Terrain over a grid laid out in local Mercator metres; latitude varies by row only. */
 function fillFrameTerrain(g: HeightGrid, f: MaskFrame, zoom: number): boolean {
@@ -146,10 +146,10 @@ function fillFrameTerrain(g: HeightGrid, f: MaskFrame, zoom: number): boolean {
   return complete;
 }
 
-/** Raises the grid to every roof standing over it. */
-async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
+/** Raises the grid to every roof standing over it; returns the LoD2 sources it stamped. */
+async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<Lod2Source[]> {
   const lod2 = await stampFrameLod2(g, f);
-  const hide = lod2.length > 0 ? [...suppress, ...lod2] : suppress;
+  const hide = lod2.rings.length > 0 ? [...suppress, ...lod2.rings] : suppress;
   const tiles = tilesInBounds(frameBounds(f, g), BUILDINGS_ZOOM).slice(0, MASK_TILE_MAX);
   const decoded = await Promise.all(tiles.map((t) => fetchBuildingBatch(t)));
   const grounds = await Promise.all(decoded.map((b) => (b ? groundOf(b) : null)));
@@ -186,6 +186,7 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
     }
     stampTriangles(g, e, n, u);
   }
+  return lod2.regions;
 }
 
 /** Every leaf in `rangeM` of `p` all around, nearest first, with its region. */
@@ -215,12 +216,13 @@ function stampLod2(g: HeightGrid, f: MaskFrame, t: Lod2Tile): void {
 }
 
 /** Stamps the LoD2 meshes over the grid and returns their hulls, which the Overture rows then give way to. */
-async function stampFrameLod2(g: HeightGrid, f: MaskFrame): Promise<SuppressRing[]> {
+async function stampFrameLod2(g: HeightGrid, f: MaskFrame): Promise<{ rings: SuppressRing[]; regions: Lod2Source[] }> {
   const wE = g.nx * g.cellM;
   const wN = g.ny * g.cellM;
   const centre = frameToLngLat(f, g.originE + wE / 2, g.originN + wN / 2);
   const around = await lod2Around(centre, Math.hypot(wE, wN) / 2);
   const rings: SuppressRing[] = [];
+  const regions = new Set<Lod2Source>();
   let tris = 0;
   for (const { c, region } of around) {
     // oxlint-disable-next-line no-await-in-loop -- nearest first until the budget runs out
@@ -229,16 +231,18 @@ async function stampFrameLod2(g: HeightGrid, f: MaskFrame): Promise<SuppressRing
     if (tris + t.idx.length / 3 > LOD2_MASK_TRIS) break;
     tris += t.idx.length / 3;
     stampLod2(g, f, t);
+    regions.add(region.id);
     for (const b of t.buildings) rings.push(suppressRing(b.hull));
   }
-  return rings;
+  return { rings, regions: [...regions] };
 }
 
 /** Null when a newer mask request has superseded this one. */
-async function maskFor(req: MaskRequest): Promise<Uint8Array | null> {
+async function maskFor(req: MaskRequest): Promise<{ mask: Uint8Array; lod2: Lod2Source[] } | null> {
   const key = `${req.centre.lat.toFixed(6)},${req.centre.lng.toFixed(6)}|${req.originE}|${req.originN}|${req.nx}|${req.ny}|${req.cellM}|${req.buildings}|${req.buildings ? modelsRev : 0}`;
   let grid = cachedMask?.key === key ? cachedMask.grid : null;
   let frame = cachedMask?.key === key ? cachedMask.frame : null;
+  let lod2 = cachedMask?.key === key ? cachedMask.lod2 : [];
   if (!grid || !frame) {
     frame = maskFrame(req.centre);
     grid = { cellM: req.cellM, nx: req.nx, ny: req.ny, originE: req.originE, originN: req.originN, h: new Float32Array(req.nx * req.ny) };
@@ -249,19 +253,20 @@ async function maskFor(req: MaskRequest): Promise<Uint8Array | null> {
     if (latestMask !== req.id) return null;
     // An absent building tile is far more often an empty one than a failure, and letting it veto
     // the cache would refetch every tile on each sun change.
-    if (req.buildings) await stampFrameBuildings(grid, frame);
+    lod2 = req.buildings ? await stampFrameBuildings(grid, frame) : [];
     if (latestMask !== req.id) return null;
-    cachedMask = complete ? { key, frame, grid } : null;
+    cachedMask = complete ? { key, frame, grid, lod2 } : null;
   }
-  return shadowMask(grid.h, sunCeiling(grid, req.sunAzDeg, req.sunAltDeg), req.softM);
+  return { mask: shadowMask(grid.h, sunCeiling(grid, req.sunAzDeg, req.sunAltDeg), req.softM), lod2 };
 }
 
 async function shade(req: MaskRequest): Promise<void> {
   const t0 = performance.now();
-  const mask = await maskFor(req);
-  if (!mask || latestMask !== req.id) return;
+  const built = await maskFor(req);
+  if (!built || latestMask !== req.id) return;
+  const { mask, lod2 } = built;
   const { id, centre, originE, originN, nx, ny, cellM } = req;
-  scope.postMessage({ kind: BuildingsKind.Shade, id, centre, originE, originN, nx, ny, cellM, mask, ms: performance.now() - t0 } satisfies BuildingsResponse, [mask.buffer]);
+  scope.postMessage({ kind: BuildingsKind.Shade, id, centre, originE, originN, nx, ny, cellM, mask, lod2, ms: performance.now() - t0 } satisfies BuildingsResponse, [mask.buffer]);
 }
 
 /** Apex above the lowest vertex of the LoD2 building under `p`; null where none stands. */
