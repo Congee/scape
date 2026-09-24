@@ -220,14 +220,17 @@ vec3 moonPixel(vec3 v, float sinSemi, vec3 sky) {
   vec3 q = (w - d * dot(w, d)) / sinSemi;
   float qq = min(dot(q, q), 1.0);
   vec3 n = q - sqrt(1.0 - qq) * d;
+  float mu0 = dot(n, uMoonSun);
+  float mu = max(dot(n, -d), 0.0);
   float albedo = 1.0;
   if (uHasMoonMap == 1) {
     vec3 b = vec3(dot(uMoonBody0, n), dot(uMoonBody1, n), dot(uMoonBody2, n));
     vec2 uv = vec2(0.5 + atan(b.y, b.x) / (2.0 * PI), 0.5 - asin(clamp(b.z, -1.0, 1.0)) / PI);
-    albedo = dot(texture(uMoonMap, uv).rgb, vec3(0.3, 0.59, 0.11)) / MOON_MEAN_ALBEDO;
+    // Explicit LOD from the disc's pixel radius: derivatives break at the longitude seam.
+    float rPx = uMoon.w * uFocal * uRes.x / uWmm;
+    float lod = log2(max(float(textureSize(uMoonMap, 0).x) / (2.0 * PI * rPx * max(mu, 0.1)), 1.0));
+    albedo = dot(textureLod(uMoonMap, uv, lod).rgb, vec3(0.3, 0.59, 0.11)) / MOON_MEAN_ALBEDO;
   }
-  float mu0 = dot(n, uMoonSun);
-  float mu = max(dot(n, -d), 0.0);
   float ls = mu0 > 0.0 ? clamp(2.0 * mu0 / (mu0 + mu + 1e-4), 0.0, 1.25) : 0.0;
   // The unlit side hides the stars but not the air in front of it, which an eclipse darkens.
   vec3 dark = sky * (1.0 - sunCover()) + albedo * EARTHSHINE_RGB * uMoonShine;
@@ -637,9 +640,11 @@ export class SceneGl {
     if (this.moonMap) gl.deleteTexture(this.moonMap.tex);
     const t = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, tex.width, tex.height);
+    // Mipmapped: a wide-angle moon is a few pixels over a 1024-texel map and would speckle.
+    gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(tex.width, tex.height))) + 1, gl.RGBA8, tex.width, tex.height);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, tex.width, tex.height, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(tex.rgba.buffer, tex.rgba.byteOffset, tex.rgba.length));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);

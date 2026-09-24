@@ -119,10 +119,13 @@ vf_shot() { # camera, instant, focal, orientation, az, alt, png → "sun dark wh
   sleep 1.5
   js "(() => { window.__scape.composition.getState().aim($5, $6); return 'ok'; })()" >/dev/null
   sleep 1
+  # The discs are the GL picture's; overlay labels (a path hour mark at 24 mm) can sit on them.
+  js 'document.querySelector("canvas.vf").style.visibility = "hidden"; "ok"' >/dev/null
   # A background window gets no animation frames; each screenshot forces one.
   ab screenshot "$7" >/dev/null
   sleep 0.5
   ab screenshot "$7" >/dev/null
+  js 'document.querySelector("canvas.vf").style.visibility = ""; "ok"' >/dev/null
   local geo; geo=$(js '(() => { const r = document.querySelector(".vf-gl").getBoundingClientRect(); return `${r.x + r.width / 2} ${r.y + r.height / 2} ${window.innerWidth}`; })()')
   # shellcheck disable=SC2086
   centre_px "$7" $geo
