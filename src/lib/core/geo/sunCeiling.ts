@@ -142,3 +142,42 @@ export function stampFootprint(g: HeightGrid, ringE: readonly number[], ringN: r
     }
   }
 }
+
+/**
+ * Raises the grid to a triangle soup's surface: each triangle's plan projection at its interpolated
+ * height, and each vertex into its nearest cell so a spire thinner than a cell still casts.
+ */
+export function stampTriangles(g: HeightGrid, e: ArrayLike<number>, n: ArrayLike<number>, u: ArrayLike<number>): void {
+  const { nx, ny, cellM, h } = g;
+  const raise = (idx: number, v: number) => {
+    if (!(h[idx] >= v)) h[idx] = v;
+  };
+  for (let t = 0; t + 2 < e.length; t += 3) {
+    const [ae, be, ce] = [e[t], e[t + 1], e[t + 2]];
+    const [an, bn, cn] = [n[t], n[t + 1], n[t + 2]];
+    const [au, bu, cu] = [u[t], u[t + 1], u[t + 2]];
+    for (const [ve, vn, vu] of [[ae, an, au], [be, bn, bu], [ce, cn, cu]]) {
+      const ix = Math.round((ve - g.originE) / cellM);
+      const iy = Math.round((vn - g.originN) / cellM);
+      if (ix >= 0 && ix < nx && iy >= 0 && iy < ny && Number.isFinite(vu)) raise(iy * nx + ix, vu);
+    }
+    const det = (be - ae) * (cn - an) - (ce - ae) * (bn - an);
+    // Walls project to a line; their vertices and neighbouring roofs carry them.
+    if (Math.abs(det) < 1e-9 || !Number.isFinite(au + bu + cu)) continue;
+    const ix0 = Math.max(0, Math.ceil((Math.min(ae, be, ce) - g.originE) / cellM));
+    const ix1 = Math.min(nx - 1, Math.floor((Math.max(ae, be, ce) - g.originE) / cellM));
+    const iy0 = Math.max(0, Math.ceil((Math.min(an, bn, cn) - g.originN) / cellM));
+    const iy1 = Math.min(ny - 1, Math.floor((Math.max(an, bn, cn) - g.originN) / cellM));
+    for (let iy = iy0; iy <= iy1; iy++) {
+      const y = g.originN + iy * cellM;
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const x = g.originE + ix * cellM;
+        const wb = ((x - ae) * (cn - an) - (ce - ae) * (y - an)) / det;
+        const wc = ((be - ae) * (y - an) - (x - ae) * (bn - an)) / det;
+        const wa = 1 - wb - wc;
+        if (wa < -1e-9 || wb < -1e-9 || wc < -1e-9) continue;
+        raise(iy * nx + ix, wa * au + wb * bu + wc * cu);
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import type { LngLat } from '@core/geo/geodesy';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height',  Mask: 'Mask', Shade: 'Shade' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** OSM Simple 3D Buildings roof families the rasteriser draws; Other renders flat at the apex. */
@@ -43,7 +43,32 @@ export interface MaskRequest {
   softM: number;
 }
 
-export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest;
+/** A precise model as the workers see it: what it hides and the surface it stamps into the mask. */
+export interface WorkerModel {
+  id: string;
+  footprint: [lng: number, lat: number][];
+  /** Hide the Overture rows whose centroid falls inside `footprint`. */
+  suppress: boolean;
+  /** lng, lat, sea-level altitude per vertex, three vertices per triangle; empty for a hidden model. */
+  tris: Float64Array;
+}
+
+/** Replaces the worker's models; no response. */
+export interface ModelsSync {
+  kind: typeof BuildingsKind.Models;
+  id: number;
+  rev: number;
+  models: WorkerModel[];
+}
+
+/** Every Overture row of the building under a point, parts included, with its ground; for seeding a model. */
+export interface RowsAtRequest {
+  kind: typeof BuildingsKind.RowsAt;
+  id: number;
+  point: LngLat;
+}
+
+export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest;
 
 /** Worker name the map's mask instance runs under; it sizes its caches for the map rect. */
 export const MASK_WORKER_NAME = 'buildings-mask';
@@ -83,5 +108,6 @@ export type BuildingsResponse =
   | { kind: typeof BuildingsKind.Tiles; id: number; batch: BuildingBatch }
   | { kind: typeof BuildingsKind.Done; id: number; tiles: number; missing: number }
   | { kind: typeof BuildingsKind.Height; id: number; heightM: number | null }
+  | { kind: typeof BuildingsKind.Rows; id: number; batch: BuildingBatch | null }
   | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; ms: number }
   | { kind: typeof BuildingsKind.Error; id: number; error: string };

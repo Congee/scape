@@ -344,3 +344,100 @@ export function groundForRows(rows: GroundRows, elevationAt: (lng: number, lat: 
   for (let i = 0; i < rows.count; i++) out[i] = low.get(rows.group[i]) ?? NaN;
   return out;
 }
+
+/** Per-row arrays every batch shape carries, plus the optional ones it may. */
+type RowBatch = Omit<BuildingBatch, 'groundM'> & { groundM?: Float32Array; group?: Int32Array };
+
+/** A copy holding only the rows `keep` accepts; `batch` itself when it accepts all. */
+export function pickRows<T extends RowBatch>(batch: T, keep: (i: number) => boolean): T {
+  const rows: number[] = [];
+  for (let i = 0; i < batch.count; i++) if (keep(i)) rows.push(i);
+  if (rows.length === batch.count) return batch;
+  let nv = 0;
+  for (const i of rows) nv += batch.ringStart[i + 1] - batch.ringStart[i];
+  const ringStart = new Int32Array(rows.length + 1);
+  const lng = new Float64Array(nv);
+  const lat = new Float64Array(nv);
+  let v = 0;
+  for (const [r, i] of rows.entries()) {
+    ringStart[r] = v;
+    const a = batch.ringStart[i];
+    const b = batch.ringStart[i + 1];
+    lng.set(batch.lng.subarray(a, b), v);
+    lat.set(batch.lat.subarray(a, b), v);
+    v += b - a;
+  }
+  ringStart[rows.length] = v;
+  const per = <A extends Float32Array | Float64Array | Uint8Array | Int32Array>(src: A): A => {
+    const out = new (src.constructor as new (n: number) => A)(rows.length);
+    for (const [r, i] of rows.entries()) out[r] = src[i];
+    return out;
+  };
+  const out: T = {
+    ...batch,
+    count: rows.length,
+    ringStart,
+    lng,
+    lat,
+    heightM: per(batch.heightM),
+    minHeightM: per(batch.minHeightM),
+    roofShape: per(batch.roofShape),
+    roofHeightM: per(batch.roofHeightM),
+    roofDirDeg: per(batch.roofDirDeg),
+    roofAcross: per(batch.roofAcross),
+    cLng: per(batch.cLng),
+    cLat: per(batch.cLat)
+  };
+  if (batch.groundM) out.groundM = per(batch.groundM);
+  if (batch.group) out.group = per(batch.group);
+  return out;
+}
+
+/** A lng/lat outline and its bounding box, for testing many centroids against it. */
+export interface SuppressRing {
+  ring: readonly (readonly [number, number])[];
+  lng0: number;
+  lat0: number;
+  lng1: number;
+  lat1: number;
+}
+
+export function suppressRing(ring: readonly (readonly [number, number])[]): SuppressRing {
+  let lng0 = Infinity;
+  let lat0 = Infinity;
+  let lng1 = -Infinity;
+  let lat1 = -Infinity;
+  for (const [x, y] of ring) {
+    lng0 = Math.min(lng0, x);
+    lng1 = Math.max(lng1, x);
+    lat0 = Math.min(lat0, y);
+    lat1 = Math.max(lat1, y);
+  }
+  return { ring, lng0, lat0, lng1, lat1 };
+}
+
+function inSuppressRing(s: SuppressRing, lng: number, lat: number): boolean {
+  if (lng < s.lng0 || lng > s.lng1 || lat < s.lat0 || lat > s.lat1) return false;
+  let inside = false;
+  for (let a = 0, b = s.ring.length - 1; a < s.ring.length; b = a++) {
+    const [xa, ya] = s.ring[a];
+    const [xb, yb] = s.ring[b];
+    if (ya > lat === yb > lat) continue;
+    if (lng < xa + ((lat - ya) / (yb - ya)) * (xb - xa)) inside = !inside;
+  }
+  return inside;
+}
+
+/** Drops each row whose centroid sits inside a model's footprint; a podium part outside it survives. */
+export function suppressRows<T extends RowBatch>(batch: T, rings: readonly SuppressRing[]): T {
+  if (rings.length === 0) return batch;
+  return pickRows(batch, (i) => !rings.some((s) => inSuppressRing(s, batch.cLng[i], batch.cLat[i])));
+}
+
+/** Every row of the buildings hit at `p`, parts included; null when `p` is on no footprint. */
+export function groupRowsAt<T extends RowBatch & { group: Int32Array }>(batch: T, p: LngLat): T | null {
+  const hit = new Set<number>();
+  for (let i = 0; i < batch.count; i++) if (inRing(batch, i, p)) hit.add(batch.group[i]);
+  if (hit.size === 0) return null;
+  return pickRows(batch, (i) => hit.has(batch.group[i]));
+}

@@ -12,7 +12,7 @@ import { dayDataStore, startDayDataSync } from '@state/dayData';
 import { finderStore } from '@state/finder';
 import { gearStore } from '@state/gear';
 import { markersStore } from '@state/markers';
-import { modelsStore } from '@state/models';
+import { modelsStore, startModelsSync } from '@state/models';
 import { offlineStore, startOffline } from '@state/offline';
 import { plansStore } from '@state/plans';
 import { searchesStore } from '@state/searches';
@@ -44,6 +44,7 @@ startTerrainSync();
 startAlignSync();
 startDayDataSync();
 startClock();
+startModelsSync();
 void markersStore.getState().load();
 void modelsStore.getState().load();
 

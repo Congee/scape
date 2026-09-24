@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
+import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
+import { modelTriangles } from '@core/geo/modelPlace';
 import { partsFootprint, type SavedModel } from '@core/model';
+import { modelMesh } from '@core/model/mesh';
 import { deleteOne, listAll, putOne } from '@data/db';
+import { setBuildingModels } from './buildings';
 
 export interface ModelsState {
   models: SavedModel[];
@@ -62,3 +66,34 @@ export const modelsStore = create<ModelsState>()(
 channel?.addEventListener('message', () => void modelsStore.getState().load());
 
 export const useModels = modelsStore;
+
+/** A hidden model gives the Overture rows back. */
+const suppresses = (m: SavedModel) => m.visible && m.suppressOverture && m.footprint.length >= 3;
+
+let suppressCache: { models: SavedModel[]; key: string; rings: SuppressRing[] } | null = null;
+
+/** Footprints hiding Overture rows, and a key that changes only when they do. */
+export function modelSuppression(): { key: string; rings: SuppressRing[] } {
+  const { models } = modelsStore.getState();
+  if (suppressCache?.models !== models) {
+    const hide = models.filter(suppresses);
+    suppressCache = { models, key: hide.map((m) => `${m.id}:${m.footprint.flat().join(',')}`).join('|'), rings: hide.map((m) => suppressRing(m.footprint)) };
+  }
+  return suppressCache;
+}
+
+/** Keeps both buildings workers' models in step with the store. */
+export function startModelsSync(): () => void {
+  const push = () => {
+    const { models, rev } = modelsStore.getState();
+    setBuildingModels(
+      rev,
+      models.map((m) => {
+        const mesh = m.visible ? modelMesh(m) : null;
+        return { id: m.id, footprint: m.footprint, suppress: suppresses(m), tris: mesh ? modelTriangles(mesh, m.anchor, m.groundM) : new Float64Array(0) };
+      })
+    );
+  };
+  push();
+  return modelsStore.subscribe((s) => s.rev, push);
+}

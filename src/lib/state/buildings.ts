@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import type { MaskRect } from '@core/geo/shadowMask';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type TilesRequest } from '@workers/buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 
 /** Decoded tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
@@ -60,6 +60,9 @@ let lastPin: LngLat = { lat: 0, lng: 0 };
 /** The map's mask keeps its own id, so a pan never cancels the viewfinder's shadow build. */
 let maskId = 0;
 let maskKey = '';
+let lastMask: Omit<MaskRequest, 'id'> | null = null;
+/** Sent to each worker as it starts and again on every change. */
+let modelsSync: ModelsSync | null = null;
 
 /** Centre of a "z/x/y" key, for distance-based eviction. */
 function tileCentre(key: string): LngLat {
@@ -79,15 +82,15 @@ function ensureWorker(): Worker {
   worker = new Worker(new URL('../workers/buildings.worker.ts', import.meta.url), { type: 'module' });
   worker.addEventListener('message', (e: MessageEvent<BuildingsResponse>) => {
     const res = e.data;
-    const waiter = heightWaiters.get(res.id);
+    const waiter = waiters.get(res.id);
     if (waiter) {
-      heightWaiters.delete(res.id);
+      waiters.delete(res.id);
       clearTimeout(waiter.timer);
-      if (res.kind === BuildingsKind.Height) waiter.resolve(res.heightM);
-      else waiter.reject(new Error(res.kind === BuildingsKind.Error ? res.error : 'Unexpected buildings response'));
+      if (res.kind === BuildingsKind.Error) waiter.reject(new Error(res.error));
+      else waiter.resolve(res);
       return;
     }
-    if (res.kind === BuildingsKind.Height) return; // its waiter already timed out
+    if (res.kind === BuildingsKind.Height || res.kind === BuildingsKind.Rows) return; // its waiter already timed out
     if (res.id !== tilesId) return;
     if (res.kind === BuildingsKind.Tiles) {
       buildingsStore.setState((st) => {
@@ -101,6 +104,7 @@ function ensureWorker(): Worker {
       buildingsStore.setState((st) => ({ busy: false, version: st.version + 1, error: res.error }));
     }
   });
+  if (modelsSync) worker.postMessage(modelsSync);
   return worker;
 }
 
@@ -116,6 +120,7 @@ function ensureMaskWorker(): Worker {
       buildingsStore.setState({ error: res.error });
     }
   });
+  if (modelsSync) maskWorker.postMessage(modelsSync);
   return maskWorker;
 }
 
@@ -141,28 +146,47 @@ export function requestShadowMask(centre: LngLat, rect: MaskRect, sunAzDeg: numb
   if (key === maskKey) return;
   maskKey = key;
   maskId = ++seq;
-  const req: MaskRequest = { kind: BuildingsKind.Mask, id: maskId, centre, ...rect, sunAzDeg: az, sunAltDeg: alt, softM, buildings };
-  ensureMaskWorker().postMessage(req);
+  lastMask = { kind: BuildingsKind.Mask, centre, ...rect, sunAzDeg: az, sunAltDeg: alt, softM, buildings };
+  ensureMaskWorker().postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);
 }
 
-interface HeightWaiter {
-  resolve: (h: number | null) => void;
+/** Hands the workers the current models and rebuilds the map's mask around them. */
+export function setBuildingModels(rev: number, models: WorkerModel[]): void {
+  modelsSync = { kind: BuildingsKind.Models, id: ++seq, rev, models };
+  worker?.postMessage(modelsSync);
+  maskWorker?.postMessage(modelsSync);
+  if (maskWorker && lastMask?.buildings) {
+    maskId = ++seq;
+    maskWorker.postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);
+  }
+}
+
+interface Waiter {
+  resolve: (res: BuildingsResponse) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
-const heightWaiters = new Map<number, HeightWaiter>();
+const waiters = new Map<number, Waiter>();
+
+/** One request, one response; null on a timeout or an unexpected reply. */
+function ask<T>(req: HeightAtRequest | RowsAtRequest, read: (res: BuildingsResponse) => T | null): Promise<T | null> {
+  return new Promise<T | null>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      waiters.delete(req.id);
+      resolve(null);
+    }, HEIGHT_TIMEOUT_MS);
+    waiters.set(req.id, { resolve: (res) => resolve(read(res)), reject, timer });
+    ensureWorker().postMessage(req);
+  });
+}
 
 /** Apex of the building under `p`, metres; null when nothing stands there. */
 export function buildingHeightAt(p: LngLat): Promise<number | null> {
-  const id = ++seq;
-  return new Promise<number | null>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      heightWaiters.delete(id);
-      resolve(null);
-    }, HEIGHT_TIMEOUT_MS);
-    heightWaiters.set(id, { resolve, reject, timer });
-    const req: HeightAtRequest = { kind: BuildingsKind.HeightAt, id, point: p };
-    ensureWorker().postMessage(req);
-  });
+  return ask({ kind: BuildingsKind.HeightAt, id: ++seq, point: p }, (res) => (res.kind === BuildingsKind.Height ? res.heightM : null));
+}
+
+/** Every Overture row of the building under `p`, with its ground; null when nothing stands there. */
+export function buildingRowsAt(p: LngLat): Promise<BuildingBatch | null> {
+  return ask({ kind: BuildingsKind.RowsAt, id: ++seq, point: p }, (res) => (res.kind === BuildingsKind.Rows ? res.batch : null));
 }

@@ -9,6 +9,9 @@ import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro
 import { arcWindow, rainbowArc, rainbowRadiusDeg, rainbowTop, WATER_N } from '@core/astro/rainbow';
 import { distance, height } from '@core/format';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
+import { suppressRows } from '@core/geo/buildingTiles';
+import { anyOccluder, MeshOccluder, type Occluder } from '@core/geo/meshOcclude';
+import { placeModel } from '@core/geo/modelPlace';
 import { PrismOccluder } from '@core/geo/prismOcclude';
 import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
@@ -17,6 +20,7 @@ import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFa
 import { cameraBasis, discRadiusMm, project, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
+import { modelMesh } from '@core/model/mesh';
 import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
@@ -27,6 +31,7 @@ import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { markersStore } from '@state/markers';
+import { modelSuppression, modelsStore } from '@state/models';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, meshKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
@@ -136,8 +141,10 @@ export class ViewfinderController {
   private sceneGl: SceneGl | null = null;
   private glError = '';
   /** Per-object building occlusion for the current frame; the GPU picture cannot mask objects. */
-  private occ: PrismOccluder | null = null;
-  private occCache: { key: string; occ: PrismOccluder } | null = null;
+  private occ: Occluder | null = null;
+  private occCache: { key: string; occ: Occluder | null } | null = null;
+  /** Placed models, rebuilt when the camera location or any model changes. */
+  private modelCache: { key: string; meshes: SurfaceMesh[] } | null = null;
   private gpuMs = -1;
 
   constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement) {
@@ -165,7 +172,8 @@ export class ViewfinderController {
       dayDataStore.subscribe(() => this.schedule()),
       skyStore.subscribe(() => this.schedule()),
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
-      buildingsStore.subscribe((s) => s.version, () => this.schedule())
+      buildingsStore.subscribe((s) => s.version, () => this.schedule()),
+      modelsStore.subscribe((s) => s.rev, () => this.schedule())
     );
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -376,15 +384,32 @@ export class ViewfinderController {
    */
   private prismTiles(sc: Scene): Map<string, PrismTile> {
     const w = worldStore.getState();
-    const key = `${w.pin.lat.toFixed(6)},${w.pin.lng.toFixed(6)}|${sc.eyeM.toFixed(2)}`;
+    const hide = modelSuppression();
+    const key = `${w.pin.lat.toFixed(6)},${w.pin.lng.toFixed(6)}|${sc.eyeM.toFixed(2)}|${hide.key}`;
     if (key !== this.prismKey) {
       this.prismKey = key;
       this.prisms.clear();
     }
     const { tiles } = buildingsStore.getState();
     for (const k of this.prisms.keys()) if (!tiles.has(k)) this.prisms.delete(k);
-    for (const [k, batch] of tiles) if (!this.prisms.has(k)) this.prisms.set(k, buildPrisms(batch, w.pin, sc.eyeM));
+    for (const [k, batch] of tiles) if (!this.prisms.has(k)) this.prisms.set(k, buildPrisms(suppressRows(batch, hide.rings), w.pin, sc.eyeM));
     return this.prisms;
+  }
+
+  /** Visible models in the same eye-relative frame as the prisms. */
+  private modelSurfaces(sc: Scene): SurfaceMesh[] {
+    const w = worldStore.getState();
+    const { models, rev } = modelsStore.getState();
+    const key = `${w.pin.lat.toFixed(6)},${w.pin.lng.toFixed(6)}|${sc.eyeM.toFixed(2)}|${rev}`;
+    if (this.modelCache?.key !== key) {
+      const meshes: SurfaceMesh[] = [];
+      for (const m of models) {
+        const mesh = m.visible ? modelMesh(m) : null;
+        if (mesh && mesh.idx.length > 0) meshes.push(placeModel(mesh, m.anchor, m.groundM, w.pin, sc.eyeM));
+      }
+      this.modelCache = { key, meshes };
+    }
+    return this.modelCache.meshes;
   }
 
   /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */
@@ -392,21 +417,25 @@ export class ViewfinderController {
     this.prismStats = { buildings: 0, tiles: 0 };
     if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
     const tiles = this.prismTiles(sc);
-    if (tiles.size === 0) return null;
+    const models = this.modelSurfaces(sc);
+    if (tiles.size === 0 && models.length === 0) return null;
     this.prismStats = { buildings: 0, tiles: tiles.size };
     const lightAzDeg = sc.sunAlt > 0 ? sc.sunAz : sc.aim.azimuthDeg + 135;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    return { tiles: [...tiles.values()], models: [], shading: { lightAzDeg, hazeRgb, night: sc.night, rangeM } };
+    return { tiles: [...tiles.values()], models, shading: { lightAzDeg, hazeRgb, night: sc.night, rangeM } };
   }
 
   /** Index of the same prisms the picture draws; it only changes when the tiles or the camera move. */
-  private occluder(sc: Scene): PrismOccluder | null {
+  private occluder(sc: Scene): Occluder | null {
     if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
     const tiles = this.prismTiles(sc);
-    if (tiles.size === 0) return null;
+    const models = this.modelSurfaces(sc);
+    if (tiles.size === 0 && models.length === 0) return null;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    const key = `${this.prismKey}|${buildingsStore.getState().version}|${rangeM}`;
-    if (this.occCache?.key !== key) this.occCache = { key, occ: new PrismOccluder(tiles.values(), rangeM) };
+    const key = `${this.prismKey}|${buildingsStore.getState().version}|${rangeM}|${this.modelCache?.key}`;
+    if (this.occCache?.key !== key) {
+      this.occCache = { key, occ: anyOccluder([tiles.size > 0 ? new PrismOccluder(tiles.values(), rangeM) : null, models.length > 0 ? new MeshOccluder(models) : null]) };
+    }
     return this.occCache.occ;
   }
 
@@ -465,8 +494,8 @@ export class ViewfinderController {
     this.gpuMs = stats.gpuMs;
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
-      const shade = { on: stats.cascades > 0, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
-      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, terrain: stats.terrain, rw: vw, rh: vh, shadow: shade };
+      const shade = { on: stats.cascades > 0, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, terrain: stats.terrain, rw: vw, rh: vh, shadow: shade };
     }
   }
 

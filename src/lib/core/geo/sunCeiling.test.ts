@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stampFootprint, sunCeiling, type HeightGrid } from './sunCeiling';
+import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from './sunCeiling';
 
 const R2D = 180 / Math.PI;
 
@@ -136,5 +136,32 @@ describe('buildings and terrain together', () => {
     // tan(alt) = 0.5, so a 30 m hill reaches the ground 60 cells out: still shadowed at the edge.
     const c = sunCeiling(g, 180, Math.atan(0.5) * R2D);
     expect(at(g, c, 4, 40)).toBeCloseTo(25, 3);
+  });
+});
+
+describe('stampTriangles', () => {
+  it('stamps a sloped triangle at its interpolated height', () => {
+    const g = makeGrid(6, 6);
+    // A plane rising 2 m per metre east, over the lower-left half of the grid.
+    stampTriangles(g, [0, 5, 0], [0, 0, 5], [10, 20, 10]);
+    expect(g.h[0]).toBe(10);
+    expect(g.h[2 * 6 + 2]).toBeCloseTo(14, 5);
+    expect(g.h[5]).toBe(20);
+    expect(g.h[5 * 6 + 5]).toBe(0);
+  });
+
+  it('takes the max and stamps a vertex thinner than a cell', () => {
+    const g = makeGrid(5, 5);
+    g.h[12] = 50;
+    stampTriangles(g, [0.5, 3.5, 0.5, 3.1, 3.2, 3.1], [0.5, 0.5, 3.5, 1.1, 1.1, 1.2], [30, 30, 30, 90, 90, 95]);
+    expect(g.h[12]).toBe(50);
+    expect(g.h[6]).toBe(30);
+    expect(g.h[1 * 5 + 3]).toBe(95);
+  });
+
+  it('leaves the grid alone outside it and for walls', () => {
+    const g = makeGrid(3, 3);
+    stampTriangles(g, [-10, -5, -10, 1, 1, 1], [-10, -10, -5, 0, 2, 2], [9, 9, 9, 0, 0, 40]);
+    expect(Array.from(g.h).filter((v) => v !== 0)).toEqual([40]);
   });
 });

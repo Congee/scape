@@ -1,13 +1,13 @@
 /// <reference lib="webworker" />
-import { groundForRows, heightAtPoint, tilesForWedge } from '@core/geo/buildingTiles';
+import { groundForRows, groupRowsAt, heightAtPoint, suppressRing, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
 import type { LngLat } from '@core/geo/geodesy';
 import { frameOf, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
-import { stampFootprint, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
+import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
 import { cubicStencilTiles, demRowAt, elevationAtCubic } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type TilesRequest } from './buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type HeightAtRequest, type MaskRequest, type ModelsSync, type RowsAtRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** The map's mask runs in a second instance of this module, so its caches are sized for the map rect. */
@@ -26,6 +26,15 @@ const MASK_TILE_MAX = 256;
 let latest = 0;
 /** Newest map-mask id; the map centre is not the camera pin, so it gets its own counter and cache. */
 let latestMask = 0;
+let models: WorkerModel[] = [];
+let modelsRev = 0;
+let suppress: SuppressRing[] = [];
+
+function syncModels(req: ModelsSync): void {
+  models = req.models;
+  modelsRev = req.rev;
+  suppress = models.filter((m) => m.suppress && m.footprint.length >= 3).map((m) => suppressRing(m.footprint));
+}
 
 function tileAt(p: LngLat, z: number): TileCoord {
   const t = lngLatToTilePixel(p.lng, p.lat, z);
@@ -129,9 +138,11 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
   const grounds = await Promise.all(decoded.map((b) => (b ? groundOf(b) : null)));
   const ringE: number[] = [];
   const ringN: number[] = [];
-  for (const [t, b] of decoded.entries()) {
-    const ground = grounds[t];
-    if (!b || !ground) continue;
+  for (const [t, raw] of decoded.entries()) {
+    const all = grounds[t];
+    if (!raw || !all) continue;
+    const b = suppressRows({ ...raw, groundM: all }, suppress);
+    const ground = b.groundM;
     for (let i = 0; i < b.count; i++) {
       const gm = ground[i];
       if (Number.isNaN(gm)) continue;
@@ -145,11 +156,24 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<void> {
       stampFootprint(g, ringE, ringN, Math.max(gm, 0) + b.heightM[i]);
     }
   }
+  for (const m of models) {
+    const nv = m.tris.length / 3;
+    const e = new Float64Array(nv);
+    const n = new Float64Array(nv);
+    const u = new Float64Array(nv);
+    for (let v = 0; v < nv; v++) {
+      const p = frameOf(f, { lng: m.tris[v * 3], lat: m.tris[v * 3 + 1] });
+      e[v] = p.e;
+      n[v] = p.n;
+      u[v] = m.tris[v * 3 + 2];
+    }
+    stampTriangles(g, e, n, u);
+  }
 }
 
 /** Null when a newer mask request has superseded this one. */
 async function maskFor(req: MaskRequest): Promise<Uint8Array | null> {
-  const key = `${req.centre.lat.toFixed(6)},${req.centre.lng.toFixed(6)}|${req.originE}|${req.originN}|${req.nx}|${req.ny}|${req.cellM}|${req.buildings}`;
+  const key = `${req.centre.lat.toFixed(6)},${req.centre.lng.toFixed(6)}|${req.originE}|${req.originN}|${req.nx}|${req.ny}|${req.cellM}|${req.buildings}|${req.buildings ? modelsRev : 0}`;
   let grid = cachedMask?.key === key ? cachedMask.grid : null;
   let frame = cachedMask?.key === key ? cachedMask.frame : null;
   if (!grid || !frame) {
@@ -179,8 +203,20 @@ async function shade(req: MaskRequest): Promise<void> {
 /** One-shot lookup; it shares the tile cache with the wedge, so a nearby target is usually free. */
 async function heightAt(req: HeightAtRequest): Promise<void> {
   const decoded = await fetchBuildingBatch(tileAt(req.point, BUILDINGS_ZOOM));
-  const heightM = decoded ? heightAtPoint(decoded, req.point) : null;
+  const heightM = decoded ? heightAtPoint(suppressRows(decoded, suppress), req.point) : null;
   scope.postMessage({ kind: BuildingsKind.Height, id: req.id, heightM } satisfies BuildingsResponse);
+}
+
+/** Rows are clipped to the point's z14 tile, so a building across a tile edge seeds only its near half. */
+async function rowsAt(req: RowsAtRequest): Promise<void> {
+  const decoded = await fetchBuildingBatch(tileAt(req.point, BUILDINGS_ZOOM));
+  const hit = decoded ? groupRowsAt(decoded, req.point) : null;
+  if (!hit) {
+    scope.postMessage({ kind: BuildingsKind.Rows, id: req.id, batch: null } satisfies BuildingsResponse);
+    return;
+  }
+  const { batch, transfer } = withGround(hit, await groundOf(hit));
+  scope.postMessage({ kind: BuildingsKind.Rows, id: req.id, batch } satisfies BuildingsResponse, transfer);
 }
 
 scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
@@ -190,8 +226,16 @@ scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
     scope.postMessage({ kind: BuildingsKind.Error, id: req.id, error } satisfies BuildingsResponse);
   };
   // Neither a height lookup nor a shadow field supersedes the wedge, so they leave `latest` alone.
+  if (req.kind === BuildingsKind.Models) {
+    syncModels(req);
+    return;
+  }
   if (req.kind === BuildingsKind.HeightAt) {
     heightAt(req).catch(fail);
+    return;
+  }
+  if (req.kind === BuildingsKind.RowsAt) {
+    rowsAt(req).catch(fail);
     return;
   }
   if (req.kind === BuildingsKind.Mask) {
