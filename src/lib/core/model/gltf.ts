@@ -1,12 +1,6 @@
 /** glTF 2.0 / GLB import and export for precise building models: positions only, no dependency. */
 
-/** Same shape as `core/model.ts#ModelMesh`. */
-export interface ModelMesh {
-  pos: Float32Array;
-  idx: Uint32Array;
-  /** minE, minN, minU, maxE, maxN, maxU. */
-  box: Float32Array;
-}
+import { convexHull, type ModelMesh } from '@core/model';
 
 export const ModelUnit = { M: 'm', Cm: 'cm', Mm: 'mm', Ft: 'ft', In: 'in' } as const;
 export type ModelUnit = (typeof ModelUnit)[keyof typeof ModelUnit];
@@ -73,6 +67,7 @@ interface GltfBufferView {
 interface GltfJson {
   asset?: { version?: string; extras?: { scape?: unknown } };
   extensionsRequired?: string[];
+  extensionsUsed?: string[];
   scene?: number;
   scenes?: { nodes?: number[] }[];
   nodes?: GltfNode[];
@@ -91,36 +86,105 @@ const INDEX_BYTES: Record<number, number> = { 5121: 1, 5123: 2, 5125: 4 };
 
 /** Parse a binary glTF (GLB v2). */
 export function parseGlb(buf: ArrayBuffer, opts: ImportOptions = DEFAULT_IMPORT): GltfImport {
+  const { json, bin } = readGlb(buf);
+  return parseGltf(json, new Map(), opts, bin);
+}
+
+interface GlbChunk {
+  type: number;
+  data: Uint8Array;
+}
+
+/** The chunks of a GLB v2, checked. */
+function glbChunks(buf: ArrayBuffer): GlbChunk[] {
   const dv = new DataView(buf);
   if (buf.byteLength < 20 || dv.getUint32(0, true) !== GLB_MAGIC) throw new GltfError('Not a GLB file.');
   const version = dv.getUint32(4, true);
   if (version !== 2) throw new GltfError(`GLB version ${version} is not supported; only glTF 2.0.`);
   const length = dv.getUint32(8, true);
   if (length > buf.byteLength || length < 20) throw new GltfError('GLB length does not match the file.');
-  let json: unknown;
-  let bin: ArrayBuffer | undefined;
-  for (let at = 12, i = 0; at < length; i++) {
+  const chunks: GlbChunk[] = [];
+  for (let at = 12; at < length; ) {
     if (at + 8 > length) throw new GltfError('GLB chunk header runs past the end.');
     const len = dv.getUint32(at, true);
     const type = dv.getUint32(at + 4, true);
     const start = at + 8;
     if (len % 4 !== 0) throw new GltfError('GLB chunk is not 4-byte aligned.');
     if (start + len > length) throw new GltfError('GLB chunk runs past the end.');
-    if (i === 0) {
-      if (type !== CHUNK_JSON) throw new GltfError('GLB does not start with a JSON chunk.');
-      try {
-        json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, start, len)));
-      } catch {
-        throw new GltfError('GLB JSON chunk is not valid JSON.');
-      }
-    } else if (i === 1 && type === CHUNK_BIN) bin = buf.slice(start, start + len);
+    if (chunks.length === 0 && type !== CHUNK_JSON) throw new GltfError('GLB does not start with a JSON chunk.');
+    chunks.push({ type, data: new Uint8Array(buf, start, len) });
     at = start + len;
   }
-  return parseGltf(json, new Map(), opts, bin);
+  if (chunks.length === 0) throw new GltfError('GLB does not start with a JSON chunk.');
+  return chunks;
 }
 
-/** Parse a `.gltf` document; `resources` holds external `.bin` files by URI or file name. */
-export function parseGltf(json: unknown, resources: ReadonlyMap<string, ArrayBuffer>, opts: ImportOptions = DEFAULT_IMPORT, glbBin?: ArrayBuffer): GltfImport {
+/** A GLB's JSON document and BIN chunk, without reading any mesh. */
+export function readGlb(buf: ArrayBuffer): { json: unknown; bin?: ArrayBuffer } {
+  const chunks = glbChunks(buf);
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(chunks[0].data));
+  } catch {
+    throw new GltfError('GLB JSON chunk is not valid JSON.');
+  }
+  const b = chunks[1]?.type === CHUNK_BIN ? chunks[1].data : undefined;
+  return { json, bin: b && b.slice().buffer };
+}
+
+/** The same GLB with its JSON chunk replaced; every other chunk is kept byte for byte. */
+export function replaceGlbJson(buf: ArrayBuffer, json: unknown): ArrayBuffer {
+  const chunks = glbChunks(buf);
+  chunks[0] = { type: CHUNK_JSON, data: new TextEncoder().encode(JSON.stringify(json)) };
+  return assembleGlb(chunks);
+}
+
+function assembleGlb(chunks: GlbChunk[]): ArrayBuffer {
+  const total = chunks.reduce((n, c) => n + 8 + pad4(c.data.length), 12);
+  const out = new ArrayBuffer(total);
+  const dv = new DataView(out);
+  const u8 = new Uint8Array(out);
+  dv.setUint32(0, GLB_MAGIC, true);
+  dv.setUint32(4, 2, true);
+  dv.setUint32(8, total, true);
+  let at = 12;
+  for (const c of chunks) {
+    const len = pad4(c.data.length);
+    dv.setUint32(at, len, true);
+    dv.setUint32(at + 4, c.type, true);
+    u8.set(c.data, at + 8);
+    // JSON pads with spaces, BIN with zeros.
+    if (c.type === CHUNK_JSON) u8.fill(0x20, at + 8 + c.data.length, at + 8 + len);
+    at += 8 + len;
+  }
+  return out;
+}
+
+/** A `.gltf` and its buffers (data: URIs or `resources`) as one GLB; external images stay as URIs. */
+export function packGltf(json: unknown, resources: ReadonlyMap<string, ArrayBuffer>): ArrayBuffer {
+  const doc = parseDoc(json);
+  const sources = compressedGuard(doc, () => (doc.buffers ?? []).map((b, i) => new Uint8Array(loadBuffer(b, i, resources), 0, b.byteLength)));
+  const starts: number[] = [];
+  let len = 0;
+  for (const s of sources) {
+    starts.push(len);
+    len = pad4(len + s.length);
+  }
+  const bin = new Uint8Array(len);
+  sources.forEach((s, i) => bin.set(s, starts[i]));
+  const out = structuredClone(doc);
+  for (const v of out.bufferViews ?? []) {
+    v.byteOffset = (v.byteOffset ?? 0) + (starts[v.buffer] ?? 0);
+    v.buffer = 0;
+  }
+  if (sources.length > 0) out.buffers = [{ byteLength: len }];
+  else delete out.buffers;
+  const chunks: GlbChunk[] = [{ type: CHUNK_JSON, data: new TextEncoder().encode(JSON.stringify(out)) }];
+  if (sources.length > 0) chunks.push({ type: CHUNK_BIN, data: bin });
+  return assembleGlb(chunks);
+}
+
+function parseDoc(json: unknown): GltfJson {
   let doc: GltfJson;
   try {
     doc = (typeof json === 'string' ? JSON.parse(json) : json) as GltfJson;
@@ -133,7 +197,26 @@ export function parseGltf(json: unknown, resources: ReadonlyMap<string, ArrayBuf
   const required = doc.extensionsRequired ?? [];
   if (required.some((e) => COMPRESSION_EXTENSIONS.has(e))) throw new GltfError(COMPRESSED_MESSAGE);
   if (required.length > 0) throw new GltfError(`Unsupported required extension: ${required.join(', ')}.`);
+  return doc;
+}
 
+/** A compressed primitive with no plain fallback fails deep in the reader; name the real cause. */
+function compressedGuard<T>(doc: GltfJson, read: () => T): T {
+  try {
+    return read();
+  } catch (e) {
+    if (e instanceof GltfError && (doc.extensionsUsed ?? []).some((x) => COMPRESSION_EXTENSIONS.has(x))) throw new GltfError(COMPRESSED_MESSAGE);
+    throw e;
+  }
+}
+
+/** Parse a `.gltf` document; `resources` holds external `.bin` files by URI or file name. */
+export function parseGltf(json: unknown, resources: ReadonlyMap<string, ArrayBuffer>, opts: ImportOptions = DEFAULT_IMPORT, glbBin?: ArrayBuffer): GltfImport {
+  const doc = parseDoc(json);
+  return compressedGuard(doc, () => readDoc(doc, resources, opts, glbBin));
+}
+
+function readDoc(doc: GltfJson, resources: ReadonlyMap<string, ArrayBuffer>, opts: ImportOptions, glbBin?: ArrayBuffer): GltfImport {
   const warnings: string[] = [];
   const buffers = (doc.buffers ?? []).map((b, i) => loadBuffer(b, i, resources, glbBin));
   const chunks: { pos: Float64Array; idx: number[] }[] = [];
@@ -472,26 +555,6 @@ export function validateMesh(mesh: ModelMesh): ValidMesh {
     degenerate,
     warnings
   };
-}
-
-const cross = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-
-/** Andrew's monotone chain; counter-clockwise, no repeated end point. */
-function convexHull(pts: readonly [number, number][]): [number, number][] {
-  const p = pts.toSorted((a, b) => a[0] - b[0] || a[1] - b[1]);
-  if (p.length < 3) return p;
-  const lower: [number, number][] = [];
-  for (const q of p) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
-    lower.push(q);
-  }
-  const upper: [number, number][] = [];
-  for (let i = p.length - 1; i >= 0; i--) {
-    const q = p[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
-    upper.push(q);
-  }
-  return lower.slice(0, -1).concat(upper.slice(0, -1));
 }
 
 /** A GLB of the mesh in glTF axes (x = E, y = U, z = −N), with `extras` as `asset.extras.scape`. */

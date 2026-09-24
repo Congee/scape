@@ -4,6 +4,7 @@ import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
 import { modelTriangles } from '@core/geo/modelPlace';
 import { modelOutlines, partsFootprint, type SavedModel } from '@core/model';
 import { modelMesh } from '@core/model/mesh';
+import { exportModelGlb, modelFileName } from '@core/model/share';
 import { deleteOne, listAll, putOne } from '@data/db';
 import { setBuildingModels } from './buildings';
 
@@ -22,6 +23,10 @@ export interface ModelsState {
   /** Applies `patch`, re-deriving the footprint from the parts. */
   update(id: string, patch: Partial<SavedModel>): Promise<SavedModel | null>;
   remove(id: string): Promise<void>;
+  /** Saves a placed import draft and selects it. */
+  importDraft(m: SavedModel): Promise<SavedModel>;
+  /** One model as a GLB download; throws GltfError when it has no mesh. */
+  exportGlb(id: string, withParts?: boolean): { fileName: string; glb: ArrayBuffer } | null;
   select(id: string | null): void;
   setPicking(on: boolean): void;
 }
@@ -59,6 +64,15 @@ export const modelsStore = create<ModelsState>()(
       set((s) => ({ selectedId: s.selectedId === id ? null : s.selectedId }));
       await get().load();
       channel?.postMessage('changed');
+    },
+    importDraft: async (m) => {
+      const saved = await get().save({ ...m, updatedAt: Date.now() });
+      set({ selectedId: saved.id });
+      return saved;
+    },
+    exportGlb: (id, withParts) => {
+      const m = get().models.find((x) => x.id === id);
+      return m ? { fileName: modelFileName(m), glb: exportModelGlb(m, withParts) } : null;
     },
     select: (selectedId) => set({ selectedId }),
     setPicking: (picking) => set(picking ? { picking, pickError: null } : { picking })

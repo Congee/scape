@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { COMPRESSED_MESSAGE, GltfError, ModelOrigin, ModelUnit, parseGlb, parseGltf, validateMesh, writeGlb, type ImportOptions, type ModelMesh } from './gltf';
+import { COMPRESSED_MESSAGE, GltfError, ModelOrigin, ModelUnit, parseGlb, parseGltf, validateMesh, writeGlb, type ImportOptions } from './gltf';
+import type { ModelMesh } from '@core/model';
 
 const KEEP: ImportOptions = { units: ModelUnit.M, zUp: false, origin: ModelOrigin.Keep };
 

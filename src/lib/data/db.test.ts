@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DB_VERSION, upgradeScape, type Upgradable } from './db';
+import { DB_VERSION, isScapeExport, upgradeScape, type Upgradable } from './db';
 
 function recorder() {
   const made: string[] = [];
@@ -34,5 +34,21 @@ describe('upgradeScape', () => {
     const { d, made } = recorder();
     upgradeScape(d, DB_VERSION);
     expect(made).toEqual([]);
+  });
+});
+
+describe('isScapeExport', () => {
+  const base = { format: 'scape', version: 1, exportedAt: '', locations: [], markers: [], plans: [] };
+  const record = { id: 'm', name: 'M', source: 'Imported', groundM: null, suppressOverture: true, visible: true, attribution: '', notes: '', createdAt: 0, updatedAt: 0, glb: '' };
+
+  it('accepts older exports without searches or models', () => {
+    expect(isScapeExport(base)).toBe(true);
+    expect(isScapeExport({ ...base, searches: [] })).toBe(true);
+  });
+
+  it('accepts model records and rejects malformed ones', () => {
+    expect(isScapeExport({ ...base, models: [record] })).toBe(true);
+    expect(isScapeExport({ ...base, models: {} })).toBe(false);
+    expect(isScapeExport({ ...base, models: [{ ...record, glb: 1 }] })).toBe(false);
   });
 });

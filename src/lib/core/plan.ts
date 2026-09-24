@@ -1,5 +1,6 @@
 import type { FinderSettings } from './astro/finder';
 import type { LngLat } from './geo/geodesy';
+import type { ScapeModelRecord } from './model/share';
 import { effectiveOptics, type Orientation, type Teleconverter } from './optics/fov';
 
 export interface SavedLocation {
@@ -123,4 +124,6 @@ export interface ScapeExport {
   plans: SavedPlan[];
   /** Added after version 1; absent in older files. */
   searches?: SavedSearch[];
+  /** Added after version 1; absent in older files. */
+  models?: ScapeModelRecord[];
 }

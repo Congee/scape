@@ -2,6 +2,7 @@
 
 import { bearingDeg, destination, distanceM, type LngLat } from './geo/geodesy';
 import type { RoofShape } from '@workers/buildings.protocol';
+import type { ImportOptions } from './model/gltf';
 
 export const ModelSource = { Drawn: 'Drawn', Imported: 'Imported' } as const;
 export type ModelSource = (typeof ModelSource)[keyof typeof ModelSource];
@@ -54,6 +55,8 @@ export interface SavedModel {
   parts?: ModelPart[];
   /** Source of truth for an Imported model. */
   glb?: ArrayBuffer;
+  /** How `glb` was read: units, up axis, origin. */
+  importOptions?: ImportOptions;
   /** Plan-view outline, the suppression and target-height test. */
   footprint: [lng: number, lat: number][];
   /** Lowest DEM under the footprint, metres; NaN when unknown, which stands it at sea level. */
