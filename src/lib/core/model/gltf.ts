@@ -1,4 +1,4 @@
-/** glTF 2.0 / GLB import and export for precise building models: positions only; meshopt through an injected decoder. */
+/** glTF 2.0 / GLB import and export for precise building models: positions only; meshopt and Draco through injected decoders. */
 
 import { convexHull, type ModelMesh } from '@core/model';
 
@@ -25,9 +25,13 @@ export const COMPRESSED_MESSAGE =
 const COMPRESSION_EXTENSIONS = new Set(['KHR_draco_mesh_compression', 'EXT_meshopt_compression', 'KHR_meshopt_compression']);
 const MESHOPT = 'EXT_meshopt_compression';
 const QUANTIZATION = 'KHR_mesh_quantization';
+const DRACO = 'KHR_draco_mesh_compression';
+const RTC = 'CESIUM_RTC';
 const FEATURE_ID = '_FEATURE_ID_0';
+/** 3D Tiles 1.0's per-vertex batch id. */
+const BATCH_ID = '_BATCHID';
 const NO_EXTENSIONS: ReadonlySet<string> = new Set();
-const WORLD_EXTENSIONS: ReadonlySet<string> = new Set([MESHOPT, QUANTIZATION]);
+const WORLD_EXTENSIONS: ReadonlySet<string> = new Set([MESHOPT, QUANTIZATION, DRACO, RTC]);
 
 /** The part of meshoptimizer's decoder the reader needs. */
 export interface MeshoptDecoder {
@@ -47,6 +51,17 @@ export interface GltfImport {
   scape: unknown;
 }
 
+/** One Draco-compressed primitive: its triangle list and the asked attributes, by Draco unique id, as floats. */
+export interface DracoDecoder {
+  decode(data: Uint8Array, attributes: Readonly<Record<string, number>>): { indices: Uint32Array; attributes: Record<string, Float32Array> };
+}
+
+export interface WorldDecoders {
+  meshopt: MeshoptDecoder;
+  /** Only needed when `gltfUsesDraco` says so. */
+  draco?: DracoDecoder;
+}
+
 interface GltfNode {
   children?: number[];
   mesh?: number;
@@ -59,6 +74,7 @@ interface GltfPrimitive {
   attributes: Record<string, number>;
   indices?: number;
   mode?: number;
+  extensions?: { KHR_draco_mesh_compression?: { bufferView: number; attributes: Record<string, number> } };
 }
 interface GltfAccessor {
   bufferView?: number;
@@ -101,7 +117,7 @@ interface GltfJson {
   accessors?: GltfAccessor[];
   bufferViews?: GltfBufferView[];
   buffers?: GltfBuffer[];
-  extensions?: { EXT_structural_metadata?: StructuralMetadata };
+  extensions?: { EXT_structural_metadata?: StructuralMetadata; CESIUM_RTC?: { center?: number[] } };
 }
 interface MetadataProperty {
   type: string;
@@ -267,7 +283,7 @@ interface WorldChunk {
 }
 
 /** Every triangle primitive of the scene, through its node matrices, in the file's own axes. */
-function collect(doc: GltfJson, buffers: ArrayBuffer[], quantized: boolean): { chunks: WorldChunk[]; skipped: number } {
+function collect(doc: GltfJson, buffers: ArrayBuffer[], quantized: boolean, draco?: DracoDecoder): { chunks: WorldChunk[]; skipped: number } {
   const chunks: WorldChunk[] = [];
   let skipped = 0;
 
@@ -294,10 +310,16 @@ function collect(doc: GltfJson, buffers: ArrayBuffer[], quantized: boolean): { c
           skipped++;
           continue;
         }
+        const ext = quantized ? prim.extensions?.KHR_draco_mesh_compression : undefined;
+        if (ext) {
+          const d = readDraco(doc, buffers, ext, draco);
+          chunks.push({ pos: transform(d.pos, m), idx: triangulate(d.idx, mode, flip), feature: d.feature });
+          continue;
+        }
         const local = readPositions(doc, buffers, posAcc, quantized);
         const count = local.length / 3;
         const order = prim.indices === undefined ? Array.from({ length: count }, (_, i) => i) : readIndices(doc, buffers, prim.indices, count);
-        const fid = prim.attributes[FEATURE_ID];
+        const fid = prim.attributes[FEATURE_ID] ?? prim.attributes[BATCH_ID];
         const feature = quantized && fid !== undefined ? readFeatureIds(doc, buffers, fid, count) : undefined;
         chunks.push({ pos: transform(local, m), idx: triangulate(order, mode, flip), feature });
       }
@@ -323,19 +345,27 @@ export interface GltfWorld {
   /** Vertices in glTF axes after every node matrix, unrounded. */
   pos: Float64Array;
   idx: Uint32Array;
-  /** `_FEATURE_ID_0` per vertex; -1 where the primitive has none. */
+  /** `_FEATURE_ID_0` or `_BATCHID` per vertex; -1 where the primitive has none. */
   feature: Int32Array;
+  /** `CESIUM_RTC` centre, added after the y-up turn. */
+  rtc?: [number, number, number];
   doc: GltfJson;
   buffers: ArrayBuffer[];
 }
 
-/** A 3D Tiles GLB (meshopt, quantized) as one Float64 triangle soup with feature ids. */
-export function readGlbWorld(buf: ArrayBuffer, decoder: MeshoptDecoder): GltfWorld {
+/** Whether the GLB has Draco primitives, so the caller loads that decoder only when it must. */
+export function gltfUsesDraco(buf: ArrayBuffer): boolean {
+  const doc = readGlb(buf).json as GltfJson | undefined;
+  return !!doc && [...(doc.extensionsUsed ?? []), ...(doc.extensionsRequired ?? [])].includes(DRACO);
+}
+
+/** A 3D Tiles GLB (meshopt or Draco, quantized) as one Float64 triangle soup with feature ids. */
+export function readGlbWorld(buf: ArrayBuffer, decoders: WorldDecoders): GltfWorld {
   const { json, bin } = readGlb(buf);
   const doc = parseDoc(json, WORLD_EXTENSIONS);
   const buffers = (doc.buffers ?? []).map((b, i) => loadBuffer(b, i, new Map(), bin));
-  decodeMeshopt(doc, buffers, decoder);
-  const { chunks } = collect(doc, buffers, true);
+  decodeMeshopt(doc, buffers, decoders.meshopt);
+  const { chunks } = collect(doc, buffers, true, decoders.draco);
   let nv = 0;
   let ni = 0;
   for (const c of chunks) {
@@ -349,11 +379,39 @@ export function readGlbWorld(buf: ArrayBuffer, decoder: MeshoptDecoder): GltfWor
   let at = 0;
   for (const c of chunks) {
     pos.set(c.pos, base * 3);
-    if (c.feature) for (let i = 0; i < c.feature.length; i++) feature[base + i] = c.feature[i];
+    if (c.feature) for (let i = 0; i < c.feature.length; i++) feature[base + i] = Math.round(c.feature[i]);
     for (const v of c.idx) idx[at++] = v + base;
     base += c.pos.length / 3;
   }
-  return { pos, idx, feature, doc, buffers };
+  const c = doc.extensions?.CESIUM_RTC?.center;
+  const rtc = c?.length === 3 && c.every(Number.isFinite) ? ([c[0], c[1], c[2]] as [number, number, number]) : undefined;
+  return { pos, idx, feature, rtc, doc, buffers };
+}
+
+/** One Draco primitive's positions, triangle list and feature ids. */
+function readDraco(doc: GltfJson, buffers: ArrayBuffer[], ext: { bufferView: number; attributes: Record<string, number> }, decoder?: DracoDecoder): { pos: Float64Array; idx: number[]; feature?: Float64Array } {
+  if (!decoder) throw new GltfError('Draco primitive needs the Draco decoder.');
+  const bv = doc.bufferViews?.[ext.bufferView];
+  const src = bv && buffers[bv.buffer];
+  if (!bv || !src || (bv.byteOffset ?? 0) + bv.byteLength > src.byteLength) throw new GltfError(`Draco buffer view ${ext.bufferView} is not valid.`);
+  const fidName = ext.attributes[FEATURE_ID] !== undefined ? FEATURE_ID : BATCH_ID;
+  const want: Record<string, number> = {};
+  if (ext.attributes.POSITION === undefined) throw new GltfError('Draco primitive has no POSITION.');
+  want.POSITION = ext.attributes.POSITION;
+  if (ext.attributes[fidName] !== undefined) want[fidName] = ext.attributes[fidName];
+  let out: ReturnType<DracoDecoder['decode']>;
+  try {
+    out = decoder.decode(new Uint8Array(src, bv.byteOffset ?? 0, bv.byteLength), want);
+  } catch (e) {
+    throw new GltfError(`Draco data is not valid: ${e instanceof Error ? e.message : e}.`);
+  }
+  const p = out.attributes.POSITION;
+  if (!p || p.length % 3 !== 0) throw new GltfError('Draco POSITION is not VEC3.');
+  const count = p.length / 3;
+  for (const i of out.indices) if (i >= count) throw new GltfError('Draco index out of range.');
+  const f = out.attributes[fidName];
+  if (f && f.length !== count) throw new GltfError(`${fidName} count does not match POSITION.`);
+  return { pos: Float64Array.from(p), idx: Array.from(out.indices), feature: f && Float64Array.from(f) };
 }
 
 /** Replace each meshopt view with its decoded bytes, so accessors read it like any other view. */

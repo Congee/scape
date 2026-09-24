@@ -1,8 +1,11 @@
 import { MeshoptDecoder } from 'meshoptimizer/decoder';
 import { MeshoptEncoder } from 'meshoptimizer/encoder';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { COMPRESSED_MESSAGE, GltfError, ModelOrigin, ModelUnit, parseGlb, parseGltf, propertyColumn, readGlbWorld, validateMesh, writeGlb, type ImportOptions } from './gltf';
+import createDecoderModule from 'draco3d/draco_decoder_nodejs.js';
+import createEncoderModule from 'draco3d/draco_encoder_nodejs.js';
+import { COMPRESSED_MESSAGE, GltfError, gltfUsesDraco, ModelOrigin, ModelUnit, parseGlb, parseGltf, propertyColumn, readGlbWorld, validateMesh, writeGlb, type ImportOptions } from './gltf';
 import type { ModelMesh } from '@core/model';
+import { dracoDecoder, type DracoModule } from './draco';
 
 const KEEP: ImportOptions = { units: ModelUnit.M, zUp: false, origin: ModelOrigin.Keep };
 
@@ -420,7 +423,7 @@ describe('readGlbWorld', () => {
   });
 
   it('decodes meshopt views, dequantizes positions through the node, and keeps feature ids', () => {
-    const w = readGlbWorld(worldGlb(), MeshoptDecoder);
+    const w = readGlbWorld(worldGlb(), { meshopt: MeshoptDecoder });
     expect(Array.from(w.idx)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(Array.from(w.feature)).toEqual([0, 0, 0, 1, 1, 1]);
     const v = (i: number) => Array.from(w.pos.subarray(i * 3, i * 3 + 3));
@@ -433,7 +436,7 @@ describe('readGlbWorld', () => {
   });
 
   it('reads property columns, noData as NaN, strings by offset', () => {
-    const w = readGlbWorld(worldGlb(), MeshoptDecoder);
+    const w = readGlbWorld(worldGlb(), { meshopt: MeshoptDecoder });
     expect(propertyColumn(w, 0, 'h')).toEqual([12.5, NaN]);
     expect(propertyColumn(w, 0, 'id')).toEqual(['NL.1', 'NL.22']);
     expect(propertyColumn(w, 0, 'missing')).toBeUndefined();
@@ -446,10 +449,96 @@ describe('readGlbWorld', () => {
     // Clobber the start of the binary chunk, where the first meshopt stream lives.
     const jl = new DataView(buf).getUint32(12, true);
     u8.fill(0xff, 28 + jl, 28 + jl + 8);
-    expectError(() => readGlbWorld(buf, MeshoptDecoder), /meshopt data is not valid/);
+    expectError(() => readGlbWorld(buf, { meshopt: MeshoptDecoder }), /meshopt data is not valid/);
   });
 
   it('still refuses meshopt and quantization on the model import path', () => {
     expectError(() => parseGlb(worldGlb(), KEEP), COMPRESSED_MESSAGE);
+  });
+});
+
+interface DracoEncoderModule {
+  MeshBuilder: new () => {
+    AddFacesToMesh(m: unknown, faces: number, idx: Uint32Array): void;
+    AddFloatAttributeToMesh(m: unknown, type: number, n: number, comps: number, data: Float32Array): number;
+  };
+  Mesh: new () => unknown;
+  Encoder: new () => { EncodeMeshToDracoBuffer(m: unknown, out: unknown): number };
+  DracoInt8Array: new () => { GetValue(i: number): number };
+  POSITION: number;
+  GENERIC: number;
+}
+
+/** Two batched triangles, Draco-compressed, under a translated node and a CESIUM_RTC centre. */
+async function dracoGlb(): Promise<ArrayBuffer> {
+  const e = (await createEncoderModule()) as DracoEncoderModule;
+  const b = new e.MeshBuilder();
+  const mesh = new e.Mesh();
+  b.AddFacesToMesh(mesh, 2, new Uint32Array([0, 1, 2, 3, 4, 5]));
+  const p = b.AddFloatAttributeToMesh(mesh, e.POSITION, 6, 3, new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 5, 6, 5, 5, 5, 6, 5]));
+  const g = b.AddFloatAttributeToMesh(mesh, e.GENERIC, 6, 1, new Float32Array([0, 0, 0, 1, 1, 1]));
+  const out = new e.DracoInt8Array();
+  const n = new e.Encoder().EncodeMeshToDracoBuffer(mesh, out);
+  const bin = new Uint8Array((n + 3) & ~3);
+  for (let i = 0; i < n; i++) bin[i] = out.GetValue(i) & 255;
+  return glb(
+    {
+      asset: { version: '2.0' },
+      extensionsUsed: ['KHR_draco_mesh_compression', 'CESIUM_RTC'],
+      extensionsRequired: ['KHR_draco_mesh_compression', 'CESIUM_RTC'],
+      buffers: [{ byteLength: bin.length }],
+      bufferViews: [{ buffer: 0, byteLength: n }],
+      accessors: [
+        { componentType: 5126, count: 6, type: 'VEC3' },
+        { componentType: 5126, count: 6, type: 'SCALAR' },
+        { componentType: 5125, count: 6, type: 'SCALAR' }
+      ],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0, _BATCHID: 1 }, indices: 2, extensions: { KHR_draco_mesh_compression: { bufferView: 0, attributes: { POSITION: p, _BATCHID: g } } } }] }],
+      nodes: [{ mesh: 0, translation: [10, 0, 0] }],
+      scenes: [{ nodes: [0] }],
+      extensions: { CESIUM_RTC: { center: [1, 2, 3] } }
+    },
+    bin
+  );
+}
+
+describe('readGlbWorld with Draco', () => {
+  let draco: ReturnType<typeof dracoDecoder>;
+  beforeAll(async () => {
+    draco = dracoDecoder((await createDecoderModule()) as DracoModule);
+  });
+
+  it('decodes Draco triangles through the node, with batch ids and the RTC centre', async () => {
+    const buf = await dracoGlb();
+    expect(gltfUsesDraco(buf)).toBe(true);
+    expect(gltfUsesDraco(worldGlb())).toBe(false);
+    const w = readGlbWorld(buf, { meshopt: MeshoptDecoder, draco });
+    expect(w.rtc).toEqual([1, 2, 3]);
+    // Draco may reorder vertices; compare triangles by their corners.
+    const got = Array.from({ length: w.idx.length / 3 }, (_, t) => ({
+      id: w.feature[w.idx[t * 3]],
+      corners: [0, 1, 2].map((k) => Array.from(w.pos.subarray(w.idx[t * 3 + k] * 3, w.idx[t * 3 + k] * 3 + 3))).toSorted()
+    })).toSorted((a, b) => a.id - b.id);
+    expect(got).toEqual([
+      { id: 0, corners: [[10, 0, 0], [10, 1, 0], [11, 0, 0]] },
+      { id: 1, corners: [[15, 5, 5], [15, 6, 5], [16, 5, 5]] }
+    ]);
+  });
+
+  it('names the missing decoder', async () => {
+    const buf = await dracoGlb();
+    expectError(() => readGlbWorld(buf, { meshopt: MeshoptDecoder }), /needs the Draco decoder/);
+  });
+
+  it('wraps a corrupt Draco stream in GltfError', async () => {
+    const buf = await dracoGlb();
+    const jl = new DataView(buf).getUint32(12, true);
+    new Uint8Array(buf).fill(0xff, 28 + jl, 28 + jl + 16);
+    expectError(() => readGlbWorld(buf, { meshopt: MeshoptDecoder, draco }), /Draco data is not valid/);
+  });
+
+  it('still refuses Draco on the model import path', async () => {
+    const buf = await dracoGlb();
+    expectError(() => parseGlb(buf, KEEP), COMPRESSED_MESSAGE);
   });
 });
