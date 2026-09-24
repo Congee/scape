@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { Bbox } from '@core/geo/bbox';
 import { DEFAULT_BASEMAP_ID, offlineBasemaps, styleAssetUrls, type Basemap, type PmFlavor } from '@data/basemaps';
-import { localTerrain } from '@data/localTiles';
+import { localBuildings, localTerrain } from '@data/localTiles';
 import { announceArchives, listArchives, opfsSupported, readArchiveFile, removeArchive, writeMeta } from '@data/opfs';
 import { registerArchive, unregisterArchive } from '@data/pmtiles';
 import { downloadBlob } from '@ui/download';
@@ -97,6 +97,7 @@ export const offlineStore = create<OfflineState>()(
       }
       set((s) => ({ archives: [...s.archives.filter((a) => a.id !== meta.id && a.id !== replaces), meta] }));
       localTerrain.refresh();
+      localBuildings.refresh();
       announceArchives();
       await get().refreshStorage();
     };
@@ -116,6 +117,7 @@ export const offlineStore = create<OfflineState>()(
         const archives = await listArchives();
         for (const meta of archives) registerArchive(meta);
         localTerrain.refresh();
+        localBuildings.refresh();
         set({ supported: true, loaded: true, archives });
         await get().refreshStorage();
       },
@@ -193,6 +195,7 @@ export const offlineStore = create<OfflineState>()(
         await removeArchive(id);
         set((s) => ({ archives: s.archives.filter((a) => a.id !== id) }));
         localTerrain.refresh();
+        localBuildings.refresh();
         announceArchives();
         const st = settingsStore.getState();
         if (st.basemapId === `opfs:${id}`) st.update({ basemapId: DEFAULT_BASEMAP_ID });

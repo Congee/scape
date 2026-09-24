@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
-import { Compression, FetchSource, PMTiles, tileIdToZxy, TileType, type Header } from 'pmtiles';
+import { Compression, FetchSource, FileSource, PMTiles, tileIdToZxy, TileType, type Header } from 'pmtiles';
 import { bboxCentre } from '@core/geo/bbox';
 import { planExtract } from '@core/tiles/extract';
 import { ArchiveBuilder, coalesceRanges, tileCountInBounds, tileIdsInBounds, type TileSink } from '@core/tiles/pmtiles';
-import { announceArchives, archiveName, archivesDir, metaFromHeader, readHeader, writeMeta } from '@data/opfs';
+import { announceArchives, archiveName, archivesDir, metaFromHeader, readHeader, vectorLayerIds, writeMeta } from '@data/opfs';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
 import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
@@ -160,10 +160,11 @@ async function assemble(dir: FileSystemDirectoryHandle, id: string, prefix: Uint
 
 // --- downloads ----------------------------------------------------------
 
-async function downloadBasemap(id: string, spec: RegionSpec, signal: AbortSignal): Promise<ArchiveMeta> {
+/** Basemap and buildings: a sub-extract of a remote PMTiles archive, tile bytes copied as stored. */
+async function downloadExtract(id: string, spec: RegionSpec, signal: AbortSignal): Promise<ArchiveMeta> {
   const { pm, url, header } = await openRemote(spec.sourceUrl, signal);
   const reader = { header, getDirectory: (offset: number, length: number) => pm.cache.getDirectory(pm.source, offset, length, header) };
-  const plan = await planExtract(reader, spec.bbox, 0, spec.maxZoom);
+  const plan = await planExtract(reader, spec.bbox, spec.minZoom, spec.maxZoom);
   if (!plan.tileCount) throw new Error('The source has no tiles in that area');
   const metadata = await pm.getMetadata().catch(() => ({}));
 
@@ -216,7 +217,7 @@ async function downloadBasemap(id: string, spec: RegionSpec, signal: AbortSignal
     return {
       id,
       name: spec.name,
-      kind: ArchiveKind.Basemap,
+      kind: spec.kind,
       bbox: spec.bbox,
       minZoom: plan.minZoom,
       maxZoom: plan.maxZoom,
@@ -304,7 +305,8 @@ async function importFile(id: string, file: File, name: string, signal: AbortSig
   } finally {
     out.close();
   }
-  return metaFromHeader(id, name, header, file.size, `import:${file.name}`);
+  const layers = header.tileType === TileType.Mvt ? await vectorLayerIds(new FileSource(file)) : [];
+  return metaFromHeader(id, name, header, file.size, `import:${file.name}`, layers);
 }
 
 async function estimate(spec: RegionSpec, signal: AbortSignal) {
@@ -314,7 +316,7 @@ async function estimate(spec: RegionSpec, signal: AbortSignal) {
   }
   const { pm, url, header } = await openRemote(spec.sourceUrl, signal);
   const reader = { header, getDirectory: (offset: number, length: number) => pm.cache.getDirectory(pm.source, offset, length, header) };
-  const plan = await planExtract(reader, spec.bbox, 0, spec.maxZoom);
+  const plan = await planExtract(reader, spec.bbox, spec.minZoom, spec.maxZoom);
   return { tileCount: plan.tileCount, bytes: plan.totalBytes, exact: true, sourceUrl: url };
 }
 
@@ -332,9 +334,9 @@ async function run(req: Exclude<RegionRequest, { kind: typeof RegionRequestKind.
     const meta =
       req.kind === RegionRequestKind.Import
         ? await importFile(req.id, req.file, req.name, signal)
-        : req.spec.kind === ArchiveKind.Basemap
-          ? await downloadBasemap(req.id, req.spec, signal)
-          : await downloadTerrain(req.id, req.spec, signal);
+        : req.spec.kind === ArchiveKind.Terrain
+          ? await downloadTerrain(req.id, req.spec, signal)
+          : await downloadExtract(req.id, req.spec, signal);
     await writeMeta(meta);
     announceArchives();
     post({ kind: RegionResponseKind.Done, id: req.id, meta });

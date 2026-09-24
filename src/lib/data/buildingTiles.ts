@@ -3,6 +3,7 @@ import { FetchSource, PMTiles } from 'pmtiles';
 import { PbfReader } from 'pbf';
 import { decodeBuildings, type DecodedBuildings, type VectorLayerLike } from '@core/geo/buildingTiles';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
+import { localBuildings, readThrough } from './localTiles';
 
 export const OVERTURE_BUILDINGS_RELEASE = '2026-08-19.0';
 export const OVERTURE_BUILDINGS_URL = `https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_BUILDINGS_RELEASE}/buildings.pmtiles`;
@@ -18,8 +19,16 @@ export function setBuildingTileCacheSize(n: number): void {
 
 export type { DecodedBuildings };
 
-/** The 180 GB planet archive is never downloaded: tiles are read with HTTP range requests. */
+/** The 180 GB planet archive is never downloaded whole: tiles are read with HTTP range requests. */
 const archive = new PMTiles(new FetchSource(OVERTURE_BUILDINGS_URL));
+
+/** Decompressed MVT bytes of one tile: an offline region first, the live archive otherwise; null when empty. */
+export function buildingTileBytes(z: number, x: number, y: number, signal?: AbortSignal): Promise<ArrayBuffer | null> {
+  return readThrough(
+    () => localBuildings.tile(z, x, y),
+    async () => (await archive.getZxy(z, x, y, signal))?.data ?? null
+  );
+}
 
 const cache = new Map<string, DecodedBuildings>();
 const inflight = new Map<string, Promise<DecodedBuildings | null>>();
@@ -49,9 +58,9 @@ function release(): void {
 async function load(tile: TileCoord, key: string): Promise<DecodedBuildings | null> {
   await acquire();
   try {
-    const res = await archive.getZxy(tile.z, tile.x, tile.y);
-    if (!res) return null;
-    const { layers } = new VectorTile(new PbfReader(new Uint8Array(res.data)));
+    const data = await buildingTileBytes(tile.z, tile.x, tile.y);
+    if (!data) return null;
+    const { layers } = new VectorTile(new PbfReader(new Uint8Array(data)));
     const batch = decodeBuildings(layers.building as VectorLayerLike | undefined, layers.building_part as VectorLayerLike | undefined, tile);
     touch(key, batch);
     return batch;

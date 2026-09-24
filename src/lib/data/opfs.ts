@@ -1,6 +1,6 @@
 /** Offline archives in OPFS: `<id>.pmtiles` plus an `<id>.json` sidecar. Worker-safe: no DOM. */
 
-import { bytesToHeader, TileType, type Header, type RangeResponse, type Source } from 'pmtiles';
+import { bytesToHeader, PMTiles, TileType, type Header, type RangeResponse, type Source } from 'pmtiles';
 import { ArchiveKind, type ArchiveMeta } from '@workers/region.protocol';
 
 const DIR = 'archives';
@@ -34,11 +34,29 @@ export async function readArchiveFile(id: string): Promise<File> {
   return (await dir.getFileHandle(archiveName(id))).getFile();
 }
 
-export function metaFromHeader(id: string, name: string, header: Header, bytes: number, sourceUrl: string): ArchiveMeta {
+const BUILDING_LAYERS = new Set(['building', 'building_part']);
+
+/** A vector archive holding only building layers is a buildings region, not a basemap. */
+export function archiveKindOf(tileType: TileType, layerIds: readonly string[]): ArchiveKind {
+  if (tileType !== TileType.Mvt) return ArchiveKind.Terrain;
+  return layerIds.length > 0 && layerIds.every((l) => BUILDING_LAYERS.has(l)) ? ArchiveKind.Buildings : ArchiveKind.Basemap;
+}
+
+/** `vector_layers` ids from an archive's metadata; empty for raster archives or bad JSON. */
+export async function vectorLayerIds(source: Source): Promise<string[]> {
+  try {
+    const meta = (await new PMTiles(source).getMetadata()) as { vector_layers?: { id?: unknown }[] };
+    return (meta.vector_layers ?? []).map((l) => l.id).filter((l): l is string => typeof l === 'string');
+  } catch {
+    return [];
+  }
+}
+
+export function metaFromHeader(id: string, name: string, header: Header, bytes: number, sourceUrl: string, layerIds: readonly string[] = []): ArchiveMeta {
   return {
     id,
     name,
-    kind: header.tileType === TileType.Mvt ? ArchiveKind.Basemap : ArchiveKind.Terrain,
+    kind: archiveKindOf(header.tileType, layerIds),
     bbox: { west: header.minLon, south: header.minLat, east: header.maxLon, north: header.maxLat },
     minZoom: header.minZoom,
     maxZoom: header.maxZoom,
@@ -74,7 +92,9 @@ export async function listArchives(): Promise<ArchiveMeta[]> {
           meta.bytes = file.size;
           return meta;
         }
-        return metaFromHeader(id, id, await readHeader(file), file.size, '');
+        const header = await readHeader(file);
+        const layers = header.tileType === TileType.Mvt ? await vectorLayerIds(new OpfsSource(id)) : [];
+        return metaFromHeader(id, id, header, file.size, '', layers);
       } catch {
         return null;
       }

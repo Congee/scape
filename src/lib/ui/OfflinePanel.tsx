@@ -3,7 +3,9 @@ import { bboxCentre, type Bbox } from '@core/geo/bbox';
 import { formatLngLat } from '@core/geo/coords';
 import { distanceM } from '@core/geo/geodesy';
 import { bytes } from '@core/format';
+import { BUILDINGS_DEFAULT_MAX_TILES, BUILDINGS_ZOOM, buildingsByDefault } from '@core/tiles/buildingsRegion';
 import { PmFlavor } from '@data/basemaps';
+import { OVERTURE_BUILDINGS_RELEASE, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
 import { PROTOMAPS_BUILD } from '@data/protomaps';
 import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
 import { defaultBasemapSourceUrl, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
@@ -16,7 +18,7 @@ const TERRAIN_MIN_ZOOM = demZoom(6);
 const TERRAIN_MAX_ZOOM = demZoom(14);
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 
-const KIND_LABEL: Record<ArchiveKind, string> = { [ArchiveKind.Basemap]: 'Basemap', [ArchiveKind.Terrain]: 'Terrain' };
+const KIND_LABEL: Record<ArchiveKind, string> = { [ArchiveKind.Basemap]: 'Basemap', [ArchiveKind.Terrain]: 'Terrain', [ArchiveKind.Buildings]: 'Buildings' };
 
 const STATE_LABEL: Record<JobState, string> = {
   [JobState.Estimating]: 'Estimating',
@@ -53,7 +55,14 @@ function estimateLabel(e: Estimate): string {
 const todayName = () => `Region ${new Date().toISOString().slice(0, 10)}`;
 
 /** A dated Protomaps build is refreshed to today's; any other source is reused as is. */
-const freshSource = (a: ArchiveMeta) => (a.kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : a.sourceUrl.startsWith(PROTOMAPS_BUILD) ? defaultBasemapSourceUrl() : a.sourceUrl);
+const freshSource = (a: ArchiveMeta) =>
+  a.kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : a.kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : a.sourceUrl.startsWith(PROTOMAPS_BUILD) ? defaultBasemapSourceUrl() : a.sourceUrl;
+
+const ZOOMS: Record<ArchiveKind, [number, number] | null> = {
+  [ArchiveKind.Basemap]: null,
+  [ArchiveKind.Terrain]: [TERRAIN_MIN_ZOOM, TERRAIN_MAX_ZOOM],
+  [ArchiveKind.Buildings]: [BUILDINGS_ZOOM, BUILDINGS_ZOOM]
+};
 
 export function OfflinePanel() {
   const supported = useOffline((s) => s.supported);
@@ -71,6 +80,8 @@ export function OfflinePanel() {
   const [sourceUrl, setSourceUrl] = useState(() => defaultBasemapSourceUrl());
   const [estimates, setEstimates] = useState<Partial<Record<ArchiveKind, Estimate>>>({});
   const [error, setError] = useState<string | null>(null);
+  /** Null follows the region's size. */
+  const [withBuildings, setWithBuildings] = useState<boolean | null>(null);
 
   useEffect(() => {
     const s = offlineStore.getState();
@@ -88,14 +99,18 @@ export function OfflinePanel() {
     );
   }
 
-  const spec = (kind: ArchiveKind, bbox: Bbox): RegionSpec => ({
-    kind,
-    name: name.trim() || todayName(),
-    bbox,
-    minZoom: kind === ArchiveKind.Basemap ? 0 : TERRAIN_MIN_ZOOM,
-    maxZoom: kind === ArchiveKind.Basemap ? maxZoom : TERRAIN_MAX_ZOOM,
-    sourceUrl: kind === ArchiveKind.Basemap ? sourceUrl.trim() || defaultBasemapSourceUrl() : TERRAIN_TILE_URL
-  });
+  const spec = (kind: ArchiveKind, bbox: Bbox): RegionSpec => {
+    const [minZoom, maxZ] = ZOOMS[kind] ?? [0, maxZoom];
+    return {
+      kind,
+      name: name.trim() || todayName(),
+      bbox,
+      minZoom,
+      maxZoom: maxZ,
+      sourceUrl: kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : sourceUrl.trim() || defaultBasemapSourceUrl()
+    };
+  };
+  const buildingsOn = draft ? (withBuildings ?? buildingsByDefault(draft)) : false;
 
   const runEstimate = async (kind: ArchiveKind) => {
     if (!draft) return;
@@ -114,6 +129,7 @@ export function OfflinePanel() {
     if (!draft) return;
     setError(null);
     o.download(spec(kind, draft));
+    if (kind === ArchiveKind.Terrain && buildingsOn) o.download(spec(ArchiveKind.Buildings, draft));
   };
 
   const update = (a: ArchiveMeta) => {
@@ -145,6 +161,7 @@ export function OfflinePanel() {
   const hasBasemapArchive = archives.some((a) => a.kind === ArchiveKind.Basemap);
   const basemapEstimate = estimates[ArchiveKind.Basemap];
   const terrainEstimate = estimates[ArchiveKind.Terrain];
+  const buildingsEstimate = estimates[ArchiveKind.Buildings];
 
   return (
     <div className="layers offline">
@@ -226,6 +243,25 @@ export function OfflinePanel() {
           Download
         </button>
         {terrainEstimate && <span className="muted">{estimateLabel(terrainEstimate)}</span>}
+      </div>
+      <div className="field">
+        <span>Buildings</span>
+        <span className="muted">
+          zoom {BUILDINGS_ZOOM}, Overture {OVERTURE_BUILDINGS_RELEASE}
+        </span>
+      </div>
+      <label className="toggle">
+        <input type="checkbox" checked={buildingsOn} disabled={!draft} onChange={(e) => setWithBuildings(e.target.checked)} />
+        <span>Download with the terrain (on by default up to {BUILDINGS_DEFAULT_MAX_TILES} tiles; a city tile is about 300 KB)</span>
+      </label>
+      <div className="actions">
+        <button onClick={() => void runEstimate(ArchiveKind.Buildings)} disabled={!draft}>
+          Estimate
+        </button>
+        <button onClick={() => start(ArchiveKind.Buildings)} disabled={!draft}>
+          Download
+        </button>
+        {buildingsEstimate && <span className="muted">{estimateLabel(buildingsEstimate)}</span>}
       </div>
       {error && <p className="error">{error}</p>}
 

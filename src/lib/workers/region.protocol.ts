@@ -1,6 +1,6 @@
 import type { Bbox } from '@core/geo/bbox';
 
-export const ArchiveKind = { Basemap: 'basemap', Terrain: 'terrain' } as const;
+export const ArchiveKind = { Basemap: 'basemap', Terrain: 'terrain', Buildings: 'buildings' } as const;
 export type ArchiveKind = (typeof ArchiveKind)[keyof typeof ArchiveKind];
 
 /** An offline archive in OPFS, mirrored by a `<id>.json` sidecar next to `<id>.pmtiles`. */

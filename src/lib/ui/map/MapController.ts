@@ -22,7 +22,7 @@ import { depthOfField } from '@core/optics/dof';
 import { cocMm, effectiveOptics, focalForFovMm, fovDeg, frameMm, sensorPixels, tcFactor } from '@core/optics/fov';
 import '@data/maplibre';
 import { isDarkBasemap, styleFor, type Basemap } from '@data/basemaps';
-import { BUILDINGS_ATTRIBUTION, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
+import { buildingsSource } from '@data/buildingsProtocol';
 import { ensureDemProtocol } from '@data/demProtocol';
 import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
@@ -652,7 +652,7 @@ export class MapController {
     if (!this.styleReady) return;
     const on = settingsStore.getState().showBuildings;
     if (on && !this.map.getLayer(BLD_LAYER)) {
-      if (!this.map.getSource(BLD_SRC)) this.map.addSource(BLD_SRC, { type: 'vector', url: `pmtiles://${OVERTURE_BUILDINGS_URL}`, attribution: BUILDINGS_ATTRIBUTION });
+      if (!this.map.getSource(BLD_SRC)) this.map.addSource(BLD_SRC, buildingsSource(BLD_MIN_ZOOM));
       const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
       const dark = isDarkBasemap(currentBasemap());
       const paint = {
