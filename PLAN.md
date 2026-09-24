@@ -503,6 +503,8 @@ doing, and the thin dark lines turned out to be real rock gullies.
   unchanged and the timing and low-sun/night checks were void (screen locked overnight, hidden tab).
   Plan: re-run `timing.sh` and `terrain-waste.sh` with the screen unlocked, then merge or drop. Cutting
   DEM tiles needs a separate cascade change (`coneDepthRange` ignoring eye-leaf boxes).
+- Model sharing (P3b core, merged): exported models are named `<name>.glb`; a Drawn model's export
+  carries its parts, so re-import gives an editable model; `.scape.json` Replace also wipes models.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
