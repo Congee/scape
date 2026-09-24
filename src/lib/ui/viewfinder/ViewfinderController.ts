@@ -42,7 +42,7 @@ import { modelSuppression, modelsStore } from '@state/models';
 import { photoStore } from '@state/photo';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
-import { EYE_HEIGHT_M, meshKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
+import { EYE_HEIGHT_M, meshEyeKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { MODEL_ACCENT } from '../map/modelOverlay';
@@ -662,8 +662,8 @@ export class ViewfinderController {
   /** Mesh levels for this camera position; a set built elsewhere would sit at the wrong height. */
   private meshLevels(): MeshLevel[] {
     const t = terrainStore.getState();
-    const want = meshKeyFor(worldStore.getState(), settingsStore.getState(), viewfinderStore.getState().meshWindow);
-    return want && t.meshKey === want ? t.mesh.map((m) => m.mesh) : [];
+    const eye = meshEyeKeyFor(worldStore.getState(), settingsStore.getState(), viewfinderStore.getState().meshWindow);
+    return eye && t.meshKey.startsWith(eye) ? t.mesh.map((m) => m.mesh) : [];
   }
 
   /** Sun and moon for the picture pass, which clips them against the depth the overlay cannot see. */

@@ -112,6 +112,9 @@ export interface MeshResult {
   /** Levels this build will send in all; the finest arrives first. */
   levels: number;
   tiles: number;
+  /** Blocks of this level taken from the worker's cache rather than sampled again. */
+  reused: number;
+  cacheBytes: number;
   /** How far out the frame's own resolution was afforded, and the cell angle it holds there. */
   reachM: number;
   targetRad: number;

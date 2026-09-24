@@ -113,6 +113,16 @@ export function meshKeyFor(w: W, s: S, win: MeshWindow | null): string {
   return `${meshAnchorFor(w)}|${win.rangeM}|${win.azimuthDeg}|${win.hfovDeg}|${win.vfovDeg}|${win.pitchDeg}|${win.elHalfDeg}|${win.targetRad}`;
 }
 
+/** The eye part of every mesh key for this world; any set whose key starts with it sits at the right height. */
+export function meshEyeKeyFor(w: W, s: S, win: MeshWindow | null): string {
+  return s.terrain && win ? `${meshAnchorFor(w)}|` : '';
+}
+
+/** Adds one streamed level to a set, replacing any older build of the same level. */
+export const mergeLevel = (set: readonly MeshResult[], r: MeshResult): MeshResult[] => [...set.filter((m) => m.mesh.level !== r.mesh.level), r].toSorted((a, b) => a.mesh.level - b.mesh.level);
+
+export const isComplete = (set: readonly MeshResult[]) => set.length > 0 && set.length === set[0].levels;
+
 const setBusy = (kind: TerrainKind, on: boolean) => terrainStore.setState((st) => ({ busy: { ...st.busy, [kind]: on } }));
 
 /** Keeps pin elevations, the sightline profile and the horizon sweep in step with the world. */
@@ -121,6 +131,7 @@ export function startTerrainSync(): () => void {
   const seq: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
   const pending: Record<TerrainKind, string> = { Elevation: '', Profile: '', Horizon: '', View: '', Points: '', Mesh: '' };
   let pendingPointIds: string[] = [];
+  let staged: MeshResult[] | null = null;
   const timers: Partial<Record<TerrainKind, ReturnType<typeof setTimeout>>> = {};
 
   const post = (req: TerrainRequest) => worker.postMessage(req);
@@ -135,9 +146,17 @@ export function startTerrainSync(): () => void {
     }
     if (res.id !== seq[res.kind]) return;
     if (res.kind === TerrainKind.Mesh) {
+      if (staged) {
+        // A complete set for this eye stays up until the re-cut is complete too, so a pan never blanks it.
+        staged = mergeLevel(staged, res.result);
+        if (staged.length < res.result.levels) return;
+        terrainStore.setState({ mesh: staged, meshKey: pending.Mesh, error: null, busy: { ...terrainStore.getState().busy, Mesh: false } });
+        staged = null;
+        return;
+      }
       // The first level of a new build replaces whatever the last one left; levels after it join in.
       const kept = terrainStore.getState().meshKey === pending.Mesh ? terrainStore.getState().mesh : [];
-      const mesh = [...kept.filter((m) => m.mesh.level !== res.result.mesh.level), res.result].toSorted((a, b) => a.mesh.level - b.mesh.level);
+      const mesh = mergeLevel(kept, res.result);
       terrainStore.setState({ mesh, meshKey: pending.Mesh, error: null, busy: { ...terrainStore.getState().busy, Mesh: mesh.length < res.result.levels } });
       return;
     }
@@ -234,12 +253,15 @@ export function startTerrainSync(): () => void {
     const moved = !key || !pending.Mesh.startsWith(`${meshAnchorFor(w)}|`);
     pending.Mesh = key;
     if (!key || !win) {
+      staged = null;
       terrainStore.setState({ mesh: [], meshKey: '' });
       setBusy(TerrainKind.Mesh, false);
       return;
     }
     // Only the eye moving makes the levels on screen wrong; a re-cut for a new aim may stay up meanwhile.
     if (moved) terrainStore.setState({ mesh: [] });
+    const shown = terrainStore.getState().mesh;
+    staged = !moved && isComplete(shown) ? [] : null;
     setBusy(TerrainKind.Mesh, true);
     post({ kind: TerrainKind.Mesh, id: ++seq.Mesh, pin: w.pin, eyeAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, rangeM: win.rangeM, view: { azimuthDeg: win.azimuthDeg, hfovDeg: win.hfovDeg, vfovDeg: win.vfovDeg, pitchDeg: win.pitchDeg, elHalfDeg: win.elHalfDeg, targetRad: win.targetRad } });
   };

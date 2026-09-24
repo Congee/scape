@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { analyzeSightline, endpointHeightM } from '@core/terrain/los';
-import type { ProfileResult } from '@workers/terrain.protocol';
+import type { MeshResult, ProfileResult } from '@workers/terrain.protocol';
 import { aimFor } from './composition';
-import { profileKeyFor, targetAngleFor, type TerrainState } from './terrain';
+import { isComplete, meshEyeKeyFor, meshKeyFor, mergeLevel, profileKeyFor, targetAngleFor, type TerrainState } from './terrain';
 
 // Zermatt to the Matterhorn: 8.5 km, the target 1.7 km above the eye.
 const PIN: LngLat = { lat: 46.0207, lng: 7.7491 };
@@ -103,5 +103,33 @@ describe('aimFor over targetAngleFor', () => {
     const manual = { ...composition, aimAtTarget: false };
     expect(aimFor(manual, w, targetAngleFor(w, settings(), t))).toEqual({ azimuthDeg: 123, elevationDeg: 45, locked: false });
     expect(aimFor(manual, w, null)).toEqual({ azimuthDeg: 123, elevationDeg: 45, locked: false });
+  });
+});
+
+const lvl = (level: number, levels = 3, tag = 0) => ({ mesh: { level }, levels, ms: tag }) as unknown as MeshResult;
+
+describe('mesh sets', () => {
+  const win = { azimuthDeg: 220, hfovDeg: 60, vfovDeg: 40, pitchDeg: 10, elHalfDeg: 30, targetRad: 0.001, rangeM: 120_000 };
+
+  it('keys a re-aimed window under the same eye', () => {
+    const a = meshKeyFor(world(), settings(), win);
+    const b = meshKeyFor(world(), settings(), { ...win, azimuthDeg: 242 });
+    const eye = meshEyeKeyFor(world(), settings(), win);
+    expect(a).not.toBe(b);
+    expect(a.startsWith(eye) && b.startsWith(eye)).toBe(true);
+    expect(a.startsWith(meshEyeKeyFor(world({ pinHeightM: 5 }), settings(), win))).toBe(false);
+    expect(meshEyeKeyFor(world(), settings(false), win)).toBe('');
+    expect(meshEyeKeyFor(world(), settings(), null)).toBe('');
+  });
+
+  it('merges levels in order and replaces a rebuilt one', () => {
+    const set = mergeLevel(mergeLevel(mergeLevel([], lvl(2)), lvl(0)), lvl(2, 3, 7));
+    expect(set.map((m) => [m.mesh.level, m.ms])).toEqual([
+      [0, 0],
+      [2, 7]
+    ]);
+    expect(isComplete(set)).toBe(false);
+    expect(isComplete(mergeLevel(set, lvl(1)))).toBe(true);
+    expect(isComplete([])).toBe(false);
   });
 });

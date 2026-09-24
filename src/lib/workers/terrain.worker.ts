@@ -2,7 +2,8 @@
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
 import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
 import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
-import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildLevel, enuBoxUnitBounds, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
+import { BlockCache } from '@core/terrain/blockCache';
+import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { sweepView } from '@core/terrain/view';
@@ -16,6 +17,8 @@ const DETAIL_ZOOMS = [demZoom(13), demZoom(14)] as const;
 /** Narrower than this the detail bound usually pays, so its tiles load alongside the coarse ones; wider waits to be asked. */
 const DETAIL_PREFETCH_HFOV_DEG = 6;
 const cache = new DemCache(demCacheTiles(320));
+// About 1500 blocks: an aim drag re-cuts the wedge, and most of it was built a moment ago.
+const meshBlocks = new BlockCache(96 * 2 ** 20);
 /** Newest request id per kind; older ones stop before the expensive step. */
 const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
 
@@ -195,8 +198,9 @@ async function mesh(req: MeshRequest): Promise<null> {
     const tiles = new Map<string, TileCoord>();
     // The halo covers the cubic stencil's two posts past the block, or its edge would fall back to bilinear.
     const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom, TERRAIN_TILE_SIZE);
-    for (const b of blocks) for (const t of tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom)) tiles.set(tileKey(t.z, t.x, t.y), t);
-    return { level, blocks, skirtM, zoom, tiles };
+    const blockTiles = blocks.map((b) => tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom));
+    for (const ts of blockTiles) for (const t of ts) tiles.set(tileKey(t.z, t.x, t.y), t);
+    return { level, blocks, skirtM, zoom, tiles, blockTiles };
   });
   // Warms every level while the first one builds. Unretained and unawaited on purpose: the fetch queue is
   // FIFO so the finest level stays first, and each level still awaits its own retained load, so a tile
@@ -204,7 +208,8 @@ async function mesh(req: MeshRequest): Promise<null> {
   const union = new Map<string, TileCoord>();
   for (const p of plans) for (const [k, t] of p.tiles) union.set(k, t);
   void cache.loadAll([...union.values()]).catch(() => {});
-  for (const { level, blocks, skirtM, zoom, tiles } of plans) {
+  meshBlocks.setAnchor(`${req.pin.lng},${req.pin.lat}|${eyeM}`);
+  for (const { level, blocks, skirtM, zoom, tiles, blockTiles } of plans) {
     const want = [...tiles.values()];
     const release = cache.retain(want);
     try {
@@ -212,9 +217,24 @@ async function mesh(req: MeshRequest): Promise<null> {
       await cache.loadAll(want);
       if (latest.Mesh !== req.id) return null;
       // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
-      const out = buildLevel(req.pin, eyeM, level, blocks, (lng, lat) => elevationAtCubic(cache, lng, lat, zoom), skirtM);
+      const sample = (lng: number, lat: number) => elevationAtCubic(cache, lng, lat, zoom);
+      let reused = 0;
+      const parts = blocks.map((b, i) => {
+        const drop = skirtM[i];
+        const key = `${level}/${b.ix}/${b.iy}/${zoom}/${drop}`;
+        const hit = meshBlocks.get(key);
+        if (hit) {
+          reused++;
+          return hit;
+        }
+        const part = buildBlock(req.pin, eyeM, level, b, sample, drop);
+        // A block over an absent tile holds sea level or a bilinear edge; built again once the tile lands.
+        if (part.missing === 0 && blockTiles[i].every((t) => cache.get(t.z, t.x, t.y))) meshBlocks.set(key, part);
+        return part;
+      });
+      const out = joinBlocks(level, parts);
       if (latest.Mesh !== req.id) return null;
-      const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, minCellM: sel.minCellM, ms: performance.now() - t0 };
+      const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, reused, cacheBytes: meshBlocks.bytes, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, minCellM: sel.minCellM, ms: performance.now() - t0 };
       scope.postMessage({ kind: TerrainKind.Mesh, id: req.id, result } satisfies TerrainResponse, [out.pos.buffer, out.nrm.buffer, out.idx.buffer, out.blockStart.buffer, out.blockBox.buffer]);
     } finally {
       release();

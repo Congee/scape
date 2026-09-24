@@ -536,110 +536,144 @@ export const skirtDepth = (cellM: number) => Math.max(8, 3 * cellM * 2 ** MAX_LE
 /** The same sag rule against the coarsest neighbour a leaf really has, which past the frame `balance` leaves unbounded. */
 export const seamSkirtM = (level: number, neighbourLevel: number) => Math.max(skirtDepth(levelCellM(level)), 3 * levelCellM(neighbourLevel));
 
-/**
- * One level's blocks. Heights come from `sample` over a one-cell halo so every vertex normal is a
- * central difference, and every block is rimmed with a downward skirt so a level seam cannot crack.
- */
-export function buildLevel(pin: LngLat, eyeM: number, level: number, blocks: readonly BlockId[], sample: HeightSampler, skirtM?: readonly number[]): MeshLevel {
-  const cellM = levelCellM(level);
-  const side = BLOCK_CELLS + 1;
-  const halo = BLOCK_CELLS + 3;
-  const vPerBlock = side * side + 4 * BLOCK_CELLS;
-  const pos = new Float32Array(blocks.length * vPerBlock * 3);
-  const nrm = new Float32Array(blocks.length * vPerBlock * 3);
-  const idx = new Uint32Array(blocks.length * TRIANGLES_PER_BLOCK * 3);
-  const blockStart = new Int32Array(blocks.length + 1);
-  const blockBox = new Float32Array(blocks.length * 6);
-  const u = new Float64Array(halo * halo);
-  let vBase = 0;
-  let ii = 0;
-  let missing = 0;
+/** One block's vertices, the unit a level is joined from; eye-relative, so reusable while the eye stays put. */
+export interface MeshBlock {
+  /** Grid posts then the skirt ring, three per vertex. */
+  pos: Float32Array;
+  nrm: Float32Array;
+  /** minE, minN, minU, maxE, maxN, maxU. */
+  box: Float32Array;
+  missing: number;
+}
 
-  for (const [b, { ix, iy }] of blocks.entries()) {
-    blockStart[b] = ii;
-    const drop = skirtM?.[b] ?? skirtDepth(cellM);
-    const i0 = ix * BLOCK_CELLS;
-    const j0 = iy * BLOCK_CELLS;
-    for (let j = 0; j < halo; j++) {
-      const n = (j0 + j - 1) * cellM;
-      for (let i = 0; i < halo; i++) {
-        const e = (i0 + i - 1) * cellM;
-        const p = samplePoint(pin, e, n);
-        const g = sample(p.lng, p.lat);
-        if (Number.isNaN(g)) missing++;
-        // Terrarium reads water as bathymetry, and the datum is sea level.
-        u[j * halo + i] = (Number.isNaN(g) ? 0 : Math.max(g, 0)) - eyeM - curvatureDropM(Math.hypot(e, n));
-      }
+const SIDE = BLOCK_CELLS + 1;
+const HALO = BLOCK_CELLS + 3;
+export const VERTICES_PER_BLOCK = SIDE * SIDE + 4 * BLOCK_CELLS;
+
+/** Triangles of one block over its own vertices; every block shares the pattern. */
+const BLOCK_IDX = (() => {
+  const idx = new Uint32Array(TRIANGLES_PER_BLOCK * 3);
+  let ii = 0;
+  for (let j = 0; j < BLOCK_CELLS; j++) {
+    for (let i = 0; i < BLOCK_CELLS; i++) {
+      const a = j * SIDE + i;
+      idx.set([a, a + 1, a + SIDE + 1, a, a + SIDE + 1, a + SIDE], ii);
+      ii += 6;
     }
-    let e0 = Infinity;
-    let e1 = -Infinity;
-    let n0 = Infinity;
-    let n1 = -Infinity;
-    let u0 = Infinity;
-    let u1 = -Infinity;
-    for (let j = 0; j < side; j++) {
-      const nn = (j0 + j) * cellM;
-      for (let i = 0; i < side; i++) {
-        const ee = (i0 + i) * cellM;
-        const h = u[(j + 1) * halo + i + 1];
-        const de = (u[(j + 1) * halo + i + 2] - u[(j + 1) * halo + i]) / (2 * cellM);
-        const dn = (u[(j + 2) * halo + i + 1] - u[j * halo + i + 1]) / (2 * cellM);
-        const inv = 1 / Math.hypot(de, dn, 1);
-        const o = (vBase + j * side + i) * 3;
-        pos[o] = ee;
-        pos[o + 1] = nn;
-        pos[o + 2] = h;
-        nrm[o] = -de * inv;
-        nrm[o + 1] = -dn * inv;
-        nrm[o + 2] = inv;
-        if (ee < e0) e0 = ee;
-        if (ee > e1) e1 = ee;
-        if (nn < n0) n0 = nn;
-        if (nn > n1) n1 = nn;
-        if (h < u0) u0 = h;
-        if (h > u1) u1 = h;
-      }
-    }
-    for (let j = 0; j < BLOCK_CELLS; j++) {
-      for (let i = 0; i < BLOCK_CELLS; i++) {
-        const a = vBase + j * side + i;
-        idx[ii++] = a;
-        idx[ii++] = a + 1;
-        idx[ii++] = a + side + 1;
-        idx[ii++] = a;
-        idx[ii++] = a + side + 1;
-        idx[ii++] = a + side;
-      }
-    }
-    // Rim skirt: the rim walked as a closed ring, each vertex paired with one hanging below it.
-    const rim: number[] = [];
-    for (let i = 0; i < BLOCK_CELLS; i++) rim.push(vBase + i);
-    for (let j = 0; j < BLOCK_CELLS; j++) rim.push(vBase + j * side + BLOCK_CELLS);
-    for (let i = BLOCK_CELLS; i > 0; i--) rim.push(vBase + BLOCK_CELLS * side + i);
-    for (let j = BLOCK_CELLS; j > 0; j--) rim.push(vBase + j * side);
-    const first = vBase + side * side;
-    for (const [s, a] of rim.entries()) {
-      const o = (first + s) * 3;
-      pos[o] = pos[a * 3];
-      pos[o + 1] = pos[a * 3 + 1];
-      pos[o + 2] = pos[a * 3 + 2] - drop;
-      nrm[o] = nrm[a * 3];
-      nrm[o + 1] = nrm[a * 3 + 1];
-      nrm[o + 2] = nrm[a * 3 + 2];
-    }
-    for (let s = 0; s < rim.length; s++) {
-      const t = (s + 1) % rim.length;
-      idx[ii++] = rim[s];
-      idx[ii++] = rim[t];
-      idx[ii++] = first + t;
-      idx[ii++] = rim[s];
-      idx[ii++] = first + t;
-      idx[ii++] = first + s;
-    }
-    u0 -= drop;
-    blockBox.set([e0, n0, u0, e1, n1, u1], b * 6);
-    vBase += vPerBlock;
   }
-  blockStart[blocks.length] = ii;
-  return { level, cellM, pos, nrm, idx, blockStart, blockBox, blocks: blocks.length, missing };
+  // Rim skirt: the rim walked as a closed ring, each vertex paired with one hanging below it.
+  const rim = blockRim();
+  const first = SIDE * SIDE;
+  for (let s = 0; s < rim.length; s++) {
+    const t = (s + 1) % rim.length;
+    idx.set([rim[s], rim[t], first + t, rim[s], first + t, first + s], ii);
+    ii += 6;
+  }
+  return idx;
+})();
+
+function blockRim(): number[] {
+  const rim: number[] = [];
+  for (let i = 0; i < BLOCK_CELLS; i++) rim.push(i);
+  for (let j = 0; j < BLOCK_CELLS; j++) rim.push(j * SIDE + BLOCK_CELLS);
+  for (let i = BLOCK_CELLS; i > 0; i--) rim.push(BLOCK_CELLS * SIDE + i);
+  for (let j = BLOCK_CELLS; j > 0; j--) rim.push(j * SIDE);
+  return rim;
+}
+const RIM = blockRim();
+
+/**
+ * One block. Heights come from `sample` over a one-cell halo so every vertex normal is a central
+ * difference, and the block is rimmed with a downward skirt `drop` deep so a level seam cannot crack.
+ */
+export function buildBlock(pin: LngLat, eyeM: number, level: number, { ix, iy }: BlockId, sample: HeightSampler, drop = skirtDepth(levelCellM(level))): MeshBlock {
+  const cellM = levelCellM(level);
+  const pos = new Float32Array(VERTICES_PER_BLOCK * 3);
+  const nrm = new Float32Array(VERTICES_PER_BLOCK * 3);
+  const u = new Float64Array(HALO * HALO);
+  let missing = 0;
+  const i0 = ix * BLOCK_CELLS;
+  const j0 = iy * BLOCK_CELLS;
+  for (let j = 0; j < HALO; j++) {
+    const n = (j0 + j - 1) * cellM;
+    for (let i = 0; i < HALO; i++) {
+      const e = (i0 + i - 1) * cellM;
+      const p = samplePoint(pin, e, n);
+      const g = sample(p.lng, p.lat);
+      if (Number.isNaN(g)) missing++;
+      // Terrarium reads water as bathymetry, and the datum is sea level.
+      u[j * HALO + i] = (Number.isNaN(g) ? 0 : Math.max(g, 0)) - eyeM - curvatureDropM(Math.hypot(e, n));
+    }
+  }
+  let e0 = Infinity;
+  let e1 = -Infinity;
+  let n0 = Infinity;
+  let n1 = -Infinity;
+  let u0 = Infinity;
+  let u1 = -Infinity;
+  for (let j = 0; j < SIDE; j++) {
+    const nn = (j0 + j) * cellM;
+    for (let i = 0; i < SIDE; i++) {
+      const ee = (i0 + i) * cellM;
+      const h = u[(j + 1) * HALO + i + 1];
+      const de = (u[(j + 1) * HALO + i + 2] - u[(j + 1) * HALO + i]) / (2 * cellM);
+      const dn = (u[(j + 2) * HALO + i + 1] - u[j * HALO + i + 1]) / (2 * cellM);
+      const inv = 1 / Math.hypot(de, dn, 1);
+      const o = (j * SIDE + i) * 3;
+      pos[o] = ee;
+      pos[o + 1] = nn;
+      pos[o + 2] = h;
+      nrm[o] = -de * inv;
+      nrm[o + 1] = -dn * inv;
+      nrm[o + 2] = inv;
+      if (ee < e0) e0 = ee;
+      if (ee > e1) e1 = ee;
+      if (nn < n0) n0 = nn;
+      if (nn > n1) n1 = nn;
+      if (h < u0) u0 = h;
+      if (h > u1) u1 = h;
+    }
+  }
+  const first = SIDE * SIDE;
+  for (const [s, a] of RIM.entries()) {
+    const o = (first + s) * 3;
+    pos[o] = pos[a * 3];
+    pos[o + 1] = pos[a * 3 + 1];
+    pos[o + 2] = pos[a * 3 + 2] - drop;
+    nrm[o] = nrm[a * 3];
+    nrm[o + 1] = nrm[a * 3 + 1];
+    nrm[o + 2] = nrm[a * 3 + 2];
+  }
+  return { pos, nrm, box: new Float32Array([e0, n0, u0 - drop, e1, n1, u1]), missing };
+}
+
+/** A level from its blocks, in order; the blocks are copied, so a cached one stays intact. */
+export function joinBlocks(level: number, parts: readonly MeshBlock[]): MeshLevel {
+  const vPerBlock = VERTICES_PER_BLOCK;
+  const pos = new Float32Array(parts.length * vPerBlock * 3);
+  const nrm = new Float32Array(parts.length * vPerBlock * 3);
+  const idx = new Uint32Array(parts.length * TRIANGLES_PER_BLOCK * 3);
+  const blockStart = new Int32Array(parts.length + 1);
+  const blockBox = new Float32Array(parts.length * 6);
+  let missing = 0;
+  for (const [b, part] of parts.entries()) {
+    const vBase = b * vPerBlock;
+    const ii = b * BLOCK_IDX.length;
+    blockStart[b] = ii;
+    pos.set(part.pos, vBase * 3);
+    nrm.set(part.nrm, vBase * 3);
+    for (let k = 0; k < BLOCK_IDX.length; k++) idx[ii + k] = BLOCK_IDX[k] + vBase;
+    blockBox.set(part.box, b * 6);
+    missing += part.missing;
+  }
+  blockStart[parts.length] = parts.length * BLOCK_IDX.length;
+  return { level, cellM: levelCellM(level), pos, nrm, idx, blockStart, blockBox, blocks: parts.length, missing };
+}
+
+/** One level's blocks, each with its skirt depth from `skirtM` or the level's default. */
+export function buildLevel(pin: LngLat, eyeM: number, level: number, blocks: readonly BlockId[], sample: HeightSampler, skirtM?: readonly number[]): MeshLevel {
+  return joinBlocks(
+    level,
+    blocks.map((b, i) => buildBlock(pin, eyeM, level, b, sample, skirtM?.[i]))
+  );
 }

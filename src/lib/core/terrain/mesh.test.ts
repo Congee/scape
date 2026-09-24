@@ -12,8 +12,10 @@ import {
   blockSideM,
   CASTER_CELL_M,
   blockUnitBounds,
+  buildBlock,
   buildLevel,
   COARSE_TARGET_RAD,
+  joinBlocks,
   levelCellM,
   levelHalfExtentM,
   levelsForRange,
@@ -522,6 +524,34 @@ describe('buildLevel', () => {
     const holed = buildLevel(PIN, 0, 0, [{ level: 0, ix: 0, iy: 0 }], () => Number.NaN);
     expect(holed.missing).toBeGreaterThan(0);
     for (let v = 0; v < 30; v++) expect(Number.isFinite(holed.pos[v * 3 + 2])).toBe(true);
+  });
+});
+
+const ridge = (lng: number, lat: number) => 900 + 400 * Math.sin(lng * 300) * Math.cos(lat * 200);
+
+describe('joinBlocks', () => {
+  const blocks: BlockId[] = [
+    { level: 3, ix: -1, iy: 0 },
+    { level: 3, ix: 0, iy: 0 },
+    { level: 3, ix: 2, iy: -3 }
+  ];
+  const skirt = [40, undefined, 12] as unknown as number[];
+
+  it('matches a level built in one go, byte for byte, from blocks built apart', () => {
+    const whole = buildLevel(PIN, 1250, 3, blocks, ridge, skirt);
+    // Out of order, as the worker's cache hands them back.
+    const parts = [2, 0, 1].map((i) => ({ i, part: buildBlock(PIN, 1250, 3, blocks[i], ridge, skirt[i]) })).toSorted((a, b) => a.i - b.i);
+    const joined = joinBlocks(3, parts.map((p) => p.part));
+    for (const k of ['pos', 'nrm', 'idx', 'blockStart', 'blockBox'] as const) expect(joined[k]).toEqual(whole[k]);
+    expect(joined.missing).toBe(whole.missing);
+    expect(joined.cellM).toBe(whole.cellM);
+  });
+
+  it('leaves the parts it copies untouched', () => {
+    const part = buildBlock(PIN, 1250, 3, blocks[0], ridge);
+    const before = part.pos.slice();
+    joinBlocks(3, [part, part]).pos.fill(0);
+    expect(part.pos).toEqual(before);
   });
 });
 
