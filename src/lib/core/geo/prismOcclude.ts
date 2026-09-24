@@ -68,6 +68,51 @@ function hitsPrism(tile: PrismTile, i: number, uMin: number, uMax: number, dx: n
   return k % 2 === 1 && spans(0, ts[0]);
 }
 
+/** Bucket slots per tile, kept so tiles streaming in do not re-index the ones already there. */
+const placed = new WeakMap<PrismTile, { rangeM: number; slots: Slots }>();
+
+/** Parallel bucket indices and entries. */
+interface Slots {
+  bucket: number[];
+  entry: Entry[];
+}
+
+function tileEntries(tile: PrismTile, rangeM: number): Slots {
+  const slots: Slots = { bucket: [], entry: [] };
+  for (let i = 0; i < tile.count; i++) {
+    if (tile.ringStart[i + 1] - tile.ringStart[i] < 3) continue;
+    if (Math.max(1, tile.distM[i]) > rangeM) continue;
+    const ce = tile.cE[i];
+    const cn = tile.cN[i];
+    const l = Math.hypot(ce, cn);
+    if (l < 1e-6) continue;
+    let uMin = Infinity;
+    let uMax = -Infinity;
+    for (let v = tile.ringStart[i]; v < tile.ringStart[i + 1]; v++) {
+      if (tile.uBase[v] < uMin) uMin = tile.uBase[v];
+      if (tile.uTop[v] > uMax) uMax = tile.uTop[v];
+    }
+    for (let q = tile.faceVert[tile.faceStart[i]]; q < tile.faceVert[tile.faceStart[i + 1]]; q++) {
+      if (tile.fU[q] < uMin) uMin = tile.fU[q];
+      if (tile.fU[q] > uMax) uMax = tile.fU[q];
+    }
+    if (!(uMax >= uMin)) continue;
+    const entry: Entry = { tile, i, uMin, uMax };
+    const centre = Math.atan2(ce, cn) * R2D;
+    const r = tile.radiusM[i];
+    // Horizontal half-width of the bounding sphere, widened a bucket so an edge lands inside;
+    // a sphere the eye stands in has no bearing at all and goes everywhere.
+    const half = r >= l ? 180 : Math.asin(r / l) * R2D + 1;
+    const lo = Math.floor(centre - half);
+    const hi = Math.min(Math.ceil(centre + half), lo + BUCKETS - 1);
+    for (let b = lo; b <= hi; b++) {
+      slots.bucket.push(((b % BUCKETS) + BUCKETS) % BUCKETS);
+      slots.entry.push(entry);
+    }
+  }
+  return slots;
+}
+
 /**
  * Buildings bucketed by azimuth, so one direction costs a bucket lookup and a handful of tests.
  * Prisms are eye-relative and immobile, so an index outlives every pan and zoom.
@@ -77,34 +122,9 @@ export class PrismOccluder {
 
   constructor(tiles: Iterable<PrismTile>, rangeM: number) {
     for (const tile of tiles) {
-      for (let i = 0; i < tile.count; i++) {
-        if (tile.ringStart[i + 1] - tile.ringStart[i] < 3) continue;
-        if (Math.max(1, tile.distM[i]) > rangeM) continue;
-        const ce = tile.cE[i];
-        const cn = tile.cN[i];
-        const l = Math.hypot(ce, cn);
-        if (l < 1e-6) continue;
-        let uMin = Infinity;
-        let uMax = -Infinity;
-        for (let v = tile.ringStart[i]; v < tile.ringStart[i + 1]; v++) {
-          if (tile.uBase[v] < uMin) uMin = tile.uBase[v];
-          if (tile.uTop[v] > uMax) uMax = tile.uTop[v];
-        }
-        for (let q = tile.faceVert[tile.faceStart[i]]; q < tile.faceVert[tile.faceStart[i + 1]]; q++) {
-          if (tile.fU[q] < uMin) uMin = tile.fU[q];
-          if (tile.fU[q] > uMax) uMax = tile.fU[q];
-        }
-        if (!(uMax >= uMin)) continue;
-        const entry: Entry = { tile, i, uMin, uMax };
-        const centre = Math.atan2(ce, cn) * R2D;
-        const r = tile.radiusM[i];
-        // Horizontal half-width of the bounding sphere, widened a bucket so an edge lands inside;
-        // a sphere the eye stands in has no bearing at all and goes everywhere.
-        const half = r >= l ? 180 : Math.asin(r / l) * R2D + 1;
-        const lo = Math.floor(centre - half);
-        const hi = Math.min(Math.ceil(centre + half), lo + BUCKETS - 1);
-        for (let b = lo; b <= hi; b++) this.buckets[((b % BUCKETS) + BUCKETS) % BUCKETS].push(entry);
-      }
+      let c = placed.get(tile);
+      if (c?.rangeM !== rangeM) placed.set(tile, (c = { rangeM, slots: tileEntries(tile, rangeM) }));
+      for (let k = 0; k < c.slots.bucket.length; k++) this.buckets[c.slots.bucket[k]].push(c.slots.entry[k]);
     }
   }
 

@@ -159,6 +159,8 @@ export class ViewfinderController {
   /** Per-object building occlusion for the current frame; the GPU picture cannot mask objects. */
   private occ: Occluder | null = null;
   private occCache: { key: string; occ: Occluder | null } | null = null;
+  /** Bumps whenever `prisms` changes, so the prism index is rebuilt only then. */
+  private prismRev = 0;
   private meshOccCache: { key: string; occ: MeshOccluder | null } | null = null;
   private anyOccCache: { key: string; occ: Occluder | null } | null = null;
   /** What the overlay hid this frame, for `__scape.overlay`. */
@@ -427,15 +429,17 @@ export class ViewfinderController {
     if (key !== this.prismKey) {
       this.prismKey = key;
       this.prisms.clear();
+      this.prismRev++;
     }
     const { tiles } = buildingsStore.getState();
     const lod2 = [...lod2Store.getState().tiles.values()];
-    for (const k of this.prisms.keys()) if (!tiles.has(k)) this.prisms.delete(k);
+    for (const k of this.prisms.keys()) if (!tiles.has(k) && this.prisms.delete(k)) this.prismRev++;
     for (const [k, batch] of tiles) {
       const cover = lod2CoverOf(k, lod2);
       if (this.prisms.has(k) && this.prismCover.get(k) === cover.sig) continue;
       const kept = suppressRows(batch, cover.rings.length > 0 ? [...hide.rings, ...cover.rings] : hide.rings);
       this.prisms.set(k, buildPrisms(kept, w.pin, sc.eyeM));
+      this.prismRev++;
       this.prismCover.set(k, cover.sig);
       this.prismHidden.set(k, batch.count - kept.count);
     }
@@ -568,16 +572,16 @@ export class ViewfinderController {
     const lod2 = this.lod2Surfaces();
     if (tiles.size === 0 && models.length === 0 && lod2.length === 0) return null;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    const key = `${this.prismKey}|${buildingsStore.getState().version}|${lod2Store.getState().version}|${rangeM}`;
+    const key = `${this.prismRev}|${rangeM}`;
     const modelKey = this.modelCache?.key ?? '';
     // Separate caches: tiles streaming in must not re-index a large imported mesh.
     if (this.meshOccCache?.key !== modelKey) this.meshOccCache = { key: modelKey, occ: models.length > 0 ? new MeshOccluder(models) : null };
     if (this.occCache?.key !== key) this.occCache = { key, occ: tiles.size > 0 ? new PrismOccluder(tiles.values(), rangeM) : null };
-    const both = `${key}|${modelKey}`;
+    const both = `${key}|${modelKey}|${lod2Store.getState().version}`;
     if (this.anyOccCache?.key !== both) {
-      const lod2Occ = lod2.map((m) => {
-        let occ = this.lod2Occ.get(m);
-        if (!occ) this.lod2Occ.set(m, (occ = new MeshOccluder([m])));
+      const lod2Occ = [...lod2Store.getState().tiles.values()].map((t) => {
+        let occ = this.lod2Occ.get(t.mesh);
+        if (!occ) this.lod2Occ.set(t.mesh, (occ = new MeshOccluder(t.occ)));
         return occ;
       });
       this.anyOccCache = { key: both, occ: anyOccluder([this.occCache.occ, this.meshOccCache.occ, ...lod2Occ]) };
@@ -649,7 +653,7 @@ export class ViewfinderController {
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       const shade = { on: stats.cascades > 0, light: sc.light?.body ?? null, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
-      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, gpuPass: stats.gpuPassMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
       if (dev) dev.moonDisc = this.moonGeometry(sc);
     }
   }
@@ -941,13 +945,16 @@ export class ViewfinderController {
     ctx.lineWidth = 1.5;
     let prev: { x: number; y: number } | null = null;
     let prevHidden = false;
+    const pxs = Array.from({ length: curve.n }, (_, i) => this.toPx(sc, azs[i], alts[i]));
+    const ins = pxs.map((p) => this.inFrame(sc, p, 40));
     for (let i = 0; i < curve.n; i++) {
-      const p = this.toPx(sc, azs[i], alts[i]);
-      const inside = this.inFrame(sc, p, 40);
-      const hidden = (!!sc.view && (() => {
+      const p = pxs[i];
+      const inside = ins[i];
+      // Only a drawn neighbouring segment or label reads this point's occlusion.
+      const hidden = (inside || !!ins[i - 1] || !!ins[i + 1]) && ((!!sc.view && (() => {
         const col = columnAt(sc.view!, azs[i]);
         return col >= 0 && alts[i] < sc.view!.skylineDeg[col];
-      })()) || this.behindBuilding(azs[i], alts[i], Infinity);
+      })()) || this.behindBuilding(azs[i], alts[i], Infinity));
       if (p && prev && (inside || this.inFrame(sc, prev, 40))) {
         ctx.strokeStyle = color;
         ctx.globalAlpha = hidden || prevHidden ? 0.35 : 0.9;
