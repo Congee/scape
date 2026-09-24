@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cameraBasis, dirFromAzAlt, type Camera, type CameraBasis, type Vec3 } from '@core/optics/projection';
-import { boxCastsInto, CASCADE_COUNT, CASCADE_RES, cascadeSplits, coneDepthRange, fitCascades, lightBasis, mergeScene, type Cascade, type SceneBounds } from './shadowFit';
+import { boxCastsInto, CASCADE_COUNT, CASCADE_RES, cascadeSplits, coneDepthRange, fitCascades, sphereMisses, lightBasis, mergeScene, type Cascade, type SceneBounds } from './shadowFit';
 
 const CAM: Camera = { azimuthDeg: 120, elevationDeg: -2, focalMm: 50, frameWmm: 36, frameHmm: 24 };
 const BASIS = cameraBasis(CAM);
@@ -320,6 +320,29 @@ describe('coneDepthRange', () => {
     const b = box(f.x * 100 + r.x * 60, f.y * 100 + r.y * 60, f.z * 100 + r.z * 60, 20);
     expect(coneDepthRange(b, 0, wideBasis, wide)).not.toBe(null);
     expect(coneDepthRange(b, 0, TELE_BASIS, TELE_UP)).toBe(null);
+  });
+});
+
+describe('sphereMisses', () => {
+  it('only rejects spheres whose every point stays outside the cone over the depth range', () => {
+    const F = { x: 0.6, y: 0.64, z: 0.48 };
+    let rejected = 0;
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+    for (let n = 0; n < 2000; n++) {
+      const [ce, cn, cu] = [rnd() * 20_000, rnd() * 20_000, rnd() * 3000];
+      const r = Math.abs(rnd()) * 3000;
+      const tr = Math.abs(rnd()) * 0.95;
+      const d = ce * F.x + cn * F.y + cu * F.z;
+      const [lo, hi] = [Math.max(0, d - r), d + r];
+      if (hi <= lo || !sphereMisses(ce, cn, cu, r, d, lo, hi, tr)) continue;
+      rejected++;
+      for (let i = 0; i <= 200; i++) {
+        const t = lo + ((hi - lo) * i) / 200;
+        expect(Math.hypot(F.x * t - ce, F.y * t - cn, F.z * t - cu) - r - tr * t).toBeGreaterThan(0);
+      }
+    }
+    expect(rejected).toBeGreaterThan(100);
   });
 });
 

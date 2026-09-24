@@ -4,7 +4,7 @@ import { HAZE_M, ROOF_SHADE, sphereVisible } from '@core/geo/prismRaster';
 import type { Camera, CameraBasis } from '@core/optics/projection';
 import type { MeshLevel } from '@core/terrain/mesh';
 import { linkProgram, prismClipMatrix, uniforms } from './prismGl';
-import { boxCastsInto, coneDepthRange, type Cascade, type SceneBounds } from './shadowFit';
+import { axialFar, axialNear, boxCastsInto, coneDepthRange, type Cascade, type SceneBounds } from './shadowFit';
 
 const VERT_SRC = `#version 300 es
 precision highp float;
@@ -132,12 +132,15 @@ export class TerrainGl {
     let maxU = 1;
     let viewNearM = Infinity;
     let viewFarM = -Infinity;
+    const F = basis.forward;
     for (const lv of this.levels)
       for (let b = 0; b < lv.blocks; b++) {
         const o = b * 6;
         halfM = Math.max(halfM, Math.abs(lv.blockBox[o]), Math.abs(lv.blockBox[o + 3]), Math.abs(lv.blockBox[o + 1]), Math.abs(lv.blockBox[o + 4]));
         minU = Math.min(minU, lv.blockBox[o + 2]);
         maxU = Math.max(maxU, lv.blockBox[o + 5]);
+        // The cone range lies within the box's axial extent, so one inside the range so far adds nothing.
+        if (viewFarM > viewNearM && axialNear(lv.blockBox, o, F) >= viewNearM && axialFar(lv.blockBox, o, F) <= viewFarM) continue;
         const seen = coneDepthRange(lv.blockBox, o, basis, cam);
         if (!seen) continue;
         viewNearM = Math.min(viewNearM, seen[0]);

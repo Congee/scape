@@ -144,6 +144,8 @@ export class ViewfinderController {
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
   /** Eye-relative prisms per tile, rebuilt when the camera location moves. */
   private prisms = new Map<string, PrismTile>();
+  private pathHidden = new Map<SkyBody, { occ: unknown; view: unknown; curve: unknown; h: Int8Array }>();
+  private prismSrc: { key: string; tiles: unknown; lod2: unknown } | null = null;
   private prismKey = '';
   /** LoD2 tiles each Overture tile was rebuilt around. */
   private prismCover = new Map<string, string>();
@@ -434,7 +436,11 @@ export class ViewfinderController {
       this.prismRev++;
     }
     const { tiles } = buildingsStore.getState();
-    const lod2 = [...lod2Store.getState().tiles.values()];
+    const lod2Tiles = lod2Store.getState().tiles;
+    // Both stores replace their maps on change, so same identities mean nothing to rebuild.
+    if (this.prismSrc?.key === key && this.prismSrc.tiles === tiles && this.prismSrc.lod2 === lod2Tiles) return this.prisms;
+    this.prismSrc = { key, tiles, lod2: lod2Tiles };
+    const lod2 = [...lod2Tiles.values()];
     for (const k of this.prisms.keys()) if (!tiles.has(k) && this.prisms.delete(k)) this.prismRev++;
     for (const [k, batch] of tiles) {
       const cover = lod2CoverOf(k, lod2);
@@ -952,14 +958,17 @@ export class ViewfinderController {
     ctx.font = '10px system-ui, sans-serif';
     const pxs = Array.from({ length: curve.n }, (_, i) => this.toPx(sc, azs[i], alts[i]));
     const ins = pxs.map((p) => this.inFrame(sc, p, 40));
+    // Occlusion does not depend on the aim, so a drag reuses it until the path or occluders change.
+    let memo = this.pathHidden.get(body);
+    if (!memo || memo.occ !== this.occ || memo.view !== sc.view || memo.curve !== curve) this.pathHidden.set(body, (memo = { occ: this.occ, view: sc.view, curve, h: new Int8Array(curve.n) }));
     for (let i = 0; i < curve.n; i++) {
       const p = pxs[i];
       const inside = ins[i];
       // Only a drawn neighbouring segment or label reads this point's occlusion.
-      const hidden = (inside || !!ins[i - 1] || !!ins[i + 1]) && ((!!sc.view && (() => {
+      const hidden = (inside || !!ins[i - 1] || !!ins[i + 1]) && (memo.h[i] !== 0 ? memo.h[i] > 0 : (memo.h[i] = (!!sc.view && (() => {
         const col = columnAt(sc.view!, azs[i]);
         return col >= 0 && alts[i] < sc.view!.skylineDeg[col];
-      })()) || this.behindBuilding(azs[i], alts[i], Infinity));
+      })()) || this.behindBuilding(azs[i], alts[i], Infinity) ? 1 : -1) > 0);
       if (p && prev && (inside || this.inFrame(sc, prev, 40))) {
         ctx.strokeStyle = color;
         ctx.globalAlpha = hidden || prevHidden ? 0.35 : 0.9;

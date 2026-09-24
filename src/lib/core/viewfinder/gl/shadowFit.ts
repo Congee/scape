@@ -62,6 +62,25 @@ export function lightBasis(sunAzDeg: number, sunAltDeg: number, view?: Vec3): Ca
 /** Bisection steps for the cone clip; a 50 km span lands well inside a metre. */
 const CONE_CLIP_STEPS = 24;
 
+const axialCentre = (box: Float32Array, o: number, F: Vec3) => ((box[o] + box[o + 3]) / 2) * F.x + ((box[o + 1] + box[o + 4]) / 2) * F.y + ((box[o + 2] + box[o + 5]) / 2) * F.z;
+const axialHalf = (box: Float32Array, o: number, F: Vec3) => Math.abs(F.x) * (box[o + 3] - (box[o] + box[o + 3]) / 2) + Math.abs(F.y) * (box[o + 4] - (box[o + 1] + box[o + 4]) / 2) + Math.abs(F.z) * (box[o + 5] - (box[o + 2] + box[o + 5]) / 2);
+
+/** Nearest and farthest axial depth of a box, the eye clamped out; `coneDepthRange` never leaves them. */
+export const axialNear = (box: Float32Array, o: number, F: Vec3) => Math.max(0, axialCentre(box, o, F) - axialHalf(box, o, F));
+export const axialFar = (box: Float32Array, o: number, F: Vec3) => axialCentre(box, o, F) + axialHalf(box, o, F);
+
+/**
+ * Whether the gap is positive over all of [lo, hi] for every point of the sphere, so the search would
+ * find no overlap anyway. `d` is the centre's axial depth; the margin keeps rounding on the far side.
+ */
+export function sphereMisses(ce: number, cn: number, cu: number, r: number, d: number, lo: number, hi: number, tr: number): boolean {
+  if (tr >= 1) return false;
+  const p = Math.sqrt(Math.max(0, ce * ce + cn * cn + cu * cu - d * d));
+  // Distance to the centre less the cone radius is convex in depth, least at d + tr·p/√(1 − tr²).
+  const t = clamp(d + (tr * p) / Math.sqrt(1 - tr * tr), lo, hi);
+  return Math.hypot(t - d, p) - tr * t > r * (1 + 1e-9) + 1e-3;
+}
+
 /**
  * Axial depth range over which a box of eye-relative metres overlaps the view cone, or null when it
  * misses it. Distance from the cone axis to the box, less the cone radius at that depth, is convex
@@ -82,10 +101,10 @@ export function coneDepthRange(box: Float32Array, o: number, basis: CameraBasis,
   const cn = (box[o + 1] + box[o + 4]) / 2;
   const cu = (box[o + 2] + box[o + 5]) / 2;
   const d = ce * F.x + cn * F.y + cu * F.z;
-  const s = Math.abs(F.x) * (box[o + 3] - ce) + Math.abs(F.y) * (box[o + 4] - cn) + Math.abs(F.z) * (box[o + 5] - cu);
-  const lo = Math.max(0, d - s);
-  const hi = d + s;
+  const lo = axialNear(box, o, F);
+  const hi = axialFar(box, o, F);
   if (hi <= lo) return null;
+  if (Math.abs(F.x * F.x + F.y * F.y + F.z * F.z - 1) < 1e-9 && sphereMisses(ce, cn, cu, Math.hypot(box[o + 3] - ce, box[o + 4] - cn, box[o + 5] - cu), d, lo, hi, tr)) return null;
   let a = lo;
   let b = hi;
   for (let i = 0; i < CONE_CLIP_STEPS; i++) {
