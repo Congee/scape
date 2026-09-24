@@ -1,16 +1,45 @@
+import { useState } from 'react';
 import { compass, distance, height } from '@core/format';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
-import type { ModelPart, SavedModel } from '@core/model';
-import { modelHeightAt } from '@core/model/heightAt';
+import { modelBaseM, type ModelPart, type SavedModel } from '@core/model';
+import { apexOf, applyNudge, azElTo, NUDGE_STEPS, NudgeKind, ringEdges, withEdgeBearing, withEdgeLength, withPart } from '@core/model/draw';
+import { modelMesh } from '@core/model/mesh';
 import { modelApexM, newPart, spirePart } from '@core/model/seed';
-import { useModels, modelsStore } from '@state/models';
+import { endpointHeightM } from '@core/terrain/los';
+import { finishDraft, useModels, modelsStore } from '@state/models';
 import { useSettings } from '@state/settings';
+import { EYE_HEIGHT_M, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 import { RoofShape } from '@workers/buildings.protocol';
+import { useMedia } from './useMedia';
 
 const ROOFS = Object.entries(RoofShape) as [keyof typeof RoofShape, RoofShape][];
 
 const num = (v: string, fallback: number) => (v.trim() === '' || !Number.isFinite(Number(v)) ? fallback : Number(v));
+const fixed = (v: number, d: number) => Number(v.toFixed(d));
+const signed = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}°`;
+
+/** The phone's bottom sheet. */
+const COMPACT = '(max-width: 900px)';
+
+const NUDGE_ROWS: { kind: NudgeKind; label: string; unit: string }[] = [
+  { kind: NudgeKind.East, label: 'East', unit: 'm' },
+  { kind: NudgeKind.North, label: 'North', unit: 'm' },
+  { kind: NudgeKind.Heading, label: 'Heading', unit: '°' },
+  { kind: NudgeKind.Lift, label: 'Lift', unit: 'm' },
+  { kind: NudgeKind.Height, label: 'Height', unit: 'm' }
+];
+
+/** A number typed freely and committed on Enter or blur, so rounding never fights the caret. */
+function NumField({ value, onCommit, label, step }: { value: number; onCommit: (v: number) => void; label: string; step: number }) {
+  const commit = (el: HTMLInputElement) => {
+    const v = num(el.value, NaN);
+    if (Number.isFinite(v) && v !== value) onCommit(v);
+    else el.value = String(value);
+  };
+  // Keyed on the value so an outside change resets what is typed.
+  return <input key={value} type="number" step={step} defaultValue={value} onBlur={(e) => commit(e.currentTarget)} onKeyDown={(e) => e.key === 'Enter' && commit(e.currentTarget)} aria-label={label} />;
+}
 
 export function ModelsPanel() {
   const models = useModels((s) => s.models);
@@ -18,6 +47,9 @@ export function ModelsPanel() {
   const selectedId = useModels((s) => s.selectedId);
   const picking = useModels((s) => s.picking);
   const pickError = useModels((s) => s.pickError);
+  const draft = useModels((s) => s.draft);
+  const rightAngles = useModels((s) => s.rightAngles);
+  const compact = useMedia(COMPACT);
   const pin = useWorld((s) => s.pin);
   const units = useSettings((s) => s.units);
   const ms = modelsStore.getState();
@@ -30,9 +62,32 @@ export function ModelsPanel() {
         <button className={picking ? 'on' : ''} onClick={() => ms.setPicking(!picking)} title="Then click an Overture building on the map to model it from its footprints">
           {picking ? 'Click a building…' : 'Model this building'}
         </button>
+        <button className={draft ? 'on' : ''} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
+          Draw a building
+        </button>
       </div>
       {pickError && <p className="error">{pickError}</p>}
-      {selected && <ModelEditor key={selected.id} m={selected} />}
+      {draft && (
+        <div className="model-draft">
+          <p className="muted hint">Tap the map to add corners; tap the first corner to close. Drag a corner to move it, hold it to delete it.</p>
+          <div className="actions">
+            <span className="count">
+              {draft.length} corner{draft.length === 1 ? '' : 's'}
+            </span>
+            <label className="toggle">
+              <input type="checkbox" checked={rightAngles} onChange={(e) => ms.setRightAngles(e.target.checked)} />
+              <span>Right angles</span>
+            </label>
+            <button onClick={() => void finishDraft()} disabled={draft.length < 3}>
+              Done
+            </button>
+            <button className="link" onClick={() => ms.setDraft(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {selected && <ModelEditor key={selected.id} m={selected} compact={compact} />}
       <h3>
         {models.length} model{models.length === 1 ? '' : 's'}
       </h3>
@@ -54,20 +109,138 @@ export function ModelsPanel() {
   );
 }
 
-function ModelEditor({ m }: { m: SavedModel }) {
+/** Where the model's top stands and how high above the geoid. */
+function modelApex(m: SavedModel): { at: { lng: number; lat: number }; aboveGroundM: number; absM: number } | null {
+  const mesh = modelMesh(m);
+  const a = mesh && apexOf(m, mesh.pos);
+  if (!a) return null;
+  const absM = modelBaseM(m.anchor, m.groundM) - m.anchor.altM + a.aboveGroundM;
+  return { at: a.at, absM, aboveGroundM: absM - Math.max(Number.isNaN(m.groundM) ? 0 : m.groundM, 0) };
+}
+
+function NudgePad({ m, partId }: { m: SavedModel; partId: string | null }) {
+  const adjusting = useModels((s) => s.adjusting);
+  const ms = modelsStore.getState();
+  const part = m.parts?.find((p) => p.id === partId) ?? null;
+  const value: Record<NudgeKind, string> = {
+    East: '',
+    North: '',
+    Heading: `${fixed(m.anchor.headingDeg, 2)}°`,
+    Lift: `${fixed(m.anchor.altM, 1)} m`,
+    Height: part ? `${fixed(part.heightM, 1)} m` : ''
+  };
+  return (
+    <div className="nudge-pad">
+      {NUDGE_ROWS.map(({ kind, label, unit }) => {
+        const [fine, coarse] = NUDGE_STEPS[kind];
+        const disabled = kind === NudgeKind.Height && !m.parts;
+        return (
+          <div className="nudge-row" key={kind}>
+            <span className="k">{label}</span>
+            {[-coarse, -fine, fine, coarse].map((by) => (
+              <button key={by} disabled={disabled} onClick={() => void ms.update(m.id, applyNudge(m, { kind, by }, partId))} aria-label={`${label} ${by > 0 ? '+' : '−'}${Math.abs(by)} ${unit}`}>
+                {by > 0 ? '+' : '−'}
+                {Math.abs(by)}
+              </button>
+            ))}
+            <span className="v muted">{value[kind]}</span>
+          </div>
+        );
+      })}
+      <label className="toggle" title="Arrows move it, Alt+arrows turn and lift it, Shift for the big step">
+        <input type="checkbox" checked={adjusting} onChange={(e) => ms.setAdjusting(e.target.checked)} />
+        <span>Arrow keys adjust it in the viewfinder</span>
+      </label>
+    </div>
+  );
+}
+
+/** The apex's bearing and elevation from the eye beside the ones measured in a photo. */
+function ApexReadout({ m }: { m: SavedModel }) {
+  const pin = useWorld((s) => s.pin);
+  const pinHeightM = useWorld((s) => s.pinHeightM);
+  const pinGroundM = useTerrain((s) => s.pinGroundM);
+  const [az, setAz] = useState('');
+  const [el, setEl] = useState('');
+  const apex = modelApex(m);
+  if (!apex) return null;
+  const eye = endpointHeightM(Number.isNaN(pinGroundM ?? NaN) ? 0 : (pinGroundM ?? 0), pinHeightM + EYE_HEIGHT_M);
+  const at = azElTo(pin, apex.at, apex.absM - eye);
+  const dAz = az.trim() === '' ? null : ((((at.azDeg - num(az, 0)) % 360) + 540) % 360) - 180;
+  const dEl = el.trim() === '' ? null : at.elDeg - num(el, 0);
+  return (
+    <div className="kv apex">
+      <span className="k">Apex</span>
+      <b className="v">
+        az {at.azDeg.toFixed(2)}° · el {at.elDeg.toFixed(2)}°
+      </b>
+      <span className="k">Measured</span>
+      <b className="v">
+        <input type="number" step={0.01} value={az} placeholder="az" onChange={(e) => setAz(e.target.value)} aria-label="Measured apex azimuth, degrees" />
+        <input type="number" step={0.01} value={el} placeholder="el" onChange={(e) => setEl(e.target.value)} aria-label="Measured apex elevation, degrees" />
+      </b>
+      {(dAz != null || dEl != null) && (
+        <>
+          <span className="k">Off by</span>
+          <b className="v" data-testid="apex-delta">
+            {dAz != null && `az ${signed(dAz)}`}
+            {dAz != null && dEl != null && ' · '}
+            {dEl != null && `el ${signed(dEl)}`}
+          </b>
+        </>
+      )}
+    </div>
+  );
+}
+
+function EdgeTable({ m, part }: { m: SavedModel; part: ModelPart }) {
+  const ms = modelsStore.getState();
+  const setRing = (ring: [number, number][]) => void ms.update(m.id, { parts: withPart(m.parts!, part.id, { ring }) });
+  return (
+    <table className="parts edges">
+      <thead>
+        <tr>
+          <th>Edge</th>
+          <th title="Metres">Length</th>
+          <th title="Degrees from true north">Bearing</th>
+        </tr>
+      </thead>
+      <tbody>
+        {ringEdges(part.ring, m.anchor).map((e, i) => (
+          <tr key={part.ring[i].join()}>
+            <td>{i + 1}</td>
+            <td>
+              <NumField value={fixed(e.lengthM, 2)} step={0.1} onCommit={(v) => setRing(withEdgeLength(part.ring, i, v, m.anchor))} label={`Edge ${i + 1} length, metres`} />
+            </td>
+            <td>
+              <NumField value={fixed(e.bearingDeg, 1)} step={1} onCommit={(v) => setRing(withEdgeBearing(part.ring, i, v, m.anchor))} label={`Edge ${i + 1} bearing, degrees`} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
   const units = useSettings((s) => s.units);
+  const selectedPartId = useModels((s) => s.selectedPartId);
   const ms = modelsStore.getState();
   const patch = (p: Partial<SavedModel>) => void ms.update(m.id, p);
   const parts = m.parts ?? [];
-  const setPart = (id: string, p: Partial<ModelPart>) => patch({ parts: parts.map((q) => (q.id === id ? { ...q, ...p } : q)) });
-  const useAsTarget = () => {
+  const setPart = (id: string, p: Partial<ModelPart>) => patch({ parts: withPart(parts, id, p) });
+  const current = parts.find((p) => p.id === selectedPartId) ?? null;
+  const targetTop = () => {
+    const a = modelApex(m);
+    if (!a) return;
     const w = worldStore.getState();
-    w.setPin2({ lat: m.anchor.lat, lng: m.anchor.lng });
-    const h = modelHeightAt([m], m.anchor);
-    if (h) w.setPin2Height(Math.round(h.heightM), true, m.name);
+    w.setPin2(a.at);
+    w.setPin2Height(fixed(a.aboveGroundM, 1), true, m.name);
   };
+  const pad = <NudgePad m={m} partId={current?.id ?? null} />;
   return (
-    <div className="model-editor">
+    <div className={compact ? 'model-editor compact' : 'model-editor'}>
+      {compact && pad}
       <div className="kv">
         <span className="k">Name</span>
         <b className="v">
@@ -111,7 +284,7 @@ function ModelEditor({ m }: { m: SavedModel }) {
         </thead>
         <tbody>
           {parts.map((p, i) => (
-            <tr key={p.id}>
+            <tr key={p.id} className={p.id === selectedPartId ? 'current' : ''} onClick={() => ms.selectPart(p.id)}>
               <td>
                 <input type="number" step={1} value={p.baseM} onChange={(e) => setPart(p.id, { baseM: num(e.target.value, 0) })} aria-label={`Part ${i + 1} base, metres`} />
               </td>
@@ -150,9 +323,17 @@ function ModelEditor({ m }: { m: SavedModel }) {
           Add spire
         </button>
       </div>
+      {current && (
+        <details className="edges-box" open={!compact}>
+          <summary>Edges of part {parts.indexOf(current) + 1}</summary>
+          <EdgeTable m={m} part={current} />
+        </details>
+      )}
+      {!compact && pad}
+      <ApexReadout m={m} />
       <div className="actions">
-        <button onClick={useAsTarget} title="Aim at this model's top">
-          Use as target
+        <button onClick={targetTop} title="Put the target on this model's highest point">
+          Set target to model top
         </button>
         <button onClick={() => worldStore.getState().flyTo(m.anchor, Math.max(worldStore.getState().view.zoom, 15))}>Show on map</button>
         <button className="link" onClick={() => void ms.remove(m.id)}>

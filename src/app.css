@@ -1548,8 +1548,88 @@ label.file input {
   color: var(--fg-2);
 }
 
+.parts td {
+  padding: 1px 2px;
+}
+
+/* Spinners and the global padding left "auto" three letters wide. */
 .parts input[type='number'] {
-  width: 4.5em;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 4.2em;
+  padding: 3px 4px;
+  appearance: textfield;
+}
+
+.parts input[type='number']::-webkit-inner-spin-button,
+.parts input[type='number']::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.parts select {
+  padding: 3px 2px;
+}
+
+.parts tbody tr.current {
+  background: var(--bg-3);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.parts.edges td:first-child {
+  color: var(--fg-2);
+  width: 3em;
+}
+
+.model-editor .kv input[type='text'] {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.model-draft .actions {
+  align-items: center;
+}
+
+.edges-box {
+  margin: 4px 6px;
+}
+
+.edges-box summary {
+  cursor: pointer;
+  color: var(--fg-2);
+}
+
+.nudge-pad {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+}
+
+.nudge-row {
+  display: grid;
+  grid-template-columns: 4.5em repeat(4, minmax(0, 1fr)) 5em;
+  gap: 4px;
+  align-items: center;
+}
+
+.nudge-row button {
+  padding: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.nudge-row .v {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kv.apex input {
+  width: 5.5em;
+}
+
+@media (pointer: coarse) {
+  .nudge-row button {
+    min-height: 36px;
+  }
 }
 
 .tide-curve {
