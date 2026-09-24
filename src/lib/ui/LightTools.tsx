@@ -61,7 +61,7 @@ export function MoonTools() {
         <span className="k">Earthshine</span>
         <b className="v">{v.earthshine ? 'Dark side glows' : 'Too faint'}</b>
       </div>
-      <p className="muted hint">Position angles run from north through east; “from up” turns them clockwise from the zenith side of the disc, as it hangs in the viewfinder.</p>
+      <p className="muted hint">Position angles run from north through east; “from up” measures them the same way, counter-clockwise from the zenith side of the disc as it hangs in the viewfinder.</p>
     </>
   );
 }
