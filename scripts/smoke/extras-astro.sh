@@ -10,7 +10,9 @@ OUT=${3:-${TMPDIR:-/tmp}/extras-astro}
 BASE="http://localhost:$PORT"
 mkdir -p "$OUT"
 
-ab() { agent-browser --cdp "$CDP" "$@"; }
+# Its own agent-browser session: "default" is shared with every other agent.
+SESSION=${AGENT_BROWSER_SESSION:-smoke-$CDP}
+ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
 # agent-browser prints eval results JSON-encoded; strip the string quotes.
 js() { ab eval "$1" | sed -e 's/^"//' -e 's/"$//' -e 's/\\"/"/g'; }
 

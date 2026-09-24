@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && bun scripts/check-smoke.ts",
     "lint": "oxlint",
     "test": "vitest run"
   },

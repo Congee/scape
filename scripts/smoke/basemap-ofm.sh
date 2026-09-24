@@ -12,7 +12,9 @@ BBOX='{west:-74.045,south:40.735,east:-74.02,north:40.755}'
 CENTRE='[-74.032,40.745]'
 mkdir -p "$SHOTS"
 
-ab() { agent-browser --cdp "$CDP" --session "${AB_SESSION:-basemap-ofm}" "$@"; }
+# Its own agent-browser session: "default" is shared with every other agent.
+SESSION=${AGENT_BROWSER_SESSION:-smoke-$CDP}
+ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
 js() { ab eval "$1" | sed -e 's/^"//' -e 's/"$//' -e 's/\\"/"/g'; }
 declare -a ROWS
 FAIL=0

@@ -105,10 +105,19 @@ const tap = async (x: number, y: number) => {
 };
 const click = (label: string) => tab.eval<boolean>(`(() => { const b = [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)} || b.textContent.trim() === ${JSON.stringify(label)}); b?.click(); return !!b; })()`);
 const openModels = () => js(`ui.uiStore.getState().setPanelTab('Markers'); ui.uiStore.getState().setMarkersView('Models'); return true;`);
+// Its own camera: the stored one is wherever the last smoke left it, and a far one keeps the buildings worker busy there.
 const home = async () => {
-  await tab.navigate(`${BASE}/`);
-  await tab.until('!!window.__scape?.models?.getState().loaded && !!window.__scapeMap', 60_000);
+  await tab.navigate(`${BASE}/?camera=${HOBOKEN}&target=${TOWER.lat},${TOWER.lng}&z=15`);
+  await tab.until(`!!window.__scape?.models?.getState().loaded && !!window.__scapeMap && Math.abs(window.__scape.world.getState().pin.lat - ${HOBOKEN.split(',')[0]}) < 1e-4`, 60_000);
 };
+/** Ms until the buildings worker answers a lookup, or null past 60 s: its first one after a load fetches the archive's header. */
+const warmUp = () =>
+  js<number | null>(`
+  const t0 = performance.now();
+  while (S.buildings.getState().busy && performance.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 200));
+  while (performance.now() - t0 < 60000) if ((await buildings.buildingHeightAt(${JSON.stringify(TOWER)})) !== null) return Math.round(performance.now() - t0);
+  return null;
+`, 90_000);
 /** Waits for a frame drawn with the wanted focal and orientation, then for tiles to land. */
 const drawn = async (focal: number, orient: string) => {
   const ok = await tab.until(`(() => { const p = window.__scape?.prism; return p && p.cam && Math.abs(p.cam.focalMm - ${focal}) < 1e-6 && (p.cam.frameWmm > p.cam.frameHmm) === ${orient === 'Landscape'} && p.terrain; })()`, 60_000, 300);
@@ -141,6 +150,8 @@ check('renderer is ANGLE Metal', /ANGLE Metal/.test(renderer), renderer);
 await js(`for (const m of S.models.getState().models.filter((m) => m.notes === 'p2-smoke')) await S.models.getState().remove(m.id); return true;`);
 
 // A building across a z14 column edge seeds whole.
+const warm = await warmUp();
+check('buildings worker answers', warm !== null, warm !== null ? `first lookup in ${warm} ms` : 'no answer in 60 s');
 const lib = await seedAt(LIBRARY, LIBRARY_NAME);
 check('seed across a tile edge', !!lib && lib.lng0 < Z14_EDGE_LNG - 1e-4 && lib.lng1 > Z14_EDGE_LNG + 1e-4, lib ? `${lib.parts} parts from ${lib.tile}, lng ${lib.lng0.toFixed(5)}…${lib.lng1.toFixed(5)} across ${Z14_EDGE_LNG.toFixed(5)}` : 'no rows');
 

@@ -15,7 +15,9 @@ NIGHT=2026-09-25T02:00Z
 mkdir -p "$SHOTS"
 
 # Own session: the default one is shared with other agents driving other browsers.
-ab() { agent-browser --cdp "$CDP" --session "${AB_SESSION:-offline-buildings}" "$@"; }
+# Its own agent-browser session: "default" is shared with every other agent.
+SESSION=${AGENT_BROWSER_SESSION:-smoke-$CDP}
+ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
 js() { ab eval "$1" | sed -e 's/^"//' -e 's/"$//'; }
 declare -a ROWS
 FAIL=0

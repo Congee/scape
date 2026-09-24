@@ -30,7 +30,9 @@ for u in "$BASE/" "http://localhost:$CDP/json/version"; do
   for _ in $(seq 120); do curl -s -o /dev/null "$u" && break; sleep 1; done
 done
 
-ab() { agent-browser --cdp "$CDP" "$@"; }
+# Its own agent-browser session: "default" is shared with every other agent.
+SESSION=${AGENT_BROWSER_SESSION:-smoke-$CDP}
+ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
 # agent-browser prints eval results JSON-encoded; strip the string quotes.
 js() { ab eval "$1" | sed -e 's/^"//' -e 's/"$//' -e 's/\\"/"/g'; }
 

@@ -19,7 +19,8 @@ fi
 LAUNCHED=0
 if ! curl -s -o /dev/null "http://localhost:$CDP/json/version"; then
   # One background Brave that never takes focus; stopped below by its profile path only.
-  open -g -n -a "Brave Browser" --args --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run
+  open -g -n -a "Brave Browser" --args --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run \
+    --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling
   LAUNCHED=1
 fi
 for p in "$PORT" "$CDP"; do
