@@ -472,8 +472,8 @@ doing, and the thin dark lines turned out to be real rock gullies.
 
 **Nothing in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
-(merged `763a99b`). **21**'s extent cap stays held on `wip/mesh-extent-cap`; 18 showed
-it does not bind at Midtown, so its case is still 21's own.
+(merged `763a99b`). **21**'s extent cap was re-measured after 2 and closed unshipped
+(below).
 
 **Precision**
 
@@ -964,6 +964,13 @@ it does not bind at Midtown, so its case is still 21's own.
       and now has a second reason: shrinking the wedge-to-coarse level gap collapses the gradation
       ring that the two-level step attacks from the other side. A wedge bottoming out at level 4
       outside the subject's range cuts the step from ten rungs to six.
+
+    **Re-measured after 2 (2026-09-23): the cap stays unshipped.** On `9c83ff4` the unserved share
+    is 35% / 51% / 60% at 600 / 1200 / 2400 mm (5% at 24p), but spread across every level — ~70 of
+    2400's 160 lie within 2 km — so the outer field is not dominant. Re-derived on
+    `wip/mesh-extent-cap-2` (`7bdc1d9`): −12 to −24 blocks and −1 to −3 tiles on narrow frames, warm
+    last ≤ 50 ms, first level unchanged, cold within noise; AE 0 over 33 shots and ≤ 3.5 px at 1° sun.
+    No shadow lost, no real win.
 
     Raising the triangle cap is not on this list: at long focal it is already slack (2.18 M of 3 M at
     2400 mm), and where it binds, these reductions are the cheaper answer.
