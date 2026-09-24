@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { groundForRows, groupRowsAt, heightAtPoint, pickRows, suppressedIds, suppressRing, suppressRingTiles, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
 import type { LngLat } from '@core/geo/geodesy';
+import { meshOccluderParts } from '@core/geo/meshOcclude';
 import { frameOf, frameToLngLat, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
 import { lod2RegionsNear, type Lod2Region, type Lod2Source } from '@core/lod2/regions';
 import { lod2BuildingAt, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
@@ -330,8 +331,9 @@ async function hiddenIds(req: SuppressedIdsRequest): Promise<void> {
 function placed(t: Lod2Tile, c: WalkContent, region: Lod2Region, req: Lod2Request, t0: number): { tile: Lod2Placed; transfer: ArrayBuffer[] } {
   const mesh = placeLod2(t, req.pin, req.eyeM);
   const tris = mesh.plane.length / 4;
-  const tile: Lod2Placed = { url: c.url, region: region.id, mesh, hulls: t.buildings.map((b) => b.hull), bbox: t.bbox, tris, ms: performance.now() - t0 };
-  const transfer = [mesh.pos, mesh.surfId, mesh.bldgId, mesh.idx, mesh.plane, mesh.surf, mesh.sphere, mesh.size, mesh.box].map((a) => a.buffer as ArrayBuffer);
+  const occ = meshOccluderParts([mesh]);
+  const tile: Lod2Placed = { url: c.url, region: region.id, mesh, hulls: t.buildings.map((b) => b.hull), bbox: t.bbox, tris, occ, ms: performance.now() - t0 };
+  const transfer = [mesh.pos, mesh.surfId, mesh.bldgId, mesh.idx, mesh.plane, mesh.surf, mesh.sphere, mesh.size, mesh.box, occ.tris, occ.boxes, occ.nodes].map((a) => a.buffer as ArrayBuffer);
   return { tile, transfer };
 }
 

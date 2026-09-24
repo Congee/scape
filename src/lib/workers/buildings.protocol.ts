@@ -1,4 +1,5 @@
 import type { LngLat } from '@core/geo/geodesy';
+import type { MeshOccluderParts } from '@core/geo/meshOcclude';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 
@@ -110,6 +111,8 @@ export interface Lod2Placed {
   /** lng0, lat0, lng1, lat1. */
   bbox: [number, number, number, number];
   tris: number;
+  /** The mesh's occlusion hierarchy, built here so the main thread never pays for it. */
+  occ: MeshOccluderParts;
   /** Worker time to decode and place it, milliseconds. */
   ms: number;
 }

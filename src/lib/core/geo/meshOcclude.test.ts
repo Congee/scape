@@ -82,6 +82,35 @@ describe('MeshOccluder edge cases', () => {
     expect(roof.occludes(0, 0, 1, Infinity)).toBe(true);
     expect(roof.occludes(0, 0, 1, 4)).toBe(false);
   });
+
+  it('agrees with a brute-force test over every triangle', () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+    const tris: number[] = [];
+    for (let i = 0; i < 3000; i++) {
+      const c = [rnd() * 400, rnd() * 400, rnd() * 40 + 20];
+      for (let k = 0; k < 3; k++) tris.push(c[0] + rnd() * 8, c[1] + rnd() * 8, c[2] + rnd() * 8);
+    }
+    const mesh = soup(tris);
+    const bvh = new MeshOccluder([mesh]);
+    const one = (t: number) => new MeshOccluder([soup(Array.from(mesh.pos.subarray(t * 9, t * 9 + 9)))]);
+    const singles = Array.from({ length: 3000 }, (_, t) => one(t));
+    let hits = 0;
+    for (let r = 0; r < 400; r++) {
+      const ray = [rnd(), rnd(), r % 7 === 0 ? 0 : rnd() * 0.5];
+      const dist = r % 3 === 0 ? Infinity : 150 + rnd() * 100;
+      const want = singles.some((s) => s.occludes(ray[0], ray[1], ray[2], dist));
+      if (want) hits++;
+      expect(bvh.occludes(ray[0], ray[1], ray[2], dist)).toBe(want);
+    }
+    expect(hits).toBeGreaterThan(40);
+  });
+
+  it('handles an empty mesh and axis-aligned rays', () => {
+    expect(new MeshOccluder([]).occludes(0, 1, 0, Infinity)).toBe(false);
+    expect(occ.occludes(0, 1, 0, Infinity)).toBe(true);
+    expect(occ.occludes(0, 0, 1, Infinity)).toBe(false);
+  });
 });
 
 describe('anyOccluder', () => {
