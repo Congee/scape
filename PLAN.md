@@ -505,6 +505,11 @@ doing, and the thin dark lines turned out to be real rock gullies.
   DEM tiles needs a separate cascade change (`coneDepthRange` ignoring eye-leaf boxes).
 - Model sharing (P3b core, merged): exported models are named `<name>.glb`; a Drawn model's export
   carries its parts, so re-import gives an editable model; `.scape.json` Replace also wipes models.
+- Models P2 (merged `a45a27d`): selection and outline in accent #5aa9ff; a drawn building starts at
+  10 m (nearby Overture median later?); arrow-key nudges only behind the "Arrow keys adjust it"
+  checkbox; long-press 600 ms deletes a vertex; "Set target to model top" replaces "Use as target";
+  phone sheet puts the nudge pad first (collapse the sheet while drawing, as a follow-up?); the outline
+  ignores occluders; meshes have no bottom face.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
