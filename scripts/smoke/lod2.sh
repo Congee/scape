@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # LoD2 smoke: 3DBAG tiles replace Overture prisms in Rotterdam, in the picture, the occluder, the shadows and the credits; Zürich stays Overture.
-# Usage: scripts/smoke/lod2.sh [port] [cdp-port] [screenshot-dir] [brave-profile]
+# Usage: scripts/smoke/lod2.sh [port] [cdp-port] [screenshot-dir] [brave-profile] [gpu-timing-lock-dir]
 # Starts what is missing (vite dev, one background Brave) and stops only what it started.
 set -uo pipefail
 
@@ -8,6 +8,7 @@ PORT=${1:-5402}
 CDP=${2:-9402}
 OUT=${3:-${TMPDIR:-/tmp}/lod2}
 PROFILE=${4:-${TMPDIR:-/tmp}/brave-lod2}
+LOCK=${5:-${TMPDIR:-/tmp}/gpu-timing.lock}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BASE="http://localhost:$PORT"
 PNG="$ROOT/scripts/smoke/png-sample.py"
@@ -21,7 +22,8 @@ fi
 BRAVE=0
 if ! curl -s -o /dev/null "http://localhost:$CDP/json/version"; then
   mkdir -p "$PROFILE"
-  open -g -n -a "Brave Browser" --args --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run
+  open -g -n -a "Brave Browser" --args --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run \
+    --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling
   BRAVE=1
 fi
 for u in "$BASE/" "http://localhost:$CDP/json/version"; do
@@ -157,6 +159,24 @@ read -r n credit <<<"$(map_credit "$NL_CAM" "$NL_TGT" nl)"
 check "map NL: mask uses LoD2, 3DBAG credited" "$([ "$n" -gt 0 ] && [ "$credit" = true ] && echo 1 || echo 0)" "$n LoD2 sources in the mask, credit $credit"
 read -r n credit <<<"$(map_credit "$CH_CAM" "$CH_TGT" ch)"
 check "map CH: no LoD2 credit" "$([ "$n" = 0 ] && [ "$credit" = false ] && echo 1 || echo 0)" "$n LoD2 sources in the mask, credit $credit"
+
+# 7. Frame pacing by day, holding the shared GPU timing lock; a background window must not be throttled.
+FPS_BUDGET_MS=17.5
+until mkdir "$LOCK" 2>/dev/null; do sleep 30; done
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+for f in 200 2400; do
+  go "$(vf_url "$NL_CAM" "$NL_TGT" "$DAY" "$f" L)" "$READY"
+  sleep 3
+  got=0
+  while read -r line; do
+    got=$((got + 1))
+    read -r sc p50 p95 long gpu <<<"$(echo "$line" | bun -e 'const r = JSON.parse(await Bun.stdin.text()); console.log(r.scenario, r.p50, r.p95, r.long.length, r.gpuP95)')"
+    check "fps $f mm day $sc: p95 ≤ $FPS_BUDGET_MS ms" "$(ok "$p95 > 0 && $p95 <= $FPS_BUDGET_MS")" "p50 $p50 ms, p95 $p95 ms, $long long tasks, GPU p95 $gpu ms"
+  done < <(bun "$ROOT/scripts/smoke/lod2-fps.ts" "$CDP" "$PORT" idle,drag 3)
+  [ "$got" = 2 ] || check "fps $f mm day: measured" 0 "$got of 2 scenarios reported"
+done
+rmdir "$LOCK"
+trap - EXIT
 
 rm -f "$OUT/.frame.png"
 [ "$VITE" = 1 ] && lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | xargs -r kill
