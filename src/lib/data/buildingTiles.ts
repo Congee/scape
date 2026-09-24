@@ -20,13 +20,21 @@ export function setBuildingTileCacheSize(n: number): void {
 export type { DecodedBuildings };
 
 /** The 180 GB planet archive is never downloaded whole: tiles are read with HTTP range requests. */
-const archive = new PMTiles(new FetchSource(OVERTURE_BUILDINGS_URL));
+let archive = new PMTiles(new FetchSource(OVERTURE_BUILDINGS_URL));
 
 /** Decompressed MVT bytes of one tile: an offline region first, the live archive otherwise; null when empty. */
 export function buildingTileBytes(z: number, x: number, y: number, signal?: AbortSignal): Promise<ArrayBuffer | null> {
   return readThrough(
     () => localBuildings.tile(z, x, y),
-    async () => (await archive.getZxy(z, x, y, signal))?.data ?? null
+    async () => {
+      try {
+        return (await archive.getZxy(z, x, y, signal))?.data ?? null;
+      } catch (e) {
+        // pmtiles keeps a rejected header or directory, so a fetch made offline would fail for good.
+        if (!signal?.aborted) archive = new PMTiles(new FetchSource(OVERTURE_BUILDINGS_URL));
+        throw e;
+      }
+    }
   );
 }
 
