@@ -1,5 +1,6 @@
 import { BUILDINGS_ATTRIBUTION } from '@data/buildingTiles';
 import { compositionStore, useComposition, type Composition } from '@state/composition';
+import { lod2Drawn, useLod2 } from '@state/lod2';
 import { useWorld } from '@state/world';
 import { PhotoTools } from './PhotoTools';
 
@@ -26,6 +27,7 @@ const CHIPS: [BoolKey, string, string][] = [
 export function ViewTools() {
   const c = useComposition();
   const pin2 = useWorld((s) => s.pin2);
+  const lod2 = lod2Drawn(useLod2((s) => s.tiles));
   const update = compositionStore.getState().update;
   return (
     <div className="vf-tools chips" aria-label="Viewfinder layers">
@@ -38,7 +40,18 @@ export function ViewTools() {
         </button>
       ))}
       <PhotoTools />
-      <p className="muted hint">Buildings: {BUILDINGS_ATTRIBUTION}</p>
+      <p className="muted hint">
+        Buildings: {BUILDINGS_ATTRIBUTION}
+        {c.showBuildings &&
+          lod2.map((r) => (
+            <span key={r.id} data-lod2={r.id}>
+              {' · '}
+              <a href={r.attributionUrl} target="_blank" rel="noreferrer">
+                {r.attribution}
+              </a>
+            </span>
+          ))}
+      </p>
     </div>
   );
 }
