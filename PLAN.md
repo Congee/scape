@@ -514,6 +514,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
   (vs a floating toolbar?); the photo is kept in memory only (IndexedDB per plan?); a photo without
   EXIF spans the frame width (lock to the current lens?); nudges step 0.002 photo widths / 0.1°;
   a body behind a building stays ghosted at 35% (hide it fully?).
+- Models P3b (import sheet, export, imported render): "On a building" waits for the next map click
+  (vs a persistent Overture selection?); a file carrying `extras.scape` still waits for Place (vs
+  placing on pick?); the Height nudge is off for Imported models.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
