@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo/geodesy';
 import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
-import { buildDetailBound, buildHeightBound, nearGroundElRad, planDetailBound } from '@core/terrain/heightBound';
-import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildLevel, enuBoxUnitBounds, levelCellM, levelsForRange, samplePoint, selectBlocks, type Selection } from '@core/terrain/mesh';
+import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
+import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildLevel, enuBoxUnitBounds, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { sweepView } from '@core/terrain/view';
@@ -158,26 +158,17 @@ async function mesh(req: MeshRequest): Promise<null> {
   const plan = planHeightBound(req.pin, rootLevel);
   const planDetail = () => (req.view ? planDetailBound(req.pin, req.view, req.rangeM, DETAIL_ZOOMS[0], DETAIL_ZOOMS[1], TERRAIN_TILE_SIZE) : null);
   const early = req.view && req.view.hfovDeg < DETAIL_PREFETCH_HFOV_DEG ? planDetail() : null;
-  const demCellM = metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);
-  const nearHalfM = blockSideM(0);
-  // The cubic stencil reaches two posts past the square.
-  const nearTiles = req.view ? tilesInBounds(enuBoxUnitBounds(req.pin, -nearHalfM - 2 * demCellM, -nearHalfM - 2 * demCellM, nearHalfM + 2 * demCellM, nearHalfM + 2 * demCellM), TERRAIN_MAX_ZOOM) : [];
-  const releasePlan = cache.retain([...plan.tiles, ...nearTiles]);
+  const releasePlan = cache.retain(plan.tiles);
   let sel: Selection;
   try {
-    const coarse = Promise.all([cache.loadAll(plan.tiles), cache.loadAll(nearTiles)]);
+    const coarse = cache.loadAll(plan.tiles);
     // Queued behind the coarse tiles, and unretained: the selection retains them only if it wants them.
     if (early) void cache.loadAll(early.tiles).catch(() => {});
     await coarse;
     if (latest.Mesh !== req.id) return null;
-    const nearGround = (e: number, n: number) => {
-      const p = samplePoint(req.pin, e, n);
-      return elevationAtCubic(cache, p.lng, p.lat, TERRAIN_MAX_ZOOM);
-    };
     const opts = {
       rangeM: req.rangeM,
-      demCellM,
-      nearGroundElRad: req.view ? nearGroundElRad(nearGround, eyeM, nearHalfM, demCellM / 2) : undefined,
+      demCellM: metersPerPixel(req.pin.lat, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE),
       view: req.view,
       heightBoundM: buildHeightBound(req.pin, cache, plan.zoom, metersPerPixel(req.pin.lat, plan.zoom, TERRAIN_TILE_SIZE), rootLevel),
       eyeM

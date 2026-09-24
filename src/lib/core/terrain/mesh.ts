@@ -119,8 +119,6 @@ export interface SelectOptions {
   eyeM?: number;
   /** A tighter bound where finer tiles are loaded, null elsewhere; it may only spend what it saves. */
   detailBoundM?: (b: BlockId) => { minM: number; maxM: number } | null;
-  /** Highest elevation, radians, any ground within one finest block of the eye subtends; omitted keeps it in frame. */
-  nearGroundElRad?: number;
 }
 
 export interface Selection {
@@ -148,12 +146,12 @@ const KEY_SIDE = 2 * KEY_HALF;
 const blockKey = (level: number, ix: number, iy: number): number => (level * KEY_SIDE + iy + KEY_HALF) * KEY_SIDE + ix + KEY_HALF;
 
 /** Distance from the eye to the nearest point of a block, metres; 0 when the eye is inside it. */
-export function nearestDistM(e0: number, n0: number, e1: number, n1: number): number {
+function nearestDistM(e0: number, n0: number, e1: number, n1: number): number {
   return Math.hypot(Math.max(e0, -e1, 0), Math.max(n0, -n1, 0));
 }
 
 /** Distance from the eye to the farthest point of a block, metres. */
-export function farthestDistM(e0: number, n0: number, e1: number, n1: number): number {
+function farthestDistM(e0: number, n0: number, e1: number, n1: number): number {
   return Math.hypot(Math.max(-e0, e1), Math.max(-n0, n1));
 }
 
@@ -223,8 +221,7 @@ export function frameWedgeHalfDeg(view: MeshView): number {
 }
 
 /** Role of each block for one view: the padded frame, the band below it that can shadow it, or neither. */
-/** With `eye`, a block holding the eye takes its children's strongest role instead of always the frame. */
-function classifier(opts: SelectOptions, bound: SelectOptions['heightBoundM'], eye = false): (b: BlockId) => BlockRole {
+function classifier(opts: SelectOptions, bound: SelectOptions['heightBoundM']): (b: BlockId) => BlockRole {
   const view = opts.view;
   if (!view) return () => BlockRole.Coarse;
   const viewMid = view.azimuthDeg * D2R;
@@ -244,24 +241,17 @@ function classifier(opts: SelectOptions, bound: SelectOptions['heightBoundM'], e
     // A null span is the eye inside the block, or a wedge that has grown to the whole circle.
     return !span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf;
   };
-  const self = (b: BlockId): BlockRole => {
+  return (b) => {
     const s = blockSideM(b.level);
     const e0 = b.ix * s;
     const n0 = b.iy * s;
     const d = nearestDistM(e0, n0, e0 + s, n0 + s);
-    if (d === 0 && eye && b.level > 0) {
-      let r: BlockRole = BlockRole.Coarse;
-      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) r = Math.max(r, self({ level: b.level - 1, ix: 2 * b.ix + dx, iy: 2 * b.iy + dy })) as BlockRole;
-      return r;
-    }
-    // d === 0 is the eye inside the block, where every elevation is covered unless the ground near it is known.
-    const near = d === 0 && eye && opts.nearGroundElRad !== undefined ? { loRad: -Math.PI / 2, hiRad: opts.nearGroundElRad } : null;
+    // d === 0 is the eye inside the block, where every elevation is covered.
     const bnd = bound && d > 0 ? bound(b) : null;
-    const band = near ?? (bnd ? elevationSpanRad(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s)) : null);
+    const band = bnd ? elevationSpanRad(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s)) : null;
     if (within(e0, n0, s, band, elLo, elHi)) return BlockRole.Frame;
     return within(e0, n0, s, band, castLo, elHi) ? BlockRole.Caster : BlockRole.Coarse;
   };
-  return self;
 }
 
 /** The fewest roles any bound inside `bound` could give: the block's terrain may sit at either end of it. */
@@ -271,11 +261,8 @@ function leastRole(opts: SelectOptions, bound: NonNullable<SelectOptions['height
   return (b) => Math.min(low(b), high(b)) as BlockRole;
 }
 
-/** Finest level a coarse block holding the eye stops at; a coarser one would stretch the shadow cascades' depth range. */
-export const EYE_LEAF_LEVEL = 7;
-
 /** One descent, with no budget check. Frame and caster blocks take `fineRad` inside the reach, each down to its own floor. */
-function descend(rootLevel: number, frameFloor: number, casterFloor: number, role: (b: BlockId) => BlockRole, fineRad: number, reachM: number, eyeLeaf = false): Map<number, Leaf> {
+function descend(rootLevel: number, frameFloor: number, casterFloor: number, role: (b: BlockId) => BlockRole, fineRad: number, reachM: number): Map<number, Leaf> {
   const leaves = new Map<number, Leaf>();
   const stack = rootBlocks(rootLevel);
   while (stack.length) {
@@ -287,8 +274,7 @@ function descend(rootLevel: number, frameFloor: number, casterFloor: number, rol
     const r = role(b);
     const target = r !== BlockRole.Coarse && d <= reachM ? fineRad : COARSE_TARGET_RAD;
     const floor = r === BlockRole.Frame ? frameFloor : casterFloor;
-    const leaf = eyeLeaf && d === 0 && r === BlockRole.Coarse && b.level <= EYE_LEAF_LEVEL;
-    if (!leaf && b.level > floor && levelCellM(b.level) > target * d) {
+    if (b.level > floor && levelCellM(b.level) > target * d) {
       for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) stack.push({ level: b.level - 1, ix: 2 * b.ix + dx, iy: 2 * b.iy + dy });
     } else {
       leaves.set(blockKey(b.level, b.ix, b.iy), { ...b, role: r });
@@ -459,12 +445,6 @@ export function selectBlocks(opts: SelectOptions): Selection {
       minLevel--;
       leaves = finer;
     }
-  }
-  if (opts.view) {
-    // Pinned to the ladder's reach and cell: re-laddered, the saving would buy a finer mesh and a different picture.
-    const eyeRole = classifier(opts, tight, true);
-    leaves = descend(rootLevel, minLevel, casterFloor, eyeRole, targetRad, reachM, true);
-    balance(leaves, rootLevel, eyeRole, false);
   }
   const byLevel = new Map<number, BlockId[]>();
   for (const { level, ix, iy } of leaves.values()) {

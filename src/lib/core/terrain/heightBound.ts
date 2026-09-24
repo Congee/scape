@@ -8,7 +8,7 @@
 import { destination, type LngLat } from '@core/geo/geodesy';
 import { lngLatToTilePixel, metersPerPixel, tileKey, type TileCoord } from '@core/terrain/tiles';
 import { elevationAt, type DemSource, type DemTile } from './dem';
-import { BLOCKS_PER_SIDE, BASE_CELL_M, blockSideM, blockUnitBounds, farthestDistM, frameWedgeHalfDeg, nearestDistM, samplePoint, type BlockId, type MeshView } from './mesh';
+import { BLOCKS_PER_SIDE, BASE_CELL_M, blockSideM, blockUnitBounds, frameWedgeHalfDeg, samplePoint, type BlockId, type MeshView } from './mesh';
 
 /**
  * Vertical slack for the relief the coarse posts step over: a 2:1 slope across the worst-case gap
@@ -287,33 +287,4 @@ export function planDetailBound(pin: LngLat, view: MeshView, rangeM: number, min
     if (tiles.size <= DETAIL_MAX_TILES) return { zoom: z, tiles: [...tiles.values()] };
   }
   return null;
-}
-
-/**
- * Highest elevation, radians, that ground within `halfM` of the eye (ENU square) can subtend, from `height`
- * sampled every `stepM` or finer. Each cell's own relief pads its top for what the samples step over; any
- * missing sample gives Infinity, so the ground is never assumed out of the frame.
- */
-export function nearGroundElRad(height: (e: number, n: number) => number, eyeM: number, halfM: number, stepM: number): number {
-  const k = Math.max(1, Math.ceil((2 * halfM) / stepM));
-  const st = (2 * halfM) / k;
-  const row = (j: number) => Array.from({ length: k + 1 }, (_, i) => height(-halfM + i * st, -halfM + j * st));
-  let lo = row(0);
-  let best = -Math.PI / 2;
-  for (let j = 0; j < k; j++) {
-    const hi = row(j + 1);
-    for (let i = 0; i < k; i++) {
-      const hs = [lo[i], lo[i + 1], hi[i], hi[i + 1]];
-      if (hs.some(Number.isNaN)) return Infinity;
-      const top = Math.max(...hs);
-      const rise = 2 * top - Math.min(...hs) - eyeM;
-      const e0 = -halfM + i * st;
-      const n0 = -halfM + j * st;
-      // Below the eye the shallowest look is at the far edge; above it, at the near one.
-      const r = rise <= 0 ? farthestDistM(e0, n0, e0 + st, n0 + st) : nearestDistM(e0, n0, e0 + st, n0 + st);
-      best = Math.max(best, Math.atan2(rise, r));
-    }
-    lo = hi;
-  }
-  return best;
 }

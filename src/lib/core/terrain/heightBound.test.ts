@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DemSource, DemTile } from './dem';
-import { buildDetailBound, buildHeightBound, DETAIL_MAX_TILES, nearGroundElRad, planDetailBound, RELIEF_PAD_POSTS } from './heightBound';
+import { buildDetailBound, buildHeightBound, DETAIL_MAX_TILES, planDetailBound, RELIEF_PAD_POSTS } from './heightBound';
 import { BLOCKS_PER_SIDE, blockSideM, samplePoint, type MeshView } from './mesh';
 import { lngLatToTilePixel, metersPerPixel } from './tiles';
 
@@ -218,25 +218,5 @@ describe('planDetailBound', () => {
 
   it('gives up rather than wait on more tiles than the cap', () => {
     expect(planDetailBound(PIN, wedge(120), 100_000, 14, 14, SIZE)).toBeNull();
-  });
-});
-
-const slope = (e: number) => 1000 + 0.5 * e;
-
-describe('nearGroundElRad', () => {
-  it('a plain under a standing eye is seen at the far corner, just below level', () => {
-    const el = nearGroundElRad(() => 1000, 1001.6, 24, 2);
-    expect(el).toBeCloseTo(Math.atan2(-1.6, Math.hypot(24, 24)), 9);
-  });
-
-  it('never under-states a slope that rises past the eye', () => {
-    const el = nearGroundElRad(slope, 1001.6, 24, 2);
-    let truth = -Math.PI / 2;
-    for (let e = -24; e <= 24; e += 0.25) for (let n = -24; n <= 24; n += 0.25) if (e || n) truth = Math.max(truth, Math.atan2(slope(e) - 1001.6, Math.hypot(e, n)));
-    expect(el).toBeGreaterThanOrEqual(truth);
-  });
-
-  it('missing ground keeps it in the frame', () => {
-    expect(nearGroundElRad((e) => (e > 10 ? NaN : 1000), 1001.6, 24, 2)).toBe(Infinity);
   });
 });
