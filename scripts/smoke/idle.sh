@@ -6,13 +6,12 @@ set -uo pipefail
 
 PORT=${1:-5427}
 CDP=${2:-9427}
-SESSION=${3:-quiet}
+SESSION=${3:-${AGENT_BROWSER_SESSION:-smoke-$CDP}}
 PROFILE=${4:-${TMPDIR:-/tmp}/brave-$SESSION}
 SECS=${5:-30}
 ONLY=${6:-}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BASE="http://localhost:$PORT"
-export AGENT_BROWSER_SESSION=$SESSION
 
 VITE=0
 if ! curl -s -o /dev/null "$BASE/"; then
@@ -31,7 +30,7 @@ for u in "$BASE/" "http://localhost:$CDP/json/version"; do
 done
 
 # The harness reuses the tab on this origin; a background tab is hidden and would pause the clock.
-agent-browser --cdp "$CDP" open "$BASE/" >/dev/null 2>&1
+agent-browser --cdp "$CDP" --session "$SESSION" open "$BASE/" >/dev/null 2>&1
 bun "$ROOT/scripts/smoke/idle.ts" "$CDP" "$PORT" "$PROFILE" "$SECS" "$ONLY"
 RC=$?
 
