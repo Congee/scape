@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { StyleSpecification } from 'maplibre-gl';
 import { tileCountInBounds, tileIdsInBounds } from '@core/tiles/pmtiles';
 import {
+  BASEMAP_DEFAULT_MAX_TILES,
   OFM_ATTRIBUTION,
   assetUrl,
+  basemapByDefault,
   buildOfTemplate,
   glyphUrls,
   isPmtilesUrl,
@@ -75,6 +77,14 @@ describe('OpenFreeMap tile enumeration', () => {
   it('mirrors the basemap zoom policy within the source range', () => {
     expect(packZooms(0, 15, { minZoom: 0, maxZoom: 14 })).toEqual([0, 14]);
     expect(packZooms(0, 12, { minZoom: 0, maxZoom: 14 })).toEqual([0, 12]);
+  });
+
+  it('joins the terrain download by default only up to the tile cap', () => {
+    const nyc = { west: -74.3, south: 40.5, east: -73.7, north: 40.95 };
+    expect(basemapByDefault(HOBOKEN, 14)).toBe(true);
+    expect(tileCountInBounds(nyc, 0, 14)).toBeGreaterThan(BASEMAP_DEFAULT_MAX_TILES);
+    expect(basemapByDefault(nyc, 14)).toBe(false);
+    expect(basemapByDefault(nyc, 10)).toBe(true);
   });
 
   it('packs Hoboken to z14 in at most 50 tiles', () => {

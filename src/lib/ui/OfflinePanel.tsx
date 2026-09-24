@@ -6,7 +6,7 @@ import { bytes } from '@core/format';
 import { BUILDINGS_DEFAULT_MAX_TILES, BUILDINGS_ZOOM, buildingsByDefault } from '@core/tiles/buildingsRegion';
 import { PmFlavor } from '@data/basemaps';
 import { OVERTURE_BUILDINGS_RELEASE, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
-import { isPmtilesUrl, OFM_STYLE, OFM_TILEJSON } from '@data/openfreemap';
+import { BASEMAP_DEFAULT_MAX_TILES, basemapByDefault, isPmtilesUrl, OFM_STYLE, OFM_TILEJSON } from '@data/openfreemap';
 import { PROTOMAPS_BUILD } from '@data/protomaps';
 import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
 import { defaultBasemapSourceUrl, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
@@ -89,7 +89,7 @@ export function OfflinePanel() {
   const [error, setError] = useState<string | null>(null);
   /** Null follows the region's size. */
   const [withBuildings, setWithBuildings] = useState<boolean | null>(null);
-  const [withBasemap, setWithBasemap] = useState(false);
+  const [withBasemap, setWithBasemap] = useState<boolean | null>(null);
 
   useEffect(() => {
     const s = offlineStore.getState();
@@ -121,6 +121,7 @@ export function OfflinePanel() {
     };
   };
   const buildingsOn = draft ? (withBuildings ?? buildingsByDefault(draft)) : false;
+  const basemapOn = draft ? (withBasemap ?? basemapByDefault(draft, maxZoom)) : false;
 
   const runEstimate = async (kind: ArchiveKind) => {
     if (!draft) return;
@@ -140,7 +141,7 @@ export function OfflinePanel() {
     setError(null);
     o.download(spec(kind, draft));
     if (kind === ArchiveKind.Terrain && buildingsOn) o.download(spec(ArchiveKind.Buildings, draft));
-    if (kind === ArchiveKind.Terrain && withBasemap) o.download(spec(ArchiveKind.Basemap, draft));
+    if (kind === ArchiveKind.Terrain && basemapOn) o.download(spec(ArchiveKind.Basemap, draft));
   };
 
   const update = (a: ArchiveMeta) => {
@@ -269,8 +270,8 @@ export function OfflinePanel() {
         {basemapEstimate && <span className="muted">{estimateLabel(basemapEstimate)}</span>}
       </div>
       <label className="toggle">
-        <input type="checkbox" checked={withBasemap} disabled={!draft} onChange={(e) => setWithBasemap(e.target.checked)} />
-        <span>Include in the terrain download (off by default)</span>
+        <input type="checkbox" checked={basemapOn} disabled={!draft} onChange={(e) => setWithBasemap(e.target.checked)} />
+        <span>Include in the terrain download (on by default up to {BASEMAP_DEFAULT_MAX_TILES} tiles)</span>
       </label>
       <div className="field">
         <span>Terrain</span>

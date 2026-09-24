@@ -50,6 +50,14 @@ js "(()=>{__scape.offline.getState().setDraft($BBOX); return 1})()" >/dev/null
 offlineTab
 src=$(js "document.querySelector('select[aria-label=\"Basemap source\"]').value+' '+document.querySelector('input[aria-label=\"Basemap source URL\"]').value+' z'+document.querySelector('select[aria-label=\"Highest basemap zoom\"]').value")
 check "OpenFreeMap is the default source" "$([ "$src" = 'openfreemap https://tiles.openfreemap.org/planet z14' ] && echo 1 || echo 0)" "$src"
+INCL="[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('Include in the terrain download'))?.querySelector('input')?.checked"
+small=$(js "$INCL")
+js "(()=>{__scape.offline.getState().setDraft({west:-74.3,south:40.5,east:-73.7,north:40.95}); return 1})()" >/dev/null
+ab wait 300 >/dev/null
+big=$(js "$INCL")
+js "(()=>{__scape.offline.getState().setDraft($BBOX); return 1})()" >/dev/null
+ab wait 300 >/dev/null
+check "basemap joins the terrain download by default up to 100 tiles" "$([ "$small" = true ] && [ "$big" = false ] && echo 1 || echo 0)" "Hoboken=$small, NYC=$big"
 ab fill "input[aria-label='Name for the region']" "$NAME" >/dev/null
 js "(()=>{[...document.querySelectorAll('button')].filter(b=>b.textContent==='Estimate')[0].click(); return 1})()" >/dev/null
 poll "[...document.querySelectorAll('.actions .muted')].some(s=>/tiles ·/.test(s.textContent))" 30

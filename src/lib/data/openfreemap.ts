@@ -1,6 +1,8 @@
 /** OpenFreeMap per-tile vector source packed into local archives. Pure: URL and style rewriting only. */
 
 import type { StyleSpecification } from 'maplibre-gl';
+import type { Bbox } from '@core/geo/bbox';
+import { tileCountInBounds } from '@core/tiles/pmtiles';
 
 /** TileJSON of the current planet build; its tile URL carries a build stamp that changes. */
 export const OFM_TILEJSON = 'https://tiles.openfreemap.org/planet';
@@ -76,6 +78,12 @@ export function buildOfTemplate(template: string): string | null {
 export function tileUrl(template: string, z: number, x: number, y: number): string {
   return template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
 }
+
+/** Same cap as buildings: Hoboken at z14 is 19 tiles, about 3 MB. */
+export const BASEMAP_DEFAULT_MAX_TILES = 100;
+
+/** Whether the terrain download takes the basemap along by default. */
+export const basemapByDefault = (b: Bbox, maxZoom: number): boolean => tileCountInBounds(b, 0, maxZoom) <= BASEMAP_DEFAULT_MAX_TILES;
 
 /** Zoom levels fetched: the basemap policy (0 to the chosen maximum) within what the source has. */
 export function packZooms(minZoom: number, maxZoom: number, src: Pick<TileJsonSource, 'minZoom' | 'maxZoom'>): [number, number] {
