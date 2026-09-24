@@ -18,6 +18,8 @@ export interface Lod2Region {
   attributionUrl: string;
   /** Content heights minus sea level, when no per-building ground says otherwise. */
   geoidM: number;
+  /** Heights came from JGD2011 orthometric heights through GSIGEO2011, so a user-imported GSI grid replaces `geoidM`. */
+  gsiGeoid?: boolean;
   /** Per-building ground height above sea level, in the tile's property table. */
   groundProperty?: string;
   /** Stable building id in the property table. */
@@ -38,6 +40,7 @@ function plateau(city: string, path: string, bbox: Lod2Region['bbox']): Lod2Regi
     attributionUrl: 'https://www.mlit.go.jp/plateau/',
     // Tokyo's geoid; the tiles have no ground column.
     geoidM: 36.7,
+    gsiGeoid: true,
     idProperty: 'gml_id'
   };
 }

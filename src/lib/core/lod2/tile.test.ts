@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { curvatureDropM, destination, type LngLat } from '@core/geo/geodesy';
+import { geoidAt, parseGsiGeoid } from '@core/geo/geoid';
+import { gsiGeoidText } from '@core/geo/geoidFixture';
+import { curvatureDropM, destination, distanceM, type LngLat } from '@core/geo/geodesy';
 import type { GltfWorld } from '@core/model/gltf';
 import { geodeticToEcef } from './ecef';
 import { LOD2_REGIONS, type Lod2Region } from './regions';
@@ -83,6 +85,32 @@ describe('lod2Tile', () => {
     expect(t.buildings[1].apexM).toBeCloseTo(12.5, 6);
     expect(lod2BuildingAt(t, destination(PIN, 180, 300))).toBe(1);
     expect(lod2BuildingAt(t, destination(PIN, 90, 300))).toBe(-1);
+  });
+  it('subtracts an imported geoid per vertex, where a tile-centre value would miss by the gradient', () => {
+    // Synthetic 1 m / 10 km eastward rise on a GSI-shaped 1′ × 1.5′ grid around the pin.
+    const g0 = { lat0: 51.8, lng0: 4.3, dLat: 1 / 60, dLng: 1.5 / 60, rows: 14, cols: 16 };
+    const east = (lng: number) => Math.sign(lng - PIN.lng) * distanceM(PIN, { lng, lat: PIN.lat });
+    const grid = parseGsiGeoid(gsiGeoidText(g0, (_, c) => 40 + east(g0.lng0 + c * g0.dLng) * 1e-4));
+    const n = (p: LngLat) => geoidAt(grid, p.lat, p.lng);
+    const a = box(90, 500, 0, 30, 0);
+    const c = box(270, 500, 0, 30, 1);
+    const pts = [...a.pts, ...c.pts].map(([lng, lat, h]): [number, number, number] => [lng, lat, h + 5 + n({ lng, lat })]);
+    const { w, transform } = world(pts, [...a.feature, ...c.feature], [...a.idx, ...c.idx.map((i) => i + a.pts.length)]);
+    const t = lod2Tile(w, transform, REGION, {}, (lat, lng) => geoidAt(grid, lat, lng));
+    for (const b of t.buildings) {
+      expect(b.baseM).toBeCloseTo(5, 3);
+      expect(b.apexM).toBeCloseTo(35, 3);
+      // The tile-centre constant is off by gradient × distance: 5 cm at 500 m.
+      expect(Math.abs(n(b.c) - t.datumM)).toBeCloseTo(0.05, 2);
+    }
+    expect(t.world[2]).toBeCloseTo(5, 3);
+  });
+
+  it('reports the imported geoid at the tile centre as its datum', () => {
+    const b = box(90, 500, 45, 30, 0);
+    const { w, transform } = world(b.pts, b.feature, b.idx);
+    expect(lod2Tile(w, transform, REGION, {}, () => 12).datumM).toBe(12);
+    expect(lod2Tile(w, transform, REGION).datumM).toBe(40);
   });
 });
 

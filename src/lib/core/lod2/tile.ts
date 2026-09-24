@@ -28,7 +28,7 @@ export interface Lod2Tile {
   /** Index into `buildings` per vertex; -1 for a vertex outside any feature. */
   building: Int32Array;
   buildings: Lod2Building[];
-  /** Metres subtracted from ellipsoidal heights to reach sea level. */
+  /** Metres subtracted from ellipsoidal heights to reach sea level; at the bbox centre when a geoid grid sets it per vertex. */
   datumM: number;
   /** lng0, lat0, lng1, lat1 over every vertex. */
   bbox: [number, number, number, number];
@@ -44,9 +44,10 @@ function median(v: number[]): number {
  * The tile's GLB world through `transform` (3D Tiles' y-up turn first) into lng/lat and sea-level
  * altitude. With a ground column the datum is the median of each building's lowest vertex above
  * its recorded ground, so the geoid is read off the data rather than assumed. `batch` holds a b3dm's
- * batch-table columns, read where the GLB has no property table.
+ * batch-table columns, read where the GLB has no property table. `geoid` (lat, lng → metres) replaces
+ * `region.geoidM` per vertex when there is no ground column.
  */
-export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Region, batch: Readonly<Record<string, readonly unknown[]>> = {}): Lod2Tile {
+export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Region, batch: Readonly<Record<string, readonly unknown[]>> = {}, geoid?: (lat: number, lng: number) => number): Lod2Tile {
   const nv = w.pos.length / 3;
   const m = transform;
   const geo = new Float64Array(nv * 3);
@@ -88,15 +89,27 @@ export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Regi
   }
   const offs: number[] = [];
   if (ground) for (let b = 0; b < fid.length; b++) if (typeof ground[fid[b]] === 'number' && Number.isFinite(ground[fid[b]])) offs.push(lo[b] - (ground[fid[b]] as number));
-  const datumM = offs.length > 0 ? median(offs) : region.geoidM;
+  const perVertex = offs.length === 0 ? geoid : undefined;
   const bbox: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
   for (let v = 0; v < nv; v++) {
-    geo[v * 3 + 2] -= datumM;
     bbox[0] = Math.min(bbox[0], geo[v * 3]);
     bbox[1] = Math.min(bbox[1], geo[v * 3 + 1]);
     bbox[2] = Math.max(bbox[2], geo[v * 3]);
     bbox[3] = Math.max(bbox[3], geo[v * 3 + 1]);
   }
+  const datumM = offs.length > 0 ? median(offs) : perVertex ? perVertex((bbox[1] + bbox[3]) / 2, (bbox[0] + bbox[2]) / 2) : region.geoidM;
+  for (let v = 0; v < nv; v++) geo[v * 3 + 2] -= perVertex ? perVertex(geo[v * 3 + 1], geo[v * 3]) : datumM;
+  if (perVertex) {
+    lo.fill(Infinity);
+    hi.fill(-Infinity);
+    for (let v = 0; v < nv; v++) {
+      const b = building[v];
+      if (b < 0) continue;
+      lo[b] = Math.min(lo[b], geo[v * 3 + 2]);
+      hi[b] = Math.max(hi[b], geo[v * 3 + 2]);
+    }
+  }
+  const shift = perVertex ? 0 : datumM;
   const buildings = pts.map((p, b): Lod2Building => {
     const hull = convexHull(p);
     let cx = 0;
@@ -106,7 +119,7 @@ export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Regi
       cy += y / hull.length;
     }
     const id = ids?.[fid[b]];
-    return { id: typeof id === 'string' ? id : `${fid[b]}`, hull, baseM: lo[b] - datumM, apexM: hi[b] - datumM, c: { lng: cx, lat: cy } };
+    return { id: typeof id === 'string' ? id : `${fid[b]}`, hull, baseM: lo[b] - shift, apexM: hi[b] - shift, c: { lng: cx, lat: cy } };
   });
   return { world: geo, idx: w.idx, building, buildings, datumM, bbox };
 }
