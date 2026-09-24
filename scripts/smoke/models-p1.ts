@@ -123,7 +123,7 @@ const typeTop = async (v: number) => {
   await tab.eval(`(() => { const i = document.querySelector('input[aria-label="Part 1 top, metres"]'); i.focus(); i.select(); return true; })()`);
   await tab.send('Input.insertText', { text: String(v) });
   await tab.until(`window.__smoke.model().parts[0].heightM === ${v}`, 5000, 100);
-  await tab.eval(`[...document.querySelectorAll('.model-editor button')].find((b) => b.textContent.trim() === 'Use as target').click()`);
+  await tab.eval(`[...document.querySelectorAll('.model-editor button')].find((b) => b.textContent.trim() === 'Set target to model top').click()`);
   await settle(500);
   return js<{ h: number; from: string | null }>(`const w = S.world.getState(); return { h: w.pin2HeightM, from: w.pin2HeightFrom };`);
 };

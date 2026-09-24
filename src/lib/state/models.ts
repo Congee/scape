@@ -82,6 +82,15 @@ export const modelsStore = create<ModelsState>()(
       await get().load();
       channel?.postMessage('changed');
     },
+    importDraft: async (m) => {
+      const saved = await get().save({ ...m, updatedAt: Date.now() });
+      get().select(saved.id);
+      return saved;
+    },
+    exportGlb: (id, withParts) => {
+      const m = get().models.find((x) => x.id === id);
+      return m ? { fileName: modelFileName(m), glb: exportModelGlb(m, withParts) } : null;
+    },
     select: (selectedId) => set((s) => (s.selectedId === selectedId ? {} : { selectedId, selectedPartId: s.models.find((m) => m.id === selectedId)?.parts?.[0]?.id ?? null })),
     selectPart: (selectedPartId) => set({ selectedPartId }),
     setPicking: (picking) => set(picking ? { picking, pickError: null, draft: null } : { picking }),
