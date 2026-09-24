@@ -120,12 +120,12 @@ const HELPERS = `(() => {
     return { x: r.left + f.x, y: r.top + f.y, w: f.w, h: f.h };
   };
   const decode = (b64) => new Promise((res) => { const i = new Image(); i.onload = () => { const c = new OffscreenCanvas(i.width, i.height).getContext('2d'); c.drawImage(i, 0, 0); res(c.getImageData(0, 0, i.width, i.height)); }; i.src = 'data:image/png;base64,' + b64; });
-  /** Whole page, and the viewfinder canvas alone: page chrome can raster a hair apart between runs. */
+  /** Whole page, and the picture frame alone: page chrome can raster a hair apart between runs. */
   td.diff = async (a, b) => {
     const [x, y] = await Promise.all([decode(a), decode(b)]);
     if (x.width !== y.width || x.height !== y.height) return { size: true, px: -1, max: 255, vfPx: -1, vfMax: 255 };
-    const r = document.querySelector('canvas.vf').getBoundingClientRect(), s = x.width / window.innerWidth;
-    const x0 = Math.floor(r.left * s), x1 = Math.ceil(r.right * s), y0 = Math.floor(r.top * s), y1 = Math.ceil(r.bottom * s);
+    const r = td.frame(), s = x.width / window.innerWidth;
+    const x0 = Math.floor(r.x * s), x1 = Math.ceil((r.x + r.w) * s), y0 = Math.floor(r.y * s), y1 = Math.ceil((r.y + r.h) * s);
     let px = 0, max = 0, vfPx = 0, vfMax = 0;
     for (let k = 0; k < x.data.length; k += 4) {
       const d = Math.max(Math.abs(x.data[k] - y.data[k]), Math.abs(x.data[k + 1] - y.data[k + 1]), Math.abs(x.data[k + 2] - y.data[k + 2]));
@@ -284,6 +284,7 @@ try {
       }
       const frame = await tab.eval<{ x: number; y: number; w: number; h: number }>('window.__td.frame()');
       const c0 = await tab.eval<{ meshReq: number; meshRes: number; viewReq: number; blocks: number; reused: number; cacheMB: number }>('(({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }) => ({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }))(window.__td)');
+      const a0 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.composition.getState())');
       const mid = [1, 2, 3].map((i) => `${shots}/mid-${s}-${f}-${i}.png`);
       const p0 = await processCpu();
       const w0 = performance.now();
@@ -307,10 +308,11 @@ try {
       for (const c of cpu) console.error(`  ${c.thread}: ${(c.ms / secs).toFixed(0)} ms/s — ${c.top} | incl ${c.incl}`);
       check(`${s} ${f}mm no hole frames mid-drag`, rec.holes === 0, `${rec.holes} of ${rec.draws} draws without terrain`);
       await settle();
-      // Wall-clock pointer timing ends the drag a hair off; snap to a grid so both runs frame the same picture.
+      // Wall-clock pointer timing ends the drag a few degrees apart between runs; re-aim half a frame from the start in the drag's direction.
       const a1 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.composition.getState())');
-      const step = (2 * Math.atan(12 / f) * 180) / Math.PI / 8;
-      const [az, el] = [a1.az, a1.el].map((v) => Math.round(v / step) * step);
+      const turn = ((((a1.az - a0.az) % 360) + 540) % 360) - 180;
+      const az = (((a0.az + Math.sign(turn) * Math.atan(18 / f) * (180 / Math.PI)) % 360) + 360) % 360;
+      const el = a0.el;
       await tab.eval(`window.__scape.composition.getState().aim(${az}, ${el})`);
       console.error(`  drag end ${a1.az.toFixed(3)}/${a1.el.toFixed(3)} snapped ${az.toFixed(3)}/${el.toFixed(3)}`);
       const settledOk = await settle();
