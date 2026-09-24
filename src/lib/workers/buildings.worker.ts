@@ -4,7 +4,7 @@ import type { LngLat } from '@core/geo/geodesy';
 import { meshOccluderParts } from '@core/geo/meshOcclude';
 import { frameOf, frameToLngLat, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
 import { lod2RegionsNear, type Lod2Region, type Lod2Source } from '@core/lod2/regions';
-import { lod2BuildingAt, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
+import { lod2BuildingAt, lod2HeightAboveM, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
 import type { WalkContent } from '@core/lod2/tileset';
 import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStitch';
 import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
@@ -153,12 +153,14 @@ function fillFrameTerrain(g: HeightGrid, f: MaskFrame, zoom: number): boolean {
   return complete;
 }
 
-/** Raises the grid to every roof standing over it; returns the LoD2 sources it stamped. */
-async function stampFrameBuildings(g: HeightGrid, f: MaskFrame): Promise<Lod2Source[]> {
-  const lod2 = await stampFrameLod2(g, f);
+/** Raises the grid to every roof standing over it; returns the LoD2 sources it stamped. Stops early, partly stamped, once `live` turns false. */
+async function stampFrameBuildings(g: HeightGrid, f: MaskFrame, live: () => boolean): Promise<Lod2Source[]> {
+  const lod2 = await stampFrameLod2(g, f, live);
+  if (!live()) return lod2.regions;
   const hide = lod2.rings.length > 0 ? [...suppress, ...lod2.rings] : suppress;
   const tiles = tilesInBounds(frameBounds(f, g), BUILDINGS_ZOOM).slice(0, MASK_TILE_MAX);
   const decoded = await Promise.all(tiles.map((t) => fetchBuildingBatch(t)));
+  if (!live()) return lod2.regions;
   const grounds = await Promise.all(decoded.map((b) => (b ? groundOf(b) : null)));
   const ringE: number[] = [];
   const ringN: number[] = [];
@@ -223,7 +225,7 @@ function stampLod2(g: HeightGrid, f: MaskFrame, t: Lod2Tile): void {
 }
 
 /** Stamps the LoD2 meshes over the grid and returns their hulls, which the Overture rows then give way to. */
-async function stampFrameLod2(g: HeightGrid, f: MaskFrame): Promise<{ rings: SuppressRing[]; regions: Lod2Source[] }> {
+async function stampFrameLod2(g: HeightGrid, f: MaskFrame, live: () => boolean): Promise<{ rings: SuppressRing[]; regions: Lod2Source[] }> {
   const wE = g.nx * g.cellM;
   const wN = g.ny * g.cellM;
   const centre = frameToLngLat(f, g.originE + wE / 2, g.originN + wN / 2);
@@ -232,8 +234,12 @@ async function stampFrameLod2(g: HeightGrid, f: MaskFrame): Promise<{ rings: Sup
   const regions = new Set<Lod2Source>();
   let tris = 0;
   for (const { c, region } of around) {
+    if (!live()) break;
     // oxlint-disable-next-line no-await-in-loop -- nearest first until the budget runs out
-    const t = await fetchLod2Tile(c, region);
+    const t = await fetchLod2Tile(c, region).catch((err: unknown) => {
+      console.warn('[scape] LoD2 tile skipped in the shadow mask:', c.url, err);
+      return null;
+    });
     if (!t) continue;
     if (tris + t.idx.length / 3 > LOD2_MASK_TRIS) break;
     tris += t.idx.length / 3;
@@ -260,7 +266,7 @@ async function maskFor(req: MaskRequest): Promise<{ mask: Uint8Array; lod2: Lod2
     if (latestMask !== req.id) return null;
     // An absent building tile is far more often an empty one than a failure, and letting it veto
     // the cache would refetch every tile on each sun change.
-    lod2 = req.buildings ? await stampFrameBuildings(grid, frame) : [];
+    lod2 = req.buildings ? await stampFrameBuildings(grid, frame, () => latestMask === req.id) : [];
     if (latestMask !== req.id) return null;
     cachedMask = complete ? { key, frame, grid, lod2 } : null;
   }
@@ -276,15 +282,19 @@ async function shade(req: MaskRequest): Promise<void> {
   scope.postMessage({ kind: BuildingsKind.Shade, id, centre, originE, originN, nx, ny, cellM, mask, lod2, ms: performance.now() - t0 } satisfies BuildingsResponse, [mask.buffer]);
 }
 
-/** Apex above the lowest vertex of the LoD2 building under `p`; null where none stands. */
+/** Apex of the LoD2 building under `p` above the ground there; null where none stands. */
 async function lod2HeightAt(p: LngLat): Promise<number | null> {
   for (const { c, region } of await lod2Around(p, 1)) {
     // oxlint-disable-next-line no-await-in-loop -- the first tile holding the point answers
     const t = await fetchLod2Tile(c, region).catch(() => null);
     const b = t ? lod2BuildingAt(t, p) : -1;
-    if (t && b >= 0) return t.buildings[b].apexM - t.buildings[b].baseM;
+    if (t && b >= 0) return groundedHeight(t, b, p);
   }
   return null;
+}
+
+async function groundedHeight(t: Lod2Tile, b: number, p: LngLat): Promise<number> {
+  return lod2HeightAboveM(t.buildings[b], await lowestGroundAt(dem, [p], BUILDING_GROUND_ZOOM, TERRAIN_TILE_SIZE));
 }
 
 /** One-shot lookup; it shares the tile cache with the wedge, so a nearby target is usually free. */
@@ -360,7 +370,11 @@ async function lod2Run(req: Lod2Request): Promise<void> {
   list.sort((a, b) => a.c.distM - b.c.distM);
   const started = new Map<number, Promise<Lod2Tile | null>>();
   const start = (i: number) => {
-    if (i < list.length && !started.has(i) && !(have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) started.set(i, fetchLod2Tile(list[i].c, list[i].region));
+    if (i >= list.length || started.has(i) || (have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) return;
+    const p = fetchLod2Tile(list[i].c, list[i].region);
+    // A prefetch left behind by a newer request or the budget is never awaited.
+    p.catch(() => undefined);
+    started.set(i, p);
   };
   for (let i = 0; i < list.length; i++) {
     if (latestLod2 !== req.id) return;
