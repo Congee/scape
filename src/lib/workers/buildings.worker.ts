@@ -2,7 +2,10 @@
 import { groundForRows, groupRowsAt, heightAtPoint, pickRows, suppressedIds, suppressRing, suppressRingTiles, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
 import type { LngLat } from '@core/geo/geodesy';
 import { meshOccluderParts } from '@core/geo/meshOcclude';
+import { prismSlots } from '@core/geo/prismOcclude';
+import { buildPrisms, prismFrameKey } from '@core/geo/prismRaster';
 import { frameOf, frameToLngLat, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
+import { lod2CoverOf, type Lod2Cover } from '@core/lod2/cover';
 import { lod2RegionsNear, type Lod2Region, type Lod2Source } from '@core/lod2/regions';
 import { lod2BuildingAt, lod2HeightAboveM, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
 import type { WalkContent } from '@core/lod2/tileset';
@@ -13,7 +16,7 @@ import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForRe
 import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
 import { fetchLod2Tile, setLod2Geoid, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Placed, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Placed, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** The map's mask runs in a second instance of this module, so its caches are sized for the map rect. */
@@ -41,17 +44,33 @@ let latest = 0;
 let latestLod2 = 0;
 /** Triangles per placed url, so a tile the caller holds is kept without decoding it again. */
 const lod2Tris = new Map<string, number>();
+/** Placed tiles for one exact placement, least recently used first, so a tile the caller dropped comes back as a copy. */
+const lod2Placed = new Map<string, Lod2Placed>();
+let lod2PlacedKey = '';
+let lod2PlacedTris = 0;
+const LOD2_PLACED_TRIS = 2 * LOD2_VIEW_TRIS;
 /** Newest map-mask id; the map centre is not the camera pin, so it gets its own counter and cache. */
 let latestMask = 0;
 let models: WorkerModel[] = [];
 let modelsRev = 0;
 let suppress: SuppressRing[] = [];
+/** Bumped only when the model outlines change, so other model edits rebuild no prisms. */
+let suppressRev = 0;
+let suppressKey = '';
+/** Footprints of the LoD2 tiles placed here, least recently used first; the caller names the ones it holds. */
+const lod2Covers = new Map<string, Lod2Cover>();
+const LOD2_COVERS_MAX = 512;
+/** Ground per decoded tile; a window change does not move it. */
+const groundCache = new WeakMap<DecodedBuildings, Float32Array>();
 let geoidKey = '';
 
 function syncModels(req: ModelsSync): void {
   models = req.models;
   modelsRev = req.rev;
   suppress = models.flatMap((m) => m.suppress.map(suppressRing));
+  const key = models.flatMap((m) => m.suppress).map((r) => r.flat().join(',')).join('|');
+  if (key !== suppressKey) suppressRev++;
+  suppressKey = key;
 }
 
 function syncGeoid(req: GeoidSync): void {
@@ -86,26 +105,63 @@ function withGround(batch: DecodedBuildings, groundM: Float32Array): { batch: Bu
   return { batch: out, transfer: arrays.map((a) => a.buffer as ArrayBuffer) };
 }
 
-/** Ground per row on the surface the mesh draws, after loading the DEM tiles its samples need. */
+/** Ground per row on the surface the mesh draws, after loading the DEM tiles its samples need; `complete` is false when a DEM tile could not be read. */
 // A fixed finest zoom, not the mesh's per-level one: that depends on view direction, so bases would shift on pan.
-async function groundOf(decoded: DecodedBuildings): Promise<Float32Array> {
-  if (decoded.count === 0) return new Float32Array(0);
+async function groundOf(decoded: DecodedBuildings): Promise<{ groundM: Float32Array; complete: boolean }> {
+  const cached = groundCache.get(decoded);
+  if (cached) return { groundM: cached, complete: true };
+  if (decoded.count === 0) return { groundM: new Float32Array(0), complete: true };
   const need = new Map<string, TileCoord>();
   const want = (lng: number, lat: number) => {
     for (const t of cubicStencilTiles(lng, lat, BUILDING_GROUND_ZOOM, TERRAIN_TILE_SIZE)) need.set(tileKey(t.z, t.x, t.y), t);
   };
   for (let i = 0; i < decoded.count; i++) want(decoded.cLng[i], decoded.cLat[i]);
   for (let i = 0; i < decoded.lng.length; i++) want(decoded.lng[i], decoded.lat[i]);
-  return withDemTiles(dem, [...need.values()], () => groundForRows(decoded, (lng, lat) => elevationAtCubic(dem, lng, lat, BUILDING_GROUND_ZOOM)));
+  const coords = [...need.values()];
+  const out = await withDemTiles(dem, coords, () => ({
+    groundM: groundForRows(decoded, (lng, lat) => elevationAtCubic(dem, lng, lat, BUILDING_GROUND_ZOOM)),
+    // A transient fetch error leaves the tile unset, so a later request grounds it again.
+    complete: coords.every((c) => dem.get(c.z, c.x, c.y) !== undefined)
+  }));
+  if (out.complete) groundCache.set(decoded, out.groundM);
+  return out;
 }
 
+/** Moves a cover to the recent end, dropping the oldest past the cap. */
+function touchCover(c: Lod2Cover): void {
+  lod2Covers.delete(c.url);
+  lod2Covers.set(c.url, c);
+  while (lod2Covers.size > LOD2_COVERS_MAX) lod2Covers.delete(lod2Covers.keys().next().value!);
+}
+
+/** Places the wedge's tiles and any held tile whose models, LoD2 cover or frame changed; a tile still matching is skipped. */
 async function run(req: TilesRequest): Promise<void> {
-  const have = new Set(req.have);
-  const tiles = tilesForWedge(req.pin, req.azFromDeg, req.azSpanDeg, req.rangeM).filter((t) => !have.has(tileKey(t.z, t.x, t.y)));
+  const frame = prismFrameKey(req.pin, req.eyeM);
+  const wedge = tilesForWedge(req.pin, req.azFromDeg, req.azSpanDeg, req.rangeM);
+  const have = new Map(req.have);
+  const inWedge = new Set(wedge.map((t) => tileKey(t.z, t.x, t.y)));
+  for (const k of have.keys()) {
+    if (inWedge.has(k)) continue;
+    const [z, x, y] = k.split('/').map(Number);
+    wedge.push({ z, x, y });
+  }
+  const covers: Lod2Cover[] = [];
+  for (const url of req.lod2Urls) {
+    const c = lod2Covers.get(url);
+    if (!c) continue;
+    touchCover(c);
+    covers.push(c);
+  }
+  const tiles: { t: TileCoord; cover: { sig: string; rings: SuppressRing[] }; sig: string }[] = [];
+  for (const t of wedge) {
+    const cover = lod2CoverOf(tileKey(t.z, t.x, t.y), covers);
+    const sig = `${frame}|${suppressRev}|${cover.sig}`;
+    if (have.get(tileKey(t.z, t.x, t.y)) !== sig) tiles.push({ t, cover, sig });
+  }
   let missing = 0;
   let sent = 0;
   // All fetches start now so the data layer's concurrency limiter runs; they are consumed nearest first.
-  const pending = tiles.map((t) => fetchBuildingBatch(t));
+  const pending = tiles.map(({ t }) => fetchBuildingBatch(t));
   for (let n = 0; n < tiles.length; n++) {
     if (latest !== req.id) return;
     // oxlint-disable-next-line no-await-in-loop -- tiles stream nearest first, one at a time
@@ -115,11 +171,16 @@ async function run(req: TilesRequest): Promise<void> {
       missing++;
       continue;
     }
+    const { cover, sig } = tiles[n];
     // oxlint-disable-next-line no-await-in-loop -- one DEM wait per streamed tile
-    const groundM = await groundOf(decoded);
+    const { groundM, complete } = await groundOf(decoded);
     if (latest !== req.id) return;
-    const { batch, transfer } = withGround(decoded, groundM);
-    scope.postMessage({ kind: BuildingsKind.Tiles, id: req.id, batch } satisfies BuildingsResponse, transfer);
+    const kept = suppressRows({ ...decoded, groundM }, cover.rings.length > 0 ? [...suppress, ...cover.rings] : suppress);
+    const prism = buildPrisms(kept, req.pin, req.eyeM);
+    const slots = prismSlots(prism, req.rangeM);
+    const tile: PrismPlaced = { tileKey: decoded.tileKey, frame, sig: complete ? sig : `${sig}|partial`, prism, slots, hidden: decoded.count - kept.count };
+    const arrays = [...Object.values(prism), slots.start, slots.i, slots.uMin, slots.uMax].filter((a) => ArrayBuffer.isView(a));
+    scope.postMessage({ kind: BuildingsKind.Tiles, id: req.id, tile } satisfies BuildingsResponse, [...new Set(arrays.map((a) => a.buffer as ArrayBuffer))]);
     sent++;
   }
   if (latest !== req.id) return;
@@ -161,7 +222,7 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame, live: () => bool
   const tiles = tilesInBounds(frameBounds(f, g), BUILDINGS_ZOOM).slice(0, MASK_TILE_MAX);
   const decoded = await Promise.all(tiles.map((t) => fetchBuildingBatch(t)));
   if (!live()) return lod2.regions;
-  const grounds = await Promise.all(decoded.map((b) => (b ? groundOf(b) : null)));
+  const grounds = await Promise.all(decoded.map(async (b) => (b ? (await groundOf(b)).groundM : null)));
   const ringE: number[] = [];
   const ringN: number[] = [];
   for (const [t, raw] of decoded.entries()) {
@@ -330,7 +391,7 @@ async function rowsAt(req: RowsAtRequest): Promise<void> {
     queue.push(...edgeNeighbours(rows, t));
   }
   const merged = got.size > 1 ? mergeTileRows([...got.values()]) : hit;
-  const { batch, transfer } = withGround(merged, await groundOf(merged));
+  const { batch, transfer } = withGround(merged, (await groundOf(merged)).groundM.slice());
   scope.postMessage({ kind: BuildingsKind.Rows, id: req.id, batch } satisfies BuildingsResponse, transfer);
 }
 
@@ -351,6 +412,20 @@ function placed(t: Lod2Tile, c: WalkContent, region: Lod2Region, req: Lod2Reques
   return { tile, transfer };
 }
 
+/** Moves a placed tile to the recent end, dropping the oldest past the triangle budget. */
+function keepPlaced(t: Lod2Placed): void {
+  const old = lod2Placed.get(t.url);
+  if (old) lod2PlacedTris -= old.tris;
+  lod2Placed.delete(t.url);
+  lod2Placed.set(t.url, t);
+  lod2PlacedTris += t.tris;
+  for (const [url, o] of lod2Placed) {
+    if (lod2PlacedTris <= LOD2_PLACED_TRIS || url === t.url) break;
+    lod2Placed.delete(url);
+    lod2PlacedTris -= o.tris;
+  }
+}
+
 /** Streams the wedge's LoD2 tiles nearest first until the triangle budget is spent. */
 async function lod2Run(req: Lod2Request): Promise<void> {
   const have = new Set(req.have);
@@ -366,9 +441,15 @@ async function lod2Run(req: Lod2Request): Promise<void> {
     if (latestLod2 !== req.id) return;
   }
   list.sort((a, b) => a.c.distM - b.c.distM);
+  const placeKey = `${req.pin.lat},${req.pin.lng}|${req.eyeM}|${geoidKey}`;
+  if (placeKey !== lod2PlacedKey) {
+    lod2PlacedKey = placeKey;
+    lod2Placed.clear();
+    lod2PlacedTris = 0;
+  }
   const started = new Map<number, Promise<Lod2Tile | null>>();
   const start = (i: number) => {
-    if (i >= list.length || started.has(i) || (have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) return;
+    if (i >= list.length || started.has(i) || lod2Placed.has(list[i].c.url) || (have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) return;
     const p = fetchLod2Tile(list[i].c, list[i].region);
     // A prefetch left behind by a newer request or the budget is never awaited.
     p.catch(() => undefined);
@@ -380,8 +461,21 @@ async function lod2Run(req: Lod2Request): Promise<void> {
     const known = have.has(c.url) ? lod2Tris.get(c.url) : undefined;
     if (known !== undefined) {
       if (tris + known > LOD2_VIEW_TRIS) break;
+      const cover = lod2Covers.get(c.url);
+      if (cover) touchCover(cover);
       tris += known;
       urls.push(c.url);
+      continue;
+    }
+    const kept = lod2Placed.get(c.url);
+    if (kept) {
+      if (tris + kept.tris > LOD2_VIEW_TRIS) break;
+      keepPlaced(kept);
+      tris += kept.tris;
+      urls.push(c.url);
+      const cover = lod2Covers.get(c.url);
+      if (cover) touchCover(cover);
+      scope.postMessage({ kind: BuildingsKind.Lod2Tile, id: req.id, tile: { ...kept, ms: 0 } } satisfies BuildingsResponse);
       continue;
     }
     for (let k = i; k <= i + LOD2_AHEAD; k++) start(k);
@@ -400,7 +494,10 @@ async function lod2Run(req: Lod2Request): Promise<void> {
     }
     if (tris + t.idx.length / 3 > LOD2_VIEW_TRIS) break;
     const { tile, transfer } = placed(t, c, region, req, t0);
+    // The copy is taken before the transfer detaches the arrays.
+    keepPlaced(structuredClone(tile));
     lod2Tris.set(c.url, tile.tris);
+    touchCover({ url: c.url, bbox: t.bbox, rings: t.buildings.map((b) => suppressRing(b.hull)) });
     tris += tile.tris;
     urls.push(c.url);
     scope.postMessage({ kind: BuildingsKind.Lod2Tile, id: req.id, tile } satisfies BuildingsResponse, transfer);

@@ -3,11 +3,12 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import type { MaskRect } from '@core/geo/shadowMask';
+import { adoptPrismSlots } from '@core/geo/prismOcclude';
 import type { Lod2Source } from '@core/lod2/regions';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, finishLod2, lod2Store } from './lod2';
 
-/** Decoded tiles kept in the store; beyond this the farthest from the pin are dropped. */
+/** Placed tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
 /** A height lookup that never comes back resolves null rather than leaving the caller hanging. */
 const HEIGHT_TIMEOUT_MS = 15_000;
@@ -15,8 +16,8 @@ const HEIGHT_TIMEOUT_MS = 15_000;
 const SUN_QUANTUM_DEG = 0.25;
 
 export interface BuildingsState {
-  /** Decoded tiles by "14/x/y". */
-  tiles: ReadonlyMap<string, BuildingBatch>;
+  /** Prisms by "14/x/y", each placed for the frame it names. */
+  tiles: ReadonlyMap<string, PrismPlaced>;
   /** Bumped on every batch and on Done, so a renderer can subscribe to one number. */
   version: number;
   busy: boolean;
@@ -61,6 +62,7 @@ let seq = 0;
 let tilesId = 0;
 let lastKey = '';
 let lastPin: LngLat = { lat: 0, lng: 0 };
+let lastTiles: Parameters<typeof requestBuildings> | null = null;
 /** The map's mask keeps its own id, so a pan never cancels the viewfinder's shadow build. */
 let maskId = 0;
 let maskKey = '';
@@ -79,7 +81,7 @@ function tileCentre(key: string): LngLat {
   return tilePixelToLngLat(z, x, y, 128, 128);
 }
 
-function evict(tiles: Map<string, BuildingBatch>, pin: LngLat): Map<string, BuildingBatch> {
+function evict(tiles: Map<string, PrismPlaced>, pin: LngLat): Map<string, PrismPlaced> {
   if (tiles.size <= MAX_TILES) return tiles;
   const byDist = [...tiles.keys()].map((k) => ({ k, d: distanceM(pin, tileCentre(k)) })).toSorted((a, b) => a.d - b.d);
   for (const { k } of byDist.slice(MAX_TILES)) tiles.delete(k);
@@ -110,7 +112,8 @@ function ensureWorker(): Worker {
     if (res.kind === BuildingsKind.Tiles) {
       buildingsStore.setState((st) => {
         const tiles = new Map(st.tiles);
-        tiles.set(res.batch.tileKey, res.batch);
+        adoptPrismSlots(res.tile.prism, res.tile.slots);
+        tiles.set(res.tile.tileKey, res.tile);
         return { tiles: evict(tiles, lastPin), version: st.version + 1 };
       });
     } else if (res.kind === BuildingsKind.Done) {
@@ -141,17 +144,27 @@ function ensureMaskWorker(): Worker {
   return maskWorker;
 }
 
-/** Streams the wedge's tiles into the store; identical consecutive requests are ignored, a new wedge supersedes the old one. */
-export function requestBuildings(pin: LngLat, azFromDeg: number, azSpanDeg: number, rangeM: number): void {
-  const key = `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}|${azFromDeg}|${azSpanDeg}|${rangeM}`;
+/** Streams the wedge's prisms, placed for `eyeM`, into the store; identical consecutive requests are ignored, a new one supersedes the old. */
+export function requestBuildings(pin: LngLat, eyeM: number, azFromDeg: number, azSpanDeg: number, rangeM: number): void {
+  lastTiles = [pin, eyeM, azFromDeg, azSpanDeg, rangeM];
+  const lod2Urls = [...lod2Store.getState().tiles.keys()];
+  const key = `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}|${eyeM.toFixed(2)}|${azFromDeg}|${azSpanDeg}|${rangeM}|${modelsSync?.rev ?? 0}|${lod2Urls.join(' ')}`;
   if (key === lastKey) return;
   lastKey = key;
   lastPin = pin;
   tilesId = ++seq;
   buildingsStore.setState({ busy: true, error: null });
-  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, azFromDeg, azSpanDeg, rangeM, have: [...buildingsStore.getState().tiles.keys()] };
+  const have = [...buildingsStore.getState().tiles.values()].map((t): [string, string] => [t.tileKey, t.sig]);
+  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, eyeM, azFromDeg, azSpanDeg, rangeM, lod2Urls, have };
   ensureWorker().postMessage(req);
 }
+
+/** The held tiles give way to LoD2 and model footprints, so either changing re-asks for the last wedge. */
+function refreshBuildings(): void {
+  if (lastTiles) requestBuildings(...lastTiles);
+}
+
+lod2Store.subscribe((s) => s.tiles, refreshBuildings);
 
 /** Streams the wedge's LoD2 meshes, placed for `eyeM`; a new pin or eye height re-places every tile. */
 export function requestLod2(pin: LngLat, eyeM: number, azFromDeg: number, azSpanDeg: number, rangeM: number, pxPerRad: number): void {
@@ -187,6 +200,7 @@ export function setBuildingModels(rev: number, models: WorkerModel[]): void {
   modelsSync = { kind: BuildingsKind.Models, id: ++seq, rev, models };
   worker?.postMessage(modelsSync);
   maskWorker?.postMessage(modelsSync);
+  refreshBuildings();
   if (maskWorker && lastMask?.buildings) {
     maskId = ++seq;
     maskWorker.postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);

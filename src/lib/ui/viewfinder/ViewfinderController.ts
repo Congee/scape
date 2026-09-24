@@ -15,12 +15,10 @@ import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
 import { distance, height } from '@core/format';
 import { bearingDeg, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
 import { pinFrame } from '@core/geo/pinFrame';
-import { suppressRows } from '@core/geo/buildingTiles';
 import { anyOccluder, MeshOccluder, type Occluder } from '@core/geo/meshOcclude';
 import { placeModel } from '@core/geo/modelPlace';
-import { lod2CoverOf } from '@core/lod2/cover';
 import { PrismOccluder } from '@core/geo/prismOcclude';
-import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
+import { prismFrameKey, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
@@ -42,7 +40,7 @@ import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { markersStore } from '@state/markers';
-import { modelSuppression, modelsStore } from '@state/models';
+import { modelsStore } from '@state/models';
 import { photoStore } from '@state/photo';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
@@ -153,15 +151,12 @@ export class ViewfinderController {
   private starGroups: { cat: StarCatalog; groups: StarGroup[]; polaris: number } | null = null;
   private showers: { day: number; list: ShowerStatus[] } | null = null;
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
-  /** Eye-relative prisms per tile, rebuilt when the camera location moves. */
+  /** Eye-relative prisms per tile, only those placed for the current camera location. */
   private prisms = new Map<string, PrismTile>();
   private pathHidden = new Map<SkyBody, { occ: unknown; view: unknown; curve: unknown; h: Int8Array }>();
-  private prismSrc: { key: string; tiles: unknown; lod2: unknown } | null = null;
-  private prismKey = '';
-  /** LoD2 tiles each Overture tile was rebuilt around. */
-  private prismCover = new Map<string, string>();
-  /** Overture rows the LoD2 and model footprints hid, over the tiles held. */
-  private prismHidden = new Map<string, number>();
+  private prismSrc: { frame: string; tiles: unknown } | null = null;
+  /** Overture rows the LoD2 and model footprints hid, over the tiles drawn. */
+  private prismHidden = 0;
   /** One index per LoD2 tile, so a tile streaming in does not re-index the others. */
   private lod2Occ = new WeakMap<SurfaceMesh, MeshOccluder>();
   private prismMs = 0;
@@ -386,7 +381,7 @@ export class ViewfinderController {
     if (!compositionStore.getState().showBuildings) return;
     const pin = worldStore.getState().pin;
     const rangeM = Math.min(win.rangeM, BUILDING_RANGE_M);
-    requestBuildings(pin, win.azFromDeg, win.azSpanDeg, rangeM);
+    requestBuildings(pin, sc.eyeM, win.azFromDeg, win.azSpanDeg, rangeM);
     // An octave ladder, so zooming only asks again once the tileset's error test could change.
     const pxPerRad = 2 ** Math.round(Math.log2(Math.max(100, sc.frame.w) / (sc.hfov * D2R)));
     requestLod2(pin, sc.eyeM, win.azFromDeg, win.azSpanDeg, rangeM, pxPerRad);
@@ -463,37 +458,21 @@ export class ViewfinderController {
     return !!p && p.x >= sc.frame.x - slack && p.x <= sc.frame.x + sc.frame.w + slack && p.y >= sc.frame.y - slack && p.y <= sc.frame.y + sc.frame.h + slack;
   }
 
-  /**
-   * Prisms for the tiles in the store, in eye-relative metres. The conversion only depends on the
-   * camera location, so it survives every pan and zoom until the pin or the eye height moves.
-   */
+  /** Prisms the worker placed for the current camera location; a tile from an old one waits for its rebuild. */
   private prismTiles(sc: Scene): Map<string, PrismTile> {
-    const w = worldStore.getState();
-    const hide = modelSuppression();
-    const key = `${w.pin.lat.toFixed(6)},${w.pin.lng.toFixed(6)}|${sc.eyeM.toFixed(2)}|${hide.key}`;
-    if (key !== this.prismKey) {
-      this.prismKey = key;
-      this.prisms.clear();
-      this.prismRev++;
-    }
+    const frame = prismFrameKey(worldStore.getState().pin, sc.eyeM);
     const { tiles } = buildingsStore.getState();
-    const lod2Tiles = lod2Store.getState().tiles;
-    // Both stores replace their maps on change, so same identities mean nothing to rebuild.
-    if (this.prismSrc?.key === key && this.prismSrc.tiles === tiles && this.prismSrc.lod2 === lod2Tiles) return this.prisms;
-    this.prismSrc = { key, tiles, lod2: lod2Tiles };
-    const lod2 = [...lod2Tiles.values()];
-    for (const k of this.prisms.keys()) if (!tiles.has(k) && this.prisms.delete(k)) this.prismRev++;
-    for (const [k, batch] of tiles) {
-      const cover = lod2CoverOf(k, lod2);
-      if (this.prisms.has(k) && this.prismCover.get(k) === cover.sig) continue;
-      const kept = suppressRows(batch, cover.rings.length > 0 ? [...hide.rings, ...cover.rings] : hide.rings);
-      this.prisms.set(k, buildPrisms(kept, w.pin, sc.eyeM));
-      this.prismRev++;
-      this.prismCover.set(k, cover.sig);
-      this.prismHidden.set(k, batch.count - kept.count);
+    // The store replaces its map on change, so the same identity means nothing new.
+    if (this.prismSrc?.frame === frame && this.prismSrc.tiles === tiles) return this.prisms;
+    this.prismSrc = { frame, tiles };
+    this.prisms = new Map();
+    this.prismHidden = 0;
+    for (const [k, t] of tiles) {
+      if (t.frame !== frame) continue;
+      this.prisms.set(k, t.prism);
+      this.prismHidden += t.hidden;
     }
-    for (const k of this.prismCover.keys()) if (!this.prisms.has(k)) this.prismCover.delete(k);
-    for (const k of this.prismHidden.keys()) if (!this.prisms.has(k)) this.prismHidden.delete(k);
+    this.prismRev++;
     return this.prisms;
   }
 
@@ -640,9 +619,7 @@ export class ViewfinderController {
 
   private lod2Stats() {
     const l = lod2Store.getState();
-    let hiddenRows = 0;
-    for (const n of this.prismHidden.values()) hiddenRows += n;
-    return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows };
+    return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows: this.prismHidden };
   }
 
   /** True when a building stands between the eye and a direction; `distM` is Infinity for the sky. */

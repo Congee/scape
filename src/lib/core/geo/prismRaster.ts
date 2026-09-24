@@ -79,6 +79,11 @@ export interface PrismShading {
  * Eye-relative prisms for one tile. A vertex lands where `elevationAngleDeg(d, dz)` puts it, so it
  * lines up with the terrain sweep and the target; recompute only when the camera location moves.
  */
+/** Placement a tile's prisms are built for; prisms from another frame are never mixed in. */
+export function prismFrameKey(pin: LngLat, eyeM: number): string {
+  return `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}|${eyeM.toFixed(2)}`;
+}
+
 export function buildPrisms(batch: BuildingBatch, pin: LngLat, eyeM: number): PrismTile {
   const nb = batch.count;
   const frame = frameAt(pin);

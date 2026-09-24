@@ -1,5 +1,7 @@
 import type { LngLat } from '@core/geo/geodesy';
 import type { MeshOccluderParts } from '@core/geo/meshOcclude';
+import type { PrismSlots } from '@core/geo/prismOcclude';
+import type { PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 
@@ -15,11 +17,14 @@ export interface TilesRequest {
   kind: typeof BuildingsKind.Tiles;
   id: number;
   pin: LngLat;
+  eyeM: number;
   azFromDeg: number;
   azSpanDeg: number;
   rangeM: number;
-  /** Tile keys the store already holds; a tile's batch does not depend on the wedge. */
-  have: string[];
+  /** Urls of the LoD2 tiles the caller holds; Overture rows under them give way. */
+  lod2Urls: string[];
+  /** Tiles the caller holds with their `sig`; one still matching is not rebuilt. */
+  have: [string, string][];
 }
 
 /** Apex height of the building under a point (max over the building and all its parts); null when none. */
@@ -163,7 +168,7 @@ export interface BuildingBatch {
 }
 
 export type BuildingsResponse =
-  | { kind: typeof BuildingsKind.Tiles; id: number; batch: BuildingBatch }
+  | { kind: typeof BuildingsKind.Tiles; id: number; tile: PrismPlaced }
   | { kind: typeof BuildingsKind.Done; id: number; tiles: number; missing: number }
   | { kind: typeof BuildingsKind.Height; id: number; heightM: number | null }
   | { kind: typeof BuildingsKind.Rows; id: number; batch: BuildingBatch | null }
@@ -173,3 +178,16 @@ export type BuildingsResponse =
   | { kind: typeof BuildingsKind.Lod2Tile; id: number; tile: Lod2Placed }
   | { kind: typeof BuildingsKind.Lod2Done; id: number; urls: string[]; tris: number; missing: number; error: string | null }
   | { kind: typeof BuildingsKind.Error; id: number; error: string };
+
+/** One Overture tile's prisms, placed and indexed in the worker. */
+export interface PrismPlaced {
+  tileKey: string;
+  /** Pin and eye the prisms are relative to. */
+  frame: string;
+  /** Frame, model outlines and LoD2 cover the tile was built for. */
+  sig: string;
+  prism: PrismTile;
+  slots: PrismSlots;
+  /** Rows the models and LoD2 hid. */
+  hidden: number;
+}

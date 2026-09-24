@@ -9,14 +9,6 @@ const R2D = 180 / Math.PI;
 /** One bucket per degree of azimuth; a query touches one of them. */
 const BUCKETS = 360;
 
-interface Entry {
-  tile: PrismTile;
-  /** Building index within the tile. */
-  i: number;
-  uMin: number;
-  uMax: number;
-}
-
 /** Scratch for the crossings of one footprint; a ring is never anywhere near this long. */
 let ts = new Float64Array(64);
 
@@ -68,17 +60,33 @@ function hitsPrism(tile: PrismTile, i: number, uMin: number, uMax: number, dx: n
   return k % 2 === 1 && spans(0, ts[0]);
 }
 
-/** Bucket slots per tile, kept so tiles streaming in do not re-index the ones already there. */
-const placed = new WeakMap<PrismTile, { rangeM: number; slots: Slots }>();
 
-/** Parallel bucket indices and entries. */
-interface Slots {
-  bucket: number[];
-  entry: Entry[];
+/**
+ * One tile's buildings bucketed by azimuth, flat so the worker can build and transfer it: bucket b
+ * holds building indices [start[b], start[b + 1]) of `i`; uMin/uMax is each building's height band.
+ */
+export interface PrismSlots {
+  rangeM: number;
+  start: Int32Array;
+  i: Int32Array;
+  uMin: Float32Array;
+  uMax: Float32Array;
 }
 
-function tileEntries(tile: PrismTile, rangeM: number): Slots {
-  const slots: Slots = { bucket: [], entry: [] };
+/** Slots per tile, kept so tiles streaming in do not re-index the ones already there. */
+const placed = new WeakMap<PrismTile, PrismSlots>();
+
+/** Adopts slots the buildings worker built for `tile`. */
+export function adoptPrismSlots(tile: PrismTile, slots: PrismSlots): void {
+  placed.set(tile, slots);
+}
+
+export function prismSlots(tile: PrismTile, rangeM: number): PrismSlots {
+  const uMin = new Float32Array(tile.count);
+  const uMax = new Float32Array(tile.count);
+  const lo = new Int32Array(tile.count);
+  const hi = new Int32Array(tile.count).fill(-1);
+  const start = new Int32Array(BUCKETS + 1);
   for (let i = 0; i < tile.count; i++) {
     if (tile.ringStart[i + 1] - tile.ringStart[i] < 3) continue;
     if (Math.max(1, tile.distM[i]) > rangeM) continue;
@@ -86,45 +94,51 @@ function tileEntries(tile: PrismTile, rangeM: number): Slots {
     const cn = tile.cN[i];
     const l = Math.hypot(ce, cn);
     if (l < 1e-6) continue;
-    let uMin = Infinity;
-    let uMax = -Infinity;
+    let min = Infinity;
+    let max = -Infinity;
     for (let v = tile.ringStart[i]; v < tile.ringStart[i + 1]; v++) {
-      if (tile.uBase[v] < uMin) uMin = tile.uBase[v];
-      if (tile.uTop[v] > uMax) uMax = tile.uTop[v];
+      if (tile.uBase[v] < min) min = tile.uBase[v];
+      if (tile.uTop[v] > max) max = tile.uTop[v];
     }
     for (let q = tile.faceVert[tile.faceStart[i]]; q < tile.faceVert[tile.faceStart[i + 1]]; q++) {
-      if (tile.fU[q] < uMin) uMin = tile.fU[q];
-      if (tile.fU[q] > uMax) uMax = tile.fU[q];
+      if (tile.fU[q] < min) min = tile.fU[q];
+      if (tile.fU[q] > max) max = tile.fU[q];
     }
-    if (!(uMax >= uMin)) continue;
-    const entry: Entry = { tile, i, uMin, uMax };
+    if (!(max >= min)) continue;
+    // Exact in float32: both are one of the tile's own float32 values.
+    uMin[i] = min;
+    uMax[i] = max;
     const centre = Math.atan2(ce, cn) * R2D;
     const r = tile.radiusM[i];
     // Horizontal half-width of the bounding sphere, widened a bucket so an edge lands inside;
     // a sphere the eye stands in has no bearing at all and goes everywhere.
     const half = r >= l ? 180 : Math.asin(r / l) * R2D + 1;
-    const lo = Math.floor(centre - half);
-    const hi = Math.min(Math.ceil(centre + half), lo + BUCKETS - 1);
-    for (let b = lo; b <= hi; b++) {
-      slots.bucket.push(((b % BUCKETS) + BUCKETS) % BUCKETS);
-      slots.entry.push(entry);
-    }
+    lo[i] = Math.floor(centre - half);
+    hi[i] = Math.min(Math.ceil(centre + half), lo[i] + BUCKETS - 1);
+    for (let b = lo[i]; b <= hi[i]; b++) start[(((b % BUCKETS) + BUCKETS) % BUCKETS) + 1]++;
   }
-  return slots;
+  for (let b = 0; b < BUCKETS; b++) start[b + 1] += start[b];
+  const fill = start.slice(0, BUCKETS);
+  const idx = new Int32Array(start[BUCKETS]);
+  for (let i = 0; i < tile.count; i++) for (let b = lo[i]; b <= hi[i]; b++) idx[fill[((b % BUCKETS) + BUCKETS) % BUCKETS]++] = i;
+  return { rangeM, start, i: idx, uMin, uMax };
 }
 
 /**
- * Buildings bucketed by azimuth, so one direction costs a bucket lookup and a handful of tests.
+ * Buildings bucketed by azimuth, so one direction costs a bucket lookup per tile and a handful of tests.
  * Prisms are eye-relative and immobile, so an index outlives every pan and zoom.
  */
 export class PrismOccluder {
-  private readonly buckets: Entry[][] = Array.from({ length: BUCKETS }, () => []);
+  private readonly tiles: PrismTile[] = [];
+  private readonly slots: PrismSlots[] = [];
 
   constructor(tiles: Iterable<PrismTile>, rangeM: number) {
     for (const tile of tiles) {
       let c = placed.get(tile);
-      if (c?.rangeM !== rangeM) placed.set(tile, (c = { rangeM, slots: tileEntries(tile, rangeM) }));
-      for (let k = 0; k < c.slots.bucket.length; k++) this.buckets[c.slots.bucket[k]].push(c.slots.entry[k]);
+      if (c?.rangeM !== rangeM) placed.set(tile, (c = prismSlots(tile, rangeM)));
+      if (c.i.length === 0) continue;
+      this.tiles.push(tile);
+      this.slots.push(c);
     }
   }
 
@@ -138,18 +152,22 @@ export class PrismOccluder {
     // Straight up or down: no wall can stand in the way, and the footprint test would divide by zero.
     if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return false;
     const az = Math.atan2(dx, dy) * R2D;
-    const bucket = this.buckets[((Math.floor(az) % BUCKETS) + BUCKETS) % BUCKETS];
+    const b = ((Math.floor(az) % BUCKETS) + BUCKETS) % BUCKETS;
     const maxT = Number.isFinite(distM) ? distM : Infinity;
-    for (const q of bucket) {
-      const { tile, i } = q;
-      const ce = tile.cE[i];
-      const cn = tile.cN[i];
-      const cu = tile.cU[i];
-      const t = ce * dx + cn * dy + cu * dz;
-      if (t <= 0 || t > maxT) continue;
-      const r = tile.radiusM[i];
-      if (ce * ce + cn * cn + cu * cu - t * t > r * r) continue;
-      if (hitsPrism(tile, i, q.uMin, q.uMax, dx, dy, dz, maxT)) return true;
+    for (let s = 0; s < this.tiles.length; s++) {
+      const tile = this.tiles[s];
+      const c = this.slots[s];
+      for (let q = c.start[b]; q < c.start[b + 1]; q++) {
+        const i = c.i[q];
+        const ce = tile.cE[i];
+        const cn = tile.cN[i];
+        const cu = tile.cU[i];
+        const t = ce * dx + cn * dy + cu * dz;
+        if (t <= 0 || t > maxT) continue;
+        const r = tile.radiusM[i];
+        if (ce * ce + cn * cn + cu * cu - t * t > r * r) continue;
+        if (hitsPrism(tile, i, c.uMin[i], c.uMax[i], dx, dy, dz, maxT)) return true;
+      }
     }
     return false;
   }
