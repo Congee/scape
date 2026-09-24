@@ -46,9 +46,8 @@ export interface MaskRequest {
 /** A precise model as the workers see it: what it hides and the surface it stamps into the mask. */
 export interface WorkerModel {
   id: string;
-  footprint: [lng: number, lat: number][];
-  /** Hide the Overture rows whose centroid falls inside `footprint`. */
-  suppress: boolean;
+  /** Hide the Overture rows whose centroid falls inside any of these lng/lat rings; empty hides none. */
+  suppress: [lng: number, lat: number][][];
   /** lng, lat, sea-level altitude per vertex, three vertices per triangle; empty for a hidden model. */
   tris: Float64Array;
 }

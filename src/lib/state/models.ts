@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
 import { modelTriangles } from '@core/geo/modelPlace';
-import { partsFootprint, type SavedModel } from '@core/model';
+import { modelOutlines, partsFootprint, type SavedModel } from '@core/model';
 import { modelMesh } from '@core/model/mesh';
 import { deleteOne, listAll, putOne } from '@data/db';
 import { setBuildingModels } from './buildings';
@@ -79,8 +79,8 @@ let suppressCache: { models: SavedModel[]; key: string; rings: SuppressRing[] } 
 export function modelSuppression(): { key: string; rings: SuppressRing[] } {
   const { models } = modelsStore.getState();
   if (suppressCache?.models !== models) {
-    const hide = models.filter(suppresses);
-    suppressCache = { models, key: hide.map((m) => `${m.id}:${m.footprint.flat().join(',')}`).join('|'), rings: hide.map((m) => suppressRing(m.footprint)) };
+    const rings = models.filter(suppresses).flatMap(modelOutlines);
+    suppressCache = { models, key: rings.map((r) => r.flat().join(',')).join('|'), rings: rings.map(suppressRing) };
   }
   return suppressCache;
 }
@@ -93,7 +93,7 @@ export function startModelsSync(): () => void {
       rev,
       models.map((m) => {
         const mesh = m.visible ? modelMesh(m) : null;
-        return { id: m.id, footprint: m.footprint, suppress: suppresses(m), tris: mesh ? modelTriangles(mesh, m.anchor, m.groundM) : new Float64Array(0) };
+        return { id: m.id, suppress: suppresses(m) ? modelOutlines(m) : [], tris: mesh ? modelTriangles(mesh, m.anchor, m.groundM) : new Float64Array(0) };
       })
     );
   };

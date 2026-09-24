@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { batchOf, PIN, rect, square } from '@core/geo/batchFixture';
-import { AltitudeRef, convexHull, inLngLatRing, lngLatToLocal, localToLngLat, type ModelAnchor, type ModelPart } from '@core/model';
+import { at, batchOf, PIN, rect, square } from '@core/geo/batchFixture';
+import { AltitudeRef, convexHull, inLngLatRing, lngLatToLocal, localToLngLat, modelOutlines, type ModelAnchor, type ModelPart } from '@core/model';
 import { RoofShape } from '@workers/buildings.protocol';
 import { modelHeightAt } from './heightAt';
 import { partsMesh } from './mesh';
@@ -141,6 +141,15 @@ describe('modelHeightAt', () => {
     expect(modelHeightAt([lifted], PIN)?.heightM).toBeCloseTo(5 + 395 * 1.1, 6);
     const abs = { ...m, anchor: { ...m.anchor, altRef: AltitudeRef.Absolute, altM: 10 } };
     expect(modelHeightAt([abs], PIN)?.heightM).toBeCloseTo(10 - 3 + 395, 6);
+  });
+
+  it('falls through in the hull between two parts', () => {
+    const ell = seedModel(batchOf([{ ring: rect(0, 0, 100, 10), heightM: 50 }, { ring: rect(45, 50, 10, 90), heightM: 200 }]), 'L')!;
+    expect(modelOutlines(ell)).toHaveLength(2);
+    const gap = at(-20, 20);
+    expect(inLngLatRing(ell.footprint, gap)).toBe(true);
+    expect(modelHeightAt([ell], gap)).toBeNull();
+    expect(modelHeightAt([ell], at(0, 0))?.heightM).toBe(200);
   });
 
   it('falls through outside the footprint or for a hidden model', () => {

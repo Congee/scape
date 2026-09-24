@@ -106,6 +106,22 @@ export function partsFootprint(anchor: ModelAnchor, parts: readonly ModelPart[])
 
 const cross = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
 
+/**
+ * Plan outlines in lng/lat that hide Overture rows and answer the target height: each part's ring for a
+ * Drawn model, since a hull over a podium would swallow its neighbours; the footprint otherwise.
+ */
+export function modelOutlines(m: Pick<SavedModel, 'anchor' | 'parts' | 'footprint'>): [number, number][][] {
+  if (!m.parts) return m.footprint.length >= 3 ? [m.footprint] : [];
+  return m.parts
+    .filter((p) => p.ring.length >= 3)
+    .map((p) =>
+      p.ring.map(([e, n]) => {
+        const g = localToLngLat(m.anchor, e, n);
+        return [g.lng, g.lat] as [number, number];
+      })
+    );
+}
+
 /** Andrew's monotone chain; counter-clockwise, no repeated end point. */
 export function convexHull(pts: readonly [number, number][]): [number, number][] {
   const p = pts.toSorted((a, b) => a[0] - b[0] || a[1] - b[1]);

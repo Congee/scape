@@ -33,7 +33,7 @@ let suppress: SuppressRing[] = [];
 function syncModels(req: ModelsSync): void {
   models = req.models;
   modelsRev = req.rev;
-  suppress = models.filter((m) => m.suppress && m.footprint.length >= 3).map((m) => suppressRing(m.footprint));
+  suppress = models.flatMap((m) => m.suppress.map(suppressRing));
 }
 
 function tileAt(p: LngLat, z: number): TileCoord {
