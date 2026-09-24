@@ -33,3 +33,18 @@ describe('geodesy', () => {
     }
   });
 });
+
+// WGS84 geodesics from GeographicLib (Karney): [from lat, lng, azimuth, metres, to lat, lng].
+describe('spherical accuracy vs WGS84', () => {
+  it.each([
+    [0, 7, 45, 1000, 0.006394858, 7.006352048],
+    [46, 7, 45, 50000, 46.317155879, 7.459044102],
+    [69.65, 18.96, 135, 20000, 69.522853766, 19.322080181],
+    [-45, 168.66, 300, 100000, -44.544838741, 167.570208063]
+  ])('%f,%f az %f %f m: distance within 0.6%, bearing within 0.2°', (lat, lng, az, s, lat2, lng2) => {
+    const a = { lat, lng };
+    const b = { lat: lat2, lng: lng2 };
+    expect(Math.abs(distanceM(a, b) - s) / s).toBeLessThan(0.006);
+    expect(Math.abs(((bearingDeg(a, b) - az + 540) % 360) - 180)).toBeLessThan(0.2);
+  });
+});

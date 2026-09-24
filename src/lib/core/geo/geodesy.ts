@@ -1,4 +1,4 @@
-/** Spherical-Earth geodesy. Accuracy (~0.3%) is ample for drawing and planning distances. */
+/** Spherical-Earth geodesy. Against WGS84: distances within 0.6%, bearings within 0.2°. */
 
 export const EARTH_RADIUS_M = 6371008.8;
 const D2R = Math.PI / 180;
