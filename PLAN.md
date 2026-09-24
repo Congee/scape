@@ -498,6 +498,11 @@ doing, and the thin dark lines turned out to be real rock gullies.
   permission classifier (6 additive conflicts with P1 and tides). Needs your OK to merge. Defaults:
   moon shade on the map deep blue; first/last light counts terrain only; earthshine under 35 % lit;
   orbit pitch 65° (max 80°), 6°/s, not saved.
+- Terrain waste at long focal lengths: parked on `wip/terrain-waste` (8c7f7dc). Coarsening the eye
+  chain cuts built blocks 10–20 % at 200–2400 mm with the daylight picture unchanged, but DEM tiles are
+  unchanged and the timing and low-sun/night checks were void (screen locked overnight, hidden tab).
+  Plan: re-run `timing.sh` and `terrain-waste.sh` with the screen unlocked, then merge or drop. Cutting
+  DEM tiles needs a separate cascade change (`coneDepthRange` ignoring eye-leaf boxes).
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
