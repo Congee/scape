@@ -1,7 +1,8 @@
 /**
  * Builds the bundled sky data in public/sky from the raw catalogues:
  *   bun scripts/build-sky.ts <dir with hygdata_v41.csv, constellations.lines.json, constellations.json>
- * Stars: HYG v4.1 (CC BY-SA 4.0) to magnitude 6.5, sorted brightest first, as a compact binary.
+ * Stars: HYG v4.1 (CC BY-SA 4.0) to magnitude 6.5, sorted brightest first, as a compact binary,
+ * carried by proper motion from J2000 to epoch 2025.0 (equinox stays J2000).
  * Constellations: d3-celestial (BSD-3-Clause) lines and label positions.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -9,6 +10,9 @@ import { join } from 'node:path';
 import { encodeStarCatalog, type StarRecord } from '../src/lib/core/astro/stars';
 
 const MAG_LIMIT = 6.5;
+const EPOCH_YEARS = 25;
+const D2R = Math.PI / 180;
+const MAS = D2R / 3_600_000;
 const src = process.argv[2];
 if (!src) throw new Error('usage: bun scripts/build-sky.ts <source dir>');
 const out = join(import.meta.dir, '../public/sky');
@@ -49,6 +53,21 @@ const cMag = col('mag');
 const cCi = col('ci');
 const cProper = col('proper');
 const cBf = col('bf');
+const cPmRa = col('pmra');
+const cPmDec = col('pmdec');
+
+/** Moves a J2000 position along its proper motion (mas/yr, RA term times cos dec) on the sphere, so it holds at the poles. */
+function atEpoch(raDeg: number, decDeg: number, pmRa: number, pmDec: number): [number, number] {
+  const a = raDeg * D2R;
+  const d = decDeg * D2R;
+  const ua = pmRa * MAS * EPOCH_YEARS;
+  const ud = pmDec * MAS * EPOCH_YEARS;
+  const x = Math.cos(d) * Math.cos(a) - ua * Math.sin(a) - ud * Math.sin(d) * Math.cos(a);
+  const y = Math.cos(d) * Math.sin(a) + ua * Math.cos(a) - ud * Math.sin(d) * Math.sin(a);
+  const z = Math.sin(d) + ud * Math.cos(d);
+  const ra = Math.atan2(y, x) / D2R;
+  return [(ra + 360) % 360, Math.atan2(z, Math.hypot(x, y)) / D2R];
+}
 
 const stars: (StarRecord & { name: string })[] = [];
 for (let i = 1; i < lines.length; i++) {
@@ -58,7 +77,8 @@ for (let i = 1; i < lines.length; i++) {
   const mag = Number(c[cMag]);
   if (!(mag <= MAG_LIMIT)) continue;
   const ci = c[cCi] === '' ? 0.6 : Number(c[cCi]);
-  stars.push({ raDeg: Number(c[cRa]) * 15, decDeg: Number(c[cDec]), mag, ci, name: c[cProper] || (mag <= 2.5 ? c[cBf] : '') });
+  const [raDeg, decDeg] = atEpoch(Number(c[cRa]) * 15, Number(c[cDec]), Number(c[cPmRa]) || 0, Number(c[cPmDec]) || 0);
+  stars.push({ raDeg, decDeg, mag, ci, name: c[cProper] || (mag <= 2.5 ? c[cBf] : '') });
 }
 stars.sort((a, b) => a.mag - b.mag);
 writeFileSync(join(out, 'stars.bin'), new Uint8Array(encodeStarCatalog(stars)));
