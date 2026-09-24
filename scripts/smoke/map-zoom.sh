@@ -6,7 +6,7 @@ set -uo pipefail
 
 PORT=${1:-5426}
 CDP=${2:-9426}
-SESSION=${3:-mapzoom}
+SESSION=${3:-${AGENT_BROWSER_SESSION:-smoke-$CDP}}
 OUT=${4:-${TMPDIR:-/tmp}/map-zoom}
 PROFILE=${5:-${TMPDIR:-/tmp}/brave-map-zoom}
 LOCK=${6:-${TMPDIR:-/tmp}/gpu-timing.lock}
@@ -30,7 +30,7 @@ for u in "$BASE/" "http://localhost:$CDP/json/version"; do
   for _ in $(seq 120); do curl -s -o /dev/null "$u" && break; sleep 1; done
 done
 
-ab() { AGENT_BROWSER_SESSION="$SESSION" agent-browser --cdp "$CDP" "$@"; }
+ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
 
 FAILS=0
 ROWS=()
