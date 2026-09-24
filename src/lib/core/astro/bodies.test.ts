@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BODIES, bodyVisible, SkyBody } from './bodies';
+import { BODIES, bodyVisible, siteHeightM, SkyBody } from './bodies';
 import { DEFAULT_COMPOSITION } from '@state/composition';
 
 describe('bodyVisible', () => {
@@ -27,5 +27,20 @@ describe('composition defaults', () => {
   it('shows the sun and the moon', () => {
     expect(DEFAULT_COMPOSITION.showSun).toBe(true);
     expect(DEFAULT_COMPOSITION.showMoon).toBe(true);
+  });
+});
+
+describe('siteHeightM', () => {
+  it('keeps a polder below sea level', () => {
+    expect(siteHeightM(-6.7, 1.6)).toBeCloseTo(-5.1, 9);
+  });
+
+  it('takes unknown ground as sea level', () => {
+    expect(siteHeightM(null, 1.6)).toBe(1.6);
+    expect(siteHeightM(Number.NaN, 1.6)).toBe(1.6);
+  });
+
+  it('stops at the atmosphere model floor', () => {
+    expect(siteHeightM(-900, 1.6)).toBe(-498.4);
   });
 });
