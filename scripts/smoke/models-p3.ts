@@ -162,23 +162,32 @@ check('Overture rows under the footprint suppressed', ids > 0 && kept > dropped,
 // The matrix: drawn, and casting only by day.
 const matrix: string[] = [];
 let matrixOk = true;
+await js(`S.settings.getState().update({ lightSource: 'Auto' }); return true;`);
 for (const light of Object.values(Light)) {
   await viewfinder(TIMES[light], 24);
   for (const orient of ['Landscape', 'Portrait']) {
     for (const f of [24, 200, 600, 2400]) {
       await js(`S.composition.getState().update({ focalMm: ${f}, orientation: '${orient}' }); aimAt(byId(${TID}), ${f > 200 ? 0.9 : 0.5}); return true;`);
       await drawn(f, orient);
-      const p = await js<{ models: number; tris: number; shadow: number; sun: number; fr: Box }>('const p = S.prism; return { models: p.models, tris: p.modelTris, shadow: p.shadow.casterModelTris, sun: p.cam.sunAlt, fr: frame() };');
-      const shadowOk = light === Light.Night ? p.shadow === 0 : p.shadow > 0;
+      const p = await js<{ models: number; tris: number; shadow: number; body: string | null; sun: number; fr: Box }>('const p = S.prism; return { models: p.models, tris: p.modelTris, shadow: p.shadow.casterModelTris, body: p.shadow.light, sun: p.cam.sunAlt, fr: frame() };');
+      // Auto light: the sun by day, the 97 % moon (42° up) at night.
+      const shadowOk = p.body === (light === Light.Night ? 'Moon' : 'Sun') && p.shadow > 0;
       const ok = p.models >= 1 && p.tris > 0 && shadowOk;
       matrixOk &&= ok;
       const name = `${light}-${orient[0]}-${f}`;
       await tab.shot(`${shots}/${name}.png`, p.fr);
-      matrix.push(`| ${name} | ${ok ? 'PASS' : 'FAIL'} | models ${p.models}, tris ${p.tris}, shadowModelTriangles ${p.shadow}, sun ${p.sun.toFixed(1)}° |`);
+      matrix.push(`| ${name} | ${ok ? 'PASS' : 'FAIL'} | models ${p.models}, tris ${p.tris}, shadowModelTriangles ${p.shadow}, light ${p.body}, sun ${p.sun.toFixed(1)}° |`);
     }
   }
 }
-check('matrix: drawn at every focal, casts by day only', matrixOk, `${matrix.length} frames`);
+check('matrix: drawn at every focal, sun-lit by day, moon-lit at night', matrixOk, `${matrix.length} frames`);
+
+// Sun-only light at night: no light, so no shadow pass at all.
+await js(`S.settings.getState().update({ lightSource: 'Sun' }); S.composition.getState().update({ focalMm: 200, orientation: 'Landscape' }); aimAt(byId(${TID}), 0.5); return true;`);
+await drawn(200, 'Landscape');
+const dark = await js<{ light: string | null; cascades: number; tris: number }>('const s = S.prism.shadow; return { light: s.light, cascades: s.cascades, tris: s.casterTris };');
+await js(`S.settings.getState().update({ lightSource: 'Auto' }); return true;`);
+check('no shadow pass when no body lights the night', dark.light === null && dark.cascades === 0 && dark.tris === 0, `light ${dark.light}, cascades ${dark.cascades}, caster tris ${dark.tris}`);
 
 // Nudges re-derive the footprint, and the map's extrusion follows it.
 await home();

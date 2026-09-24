@@ -159,6 +159,7 @@ check('sky occluded up to the crown, clear above', occ.below && !occ.above, `cro
 // The matrix.
 const matrix: string[] = [];
 let matrixOk = true;
+await js(`S.settings.getState().update({ lightSource: 'Auto' }); return true;`);
 for (const light of Object.values(Light)) {
   await viewfinder(HOBOKEN, TIMES[light], 24);
   for (const orient of ['Landscape', 'Portrait']) {
@@ -179,18 +180,26 @@ for (const light of Object.values(Light)) {
           return true;
         `);
         await drawn(f, orient);
-        const p = await js<{ models: number; modelTris: number; shadowModel: number; shadowAll: number; sunAlt: number }>('const p = S.prism; return { models: p.models, modelTris: p.modelTris, shadowModel: p.shadow.casterModelTris, shadowAll: p.shadow.casterTris, sunAlt: p.cam.sunAlt };');
-        const shadowOk = light === Light.Night ? p.shadowModel === 0 && p.shadowAll === 0 : p.shadowModel > 0;
+        const p = await js<{ models: number; modelTris: number; shadowModel: number; body: string | null; sunAlt: number }>('const p = S.prism; return { models: p.models, modelTris: p.modelTris, shadowModel: p.shadow.casterModelTris, body: p.shadow.light, sunAlt: p.cam.sunAlt };');
+        // Auto light: the sun by day, the 97 % moon (42° up) at night.
+        const shadowOk = p.body === (light === Light.Night ? 'Moon' : 'Sun') && p.shadowModel > 0;
         const ok = p.models >= 1 && p.modelTris > 0 && shadowOk;
         matrixOk &&= ok;
         const name = `${light}-${orient[0]}-${f}-${aim}`;
         await tab.shot(`${shots}/${name}.png`, await js('return frame();'));
-        matrix.push(`| ${name} | ${ok ? 'PASS' : 'FAIL'} | models ${p.models}, tris ${p.modelTris}, shadowModelTris ${p.shadowModel}, sun ${p.sunAlt.toFixed(1)}° |`);
+        matrix.push(`| ${name} | ${ok ? 'PASS' : 'FAIL'} | models ${p.models}, tris ${p.modelTris}, shadowModelTris ${p.shadowModel}, light ${p.body}, sun ${p.sunAlt.toFixed(1)}° |`);
       }
     }
   }
 }
-check('matrix: models ≥ 1, tris > 0, shadows by day and not at night', matrixOk, `${matrix.length} frames`);
+check('matrix: models ≥ 1, tris > 0, sun shadows by day, moon shadows at night', matrixOk, `${matrix.length} frames`);
+
+// Sun-only light at night: no light, so no shadow pass at all.
+await js(`S.settings.getState().update({ lightSource: 'Sun' }); S.composition.getState().update({ focalMm: 200, orientation: 'Landscape' }); const c = await crown(); S.composition.getState().aim(c.az, c.alt); return true;`);
+await drawn(200, 'Landscape');
+const dark = await js<{ light: string | null; cascades: number; tris: number }>('const s = S.prism.shadow; return { light: s.light, cascades: s.cascades, tris: s.casterTris };');
+await js(`S.settings.getState().update({ lightSource: 'Auto' }); return true;`);
+check('no shadow pass when no body lights the night', dark.light === null && dark.cascades === 0 && dark.tris === 0, `light ${dark.light}, cascades ${dark.cascades}, caster tris ${dark.tris}`);
 
 // No z-fight: sub-pixel camera moves leave the model's pixels alone.
 await viewfinder(HOBOKEN, TIMES.day, 600);
