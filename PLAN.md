@@ -498,11 +498,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
   permission classifier (6 additive conflicts with P1 and tides). Needs your OK to merge. Defaults:
   moon shade on the map deep blue; first/last light counts terrain only; earthshine under 35 % lit;
   orbit pitch 65° (max 80°), 6°/s, not saved.
-- Terrain waste at long focal lengths: parked on `wip/terrain-waste` (8c7f7dc). Coarsening the eye
-  chain cuts built blocks 10–20 % at 200–2400 mm with the daylight picture unchanged, but DEM tiles are
-  unchanged and the timing and low-sun/night checks were void (screen locked overnight, hidden tab).
-  Plan: re-run `timing.sh` and `terrain-waste.sh` with the screen unlocked, then merge or drop. Cutting
-  DEM tiles needs a separate cascade change (`coneDepthRange` ignoring eye-leaf boxes).
+- Terrain waste at long focal lengths (merged `6a54ad2`): built blocks drop 6–21 % at 200–2400 mm;
+  picture pixel-identical day/low sun/night; DEM tiles and frame/build times unchanged. Cutting DEM
+  tiles needs a separate cascade change (`coneDepthRange` ignoring eye-leaf boxes).
 - Model sharing (P3b core, merged): exported models are named `<name>.glb`; a Drawn model's export
   carries its parts, so re-import gives an editable model; `.scape.json` Replace also wipes models.
 - Models P2 (merged `a45a27d`): selection and outline in accent #5aa9ff; a drawn building starts at
