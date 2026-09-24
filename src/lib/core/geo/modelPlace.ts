@@ -17,6 +17,7 @@ export function modelWorld(mesh: ModelMesh, anchor: ModelAnchor, groundM: number
     out[v * 3] = g.lng;
     out[v * 3 + 1] = g.lat;
     out[v * 3 + 2] = base + mesh.pos[v * 3 + 2] * anchor.scale;
+    if (!Number.isFinite(g.lng + g.lat + out[v * 3 + 2])) throw new Error(`Model vertex ${v} is not finite`);
   }
   return out;
 }

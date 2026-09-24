@@ -110,6 +110,12 @@ describe('Imported models', () => {
     expect(modelHeightAt([big], ANCHOR)?.heightM).toBeCloseTo(4 + 60, 6);
     expect(modelHeightAt([m], { lat: ANCHOR.lat + 0.001, lng: ANCHOR.lng })).toBeNull();
   });
+
+  it('refuse a NaN anchor instead of a NaN footprint or height', () => {
+    const m = imported();
+    expect(() => imported(m.glb, { ...ANCHOR, lng: NaN })).toThrow(/footprint/);
+    expect(() => modelHeightAt([{ ...m, groundM: undefined as unknown as number }], ANCHOR)).toThrow(/ground/);
+  });
 });
 
 describe('rowsCentre', () => {

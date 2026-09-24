@@ -106,15 +106,19 @@ export function importedMesh(glb: ArrayBuffer, opts: ImportOptions = DEFAULT_IMP
 /** The mesh a saved model draws; throws GltfError when an Imported model's bytes do not parse. */
 export function modelMesh(m: SavedModel): ModelMesh {
   if (m.parts) return partsMesh(m.parts);
+  return importedMesh(glbOf(m), m.importOptions).mesh;
+}
+
+function glbOf(m: SavedModel): ArrayBuffer {
   if (!m.glb) throw new GltfError(`Model “${m.name}” has neither parts nor a mesh.`);
-  return importedMesh(m.glb, m.importOptions).mesh;
+  return m.glb;
 }
 
 /** Plan-view outline at the model's anchor: the parts' hull, or the mesh's. */
 export function modelFootprint(m: SavedModel): [number, number][] {
-  if (m.parts) return partsFootprint(m.anchor, m.parts);
-  if (!m.glb) throw new GltfError(`Model “${m.name}” has neither parts nor a mesh.`);
-  return hullFootprint(m.anchor, importedMesh(m.glb, m.importOptions).hull);
+  const fp = m.parts ? partsFootprint(m.anchor, m.parts) : hullFootprint(m.anchor, importedMesh(glbOf(m), m.importOptions).hull);
+  if (!fp.every(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))) throw new Error(`Model “${m.name}” footprint is not finite`);
+  return fp;
 }
 
 /** Highest point above the local frame's U = 0, unscaled. */

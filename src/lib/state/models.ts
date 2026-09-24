@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
 import { modelTriangles } from '@core/geo/modelPlace';
-import { modelOutlines, type SavedModel } from '@core/model';
+import { AltitudeRef, modelOutlines, type SavedModel } from '@core/model';
 import { drawnModel } from '@core/model/draw';
 import { modelFootprint, modelMesh } from '@core/model/mesh';
 import { exportModelGlb, modelFileName } from '@core/model/share';
@@ -49,6 +49,21 @@ export interface ModelsState {
   setAdjusting(on: boolean): void;
 }
 
+const healTried = new Set<string>();
+
+/** Re-resolves the ground of models saved while the DEM was unreadable, once per model per session. */
+async function healGrounds(models: SavedModel[]): Promise<void> {
+  const lost = models.filter((m) => m.anchor.altRef === AltitudeRef.Ground && Number.isNaN(m.groundM) && m.footprint.length >= 3 && !healTried.has(m.id));
+  await Promise.all(
+    lost.map(async (m) => {
+      healTried.add(m.id);
+      const groundM = await groundUnder(m.footprint.map(([lng, lat]) => ({ lng, lat }))).catch(() => null);
+      const cur = modelsStore.getState().models.find((x) => x.id === m.id);
+      if (groundM !== null && cur && Number.isNaN(cur.groundM)) await modelsStore.getState().save({ ...cur, groundM });
+    })
+  );
+}
+
 /** Keeps the buffer already loaded when the bytes match, so the mesh parse cache survives a reload of the store. */
 function sameGlb(m: SavedModel, old: ArrayBuffer | undefined): SavedModel {
   if (!m.glb || !old || old.byteLength !== m.glb.byteLength) return m;
@@ -77,8 +92,9 @@ export const modelsStore = create<ModelsState>()(
     importAt: null,
     load: async () => {
       const prev = new Map(get().models.map((m) => [m.id, m.glb]));
-      const models = (await listAll('models')).map((m) => sameGlb(m, prev.get(m.id)));
+      const models = (await listAll('models')).map((m) => sameGlb(typeof m.groundM === 'number' ? m : { ...m, groundM: NaN }, prev.get(m.id)));
       set((s) => ({ models, loaded: true, rev: s.rev + 1 }));
+      void healGrounds(models);
     },
     save: async (m) => {
       await putOne('models', m);

@@ -110,4 +110,20 @@ describe('placeModel', () => {
     for (let i = 2; i < tris.length; i += 3) top = Math.max(top, tris[i]);
     expect(top).toBeCloseTo(GROUND + 180, 6);
   });
+
+  it('stands on sea level when the ground is unknown', () => {
+    const tris = modelTriangles(partsMesh([part()]), ANCHOR, NaN);
+    expect(tris.every(Number.isFinite)).toBe(true);
+    expect(Math.min(...tris.filter((_, i) => i % 3 === 2))).toBeCloseTo(0, 6);
+  });
+
+  it('throws instead of placing at NaN', () => {
+    const mesh = partsMesh([part()]);
+    expect(() => placeModel(mesh, ANCHOR, undefined as unknown as number, PIN, EYE)).toThrow(/ground is undefined/);
+    expect(() => placeModel(mesh, ANCHOR, Infinity, PIN, EYE)).toThrow(/ground/);
+    expect(() => placeModel(mesh, { ...ANCHOR, lat: NaN }, GROUND, PIN, EYE)).toThrow(/anchor lat/);
+    expect(() => modelTriangles(mesh, { ...ANCHOR, scale: undefined as unknown as number }, GROUND)).toThrow(/anchor scale/);
+    const bad = { ...mesh, pos: mesh.pos.map((v, i) => (i === 5 ? NaN : v)) };
+    expect(() => modelTriangles(bad, ANCHOR, GROUND)).toThrow(/vertex 1/);
+  });
 });

@@ -74,9 +74,16 @@ const R2D = 180 / Math.PI;
 
 /** Sea-level altitude of the local frame's U = 0. */
 export function modelBaseM(anchor: ModelAnchor, groundM: number): number {
+  assertPlaceable(anchor, groundM);
   if (anchor.altRef === AltitudeRef.Absolute) return anchor.altM;
   // Same rule as the prisms: no DEM is sea level, and water reads as bathymetry.
   return (Number.isNaN(groundM) ? 0 : Math.max(groundM, 0)) + anchor.altM;
+}
+
+/** Throws on an anchor or ground that would place the model at NaN; a NaN ground is the "no DEM" sentinel. */
+export function assertPlaceable(anchor: ModelAnchor, groundM: number): void {
+  for (const k of ['lat', 'lng', 'altM', 'headingDeg', 'scale'] as const) if (!Number.isFinite(anchor[k])) throw new Error(`Model anchor ${k} is ${anchor[k]}`);
+  if (typeof groundM !== 'number' || groundM === Infinity || groundM === -Infinity) throw new Error(`Model ground is ${groundM}`);
 }
 
 /** Local e, n metres to lng/lat, heading and scale applied. */
