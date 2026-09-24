@@ -495,7 +495,7 @@ export class ViewfinderController {
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       const shade = { on: stats.cascades > 0, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
-      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, terrain: stats.terrain, rw: vw, rh: vh, shadow: shade };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
     }
   }
 
