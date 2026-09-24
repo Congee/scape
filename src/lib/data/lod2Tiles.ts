@@ -1,9 +1,11 @@
 import { MeshoptDecoder } from 'meshoptimizer/decoder';
+import { geoidAt, type GeoidGrid } from '@core/geo/geoid';
 import { isB3dm, readB3dm } from '@core/lod2/b3dm';
 import { lod2Tile, type Lod2Tile } from '@core/lod2/tile';
 import { walkTileset, type TilesetJson, type WalkContent, type WalkView } from '@core/lod2/tileset';
 import type { Lod2Region } from '@core/lod2/regions';
 import { gltfUsesDraco, readGlbWorld, type DracoDecoder } from '@core/model/gltf';
+import { readGeoid } from './geoid';
 
 const CONCURRENCY = 6;
 /** External tilesets a walk may still name after this many rounds are left out. */
@@ -61,6 +63,29 @@ function touch(key: string, t: Lod2Tile): void {
   while (cache.size > maxCachedTiles) cache.delete(cache.keys().next().value!);
 }
 
+let geoidKey = '';
+let geoid: Promise<GeoidGrid | null> | null = null;
+/** Bumped on a geoid change, so a load that started on the old grid is not cached. */
+let geoidGen = 0;
+
+/** Drops every tile built on another geoid; the grid itself is read on the first PLATEAU tile. */
+export function setLod2Geoid(key: string): void {
+  if (key === geoidKey) return;
+  geoidKey = key;
+  geoid = null;
+  geoidGen++;
+  cache.clear();
+  inflight.clear();
+}
+
+function gsiGeoid(): Promise<GeoidGrid | null> {
+  geoid ??= readGeoid().catch((e: unknown) => {
+    console.warn('[scape] geoid read failed:', e);
+    return null;
+  });
+  return geoid;
+}
+
 let draco: Promise<DracoDecoder> | null = null;
 
 /** The Draco decoder chunk and WASM, fetched on the first tile that needs them. */
@@ -85,6 +110,7 @@ function release(): void {
 }
 
 async function load(c: WalkContent, region: Lod2Region): Promise<Lod2Tile | null> {
+  const gen = geoidGen;
   await acquire();
   let buf: ArrayBuffer;
   try {
@@ -100,8 +126,9 @@ async function load(c: WalkContent, region: Lod2Region): Promise<Lod2Tile | null
   await MeshoptDecoder.ready;
   const w = readGlbWorld(b.glb, { meshopt: MeshoptDecoder, draco: gltfUsesDraco(b.glb) ? await dracoDecoder() : undefined });
   w.rtc ??= b.rtc;
-  const t = lod2Tile(w, c.transform, region, b.batch);
-  touch(c.url, t);
+  const grid = region.gsiGeoid && geoidKey ? await gsiGeoid() : null;
+  const t = lod2Tile(w, c.transform, region, b.batch, grid ? (lat, lng) => geoidAt(grid, lat, lng) : undefined);
+  if (gen === geoidGen) touch(c.url, t);
   return t;
 }
 
@@ -114,7 +141,10 @@ export function fetchLod2Tile(c: WalkContent, region: Lod2Region): Promise<Lod2T
   }
   let p = inflight.get(c.url);
   if (!p) {
-    p = load(c, region).finally(() => inflight.delete(c.url));
+    const gen = geoidGen;
+    p = load(c, region).finally(() => {
+      if (gen === geoidGen) inflight.delete(c.url);
+    });
     inflight.set(c.url, p);
   }
   return p;

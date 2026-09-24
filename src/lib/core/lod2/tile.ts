@@ -30,6 +30,8 @@ export interface Lod2Tile {
   buildings: Lod2Building[];
   /** Metres subtracted from ellipsoidal heights to reach sea level; at the bbox centre when a geoid grid sets it per vertex. */
   datumM: number;
+  /** Heights went through an imported geoid grid. */
+  geoidGrid: boolean;
   /** lng0, lat0, lng1, lat1 over every vertex. */
   bbox: [number, number, number, number];
 }
@@ -121,7 +123,7 @@ export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Regi
     const id = ids?.[fid[b]];
     return { id: typeof id === 'string' ? id : `${fid[b]}`, hull, baseM: lo[b] - shift, apexM: hi[b] - shift, c: { lng: cx, lat: cy } };
   });
-  return { world: geo, idx: w.idx, building, buildings, datumM, bbox };
+  return { world: geo, idx: w.idx, building, buildings, datumM, geoidGrid: perVertex !== undefined, bbox };
 }
 
 /** The triangles in the frame `buildPrisms` uses: one surface each, one sphere row per building. */

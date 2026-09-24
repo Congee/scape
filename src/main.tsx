@@ -14,7 +14,7 @@ import { gearStore } from '@state/gear';
 import { lightProbeStore } from '@state/lightProbe';
 import { markersStore } from '@state/markers';
 import { modelsStore, startModelsSync } from '@state/models';
-import { offlineStore, startOffline } from '@state/offline';
+import { offlineStore, startGeoidSync, startOffline } from '@state/offline';
 import { plansStore } from '@state/plans';
 import { searchesStore } from '@state/searches';
 import { settingsStore } from '@state/settings';
@@ -47,6 +47,7 @@ startAlignSync();
 startDayDataSync();
 startClock();
 startModelsSync();
+startGeoidSync();
 void markersStore.getState().load();
 void modelsStore.getState().load();
 

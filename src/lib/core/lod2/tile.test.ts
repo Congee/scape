@@ -109,8 +109,8 @@ describe('lod2Tile', () => {
   it('reports the imported geoid at the tile centre as its datum', () => {
     const b = box(90, 500, 45, 30, 0);
     const { w, transform } = world(b.pts, b.feature, b.idx);
-    expect(lod2Tile(w, transform, REGION, {}, () => 12).datumM).toBe(12);
-    expect(lod2Tile(w, transform, REGION).datumM).toBe(40);
+    expect(lod2Tile(w, transform, REGION, {}, () => 12)).toMatchObject({ datumM: 12, geoidGrid: true });
+    expect(lod2Tile(w, transform, REGION)).toMatchObject({ datumM: 40, geoidGrid: false });
   });
 });
 

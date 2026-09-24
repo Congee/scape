@@ -9,7 +9,7 @@ import { OVERTURE_BUILDINGS_RELEASE, OVERTURE_BUILDINGS_URL } from '@data/buildi
 import { BASEMAP_DEFAULT_MAX_TILES, basemapByDefault, isPmtilesUrl, OFM_STYLE, OFM_TILEJSON } from '@data/openfreemap';
 import { PROTOMAPS_BUILD } from '@data/protomaps';
 import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
-import { defaultBasemapSourceUrl, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
+import { defaultBasemapSourceUrl, GEOID_DOWNLOAD_URL, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
 import { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 
@@ -378,7 +378,69 @@ export function OfflinePanel() {
         <input type="file" accept=".pmtiles" onChange={(e) => void importFile(e.target.files?.[0])} />
         Import a .pmtiles file
       </label>
+
+      <GeoidSection />
     </div>
+  );
+}
+
+function GeoidSection() {
+  const geoid = useOffline((s) => s.geoid);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const o = offlineStore.getState();
+
+  const importGeoid = async (input: HTMLInputElement) => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await o.importGeoid(file);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = () => {
+    if (window.confirm('Remove the imported geoid? PLATEAU heights fall back to a Tokyo average.')) void o.removeGeoid();
+  };
+
+  return (
+    <>
+      <h3>Geoid (Japan)</h3>
+      <p className="muted hint">
+        PLATEAU buildings carry ellipsoid heights; GSI’s geoid sets them on the terrain anywhere in Japan, where a central-Tokyo constant can be metres off. Download “日本のジオイド2011” from{' '}
+        <a href={GEOID_DOWNLOAD_URL} target="_blank" rel="noreferrer">
+          GSI
+        </a>{' '}
+        and import the .zip or .asc.
+      </p>
+      {geoid ? (
+        <div className="list" data-geoid="imported">
+          <span className="detail">
+            GSIGEO2011 {geoid.version} · {geoid.fileName} · {bytes(geoid.bytes)} · imported {geoid.importedAt.slice(0, 10)}
+          </span>
+          <div className="actions">
+            <button className="link" onClick={remove}>
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="muted hint" data-geoid="none">
+          Not imported
+        </p>
+      )}
+      <label className="file">
+        <input type="file" accept=".asc,.zip,.gz" disabled={busy} aria-label="Import the GSI geoid" onChange={(e) => void importGeoid(e.currentTarget)} />
+        {busy ? 'Importing…' : geoid ? 'Replace the geoid file' : 'Import the geoid file'}
+      </label>
+      {error && <p className="error">{error}</p>}
+    </>
   );
 }
 

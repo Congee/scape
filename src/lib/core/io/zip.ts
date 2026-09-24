@@ -41,7 +41,7 @@ export function findZipEntry(b: Uint8Array, want: (name: string) => boolean): Zi
     const nameLen = dv.getUint16(p + 28, true);
     const next = p + 46 + nameLen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
     const local = dv.getUint32(p + 42, true);
-    // GSI's archives store Shift-JIS names without the UTF-8 flag; ASCII names read the same either way.
+    // GSI's archives store non-ASCII names without the UTF-8 flag; ASCII names read the same either way.
     const name = latin.decode(b.subarray(p + 46, p + 46 + nameLen));
     p = next;
     if (!want(name)) continue;

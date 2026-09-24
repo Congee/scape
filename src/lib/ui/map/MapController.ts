@@ -28,6 +28,7 @@ import '@data/maplibre';
 import { isDarkBasemap, styleFor, type Basemap } from '@data/basemaps';
 import { buildingsSource } from '@data/buildingsProtocol';
 import { ensureDemProtocol } from '@data/demProtocol';
+import { GEOID_DOWNLOAD_URL, geoidCredit } from '@data/geoid';
 import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
@@ -876,9 +877,9 @@ export class MapController {
 
   private creditShadow(ids: readonly Lod2Source[]) {
     if (!this.styleReady) return;
-    const text = lod2Credits(ids)
-      .map((r) => `<a href="${r.attributionUrl}">${r.attribution}</a>`)
-      .join(' · ');
+    const regions = lod2Credits(ids);
+    const geoid = regions.some((r) => r.gsiGeoid) ? offlineStore.getState().geoid : null;
+    const text = [...regions.map((r) => `<a href="${r.attributionUrl}">${r.attribution}</a>`), ...(geoid ? [`<a href="${GEOID_DOWNLOAD_URL}">${geoidCredit(geoid.version)}</a>`] : [])].join(' · ');
     const src = this.map.getSource(SHADOW_CREDIT_SRC);
     if ((src?.attribution ?? '') === text) return;
     if (src) {

@@ -2,15 +2,18 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { Bbox } from '@core/geo/bbox';
 import { DEFAULT_BASEMAP_ID, offlineBasemaps, styleAssetUrls, type Basemap, type PmFlavor } from '@data/basemaps';
+import { readGeoidMeta, removeGeoid, type GeoidMeta } from '@data/geoid';
 import { localBuildings, localTerrain } from '@data/localTiles';
 import { announceArchives, listArchives, opfsSupported, readArchiveFile, removeArchive, writeMeta } from '@data/opfs';
 import { registerArchive, unregisterArchive } from '@data/pmtiles';
 import { downloadBlob } from '@ui/download';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from '@workers/region.protocol';
+import { setBuildingGeoid } from './buildings';
 import { findBasemap, settingsStore } from './settings';
 
 export { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 export { defaultBasemapSourceUrl } from '@data/protomaps';
+export { GEOID_DOWNLOAD_URL, type GeoidMeta } from '@data/geoid';
 
 /** OPFS is read once at startup; a slow storage layer must not hold up the app. */
 const LOAD_TIMEOUT_MS = 800;
@@ -54,6 +57,10 @@ export interface OfflineState {
   remove(id: string): Promise<void>;
   exportArchive(id: string): Promise<void>;
   importArchive(file: File, name?: string): Promise<ArchiveMeta>;
+  /** The imported GSI geoid for PLATEAU heights; null for none. */
+  geoid: GeoidMeta | null;
+  importGeoid(file: File): Promise<GeoidMeta>;
+  removeGeoid(): Promise<void>;
 }
 
 // --- worker plumbing ----------------------------------------------------
@@ -112,14 +119,15 @@ export const offlineStore = create<OfflineState>()(
       draft: null,
       drawing: false,
       viewSeq: 0,
+      geoid: null,
 
       load: async () => {
         if (!opfsSupported()) return set({ supported: false, loaded: true });
-        const archives = await listArchives();
+        const [archives, geoid] = await Promise.all([listArchives(), readGeoidMeta()]);
         for (const meta of archives) registerArchive(meta);
         localTerrain.refresh();
         localBuildings.refresh();
-        set({ supported: true, loaded: true, archives });
+        set({ supported: true, loaded: true, archives, geoid });
         await get().refreshStorage();
       },
 
@@ -222,7 +230,30 @@ export const offlineStore = create<OfflineState>()(
             }
           });
           post({ kind: RegionRequestKind.Import, id, file, name: name?.trim() || file.name.replace(/\.pmtiles$/i, '') });
-        })
+        }),
+
+      importGeoid: (file) =>
+        new Promise<GeoidMeta>((resolve, reject) => {
+          const id = newId('geoid');
+          handlers.set(id, (res) => {
+            if (res.kind === RegionResponseKind.Geoid) {
+              handlers.delete(id);
+              set({ geoid: res.meta });
+              void get().refreshStorage();
+              resolve(res.meta);
+            } else if (res.kind === RegionResponseKind.Error) {
+              handlers.delete(id);
+              reject(new Error(res.message));
+            }
+          });
+          post({ kind: RegionRequestKind.ImportGeoid, id, file });
+        }),
+
+      removeGeoid: async () => {
+        await removeGeoid();
+        set({ geoid: null });
+        await get().refreshStorage();
+      }
     };
   })
 );
@@ -233,6 +264,13 @@ export const useOffline = offlineStore;
 export function currentBasemap(): Basemap {
   const s = settingsStore.getState();
   return findBasemap(s.basemapId, s.customBasemaps, offlineBasemaps(offlineStore.getState().archives, s.offlineFlavor));
+}
+
+/** Keeps the buildings workers on the imported geoid. */
+export function startGeoidSync(): () => void {
+  const push = () => setBuildingGeoid(offlineStore.getState().geoid?.importedAt ?? '');
+  push();
+  return offlineStore.subscribe((s) => s.geoid, push);
 }
 
 /** Startup must never block on OPFS, so the first listing races a short timeout. */

@@ -1,6 +1,8 @@
 import { BUILDINGS_ATTRIBUTION } from '@data/buildingTiles';
+import { GEOID_DOWNLOAD_URL, geoidCredit } from '@data/geoid';
 import { compositionStore, useComposition, type Composition } from '@state/composition';
-import { lod2Drawn, useLod2 } from '@state/lod2';
+import { lod2Drawn, lod2GeoidUse, useLod2 } from '@state/lod2';
+import { useOffline } from '@state/offline';
 import { useWorld } from '@state/world';
 import { PhotoTools } from './PhotoTools';
 
@@ -27,7 +29,10 @@ const CHIPS: [BoolKey, string, string][] = [
 export function ViewTools() {
   const c = useComposition();
   const pin2 = useWorld((s) => s.pin2);
-  const lod2 = lod2Drawn(useLod2((s) => s.tiles));
+  const tiles = useLod2((s) => s.tiles);
+  const lod2 = lod2Drawn(tiles);
+  const geoidUse = lod2GeoidUse(tiles);
+  const geoidVersion = useOffline((s) => s.geoid?.version);
   const update = compositionStore.getState().update;
   return (
     <div className="vf-tools chips" aria-label="Viewfinder layers">
@@ -51,6 +56,15 @@ export function ViewTools() {
               </a>
             </span>
           ))}
+        {c.showBuildings && geoidUse.gsi && geoidVersion && (
+          <span data-geoid-credit="">
+            {' · '}
+            <a href={GEOID_DOWNLOAD_URL} target="_blank" rel="noreferrer">
+              {geoidCredit(geoidVersion)}
+            </a>
+          </span>
+        )}
+        {c.showBuildings && geoidUse.approx && <span data-geoid-note=""> · PLATEAU heights approximate outside central Tokyo until the GSI geoid is imported (Offline tab).</span>}
       </p>
     </div>
   );

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
-import { lod2Credits, type Lod2Region } from '@core/lod2/regions';
+import { LOD2_REGIONS, lod2Credits, type Lod2Region } from '@core/lod2/regions';
 import type { Lod2Placed } from '@workers/buildings.protocol';
 
 /** A placed LoD2 tile and the rings its buildings hide Overture rows with. */
@@ -65,4 +65,16 @@ export function finishLod2(urls: readonly string[], tris: number, missing: numbe
 export function lod2Drawn(tiles: ReadonlyMap<string, Lod2View>): Lod2Region[] {
   const ids = new Set([...tiles.values()].map((t) => t.region));
   return lod2Credits(ids);
+}
+
+/** Whether drawn tiles used the imported GSI geoid, and whether any that could have fell back to the constant. */
+export function lod2GeoidUse(tiles: ReadonlyMap<string, Lod2View>): { gsi: boolean; approx: boolean } {
+  const gsiRegions = new Set(LOD2_REGIONS.filter((r) => r.gsiGeoid).map((r) => r.id));
+  let gsi = false;
+  let approx = false;
+  for (const t of tiles.values()) {
+    if (t.geoid) gsi = true;
+    else if (gsiRegions.has(t.region)) approx = true;
+  }
+  return { gsi, approx };
 }

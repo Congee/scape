@@ -3,7 +3,7 @@ import type { MeshOccluderParts } from '@core/geo/meshOcclude';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done', Geoid: 'Geoid' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** OSM Simple 3D Buildings roof families the rasteriser draws; Other renders flat at the apex. */
@@ -63,6 +63,13 @@ export interface ModelsSync {
   models: WorkerModel[];
 }
 
+/** The imported geoid's key (its import time), '' for none; tiles built on another grid are dropped. No response. */
+export interface GeoidSync {
+  kind: typeof BuildingsKind.Geoid;
+  id: number;
+  key: string;
+}
+
 /** Every Overture row of the building under a point, parts included, with its ground; for seeding a model. */
 export interface RowsAtRequest {
   kind: typeof BuildingsKind.RowsAt;
@@ -99,7 +106,7 @@ export interface Lod2Request {
   have: string[];
 }
 
-export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request;
+export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request | GeoidSync;
 
 /** One LoD2 content tile placed in the viewfinder's frame. */
 export interface Lod2Placed {
@@ -111,6 +118,8 @@ export interface Lod2Placed {
   /** lng0, lat0, lng1, lat1. */
   bbox: [number, number, number, number];
   tris: number;
+  /** Heights went through the imported GSI geoid rather than the region's constant. */
+  geoid: boolean;
   /** The mesh's occlusion hierarchy, built here so the main thread never pays for it. */
   occ: MeshOccluderParts;
   /** Worker time to decode and place it, milliseconds. */

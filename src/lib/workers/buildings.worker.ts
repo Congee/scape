@@ -11,9 +11,9 @@ import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@co
 import { cubicStencilTiles, demRowAt, elevationAtCubic, lowestGroundAt, withDemTiles } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
-import { fetchLod2Tile, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
+import { fetchLod2Tile, setLod2Geoid, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type Lod2Placed, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Placed, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** The map's mask runs in a second instance of this module, so its caches are sized for the map rect. */
@@ -46,11 +46,17 @@ let latestMask = 0;
 let models: WorkerModel[] = [];
 let modelsRev = 0;
 let suppress: SuppressRing[] = [];
+let geoidKey = '';
 
 function syncModels(req: ModelsSync): void {
   models = req.models;
   modelsRev = req.rev;
   suppress = models.flatMap((m) => m.suppress.map(suppressRing));
+}
+
+function syncGeoid(req: GeoidSync): void {
+  geoidKey = req.key;
+  setLod2Geoid(req.key);
 }
 
 function tileAt(p: LngLat, z: number): TileCoord {
@@ -240,7 +246,7 @@ async function stampFrameLod2(g: HeightGrid, f: MaskFrame): Promise<{ rings: Sup
 
 /** Null when a newer mask request has superseded this one. */
 async function maskFor(req: MaskRequest): Promise<{ mask: Uint8Array; lod2: Lod2Source[] } | null> {
-  const key = `${req.centre.lat.toFixed(6)},${req.centre.lng.toFixed(6)}|${req.originE}|${req.originN}|${req.nx}|${req.ny}|${req.cellM}|${req.buildings}|${req.buildings ? modelsRev : 0}`;
+  const key = `${req.centre.lat.toFixed(6)},${req.centre.lng.toFixed(6)}|${req.originE}|${req.originN}|${req.nx}|${req.ny}|${req.cellM}|${req.buildings}|${req.buildings ? `${modelsRev}|${geoidKey}` : 0}`;
   let grid = cachedMask?.key === key ? cachedMask.grid : null;
   let frame = cachedMask?.key === key ? cachedMask.frame : null;
   let lod2 = cachedMask?.key === key ? cachedMask.lod2 : [];
@@ -332,7 +338,7 @@ function placed(t: Lod2Tile, c: WalkContent, region: Lod2Region, req: Lod2Reques
   const mesh = placeLod2(t, req.pin, req.eyeM);
   const tris = mesh.plane.length / 4;
   const occ = meshOccluderParts([mesh]);
-  const tile: Lod2Placed = { url: c.url, region: region.id, mesh, hulls: t.buildings.map((b) => b.hull), bbox: t.bbox, tris, occ, ms: performance.now() - t0 };
+  const tile: Lod2Placed = { url: c.url, region: region.id, mesh, hulls: t.buildings.map((b) => b.hull), bbox: t.bbox, tris, geoid: t.geoidGrid, occ, ms: performance.now() - t0 };
   const transfer = [mesh.pos, mesh.surfId, mesh.bldgId, mesh.idx, mesh.plane, mesh.surf, mesh.sphere, mesh.size, mesh.box, occ.tris, occ.boxes, occ.nodes].map((a) => a.buffer as ArrayBuffer);
   return { tile, transfer };
 }
@@ -405,6 +411,10 @@ scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
   // Neither a height lookup nor a shadow field supersedes the wedge, so they leave `latest` alone.
   if (req.kind === BuildingsKind.Models) {
     syncModels(req);
+    return;
+  }
+  if (req.kind === BuildingsKind.Geoid) {
+    syncGeoid(req);
     return;
   }
   if (req.kind === BuildingsKind.HeightAt) {

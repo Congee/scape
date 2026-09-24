@@ -4,7 +4,7 @@ import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import type { MaskRect } from '@core/geo/shadowMask';
 import type { Lod2Source } from '@core/lod2/regions';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, finishLod2, lod2Store } from './lod2';
 
 /** Decoded tiles kept in the store; beyond this the farthest from the pin are dropped. */
@@ -70,6 +70,8 @@ let modelsSync: ModelsSync | null = null;
 /** Id of the LoD2 request whose responses the store still wants. */
 let lod2Id = 0;
 let lod2Key = '';
+let lastLod2: Parameters<typeof requestLod2> | null = null;
+let geoidSync: GeoidSync | null = null;
 
 /** Centre of a "z/x/y" key, for distance-based eviction. */
 function tileCentre(key: string): LngLat {
@@ -118,6 +120,7 @@ function ensureWorker(): Worker {
     }
   });
   if (modelsSync) worker.postMessage(modelsSync);
+  if (geoidSync) worker.postMessage(geoidSync);
   return worker;
 }
 
@@ -134,6 +137,7 @@ function ensureMaskWorker(): Worker {
     }
   });
   if (modelsSync) maskWorker.postMessage(modelsSync);
+  if (geoidSync) maskWorker.postMessage(geoidSync);
   return maskWorker;
 }
 
@@ -151,7 +155,8 @@ export function requestBuildings(pin: LngLat, azFromDeg: number, azSpanDeg: numb
 
 /** Streams the wedge's LoD2 meshes, placed for `eyeM`; a new pin or eye height re-places every tile. */
 export function requestLod2(pin: LngLat, eyeM: number, azFromDeg: number, azSpanDeg: number, rangeM: number, pxPerRad: number): void {
-  const placeKey = `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}|${eyeM.toFixed(2)}`;
+  lastLod2 = [pin, eyeM, azFromDeg, azSpanDeg, rangeM, pxPerRad];
+  const placeKey = `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}|${eyeM.toFixed(2)}|${geoidSync?.key ?? ''}`;
   const key = `${placeKey}|${azFromDeg}|${azSpanDeg}|${rangeM}|${pxPerRad}`;
   if (key === lod2Key) return;
   lod2Key = key;
@@ -182,6 +187,19 @@ export function setBuildingModels(rev: number, models: WorkerModel[]): void {
   modelsSync = { kind: BuildingsKind.Models, id: ++seq, rev, models };
   worker?.postMessage(modelsSync);
   maskWorker?.postMessage(modelsSync);
+  if (maskWorker && lastMask?.buildings) {
+    maskId = ++seq;
+    maskWorker.postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);
+  }
+}
+
+/** Hands the workers the imported geoid's key and re-places what was built on the old one. */
+export function setBuildingGeoid(key: string): void {
+  if ((geoidSync?.key ?? '') === key) return;
+  geoidSync = { kind: BuildingsKind.Geoid, id: ++seq, key };
+  worker?.postMessage(geoidSync);
+  maskWorker?.postMessage(geoidSync);
+  if (worker && lastLod2) requestLod2(...lastLod2);
   if (maskWorker && lastMask?.buildings) {
     maskId = ++seq;
     maskWorker.postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);

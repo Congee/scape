@@ -19,6 +19,7 @@ import {
   type TileJsonSource
 } from '@data/openfreemap';
 import { announceArchives, archiveName, archivesDir, assetsDirName, metaFromHeader, readHeader, vectorLayerIds, writeFileBytes, writeMeta } from '@data/opfs';
+import { importGeoid } from '@data/geoid';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
 import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
@@ -457,6 +458,10 @@ async function run(req: Exclude<RegionRequest, { kind: typeof RegionRequestKind.
   try {
     if (req.kind === RegionRequestKind.Estimate) {
       post({ kind: RegionResponseKind.Estimate, id: req.id, estimate: await estimate(req.spec, signal) });
+      return;
+    }
+    if (req.kind === RegionRequestKind.ImportGeoid) {
+      post({ kind: RegionResponseKind.Geoid, id: req.id, meta: await importGeoid(req.file) });
       return;
     }
     const meta =
