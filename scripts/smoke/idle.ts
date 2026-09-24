@@ -52,20 +52,23 @@ const cases: Case[] = [
 
 const label = (c: Case) => `${c.scene.name} · ${c.route || 'map'} · ${c.tab}${c.phone ? ' · phone' : ''}${c.input ? ` · after ${c.input}` : ''}`;
 
-/** Cumulative CPU seconds of this profile's renderer and GPU processes. */
-async function cpuTimes(): Promise<{ renderer: number; gpu: number }> {
+/** Cumulative CPU seconds of this profile's renderer and GPU processes, by pid. */
+async function cpuTimes(): Promise<{ renderer: Map<string, number>; gpu: number }> {
   const out = await new Response(Bun.spawn(['ps', '-axo', 'pid=,time=,command='], { stdout: 'pipe' }).stdout).text();
-  const t = { renderer: 0, gpu: 0 };
+  const t = { renderer: new Map<string, number>(), gpu: 0 };
   for (const line of out.split('\n')) {
     if (!line.includes(`--user-data-dir=${profile}`)) continue;
-    const m = /^\s*\d+\s+(\S+)\s/.exec(line);
+    const m = /^\s*(\d+)\s+(\S+)\s/.exec(line);
     if (!m) continue;
-    const secs = m[1].split(':').reduce((a, p) => a * 60 + Number(p), 0);
-    if (line.includes('--type=renderer') && !line.includes('--extension-process')) t.renderer += secs;
+    const secs = m[2].split(':').reduce((a, p) => a * 60 + Number(p), 0);
+    if (line.includes('--type=renderer') && !line.includes('--extension-process')) t.renderer.set(m[1], secs);
     else if (line.includes('--type=gpu-process')) t.gpu += secs;
   }
   return t;
 }
+
+/** The busiest renderer over the window is the app tab's. */
+const rendererDelta = (a: Map<string, number>, b: Map<string, number>) => Math.max(0, ...[...b].map(([pid, s]) => s - (a.get(pid) ?? s)));
 
 const tab = await Tab.open(Number(cdp), BASE);
 await tab.send('Performance.enable');
@@ -128,13 +131,13 @@ async function measure(c: Case): Promise<Row> {
   const task1 = await taskSecs();
   const p = await tab.eval<{ raf: number; glFrames: number; timers: number }>('(() => { const p = window.__scape.idle; return { raf: p.raf, glFrames: p.glFrames, timers: p.timers }; })()');
   const pct = (a: number, b: number) => +((100 * (b - a)) / dt).toFixed(1);
-  const r: Row = { label: label(c), renderer: pct(cpu0.renderer, cpu1.renderer), gpu: pct(cpu0.gpu, cpu1.gpu), task: pct(task0, task1), ...p, pass: false };
+  const r: Row = { label: label(c), renderer: pct(0, rendererDelta(cpu0.renderer, cpu1.renderer)), gpu: pct(cpu0.gpu, cpu1.gpu), task: pct(task0, task1), ...p, pass: false };
   r.pass = r.renderer <= CPU_MAX && r.gpu <= CPU_MAX && r.glFrames === 0;
   return r;
 }
 
 const rows: Row[] = [];
-for (const c of cases.filter((c) => label(c).includes(only))) {
+for (const c of cases.filter((k) => label(k).includes(only))) {
   const r = await measure(c);
   rows.push(r);
   console.error(JSON.stringify(r));
