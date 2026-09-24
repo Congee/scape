@@ -17,9 +17,10 @@ import { buildPrisms, type PrismShading, type PrismTile } from '@core/geo/prismR
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
-import { cameraBasis, discRadiusMm, project, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
+import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
+import { applyNudge, nudgeForKey, silhouetteEdges } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
 import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
@@ -37,6 +38,7 @@ import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, meshKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
+import { MODEL_ACCENT } from '../map/modelOverlay';
 import { CATEGORY_COLORS } from '../map/overlays';
 
 const D2R = Math.PI / 180;
@@ -144,7 +146,9 @@ export class ViewfinderController {
   private occ: Occluder | null = null;
   private occCache: { key: string; occ: Occluder | null } | null = null;
   /** Placed models, rebuilt when the camera location or any model changes. */
-  private modelCache: { key: string; meshes: SurfaceMesh[] } | null = null;
+  private modelCache: { key: string; meshes: SurfaceMesh[]; ids: string[] } | null = null;
+  /** The selected model's outline, eye-relative e, n, u pairs. */
+  private outlineCache: { key: string; seg: Float32Array } | null = null;
   private gpuMs = -1;
 
   constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement) {
@@ -173,7 +177,8 @@ export class ViewfinderController {
       skyStore.subscribe(() => this.schedule()),
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
       buildingsStore.subscribe((s) => s.version, () => this.schedule()),
-      modelsStore.subscribe((s) => s.rev, () => this.schedule())
+      modelsStore.subscribe((s) => s.rev, () => this.schedule()),
+      modelsStore.subscribe((s) => s.selectedId, () => this.schedule())
     );
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -355,6 +360,14 @@ export class ViewfinderController {
   };
 
   private onKey = (e: KeyboardEvent) => {
+    const ms = modelsStore.getState();
+    const nudge = ms.adjusting && ms.selectedId ? nudgeForKey(e.key, e.shiftKey, e.altKey) : null;
+    const m = nudge && ms.models.find((x) => x.id === ms.selectedId);
+    if (nudge && m) {
+      void ms.update(m.id, applyNudge(m, nudge, ms.selectedPartId));
+      e.preventDefault();
+      return;
+    }
     const c = compositionStore.getState();
     const sc = this.scene();
     const step = e.shiftKey ? 10 : 1;
@@ -403,13 +416,75 @@ export class ViewfinderController {
     const key = `${w.pin.lat.toFixed(6)},${w.pin.lng.toFixed(6)}|${sc.eyeM.toFixed(2)}|${rev}`;
     if (this.modelCache?.key !== key) {
       const meshes: SurfaceMesh[] = [];
+      const ids: string[] = [];
       for (const m of models) {
         const mesh = m.visible ? modelMesh(m) : null;
-        if (mesh && mesh.idx.length > 0) meshes.push(placeModel(mesh, m.anchor, m.groundM, w.pin, sc.eyeM));
+        if (!mesh || mesh.idx.length === 0) continue;
+        meshes.push(placeModel(mesh, m.anchor, m.groundM, w.pin, sc.eyeM));
+        ids.push(m.id);
       }
-      this.modelCache = { key, meshes };
+      this.modelCache = { key, meshes, ids };
     }
     return this.modelCache.meshes;
+  }
+
+  /** Accent silhouette of the selected model, over the picture; it ignores occluders so a hidden model can still be lined up. */
+  private drawModelOutline(sc: Scene) {
+    const dev = import.meta.env.DEV ? (window as unknown as { __scape?: Record<string, unknown> }).__scape : undefined;
+    const id = modelsStore.getState().selectedId;
+    const cache = this.modelCache;
+    const shown = compositionStore.getState().showBuildings && settingsStore.getState().terrain;
+    const at = shown && id && cache ? cache.ids.indexOf(id) : -1;
+    if (!cache || at < 0) {
+      if (dev) dev.modelOutline = null;
+      return;
+    }
+    const key = `${cache.key}|${id}`;
+    if (this.outlineCache?.key !== key) this.outlineCache = { key, seg: silhouetteEdges(cache.meshes[at].pos, cache.meshes[at].idx) };
+    const seg = this.outlineCache.seg;
+    const { ctx } = this;
+    const F = sc.basis.forward;
+    const cx = sc.frame.x + sc.frame.w / 2;
+    const cy = sc.frame.y + sc.frame.h / 2;
+    const px = (e: number, n: number, u: number) => {
+      const p = projectDir(sc.cam, sc.basis, { x: e, y: n, z: u });
+      return p && { x: cx + p.x * sc.frame.pxPerMm, y: cy - p.y * sc.frame.pxPerMm };
+    };
+    const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    let drawn = 0;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.clip();
+    ctx.strokeStyle = MODEL_ACCENT;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i + 5 < seg.length; i += 6) {
+      let [ae, an, au, be, bn, bu] = [seg[i], seg[i + 1], seg[i + 2], seg[i + 3], seg[i + 4], seg[i + 5]];
+      const da = ae * F.x + an * F.y + au * F.z;
+      const db = be * F.x + bn * F.y + bu * F.z;
+      if (da <= 0.1 && db <= 0.1) continue;
+      // Clip at a near plane 10 cm ahead so a segment passing beside the eye still draws.
+      if (da <= 0.1 || db <= 0.1) {
+        const t = (0.1 - da) / (db - da);
+        const [ce, cn, cu] = [ae + (be - ae) * t, an + (bn - an) * t, au + (bu - au) * t];
+        if (da <= 0.1) [ae, an, au] = [ce, cn, cu];
+        else [be, bn, bu] = [ce, cn, cu];
+      }
+      const p = px(ae, an, au);
+      const q = px(be, bn, bu);
+      if (!p || !q) continue;
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(q.x, q.y);
+      drawn++;
+      box.x0 = Math.min(box.x0, p.x, q.x);
+      box.y0 = Math.min(box.y0, p.y, q.y);
+      box.x1 = Math.max(box.x1, p.x, q.x);
+      box.y1 = Math.max(box.y1, p.y, q.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+    if (dev) dev.modelOutline = { id, segments: drawn, box: drawn > 0 ? box : null };
   }
 
   /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */
@@ -1190,6 +1265,7 @@ export class ViewfinderController {
 
     this.drawBodyLabels(sc, labels);
     this.drawMarkers(sc);
+    this.drawModelOutline(sc);
     this.drawTarget(sc);
 
     // Frame, thirds grid and centre mark.
