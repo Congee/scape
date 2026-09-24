@@ -529,21 +529,19 @@ visible errors are design choices, each waiting on a decision (recommendation in
 - Spherical geodesy: bearings off by ≤0.19°, destination points by ≤0.56 % of distance, while the
   Sun's azimuth is ellipsoidal, so terrain can sit 0.19° off the Sun. [Ellipsoidal `geodesy.ts` and
   `pinFrame.ts` together, with the terrain work.]
-- Refraction steps to zero below −0.8333° (`refraction.ts`): the drawn Sun/Moon drops 0.62°, and
-  sits too low wherever the horizon is below that (high viewpoints over sea or plains). [Taper to
-  zero by about −3°; twilight thresholds stay geometric.]
-- Stars above 10° get no refraction (`placeEnu` fast path), 1′ still missing at 45°; the Milky Way
-  texture gets none at any altitude. [Refract stars; the Milky Way needs a shader change.]
-- Rise/set ignore site altitude (`pinHeightM` is above ground): ≤58 s at 3000 m. [Pass ground
-  elevation plus eye height.]
+- Fixed 2026-09-24 (astrofix): refraction tapers to zero by −3° (≤24″ vs Horizons below the
+  horizon, was ≤39′); stars and the Milky Way are refracted; catalogue stars carry aberration and
+  proper motion to 2025 (<1″ vs astropy, was 15–20″); rise/set use sampled ground plus eye height
+  (0.1 s at 3000 m, was 44 s); Tokyo fallback 37.0 m. Open: viewfinder refraction assumes sea-level
+  air (~9′ at 3000 m) [scale by air density like rise/set]; constellation lines stay J2000 (≤18″)
+  [snap endpoints to catalogue stars, low priority].
 - Horizon sweep reads summits low, 12–53 m at 10 km, up to 205 m at 50 km (≤0.30°), so the Sun
   clears ridges early and sets late (`horizon.ts`, zoom ceiling in `terrain.worker.ts`). Max-per-cell
   or a finer coarsening floor, both cost speed. [After the terrain-drag work.]
 - Safari/iOS (AWS terrain) reads ground up to 197 m low (1.1° at 10 km). Software WebP decode (new
   path or dependency) or accept.
-- Minor: the Tokyo 36.7 m fallback as 37.0 m cuts its worst case to about 1 m; proper motion to 2025
-  in `build-sky.ts` (worst star 0.05°); annual aberration in `eqjToEnu` (20″); `Math.max(ground, 0)`
-  puts the eye up to 7 m high in Dutch polders.
+- `Math.max(ground, 0)` puts the eye up to 7 m high in Dutch polders; the terrain mesh clamps too.
+  [A ground source that allows real negative heights in mesh and eye, touching the terrain worker.]
 
 **Known code glitches (2026-09-24).**
 
