@@ -889,7 +889,8 @@ export class MapController {
   }
 
   private hideShadows() {
-    if (this.map.getLayer(SHADOW_LAYER)) this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'none');
+    // setLayoutProperty repaints even when the value is unchanged, and a sunless tick lands here.
+    if (this.map.getLayer(SHADOW_LAYER) && this.map.getLayoutProperty(SHADOW_LAYER, 'visibility') !== 'none') this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'none');
     this.creditShadow([]);
   }
 
