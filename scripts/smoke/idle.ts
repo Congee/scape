@@ -10,6 +10,8 @@ const BASE = `http://localhost:${port}`;
 const SETTLE_MS = 20_000;
 // Budget: renderer and GPU process each ≤ 2 % of a core, no GL-drawing rAF callbacks.
 const CPU_MAX = 2;
+// The live clock may redraw when the sky has visibly drifted: ≥ 0.5 px, about every 3.7 s at 35 mm.
+const LIVE_FRAMES_MAX = Math.ceil(SECS / 3);
 
 const Scene = {
   Rotterdam: { name: 'Rotterdam 3DBAG', camera: '51.9091,4.4868', target: '51.90664,4.48805', z: 16.5, t: '' },
@@ -116,6 +118,8 @@ async function measure(c: Case): Promise<Row> {
   await tab.eval(`localStorage.setItem('scape.ui', JSON.stringify({ state: { panelTab: ${JSON.stringify(c.tab === 'Models' ? 'Markers' : c.tab)}, panelCollapsed: false, markersView: ${JSON.stringify(c.tab === 'Models' ? 'Models' : 'Markers')} }, version: 0 }))`).catch(() => {});
   await tab.navigate(`${BASE}/${c.route}?${q}`);
   await tab.until('window.__scape?.idle', 30_000);
+  // A pinned instant persists live=false; a scene without one is the live clock.
+  if (!c.scene.t) await tab.eval('window.__scape.world.getState().setNow()');
   await Bun.sleep(SETTLE_MS);
   if (c.input) {
     await drive(c);
@@ -132,7 +136,8 @@ async function measure(c: Case): Promise<Row> {
   const p = await tab.eval<{ raf: number; glFrames: number; timers: number }>('(() => { const p = window.__scape.idle; return { raf: p.raf, glFrames: p.glFrames, timers: p.timers }; })()');
   const pct = (a: number, b: number) => +((100 * (b - a)) / dt).toFixed(1);
   const r: Row = { label: label(c), renderer: pct(0, rendererDelta(cpu0.renderer, cpu1.renderer)), gpu: pct(cpu0.gpu, cpu1.gpu), task: pct(task0, task1), ...p, pass: false };
-  r.pass = r.renderer <= CPU_MAX && r.gpu <= CPU_MAX && r.glFrames === 0;
+  const live = !c.scene.t && c.input !== Input.Scrub;
+  r.pass = r.renderer <= CPU_MAX && r.gpu <= CPU_MAX && r.glFrames <= (live ? LIVE_FRAMES_MAX : 0);
   return r;
 }
 
