@@ -9,24 +9,25 @@ const altAz = (p: { altitude: number; azimuth: number }) => `${p.altitude >= 0 ?
 
 /** Sun, moon and Galactic Centre readout for the composed moment, PlanIt's viewfinder header. */
 export function BodyStrip() {
-  const time = useWorld((s) => s.time);
-  const pin = useWorld((s) => s.pin);
-  const siteM = usePinSiteHeightM();
   const showGc = useSettings((s) => s.showGc);
-  const date = new Date(time);
-  const obs = makeObserver(pin, siteM);
-  const moon = moonInfo(date);
+  // String selectors, so a clock tick re-renders the strip only when a shown digit changes.
+  const sun = useWorld((s) => altAz(position(SkyBody.Sun, new Date(s.time), makeObserver(s.pin, s.pinHeightM))));
+  const moon = useWorld((s) => {
+    const m = moonInfo(new Date(s.time));
+    return `${altAz(position(SkyBody.Moon, new Date(s.time), makeObserver(s.pin, s.pinHeightM)))} · ${percent(m.illumination, 0)} ${m.name}`;
+  });
+  const gc = useWorld((s) => (showGc ? altAz(position(SkyBody.Gc, new Date(s.time), makeObserver(s.pin, s.pinHeightM))) : ''));
   return (
     <div className="vf-bodies" aria-label="Sun and moon position">
       <span>
-        <b>Sun</b> {altAz(position(SkyBody.Sun, date, obs))}
+        <b>Sun</b> {sun}
       </span>
       <span>
-        <b>Moon</b> {altAz(position(SkyBody.Moon, date, obs))} · {percent(moon.illumination, 0)} {moon.name}
+        <b>Moon</b> {moon}
       </span>
       {showGc && (
         <span>
-          <b>Galactic Centre</b> {altAz(position(SkyBody.Gc, date, obs))}
+          <b>Galactic Centre</b> {gc}
         </span>
       )}
     </div>

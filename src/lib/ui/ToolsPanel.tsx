@@ -39,7 +39,7 @@ import { usePinSiteHeightM } from '@state/terrain';
 import { LightPointSummary, LightPointTools, MoonSummary, MoonTools } from './LightTools';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
 import { timelapseStore, useTimelapse } from '@state/timelapse';
-import { useWorld, worldStore } from '@state/world';
+import { usePlanTime, useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
 
 const ExposureSolve = { Ev: 'Ev', Aperture: 'Aperture', Shutter: 'Shutter', Iso: 'Iso' } as const;
@@ -92,7 +92,7 @@ function lastLightFor(pin: LngLat, pinHeightM: number, time: number, heightM: nu
 }
 
 function TidesGroup() {
-  const time = useWorld((s) => s.time);
+  const time = usePlanTime();
   const tz = useWorld((s) => s.tz);
   const units = useSettings((s) => s.units);
   const hour12 = useSettings((s) => s.hour12);
@@ -164,7 +164,7 @@ function TidesGroup() {
 }
 
 export function ToolsPanel() {
-  const time = useWorld((s) => s.time);
+  const time = usePlanTime();
   const tz = useWorld((s) => s.tz);
   const pin = useWorld((s) => s.pin);
   const pinHeightM = useWorld((s) => s.pinHeightM);

@@ -29,7 +29,6 @@ export function FramePanel() {
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const pinHeightM = useWorld((s) => s.pinHeightM);
-  const time = useWorld((s) => s.time);
   const units = useSettings((s) => s.units);
   const cocRule = useSettings((s) => s.cocRule);
   const profile = useTerrain((s) => s.profile);
@@ -60,7 +59,7 @@ export function FramePanel() {
   const setSetting = settingsStore.getState().update;
 
   const aimAt = (body: SkyBody) => {
-    const p = position(body, new Date(time), makeObserver(pin, pinSiteHeightM({ pinHeightM }, { pinGroundM })));
+    const p = position(body, new Date(worldStore.getState().time), makeObserver(pin, pinHeightM));
     compositionStore.getState().aim(p.azimuth, Math.max(0, p.altitude));
   };
   const setFocal = (v: number) => update(zoomPatch(c, v));

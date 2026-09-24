@@ -4,7 +4,7 @@ import { degrees } from '@core/format';
 import { formatTime } from '@core/time/format';
 import { useLightProbe } from '@state/lightProbe';
 import { useSettings } from '@state/settings';
-import { useWorld } from '@state/world';
+import { usePlanTime, useWorld } from '@state/world';
 
 const wrap360 = (d: number) => ((d % 360) + 360) % 360;
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg, 2)}`;
@@ -20,7 +20,7 @@ function phaseName(v: MoonView): string {
 }
 
 function useMoon(): MoonView {
-  const time = useWorld((s) => s.time);
+  const time = usePlanTime();
   const pin = useWorld((s) => s.pin);
   const pinHeightM = useWorld((s) => s.pinHeightM);
   return moonView(new Date(time), makeObserver(pin, pinHeightM));

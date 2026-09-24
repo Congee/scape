@@ -336,7 +336,9 @@ export class MapController {
       ),
       worldStore.subscribe((st) => st.time, () => {
         this.renderLive(true);
-        this.scheduleShadows();
+        // A 1 Hz live tick needs no debounce, and a timer per tick keeps an idle page awake.
+        if (worldStore.getState().live) this.requestShadows();
+        else this.scheduleShadows();
       }),
       worldStore.subscribe((st) => st.pinHeightM, () => this.renderLive()),
       worldStore.subscribe((st) => st.pin2HeightM, () => this.renderLive()),

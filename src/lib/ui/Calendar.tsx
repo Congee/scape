@@ -102,13 +102,12 @@ function EclipseDetail({ mark, lat, lng }: { mark: CalendarMark; lat: number; ln
 /** Month grid popover marking the moon phases and locally visible eclipses. */
 export function Calendar() {
   const [open, setOpen] = useState(false);
-  const time = useWorld((s) => s.time);
   const tz = useWorld((s) => s.tz);
+  const selected = useWorld((s) => isoDate(localParts(new Date(s.time), s.tz)));
   const pin = useWorld((s) => s.pin);
   const hour12 = useSettings((s) => s.hour12);
   const box = useRef<HTMLDivElement>(null);
 
-  const selected = isoDate(localParts(new Date(time), tz));
   const [ym, setYm] = useState(selected.slice(0, 7));
   // The popover is fixed, so the shell's clipped, wrapping header cannot cut it off.
   const [at, setAt] = useState({ top: 0, left: 0 });

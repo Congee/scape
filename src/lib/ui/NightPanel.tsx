@@ -17,15 +17,8 @@ import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { useDayData } from '@state/dayData';
 import { sensorById, useGear } from '@state/gear';
 import { settingsStore, useSettings } from '@state/settings';
-import { EYE_HEIGHT_M, horizonKeyFor, pinSiteHeightM, targetAngleFor, useTerrain } from '@state/terrain';
-import { useWorld, worldStore } from '@state/world';
-import { NATURAL_SKY_MAG } from '@core/sky/brightness';
-import { darkHoursUrl } from '@core/sky/darkhours';
-import { domeText, glowTowardText, MOON_DARK_DMAG, moonCurve, SKY_TOOLTIP, skyReadout, type MoonSample } from '@core/sky/readout';
-import { glowToward, SKYGLOW_PARAMS, skyglowFrom } from '@core/sky/skyglow';
-import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
-import { GlowStatus, useSkyglow, type GlowPoint } from '@state/skyglow';
-import { PanelTab, uiStore } from '@state/ui';
+import { EYE_HEIGHT_M, horizonKeyFor, targetAngleFor, useTerrain } from '@state/terrain';
+import { usePlanTime, useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
 
 const DAY_MS = 86_400_000;
@@ -228,7 +221,7 @@ function SkyGroup({ obs, skyline, aim, night, time, tz, hour12, heights }: { obs
 }
 
 export function NightPanel() {
-  const time = useWorld((s) => s.time);
+  const time = usePlanTime();
   const tz = useWorld((s) => s.tz);
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);

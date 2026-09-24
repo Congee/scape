@@ -7,17 +7,31 @@ import { Calendar } from './Calendar';
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const ZONES: string[] = Intl.supportedValuesOf('timeZone');
 
-export function DateBar() {
+/** The only part of the bar that changes every second. */
+function Clock() {
   const time = useWorld((s) => s.time);
+  const tz = useWorld((s) => s.tz);
+  const live = useWorld((s) => s.live);
+  const hour12 = useSettings((s) => s.hour12);
+  return (
+    <span className={`clock${live ? ' live' : ''}`} title={live ? 'Following real time' : 'Simulated time'}>
+      {formatTime(time, tz, hour12, true)}
+    </span>
+  );
+}
+
+export function DateBar() {
   const tz = useWorld((s) => s.tz);
   const tzAuto = useWorld((s) => s.tzAuto);
   const live = useWorld((s) => s.live);
-  const hour12 = useSettings((s) => s.hour12);
+  // String selectors, so a clock tick re-renders the bar only when the minute turns.
+  const iso = useWorld((s) => isoDate(localParts(new Date(s.time), s.tz)));
+  const hm = useWorld((s) => {
+    const p = localParts(new Date(s.time), s.tz);
+    return `${pad2(p.hour)}:${pad2(p.minute)}`;
+  });
+  const offset = useWorld((s) => offsetLabel(new Date(s.time), s.tz));
   const { addDays, setDate, setNow, setTime, setTz } = worldStore.getState();
-
-  const parts = localParts(new Date(time), tz);
-  const iso = isoDate(parts);
-  const hm = `${pad2(parts.hour)}:${pad2(parts.minute)}`;
 
   return (
     <div className="datebar">
@@ -40,13 +54,11 @@ export function DateBar() {
         value={hm}
         onChange={(e) => {
           const [h, m] = e.target.value.split(':').map(Number);
-          if (Number.isFinite(h) && Number.isFinite(m)) setTime(withLocalTime(new Date(time), h * 3600 + m * 60, tz).getTime());
+          if (Number.isFinite(h) && Number.isFinite(m)) setTime(withLocalTime(new Date(worldStore.getState().time), h * 3600 + m * 60, tz).getTime());
         }}
         aria-label="Time"
       />
-      <span className={`clock${live ? ' live' : ''}`} title={live ? 'Following real time' : 'Simulated time'}>
-        {formatTime(time, tz, hour12, true)}
-      </span>
+      <Clock />
       <button className={live ? 'on' : ''} onClick={setNow} title="Jump to the current time">
         Now
       </button>
@@ -57,7 +69,7 @@ export function DateBar() {
         title="Time zone (auto from the camera location, or override)"
         aria-label="Time zone"
       >
-        <option value="">{`Auto · ${tz} (${offsetLabel(new Date(time), tz)})`}</option>
+        <option value="">{`Auto · ${tz} (${offset})`}</option>
         {ZONES.map((z) => (
           <option key={z} value={z}>
             {z}

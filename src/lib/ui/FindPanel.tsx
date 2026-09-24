@@ -77,7 +77,6 @@ export function FindPanel() {
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const tz = useWorld((s) => s.tz);
-  const time = useWorld((s) => s.time);
   const s = useSettings();
 
   const update = finderStore.getState().update;
@@ -86,6 +85,7 @@ export function FindPanel() {
   const stale = !!resultPin && (resultPin.lat !== pin.lat || resultPin.lng !== pin.lng);
   const needsTarget = a.mode === HeatMode.Align || a.mode === HeatMode.Time;
   const c = a.candidate;
+  const offset = useWorld((w) => (c ? offsetMs(c.bestMs - w.time) : ''));
 
   const setWeekday = (d: number) => {
     const on = f.weekdays ?? [];
@@ -339,7 +339,7 @@ export function FindPanel() {
                 <b className="v">{Number.isFinite(c.sepDeg) ? degrees(c.sepDeg) : '—'}</b>
                 <span className="k">Moment</span>
                 <b className="v">
-                  {formatDateTime(c.bestMs, tz, s.hour12)} <span className="muted">· {offsetMs(c.bestMs - time)}</span>
+                  {formatDateTime(c.bestMs, tz, s.hour12)} <span className="muted">· {offset}</span>
                 </b>
               </div>
               {c.blocked && <p className="error">The target is behind terrain from here.</p>}

@@ -58,7 +58,6 @@ function shade(kind: EventKind): string {
 export function Timeline() {
   const events = useDayData((s) => s.events);
   const loading = useDayData((s) => s.loading);
-  const time = useWorld((s) => s.time);
   const tz = useWorld((s) => s.tz);
   const hour12 = useSettings((s) => s.hour12);
   const showGc = useSettings((s) => s.showGc);
@@ -66,8 +65,12 @@ export function Timeline() {
 
   const sight = useSightlines().lines;
   const list = events.filter((e) => (detail ? showGc || e.body !== SkyBody.Gc : !isDetail(e)));
-  let activeIdx = -1;
-  for (let i = 0; i < list.length; i++) if (list[i].time <= time) activeIdx = i;
+  // An index selector, so a clock tick re-renders only when the active event changes.
+  const activeIdx = useWorld((s) => {
+    let idx = -1;
+    for (let i = 0; i < list.length; i++) if (list[i].time <= s.time) idx = i;
+    return idx;
+  });
 
   return (
     <div className={`timeline${loading ? ' loading' : ''}`}>

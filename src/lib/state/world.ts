@@ -107,3 +107,6 @@ export const worldStore = create<WorldState>()(
 );
 
 export const useWorld = worldStore;
+
+/** The clock for panels that plan rather than track: exact when set, whole minutes while live, so a tick rarely re-renders them. */
+export const usePlanTime = () => useWorld((s) => (s.live ? s.time - (s.time % 60_000) : s.time));

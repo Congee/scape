@@ -6,7 +6,7 @@ import { useSettings } from '@state/settings';
 import { usePinSiteHeightM } from '@state/terrain';
 import { useWorld } from '@state/world';
 
-/** Live azimuth/altitude of the bodies at the simulated time. Re-renders per tick; cheap by design. */
+/** Live azimuth/altitude of the bodies at the simulated time. Re-renders per tick; rows take strings so they skip unchanged ticks. */
 export function LiveReadout() {
   const time = useWorld((s) => s.time);
   const pin = useWorld((s) => s.pin);
@@ -31,17 +31,19 @@ export function LiveReadout() {
 }
 
 function Row({ cls, label, pos, extra }: { cls: string; label: string; pos: HorizontalPos; extra?: string }) {
-  const up = pos.altitude > 0;
+  return <Cells cls={cls} label={label} up={pos.altitude > 0} az={`${degrees(pos.azimuth)} ${compass(pos.azimuth)}`} alt={`${pos.altitude >= 0 ? '+' : ''}${degrees(pos.altitude)}`} extra={extra} />;
+}
+
+function Cells({ cls, label, up, az, alt, extra }: { cls: string; label: string; up: boolean; az: string; alt: string; extra?: string }) {
   return (
     <div className={`readout-row${up ? '' : ' below'}`}>
       <span className={`dot ${cls} mid`} aria-hidden="true" />
       <span className="label">{label}</span>
       <span className="val" title="Azimuth">
-        {degrees(pos.azimuth)} {compass(pos.azimuth)}
+        {az}
       </span>
       <span className="val" title="Altitude">
-        {pos.altitude >= 0 ? '+' : ''}
-        {degrees(pos.altitude)}
+        {alt}
       </span>
       {extra && <span className="extra">{extra}</span>}
     </div>
