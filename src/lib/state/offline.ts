@@ -243,6 +243,7 @@ export const offlineStore = create<OfflineState>()(
               resolve(res.meta);
             } else if (res.kind === RegionResponseKind.Error) {
               handlers.delete(id);
+              void readGeoidMeta().then((geoid) => set({ geoid }));
               reject(new Error(res.message));
             }
           });

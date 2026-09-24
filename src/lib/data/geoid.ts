@@ -1,4 +1,4 @@
-/** The user-imported GSI geoid in OPFS: `geoid/grid.f32` plus a `meta.json` written after it. Worker-safe: no DOM. */
+/** The user-imported GSI geoid in OPFS: `geoid/<grid>.f32` plus a `meta.json` naming it, written after it. Worker-safe: no DOM. */
 
 import { parseGsiGeoid, type GeoidGrid, type GeoidHeader } from '@core/geo/geoid';
 import { findZipEntry, isGzip, isZip, ZipMethod } from '@core/io/zip';
@@ -18,6 +18,8 @@ export interface GeoidMeta extends GeoidHeader {
   /** ISO timestamp; also the key workers compare to drop tiles built on another grid. */
   importedAt: string;
   bytes: number;
+  /** Grid file name; absent for grids stored before imports were swapped in. */
+  grid?: string;
 }
 
 async function geoidDir(create: boolean): Promise<FileSystemDirectoryHandle> {
@@ -42,15 +44,33 @@ export async function geoidText(file: Blob): Promise<string> {
   return new TextDecoder('latin1').decode(b);
 }
 
-/** Parses and stores the grid, replacing any earlier one; the meta goes last so a torn write reads as absent. */
+/** Parses and stores the grid, replacing any earlier one only once the new one is fully written. */
 export async function importGeoid(file: File): Promise<GeoidMeta> {
   const { n, ...header } = parseGsiGeoid(await geoidText(file));
-  const dir = await geoidDir(true);
-  await dir.removeEntry(META).catch(() => undefined);
-  await writeFileBytes(dir, GRID, new Uint8Array(n.buffer as ArrayBuffer));
-  const meta: GeoidMeta = { ...header, fileName: file.name, importedAt: new Date().toISOString(), bytes: n.byteLength };
-  await writeFileBytes(dir, META, new TextEncoder().encode(JSON.stringify(meta)));
+  const meta: GeoidMeta & { grid: string } = { ...header, fileName: file.name, importedAt: new Date().toISOString(), bytes: n.byteLength, grid: `grid-${Date.now().toString(36)}.f32` };
+  await storeGeoid(await geoidDir(true), new Uint8Array(n.buffer as ArrayBuffer), meta);
   return meta;
+}
+
+type DirEntries = FileSystemDirectoryHandle & { keys(): AsyncIterableIterator<string> };
+
+/** The grid goes to a fresh file and the meta repoints to it, so a failed write (quota) leaves the old pair readable. */
+export async function storeGeoid(dir: FileSystemDirectoryHandle, grid: Uint8Array<ArrayBuffer>, meta: GeoidMeta & { grid: string }): Promise<void> {
+  const old = await dir
+    .getFileHandle(META)
+    .then(async (h) => (await h.getFile()).text())
+    .catch(() => null);
+  try {
+    await writeFileBytes(dir, meta.grid, grid);
+    await writeFileBytes(dir, META, new TextEncoder().encode(JSON.stringify(meta)));
+  } catch (err) {
+    await dir.removeEntry(meta.grid).catch(() => undefined);
+    if (old !== null) await writeFileBytes(dir, META, new TextEncoder().encode(old)).catch(() => undefined);
+    throw err;
+  }
+  const stale: string[] = [];
+  for await (const name of (dir as DirEntries).keys()) if (name !== META && name !== meta.grid) stale.push(name);
+  await Promise.all(stale.map((name) => dir.removeEntry(name).catch(() => undefined)));
 }
 
 export async function readGeoidMeta(): Promise<GeoidMeta | null> {
@@ -67,7 +87,7 @@ export async function readGeoidMeta(): Promise<GeoidMeta | null> {
 export async function readGeoid(): Promise<GeoidGrid | null> {
   const meta = await readGeoidMeta();
   if (!meta) return null;
-  const file = await (await (await geoidDir(false)).getFileHandle(GRID)).getFile();
+  const file = await (await (await geoidDir(false)).getFileHandle(meta.grid ?? GRID)).getFile();
   if (file.size !== meta.rows * meta.cols * 4) return null;
   const { lat0, lng0, dLat, dLng, rows, cols, version } = meta;
   return { lat0, lng0, dLat, dLng, rows, cols, version, n: new Float32Array(await file.arrayBuffer()) };
