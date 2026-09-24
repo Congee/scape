@@ -29,15 +29,27 @@ export function PanelExpand() {
 
 export function Panel() {
   const tab = useUi((s) => s.panelTab);
+  const collapsed = useUi((s) => s.panelCollapsed);
+  const ui = uiStore.getState();
   return (
     <div className="panel-inner">
       <div className="tabs" role="tablist">
         {TABS.map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => uiStore.getState().setPanelTab(t)}>
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            className={tab === t ? 'active' : ''}
+            onClick={() => {
+              ui.setPanelTab(t);
+              // On narrow screens the tab row stays as a peek bar; a tap opens the sheet.
+              ui.setPanelCollapsed(false);
+            }}
+          >
             {t}
           </button>
         ))}
-        <button className="tabs-collapse" title="Hide panel" aria-label="Hide panel" onClick={() => uiStore.getState().setPanelCollapsed(true)}>
+        <button className="tabs-collapse" title={collapsed ? 'Show panel' : 'Hide panel'} aria-label={collapsed ? 'Show panel' : 'Hide panel'} onClick={() => ui.setPanelCollapsed(!collapsed)}>
           »
         </button>
       </div>
