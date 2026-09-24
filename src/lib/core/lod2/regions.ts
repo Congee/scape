@@ -39,7 +39,7 @@ function plateau(city: string, path: string, bbox: Lod2Region['bbox']): Lod2Regi
     attribution: '© MLIT Project PLATEAU',
     attributionUrl: 'https://www.mlit.go.jp/plateau/',
     // Tokyo's geoid; the tiles have no ground column.
-    geoidM: 36.7,
+    geoidM: 37.0,
     gsiGeoid: true,
     idProperty: 'gml_id'
   };

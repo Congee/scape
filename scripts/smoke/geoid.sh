@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Geoid smoke: a synthetic GSIGEO2011 file imported through the Offline tab moves Tokyo's PLATEAU heights by exactly its offset from 36.7 m; removing it reverts them; Rotterdam never changes.
+# Geoid smoke: a synthetic GSIGEO2011 file imported through the Offline tab moves Tokyo's PLATEAU heights by exactly its offset from 37.0 m; removing it reverts them; Rotterdam never changes.
 # Usage: scripts/smoke/geoid.sh [port] [cdp-port] [screenshot-dir] [brave-profile]
 # Starts what is missing (vite dev, one background Brave) and stops only what it started. The grid is synthetic, written to the screenshot dir at runtime.
 set -uo pipefail
@@ -42,14 +42,14 @@ check() { # name, ok (0/1), detail
 }
 ok() { awk "BEGIN { exit !($1) }" && echo 1 || echo 0; }
 
-# Synthetic grids over central Tokyo: a constant 41.7 m, 5 m above PLATEAU's 36.7 m constant, and an unsupported model.
+# Synthetic grids over central Tokyo: a constant 42.0 m, 5 m above PLATEAU's 37.0 m constant, and an unsupported model.
 OFFSET=5
 ASC="$OUT/synthetic-geoid.asc"
 BAD="$OUT/synthetic-geoid-v1.asc"
 (cd "$ROOT" && bun -e "
 import { gsiGeoidText } from './src/lib/core/geo/geoidFixture.ts';
 const g = { lat0: 35.4, lng0: 139.4, dLat: 1 / 60, dLng: 1.5 / 60, rows: 60, cols: 60 };
-await Bun.write('$ASC', gsiGeoidText(g, () => 36.7 + $OFFSET));
+await Bun.write('$ASC', gsiGeoidText(g, () => 37.0 + $OFFSET));
 await Bun.write('$BAD', gsiGeoidText({ ...g, rows: 2, cols: 2, version: 'ver1.0' }, () => 40));
 ") || { echo "could not write the synthetic grid" >&2; exit 1; }
 gzip -kf "$ASC"
@@ -111,7 +111,7 @@ go "$(vf_url "$NL_CAM" "$NL_TGT")" "$READY"
 read -r nl_tiles nl_verts nl_hash0 <<<"$(js "$HASH")"
 nl_flags0=$(js "$FLAGS")
 
-# 2. Tokyo on the 36.7 m constant: the approximate-heights note, no GSI credit.
+# 2. Tokyo on the 37.0 m constant: the approximate-heights note, no GSI credit.
 go "$(vf_url "$JP_CAM" "$JP_TGT")" "$(settled none)"
 ab screenshot "$OUT/jp-constant.png" >/dev/null
 note=$(js "$(TEXT_OF '[data-geoid-note]')")
