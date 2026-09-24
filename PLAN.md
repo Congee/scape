@@ -27,6 +27,8 @@ research with versions and licenses, TPE screenshots).
    user says so. The app shell itself is a PWA.
 6. **Fast.** Sub-frame updates while scrubbing. Heavy work (horizon sweeps, searches) in
    Web Workers. Astronomy calls are memoised per (camera location, day).
+7. **Quiet.** Normal use must never spin a laptop's fan: an idle app (nothing moving, no load in
+   flight) draws no frames and burns ~0 % CPU, and interaction work stops when the input stops.
 
 ## 2. Feature scope (best of TPE ∪ PlanIt)
 
