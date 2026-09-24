@@ -471,7 +471,18 @@ them. **14** and **18** were measured and closed unfixed, **8** is a watch rathe
 **22** is fixed, which also closed both of **21**'s open defects — the empty canvas was 22's own
 doing, and the thin dark lines turned out to be real rock gullies.
 
-**Nothing in this register is waiting on a decision.** **19** and **20** were answered on
+**Waiting on the user (2026-09-24, overnight run).** Each has a default shipped or a task held:
+
+- Basemap source for a deployed origin (deferred 2026-09-12). Held.
+- Official LoD2 buildings need a meshopt decoder dependency. Held.
+- Target height on a model: apex (shipped default) or the roof under the target point.
+- Tools tab (Phase 7 calculators, merged): name "Tools" after Night; tab min width 62 px so 9 tabs
+  fit two rows; Rainbow overlay off by default; RAW size 14-bit uncompressed (worst case); rainbow
+  behind terrain drawn dim and dashed, not hidden; Earth-shadow cloud light without refraction
+  (~0.5°, a few minutes short); cloud heights above the camera's ground; time-lapse playback capped
+  at 30 Hz and looping. Twilight and moonlight scene EVs are estimates awaiting field readings.
+
+**Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
 (merged `763a99b`). **21**'s extent cap was re-measured after 2 and closed unshipped
 (below).
