@@ -269,10 +269,14 @@ function cutBlock(pin: LngLat, eyeM: number, level: number, b: BlockId, zoom: nu
 
 /** Aim offsets, in frame widths, whose blocks are cut while idle so a pan finds them cached. */
 const WARM_YAW = [0.5, -0.5, 1, -1] as const;
+/** Warming waits this long for the aim to rest; mid-drag it would outbid the drag's own blocks. */
+const WARM_REST_MS = 300;
 
 /** Fills the block cache for the aims a drag reaches next; any newer request stops it between blocks. */
 async function warmAround(req: MeshRequest, frame: MeshView, opts: SelectOptions, eyeM: number): Promise<void> {
   const stale = () => latest.Mesh !== req.id;
+  await new Promise<void>((r) => setTimeout(r, WARM_REST_MS));
+  if (stale()) return;
   for (const f of WARM_YAW) {
     // oxlint-disable-next-line no-await-in-loop -- one offset at a time, yielding to any new request
     await idle();
