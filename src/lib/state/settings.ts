@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
+import { LightMode } from '@core/astro/lightSource';
 import { MoonRule } from '@core/astro/milkyWay';
 import { Units } from '@core/format';
 import { CoordFormat } from '@core/geo/coords';
@@ -28,6 +29,8 @@ export interface Settings {
   showBuildings: boolean;
   /** Ground shadows those buildings cast at the timeline time. */
   showSunShadows: boolean;
+  /** Which body casts those shadows, and the viewfinder's. */
+  lightSource: LightMode;
   /** Show transits, golden hour, terrain and Galactic Centre rows in the timeline. */
   timelineDetail: boolean;
   clickMovesPin: boolean;
@@ -69,6 +72,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showGc: true,
   showBuildings: true,
   showSunShadows: true,
+  lightSource: LightMode.Auto,
   timelineDetail: false,
   clickMovesPin: true,
   terrain: true,

@@ -12,6 +12,7 @@ import {
 } from 'maplibre-gl';
 import { shallow } from 'zustand/shallow';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
+import { lightAt } from '@core/astro/lightSource';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
 import { modelHeightAt } from '@core/model/heightAt';
@@ -19,7 +20,7 @@ import { rowsCentre, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
-import { frameOf, maskCorners, maskFrame, maskPixels, maskRect, type MaskRect } from '@core/geo/shadowMask';
+import { frameOf, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, SHADOW_RGB, type MaskRect } from '@core/geo/shadowMask';
 import { depthOfField } from '@core/optics/dof';
 import { cocMm, effectiveOptics, focalForFovMm, fovDeg, frameMm, sensorPixels, tcFactor } from '@core/optics/fov';
 import '@data/maplibre';
@@ -142,9 +143,8 @@ export class MapController {
   private dragging2 = false;
   private draggingFov = false;
   private shadowTimer: ReturnType<typeof setTimeout> | 0 = 0;
-  private drawer: ModelDrawer;
-  /** Overture feature ids a visible model stands in for. */
-  private hiddenIds: string[] = [];
+  /** Body behind the mask on screen; the smoke test reads it. */
+  lightBody: SkyBody | null = null;
 
   constructor(container: HTMLElement) {
     const w = worldStore.getState();
@@ -167,7 +167,7 @@ export class MapController {
     this.map.addControl(new GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'top-right');
     this.scale = new ScaleControl({ unit: s.units });
     this.map.addControl(this.scale, 'bottom-left');
-    if (import.meta.env.DEV) (window as unknown as { __scapeMap?: MaplibreMap }).__scapeMap = this.map;
+    if (import.meta.env.DEV) Object.assign(window, { __scapeMap: this.map, __scapeMapCtl: this });
 
     this.pin = this.makeMarker({ at: w.pin, color: PIN_COLOR, scale: 1 }, (p) => worldStore.getState().setPin(p), (d) => (this.dragging = d));
     this.syncPin2(w.pin2);
@@ -312,6 +312,7 @@ export class MapController {
       ),
       settingsStore.subscribe((st) => st.showBuildings, () => this.applyBuildings()),
       settingsStore.subscribe((st) => st.showSunShadows, () => this.applyShadows()),
+      settingsStore.subscribe((st) => st.lightSource, () => this.scheduleShadows()),
       settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
       settingsStore.subscribe((st) => st.showLightPollution, () => this.applyNightLights()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
@@ -769,15 +770,16 @@ export class MapController {
     const s = settingsStore.getState();
     if (!s.showSunShadows || this.map.getZoom() < SHADOW_MIN_ZOOM) return this.hideShadows();
     const w = worldStore.getState();
-    const sun = position(SkyBody.Sun, new Date(w.time), makeObserver(w.pin, w.pinHeightM));
-    if (!(sun.altitude > 0)) return this.hideShadows();
+    const light = lightAt(s.lightSource, new Date(w.time), makeObserver(w.pin, w.pinHeightM));
+    this.lightBody = light?.body ?? null;
+    if (!light) return this.hideShadows();
     const buildings = s.showBuildings && this.map.getZoom() >= BLD_MIN_ZOOM;
-    const b = this.shadowBounds(sun.altitude, sun.azimuth, buildings);
+    const b = this.shadowBounds(light.altitudeDeg, light.azimuthDeg, buildings);
     const c = this.map.getCenter();
     // Sized against the true centre, then rebuilt around a snapped one so a small pan reuses the grid.
     const rough = this.shadowRect({ lng: c.lng, lat: c.lat }, b);
     const centre = snapPoint({ lng: c.lng, lat: c.lat }, rough.cellM * 16);
-    requestShadowMask(centre, this.shadowRect(centre, b), sun.azimuth, sun.altitude, SHADOW_SOFT_M, buildings);
+    requestShadowMask(centre, this.shadowRect(centre, b), light.azimuthDeg, light.altitudeDeg, SHADOW_SOFT_M, buildings);
     // A toggle back on finds the store unchanged; the mask already in hand goes back up.
     this.paintShadowMask();
   }
@@ -798,7 +800,8 @@ export class MapController {
     const m = buildingsStore.getState().shadowMask;
     const src = this.styleReady ? (this.map.getSource(SHADOW_SRC) as ImageSource | undefined) : undefined;
     if (!m || !src || !this.map.getLayer(SHADOW_LAYER)) return;
-    src.updateImage({ image: new ImageData(maskPixels(m.mask, m.nx, m.ny), m.nx, m.ny), coordinates: maskCorners(m.centre, m) });
+    const rgb = this.lightBody === SkyBody.Moon ? MOON_SHADOW_RGB : SHADOW_RGB;
+    src.updateImage({ image: new ImageData(maskPixels(m.mask, m.nx, m.ny, rgb), m.nx, m.ny), coordinates: maskCorners(m.centre, m) });
     this.map.setLayoutProperty(SHADOW_LAYER, 'visibility', 'visible');
   }
 

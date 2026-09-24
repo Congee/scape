@@ -17,6 +17,8 @@ export const MASK_MIN_CELL_M = 2;
 export const MASK_SNAP_CELLS = 16;
 /** Dark desaturated blue-grey; pure black at low opacity reads as grime over a light basemap. */
 export const SHADOW_RGB = [26, 36, 54] as const;
+/** Moon shadows keep the blue of the moon's colour language, deeper. */
+export const MOON_SHADOW_RGB = [8, 16, 52] as const;
 
 /**
  * Local frame for a mask: a Mercator plane scaled to ground metres at `centre`. Cells stay square
@@ -105,9 +107,9 @@ export function shadowMask(h: Float32Array, ceiling: Float32Array, softM: number
 }
 
 /** RGBA pixels for an `ImageData`; grid row 0 is the southernmost, image row 0 the north edge. */
-export function maskPixels(mask: Uint8Array, nx: number, ny: number): Uint8ClampedArray<ArrayBuffer> {
+export function maskPixels(mask: Uint8Array, nx: number, ny: number, rgb: readonly number[] = SHADOW_RGB): Uint8ClampedArray<ArrayBuffer> {
   const px = new Uint8ClampedArray(new ArrayBuffer(nx * ny * 4));
-  const [r, g, b] = SHADOW_RGB;
+  const [r, g, b] = rgb;
   for (let iy = 0; iy < ny; iy++) {
     const src = (ny - 1 - iy) * nx;
     let o = iy * nx * 4;
