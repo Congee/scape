@@ -490,6 +490,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Models P1 (merged): a hidden model does not suppress Overture rows; the map's fill-extrusion is
   not yet hidden under a model (P2 adds `models-fill`); "Model this building" seeds from one z14 tile
   (P2 spans tiles); `.scape.json` export omits models until P3b.
+- Tides and eclipses (merged): NOAA harmonic stations only (1251; 2243 subordinate left out,
+  ~+150 KB gzip to add); no Timeline tide row (Tools only); lunar eclipse moon not tinted red (small
+  shader change if wanted); eclipses via astronomy-engine (within 30 s of NASA), no Besselian elements.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
