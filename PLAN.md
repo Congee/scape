@@ -493,9 +493,7 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Tides and eclipses (merged): NOAA harmonic stations only (1251; 2243 subordinate left out,
   ~+150 KB gzip to add); no Timeline tide row (Tools only); lunar eclipse moon not tinted red (small
   shader change if wanted); eclipses via astronomy-engine (within 30 s of NASA), no Besselian elements.
-- Light extras (moon simulator, auto light source, first/last light, orbit) are done on
-  `wip/extras-light` (89260fe, smoke 45/45) but not merged: the merge into master was blocked by the
-  permission classifier (6 additive conflicts with P1 and tides). Needs your OK to merge. Defaults:
+- Light extras (moon simulator, auto light source, first/last light, orbit) merged at `aa61568`. Defaults:
   moon shade on the map deep blue; first/last light counts terrain only; earthshine under 35 % lit;
   orbit pitch 65° (max 80°), 6°/s, not saved.
 - Terrain waste at long focal lengths: dropped (merge `6a54ad2` reverted). It cut built blocks 6–21 % at
