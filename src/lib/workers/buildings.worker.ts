@@ -4,7 +4,7 @@ import type { LngLat } from '@core/geo/geodesy';
 import { frameOf, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
 import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStitch';
 import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
-import { cubicStencilTiles, demRowAt, elevationAtCubic } from '@core/terrain/dem';
+import { cubicStencilTiles, demRowAt, elevationAtCubic, lowestGroundAt, withDemTiles } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
@@ -74,8 +74,7 @@ async function groundOf(decoded: DecodedBuildings): Promise<Float32Array> {
   };
   for (let i = 0; i < decoded.count; i++) want(decoded.cLng[i], decoded.cLat[i]);
   for (let i = 0; i < decoded.lng.length; i++) want(decoded.lng[i], decoded.lat[i]);
-  await dem.loadAll([...need.values()]);
-  return groundForRows(decoded, (lng, lat) => elevationAtCubic(dem, lng, lat, BUILDING_GROUND_ZOOM));
+  return withDemTiles(dem, [...need.values()], () => groundForRows(decoded, (lng, lat) => elevationAtCubic(dem, lng, lat, BUILDING_GROUND_ZOOM)));
 }
 
 async function run(req: TilesRequest): Promise<void> {
@@ -181,9 +180,10 @@ async function maskFor(req: MaskRequest): Promise<Uint8Array | null> {
     frame = maskFrame(req.centre);
     grid = { cellM: req.cellM, nx: req.nx, ny: req.ny, originE: req.originE, originN: req.originN, h: new Float32Array(req.nx * req.ny) };
     const zoom = zoomForResolution(req.centre.lat, req.cellM, CEILING_MIN_ZOOM, CEILING_MAX_ZOOM, TERRAIN_TILE_SIZE);
-    await dem.loadAll(tilesInBounds(frameBounds(frame, grid), zoom));
+    const g = grid;
+    const f = frame;
+    const complete = await withDemTiles(dem, tilesInBounds(frameBounds(f, g), zoom), () => latestMask === req.id && fillFrameTerrain(g, f, zoom));
     if (latestMask !== req.id) return null;
-    const complete = fillFrameTerrain(grid, frame, zoom);
     // An absent building tile is far more often an empty one than a failure, and letting it veto
     // the cache would refetch every tile on each sun change.
     if (req.buildings) await stampFrameBuildings(grid, frame);
@@ -248,14 +248,7 @@ async function hiddenIds(req: SuppressedIdsRequest): Promise<void> {
 }
 
 async function groundAt(req: GroundAtRequest): Promise<void> {
-  const need = new Map<string, TileCoord>();
-  for (const p of req.points) for (const t of cubicStencilTiles(p.lng, p.lat, BUILDING_GROUND_ZOOM, TERRAIN_TILE_SIZE)) need.set(tileKey(t.z, t.x, t.y), t);
-  await dem.loadAll([...need.values()]);
-  let groundM: number | null = null;
-  for (const p of req.points) {
-    const g = elevationAtCubic(dem, p.lng, p.lat, BUILDING_GROUND_ZOOM);
-    if (!Number.isNaN(g) && (groundM === null || g < groundM)) groundM = g;
-  }
+  const groundM = await lowestGroundAt(dem, req.points, BUILDING_GROUND_ZOOM, TERRAIN_TILE_SIZE);
   scope.postMessage({ kind: BuildingsKind.Ground, id: req.id, groundM } satisfies BuildingsResponse);
 }
 

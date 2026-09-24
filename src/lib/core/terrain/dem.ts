@@ -1,4 +1,4 @@
-import { lngLatToTilePixel, TILE_SIZE, type TileCoord } from './tiles';
+import { lngLatToTilePixel, tileKey, TILE_SIZE, type TileCoord } from './tiles';
 
 /** One decoded DEM tile: elevations in metres, row-major, NaN where unknown. */
 export interface DemTile {
@@ -348,4 +348,35 @@ export function demRowAt(src: DemSource, lat: number, z: number): (lng: number) 
     }
     return tile ? sampleTile(tile, (xf - fx) * tile.size, py * tile.size) : NaN;
   };
+}
+
+/** A shared tile cache: loads, and pins tiles so another request's load cannot evict them mid-read. */
+export interface RetainingDemSource extends DemSource {
+  retain(coords: readonly TileCoord[]): () => void;
+  loadAll(coords: TileCoord[]): Promise<void>;
+}
+
+/** Runs `read` once `coords` are loaded, holding them from before the load until it returns. */
+export async function withDemTiles<T>(src: RetainingDemSource, coords: TileCoord[], read: () => T): Promise<T> {
+  const release = src.retain(coords);
+  try {
+    await src.loadAll(coords);
+    return read();
+  } finally {
+    release();
+  }
+}
+
+/** Lowest cubic sample at `points`, metres; null when none of them has data. */
+export async function lowestGroundAt(src: RetainingDemSource, points: readonly { lng: number; lat: number }[], z: number, size = TILE_SIZE): Promise<number | null> {
+  const need = new Map<string, TileCoord>();
+  for (const p of points) for (const t of cubicStencilTiles(p.lng, p.lat, z, size)) need.set(tileKey(t.z, t.x, t.y), t);
+  return withDemTiles(src, [...need.values()], () => {
+    let low: number | null = null;
+    for (const p of points) {
+      const g = elevationAtCubic(src, p.lng, p.lat, z);
+      if (Number.isFinite(g) && (low === null || g < low)) low = g;
+    }
+    return low;
+  });
 }

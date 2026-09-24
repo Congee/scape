@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ancestorTile, cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, overzoomTile, sampleGridCubic, sampleTile, type DemSource, type DemTile } from './dem';
+import { ancestorTile, cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, lowestGroundAt, overzoomTile, sampleGridCubic, sampleTile, type DemSource, type DemTile, type RetainingDemSource } from './dem';
+import { evictionKeys, Holds } from './holds';
+import { tileKey, tilePixelToLngLat, type TileCoord } from './tiles';
 
 describe('decodeTerrarium', () => {
   it('decodes known triplets', () => {
@@ -384,5 +386,60 @@ describe('overzoomTile', () => {
     expect(Math.max(...all)).toBeCloseTo(plane(size - 1, size - 1), 4);
     // The right-hand child starts where the left-hand one left off, half a parent post further on.
     expect(kids[1].elev[0] - kids[0].elev[size - 1]).toBeCloseTo(0.5, 4);
+  });
+});
+
+/** An LRU like the worker's DemCache whose loads land only when the test says so. */
+class SlowDem implements RetainingDemSource {
+  private tiles = new Map<string, DemTile>();
+  private pending = new Map<string, () => void>();
+  private holds = new Holds();
+  constructor(private maxTiles: number) {}
+  get(z: number, x: number, y: number) {
+    return this.tiles.get(tileKey(z, x, y));
+  }
+  retain(coords: readonly TileCoord[]) {
+    return this.holds.retain(coords.map((c) => tileKey(c.z, c.x, c.y)));
+  }
+  loadAll(coords: TileCoord[]) {
+    return Promise.all(coords.map((c) => (this.tiles.has(tileKey(c.z, c.x, c.y)) ? undefined : new Promise<void>((r) => this.pending.set(tileKey(c.z, c.x, c.y), r))))).then(() => {});
+  }
+  /** One tile arrives, evicting the oldest unheld ones past the cap. */
+  arrive(c: TileCoord, elevM: number) {
+    const k = tileKey(c.z, c.x, c.y);
+    this.tiles.set(k, { ...c, size: 4, elev: new Float32Array(16).fill(elevM) });
+    for (const e of evictionKeys(this.tiles.keys(), this.holds, this.tiles.size - this.maxTiles)) this.tiles.delete(e);
+    this.pending.get(k)?.();
+  }
+}
+
+describe('lowestGroundAt', () => {
+  const z = 3;
+  const at = (x: number, y: number) => tilePixelToLngLat(z, x, y, 2, 2, 4);
+
+  it('keeps its tile through another request filling the cache before it reads', async () => {
+    const src = new SlowDem(2);
+    const ground = lowestGroundAt(src, [at(2, 2)], z, 4);
+    void src.loadAll([{ z, x: 5, y: 5 }, { z, x: 6, y: 6 }]);
+    src.arrive({ z, x: 2, y: 2 }, 21);
+    src.arrive({ z, x: 5, y: 5 }, 0);
+    src.arrive({ z, x: 6, y: 6 }, 0);
+    expect(await ground).toBe(21);
+  });
+
+  it('takes the lowest point and skips points without data', async () => {
+    const src = new SlowDem(8);
+    const ground = lowestGroundAt(src, [at(2, 2), at(3, 2), at(7, 7)], z, 4);
+    src.arrive({ z, x: 2, y: 2 }, 30);
+    src.arrive({ z, x: 3, y: 2 }, 12);
+    src.arrive({ z, x: 7, y: 7 }, NaN);
+    expect(await ground).toBe(12);
+  });
+
+  it('is null when no point has data', async () => {
+    const src = new SlowDem(8);
+    const ground = lowestGroundAt(src, [at(2, 2)], z, 4);
+    src.arrive({ z, x: 2, y: 2 }, NaN);
+    expect(await ground).toBeNull();
   });
 });
