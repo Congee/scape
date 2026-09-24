@@ -168,9 +168,11 @@ export async function finishDraft(): Promise<SavedModel | null> {
   st.setDraft(null);
   const pts = draft.map(([lng, lat]) => ({ lng, lat }));
   const c = { lng: pts.reduce((a, p) => a + p.lng, 0) / pts.length, lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length };
-  const [heightM, groundM] = await Promise.all([buildingHeightAt(c).catch(() => null), groundUnder(pts).catch(() => null)]);
-  const m = drawnModel(pts, `Model ${st.models.length + 1}`, heightM ?? DRAWN_HEIGHT_M);
+  const m = drawnModel(pts, `Model ${st.models.length + 1}`, DRAWN_HEIGHT_M);
   if (!m) return null;
+  // The footprint, as the heal and the nudge refresh read it, so they agree to the bit.
+  const [heightM, groundM] = await Promise.all([buildingHeightAt(c).catch(() => null), groundUnder(m.footprint.map(([lng, lat]) => ({ lng, lat }))).catch(() => null)]);
+  m.parts![0].heightM = heightM ?? DRAWN_HEIGHT_M;
   m.groundM = groundM ?? NaN;
   await modelsStore.getState().save(m);
   modelsStore.getState().select(m.id);

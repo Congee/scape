@@ -273,7 +273,9 @@ const healed = await js<{ was: number; now: number; ms: number } | null>(`
   while (Number.isNaN(g()) && performance.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 100));
   return { was: m.groundM, now: g(), ms: Math.round(performance.now() - t0) };
 `);
-check('a NaN ground heals on load', !!healed && healed.now === healed.was, healed ? `${healed.was.toFixed(2)} → NaN → ${healed.now.toFixed(2)} m in ${healed.ms} ms` : 'no drawn model');
+// 1 mm: far under Terrarium's 3.9 mm step, so a real re-read error still fails, yet immune to float noise.
+const HEAL_TOL_M = 0.001;
+check('a NaN ground heals on load', !!healed && Math.abs(healed.now - healed.was) < HEAL_TOL_M, healed ? `${healed.was.toFixed(2)} → NaN → ${healed.now.toFixed(2)} m (Δ ${Math.abs(healed.now - healed.was).toExponential(1)}) in ${healed.ms} ms` : 'no drawn model');
 // A burst of three 100 m east moves re-reads the ground once it settles, then the move back restores it.
 const shifted = await js<{ was: number; now: number; want: number | null; back: number; ms: number } | null>(`
   const id = ${JSON.stringify(made?.id ?? '')}, get = () => S.models.getState().models.find((x) => x.id === id);
