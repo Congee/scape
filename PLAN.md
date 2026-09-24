@@ -476,8 +476,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
 
 **Waiting on the user (2026-09-24, overnight run).** Each has a default shipped or a task held:
 
-- Basemap source for a deployed origin: decided 2026-09-24 — pack OpenFreeMap per-tile PBFs into
-  PMTiles like terrain, Liberty style, sprites and glyphs cached alongside. In progress.
+- Basemap source for a deployed origin: OpenFreeMap per-tile PBFs packed into PMTiles, Liberty style,
+  sprites and glyphs cached (merged 2026-09-24). Joins the terrain download by default up to 100 tiles;
+  Liberty's shaded relief is dropped offline.
 - Official LoD2 buildings: `meshoptimizer` decoder approved 2026-09-24 (no Draco). In progress.
 - Target height on a model: apex (shipped default) or the roof under the target point.
 - Tools tab (Phase 7 calculators, merged): name "Tools" after Night; tab min width 62 px so 9 tabs
@@ -487,7 +488,7 @@ doing, and the thin dark lines turned out to be real rock gullies.
   at 30 Hz and looping. Twilight and moonlight scene EVs are estimates awaiting field readings.
 - Offline buildings (merged): z14 only, "download with the terrain" on by default up to 100 tiles
   (~30 MB dense city; NYC 50 km = 686 tiles / 146 MB); separate Estimate/Download too. Open: should
-  one click also fetch the basemap for the region?
+  one click also fetch the basemap for the region? Yes, up to 100 tiles.
 - Models P1 (merged): a hidden model does not suppress Overture rows; the map's fill-extrusion is
   not yet hidden under a model (P2 adds `models-fill`); "Model this building" seeds from one z14 tile
   (P2 spans tiles); `.scape.json` export omits models until P3b.
