@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase, type StoreNames } from 'idb';
+import type { SavedModel } from '@core/model';
 import type { SavedLocation, SavedMarker, SavedPlan, SavedSearch, ScapeExport } from '@core/plan';
 
 export type { SavedLocation, SavedMarker, SavedPlan, SavedSearch } from '@core/plan';
@@ -8,23 +9,34 @@ interface ScapeDB extends DBSchema {
   markers: { key: string; value: SavedMarker; indexes: { byName: string } };
   plans: { key: string; value: SavedPlan; indexes: { byName: string } };
   searches: { key: string; value: SavedSearch; indexes: { byName: string } };
+  models: { key: string; value: SavedModel; indexes: { byName: string } };
 }
 
 type Store = StoreNames<ScapeDB>;
 
+export const DB_VERSION = 4;
+
+/** The slice of an upgrading database that `upgradeScape` touches. */
+export interface Upgradable {
+  createObjectStore(name: Store, options: { keyPath: string }): { createIndex(name: 'byName', keyPath: string): unknown };
+}
+
+/** Creates every store added after `oldVersion`; each is keyed by `id` and listed by name. */
+export function upgradeScape(d: Upgradable, oldVersion: number): void {
+  const add = (name: Store) => d.createObjectStore(name, { keyPath: 'id' }).createIndex('byName', 'name');
+  if (oldVersion < 1) add('locations');
+  if (oldVersion < 2) {
+    add('markers');
+    add('plans');
+  }
+  if (oldVersion < 3) add('searches');
+  if (oldVersion < 4) add('models');
+}
+
 let dbp: Promise<IDBPDatabase<ScapeDB>> | null = null;
 
 export function db(): Promise<IDBPDatabase<ScapeDB>> {
-  dbp ??= openDB<ScapeDB>('scape', 3, {
-    upgrade(d, oldVersion) {
-      if (oldVersion < 1) d.createObjectStore('locations', { keyPath: 'id' }).createIndex('byName', 'name');
-      if (oldVersion < 2) {
-        d.createObjectStore('markers', { keyPath: 'id' }).createIndex('byName', 'name');
-        d.createObjectStore('plans', { keyPath: 'id' }).createIndex('byName', 'name');
-      }
-      if (oldVersion < 3) d.createObjectStore('searches', { keyPath: 'id' }).createIndex('byName', 'name');
-    }
-  });
+  dbp ??= openDB<ScapeDB>('scape', DB_VERSION, { upgrade: (d, oldVersion) => upgradeScape(d, oldVersion) });
   return dbp;
 }
 
