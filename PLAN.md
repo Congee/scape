@@ -517,6 +517,42 @@ doing, and the thin dark lines turned out to be real rock gullies.
   placing on pick?); the Height nudge is off for Imported models.
 - Models ground fix: a drawn model whose ground is unknown at save (offline/timeout) is saved at
   sea level and healed on the next load (vs blocking save, or an editor warning?).
+- LoD2 follow-ups: moonlit building faces read bright (tone down or keep?); swissBUILDINGS3D stays
+  pinned to v1/20260520 (vs following latest); PLATEAU beyond the Tokyo 23 wards not started.
+
+**Precision audit (2026-09-24, pinned by `horizons.test.ts` and `geodesy.test.ts`).** Sun/Moon are
+within 0.003° and 4 s of JPL Horizons, stars within 25″, LoD2 roofs within 1.3 cm of source. The
+visible errors are design choices, each waiting on a decision (recommendation in brackets):
+
+- Spherical geodesy: bearings off by ≤0.19°, destination points by ≤0.56 % of distance, while the
+  Sun's azimuth is ellipsoidal, so terrain can sit 0.19° off the Sun. [Ellipsoidal `geodesy.ts` and
+  `pinFrame.ts` together, with the terrain work.]
+- Refraction steps to zero below −0.8333° (`refraction.ts`): the drawn Sun/Moon drops 0.62°, and
+  sits too low wherever the horizon is below that (high viewpoints over sea or plains). [Taper to
+  zero by about −3°; twilight thresholds stay geometric.]
+- Stars above 10° get no refraction (`placeEnu` fast path), 1′ still missing at 45°; the Milky Way
+  texture gets none at any altitude. [Refract stars; the Milky Way needs a shader change.]
+- Rise/set ignore site altitude (`pinHeightM` is above ground): ≤58 s at 3000 m. [Pass ground
+  elevation plus eye height.]
+- Horizon sweep reads summits low, 12–53 m at 10 km, up to 205 m at 50 km (≤0.30°), so the Sun
+  clears ridges early and sets late (`horizon.ts`, zoom ceiling in `terrain.worker.ts`). Max-per-cell
+  or a finer coarsening floor, both cost speed. [After the terrain-drag work.]
+- Safari/iOS (AWS terrain) reads ground up to 197 m low (1.1° at 10 km). Software WebP decode (new
+  path or dependency) or accept.
+- Minor: the Tokyo 36.7 m fallback as 37.0 m cuts its worst case to about 1 m; proper motion to 2025
+  in `build-sky.ts` (worst star 0.05°); annual aberration in `eqjToEnu` (20″); `Math.max(ground, 0)`
+  puts the eye up to 7 m high in Dutch polders.
+
+**Known code glitches (2026-09-24).**
+
+- extras-astro smoke "24 mm L/P night, lunar maximum: moon disc at centre" fails on master; fix in
+  progress (wip/fixflakes).
+- models-p2 NaN-heal smoke compares floats with `===` and flakes; fix in progress (wip/fixflakes).
+- Overture prism build and `occludes` run on the main thread (170–250 ms/s dragging in Rotterdam);
+  the terrain-drag work is cutting it, moving the build into the worker is still open.
+- The mask worker warns once per skipped LoD2 tile on every rebuild, so a permanently bad tile
+  repeats its warning.
+- `zip.ts` does not check per-entry 0xFFFFFFFF (Zip64) sizes; harmless at GSI file sizes.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
