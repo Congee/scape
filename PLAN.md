@@ -481,6 +481,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
   behind terrain drawn dim and dashed, not hidden; Earth-shadow cloud light without refraction
   (~0.5°, a few minutes short); cloud heights above the camera's ground; time-lapse playback capped
   at 30 Hz and looping. Twilight and moonlight scene EVs are estimates awaiting field readings.
+- Offline buildings (merged): z14 only, "download with the terrain" on by default up to 100 tiles
+  (~30 MB dense city; NYC 50 km = 686 tiles / 146 MB); separate Estimate/Download too. Open: should
+  one click also fetch the basemap for the region?
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
