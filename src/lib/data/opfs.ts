@@ -10,6 +10,8 @@ export const ARCHIVES_CHANNEL = 'scape.archives';
 
 export const archiveName = (id: string): string => `${id}.pmtiles`;
 export const archiveKey = (id: string): string => `opfs/${archiveName(id)}`;
+/** Style, sprites and glyphs cached for a style-backed basemap. */
+export const assetsDirName = (id: string): string => `${id}.assets`;
 
 export function opfsSupported(): boolean {
   return typeof navigator !== 'undefined' && typeof navigator.storage?.getDirectory === 'function';
@@ -127,12 +129,21 @@ export async function writeMeta(meta: ArchiveMeta): Promise<void> {
   await writeFileBytes(dir, `${meta.id}.json`, new TextEncoder().encode(JSON.stringify(meta)));
 }
 
+export async function assetsDir(id: string, create = false): Promise<FileSystemDirectoryHandle> {
+  return (await archivesDir()).getDirectoryHandle(assetsDirName(id), { create });
+}
+
+export async function readAsset(id: string, fileName: string): Promise<ArrayBuffer> {
+  const file = await (await (await assetsDir(id)).getFileHandle(fileName)).getFile();
+  return file.arrayBuffer();
+}
+
 export async function removeArchive(id: string): Promise<void> {
   const dir = await archivesDir();
-  for (const name of [archiveName(id), `${id}.json`]) {
+  for (const name of [archiveName(id), `${id}.json`, assetsDirName(id)]) {
     try {
-      // oxlint-disable-next-line no-await-in-loop -- two entries, order irrelevant
-      await dir.removeEntry(name);
+      // oxlint-disable-next-line no-await-in-loop -- three entries, order irrelevant
+      await dir.removeEntry(name, { recursive: true });
     } catch {
       // already gone
     }

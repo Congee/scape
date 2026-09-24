@@ -16,6 +16,8 @@ export interface ArchiveMeta {
   sourceUrl: string;
   /** ISO timestamp. */
   downloadedAt: string;
+  /** Style the archive was packed for; its local copy sits in `<id>.assets/style.json`. */
+  style?: string;
 }
 
 export interface RegionSpec {
@@ -27,6 +29,8 @@ export interface RegionSpec {
   sourceUrl: string;
   /** Archive id superseded once this download succeeds. */
   replaces?: string;
+  /** Style to cache with a TileJSON basemap source. */
+  styleUrl?: string;
 }
 
 export interface Estimate {
@@ -35,6 +39,8 @@ export interface Estimate {
   exact: boolean;
   /** The URL that answered; a basemap build date may fall back to an earlier day. */
   sourceUrl: string;
+  /** Build day of a TileJSON source, "2026-09-13". */
+  build?: string;
 }
 
 export const RegionRequestKind = { Estimate: 'Estimate', Download: 'Download', Import: 'Import', Cancel: 'Cancel' } as const;

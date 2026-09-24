@@ -62,7 +62,7 @@ export function LayersPanel() {
                 {g}
                 {items.some((b) => b.id === basemapId) && <span className="dot active" aria-hidden="true" />}
               </summary>
-              {g === BasemapGroup.Downloaded && (
+              {g === BasemapGroup.Downloaded && items.some((b) => b.kind === BasemapKind.Pmtiles) && (
                 <label className="toggle">
                   <span>Style</span>
                   <select value={offlineFlavor} onChange={(e) => update({ offlineFlavor: e.target.value as PmFlavor })} title="Protomaps style flavor for downloaded archives">

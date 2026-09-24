@@ -87,7 +87,8 @@ export const offlineStore = create<OfflineState>()(
 
     const adopt = async (meta: ArchiveMeta, replaces?: string) => {
       registerArchive(meta);
-      if (meta.kind === ArchiveKind.Basemap) warmStyleAssets(settingsStore.getState().offlineFlavor);
+      // Style-packed archives carry their own sprites and glyphs.
+      if (meta.kind === ArchiveKind.Basemap && !meta.style) warmStyleAssets(settingsStore.getState().offlineFlavor);
       if (replaces) {
         // An update must carry the selection over, or the basemap falls back to the default.
         const st = settingsStore.getState();

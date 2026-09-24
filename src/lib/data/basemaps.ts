@@ -1,6 +1,7 @@
 import { layers, namedFlavor } from '@protomaps/basemaps';
 import type { StyleSpecification } from 'maplibre-gl';
 import { ArchiveKind, type ArchiveMeta } from '@workers/region.protocol';
+import { assetUrl } from './openfreemap';
 
 // Values are Protomaps flavor names and are persisted with custom basemaps.
 export const PmFlavor = { Light: 'light', Dark: 'dark', White: 'white', Grayscale: 'grayscale', Black: 'black' } as const;
@@ -101,14 +102,19 @@ export function styleFor(b: Basemap): string | StyleSpecification {
 export function offlineBasemaps(archives: ArchiveMeta[], flavor: PmFlavor): Basemap[] {
   return archives
     .filter((m) => m.kind === ArchiveKind.Basemap)
-    .map((m) => ({
-      id: `opfs:${m.id}`,
-      name: m.name,
-      kind: BasemapKind.Pmtiles,
-      url: `opfs/${m.id}.pmtiles`,
-      flavor,
-      attribution: `<a href="https://protomaps.com">Protomaps</a> ${OSM_ATTR}`
-    }));
+    .map((m) =>
+      // Packed with its own style: sources, sprite and glyphs all resolve locally.
+      m.style
+        ? { id: `opfs:${m.id}`, name: m.name, kind: BasemapKind.Style, url: assetUrl(m.id, 'style.json') }
+        : {
+            id: `opfs:${m.id}`,
+            name: m.name,
+            kind: BasemapKind.Pmtiles,
+            url: `opfs/${m.id}.pmtiles`,
+            flavor,
+            attribution: `<a href="https://protomaps.com">Protomaps</a> ${OSM_ATTR}`
+          }
+    );
 }
 
 export const BasemapGroup = { Vector: 'OpenFreeMap', Raster: 'Raster', Downloaded: 'Downloaded', Custom: 'Custom' } as const;

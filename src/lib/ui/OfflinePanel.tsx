@@ -6,6 +6,7 @@ import { bytes } from '@core/format';
 import { BUILDINGS_DEFAULT_MAX_TILES, BUILDINGS_ZOOM, buildingsByDefault } from '@core/tiles/buildingsRegion';
 import { PmFlavor } from '@data/basemaps';
 import { OVERTURE_BUILDINGS_RELEASE, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
+import { isPmtilesUrl, OFM_STYLE, OFM_TILEJSON } from '@data/openfreemap';
 import { PROTOMAPS_BUILD } from '@data/protomaps';
 import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
 import { defaultBasemapSourceUrl, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
@@ -17,6 +18,12 @@ const DEFAULT_MAX_ZOOM = 14;
 const TERRAIN_MIN_ZOOM = demZoom(6);
 const TERRAIN_MAX_ZOOM = demZoom(14);
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
+
+const BasemapSource = { OpenFreeMap: 'openfreemap', Protomaps: 'protomaps' } as const;
+type BasemapSource = (typeof BasemapSource)[keyof typeof BasemapSource];
+
+const sourceOf = (url: string): BasemapSource => (isPmtilesUrl(url) ? BasemapSource.Protomaps : BasemapSource.OpenFreeMap);
+const defaultSourceUrl = (s: BasemapSource) => (s === BasemapSource.Protomaps ? defaultBasemapSourceUrl() : OFM_TILEJSON);
 
 const KIND_LABEL: Record<ArchiveKind, string> = { [ArchiveKind.Basemap]: 'Basemap', [ArchiveKind.Terrain]: 'Terrain', [ArchiveKind.Buildings]: 'Buildings' };
 
@@ -47,7 +54,7 @@ function buildDate(url: string): string {
 }
 
 function estimateLabel(e: Estimate): string {
-  const date = buildDate(e.sourceUrl);
+  const date = e.build ?? buildDate(e.sourceUrl);
   const size = `${e.exact ? '' : '~'}${bytes(e.bytes)}`;
   return `${e.tileCount.toLocaleString()} tiles · ${size}${date ? ` · build ${date}` : ''}`;
 }
@@ -77,11 +84,12 @@ export function OfflinePanel() {
 
   const [name, setName] = useState(todayName);
   const [maxZoom, setMaxZoom] = useState(DEFAULT_MAX_ZOOM);
-  const [sourceUrl, setSourceUrl] = useState(() => defaultBasemapSourceUrl());
+  const [sourceUrl, setSourceUrl] = useState(OFM_TILEJSON);
   const [estimates, setEstimates] = useState<Partial<Record<ArchiveKind, Estimate>>>({});
   const [error, setError] = useState<string | null>(null);
   /** Null follows the region's size. */
   const [withBuildings, setWithBuildings] = useState<boolean | null>(null);
+  const [withBasemap, setWithBasemap] = useState(false);
 
   useEffect(() => {
     const s = offlineStore.getState();
@@ -101,13 +109,15 @@ export function OfflinePanel() {
 
   const spec = (kind: ArchiveKind, bbox: Bbox): RegionSpec => {
     const [minZoom, maxZ] = ZOOMS[kind] ?? [0, maxZoom];
+    const url = sourceUrl.trim() || OFM_TILEJSON;
     return {
       kind,
       name: name.trim() || todayName(),
       bbox,
       minZoom,
       maxZoom: maxZ,
-      sourceUrl: kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : sourceUrl.trim() || defaultBasemapSourceUrl()
+      sourceUrl: kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : url,
+      ...(kind === ArchiveKind.Basemap && !isPmtilesUrl(url) && { styleUrl: OFM_STYLE })
     };
   };
   const buildingsOn = draft ? (withBuildings ?? buildingsByDefault(draft)) : false;
@@ -130,6 +140,7 @@ export function OfflinePanel() {
     setError(null);
     o.download(spec(kind, draft));
     if (kind === ArchiveKind.Terrain && buildingsOn) o.download(spec(ArchiveKind.Buildings, draft));
+    if (kind === ArchiveKind.Terrain && withBasemap) o.download(spec(ArchiveKind.Basemap, draft));
   };
 
   const update = (a: ArchiveMeta) => {
@@ -140,7 +151,8 @@ export function OfflinePanel() {
       minZoom: a.minZoom,
       maxZoom: a.maxZoom,
       replaces: a.id,
-      sourceUrl: freshSource(a)
+      sourceUrl: freshSource(a),
+      ...(a.style && { styleUrl: a.style })
     });
   };
 
@@ -158,7 +170,9 @@ export function OfflinePanel() {
     if (window.confirm(`Delete “${a.name}”? The tiles are removed from this device.`)) void o.remove(a.id);
   };
 
-  const hasBasemapArchive = archives.some((a) => a.kind === ArchiveKind.Basemap);
+  // The flavor only styles Protomaps archives; OpenFreeMap ones carry their own style.
+  const hasProtomapsArchive = archives.some((a) => a.kind === ArchiveKind.Basemap && !a.style);
+  const source = sourceOf(sourceUrl);
   const basemapEstimate = estimates[ArchiveKind.Basemap];
   const terrainEstimate = estimates[ArchiveKind.Terrain];
   const buildingsEstimate = estimates[ArchiveKind.Buildings];
@@ -216,10 +230,35 @@ export function OfflinePanel() {
           ))}
         </select>
       </div>
-      <div className="field-row">
-        <input className="url" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} spellCheck={false} aria-label="Basemap source URL" title="PMTiles archive the region is cut from; it must allow cross-origin range requests" />
+      <div className="field">
+        <span>Source</span>
+        <select
+          value={source}
+          onChange={(e) => {
+            setSourceUrl(defaultSourceUrl(e.target.value as BasemapSource));
+            setEstimates(({ [ArchiveKind.Basemap]: _, ...rest }) => rest);
+          }}
+          aria-label="Basemap source"
+        >
+          <option value={BasemapSource.OpenFreeMap}>OpenFreeMap</option>
+          <option value={BasemapSource.Protomaps}>Protomaps PMTiles</option>
+        </select>
       </div>
-      <p className="muted hint">The default Protomaps build answers only local development origins (localhost:5173 and :3000); elsewhere use an archive that allows cross-origin range requests.</p>
+      <div className="field-row">
+        <input
+          className="url"
+          value={sourceUrl}
+          onChange={(e) => setSourceUrl(e.target.value)}
+          spellCheck={false}
+          aria-label="Basemap source URL"
+          title={source === BasemapSource.Protomaps ? 'PMTiles archive the region is cut from; it must allow cross-origin range requests' : 'TileJSON whose vector tiles are packed one by one'}
+        />
+      </div>
+      <p className="muted hint">
+        {source === BasemapSource.Protomaps
+          ? 'The default Protomaps build answers only local development origins (localhost:5173 and :3000); elsewhere use an archive that allows cross-origin range requests.'
+          : 'OpenFreeMap tiles are packed one by one with the Liberty style, its icons and Latin, Greek and Cyrillic labels.'}
+      </p>
       <div className="actions">
         <button onClick={() => void runEstimate(ArchiveKind.Basemap)} disabled={!draft}>
           Estimate
@@ -229,6 +268,10 @@ export function OfflinePanel() {
         </button>
         {basemapEstimate && <span className="muted">{estimateLabel(basemapEstimate)}</span>}
       </div>
+      <label className="toggle">
+        <input type="checkbox" checked={withBasemap} disabled={!draft} onChange={(e) => setWithBasemap(e.target.checked)} />
+        <span>Include in the terrain download (off by default)</span>
+      </label>
       <div className="field">
         <span>Terrain</span>
         <span className="muted">
@@ -310,7 +353,7 @@ export function OfflinePanel() {
           </li>
         ))}
       </ul>
-      {hasBasemapArchive && (
+      {hasProtomapsArchive && (
         <label className="toggle">
           <span>Basemap style</span>
           <select

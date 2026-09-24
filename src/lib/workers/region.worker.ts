@@ -2,11 +2,26 @@
 import { Compression, FetchSource, FileSource, PMTiles, tileIdToZxy, TileType, type Header } from 'pmtiles';
 import { bboxCentre } from '@core/geo/bbox';
 import { planExtract } from '@core/tiles/extract';
-import { ArchiveBuilder, coalesceRanges, tileCountInBounds, tileIdsInBounds, type TileSink } from '@core/tiles/pmtiles';
-import { announceArchives, archiveName, archivesDir, metaFromHeader, readHeader, vectorLayerIds, writeMeta } from '@data/opfs';
+import type { StyleSpecification } from 'maplibre-gl';
+import { ArchiveBuilder, coalesceRanges, gzip, tileCountInBounds, tileIdsInBounds, tileRange, type TileSink } from '@core/tiles/pmtiles';
+import {
+  assetFileName,
+  glyphUrls,
+  isPmtilesUrl,
+  localStyle,
+  OFM_CONCURRENCY,
+  OFM_STYLE,
+  packZooms,
+  parseTileJson,
+  spriteUrls,
+  styleFontstacks,
+  tileUrl,
+  type TileJsonSource
+} from '@data/openfreemap';
+import { announceArchives, archiveName, archivesDir, assetsDirName, metaFromHeader, readHeader, vectorLayerIds, writeFileBytes, writeMeta } from '@data/opfs';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
 import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
-import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
+import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -20,6 +35,8 @@ const PROGRESS_MS = 150;
 const BASEMAP_CONCURRENCY = 4;
 const TERRAIN_CONCURRENCY = 8;
 const RETRIES = 3;
+/** Gzipped vector tile size assumed when a server hides Content-Length. */
+const FALLBACK_TILE_BYTES = 60_000;
 
 const jobs = new Map<string, AbortController>();
 
@@ -131,7 +148,9 @@ const removeQuietly = async (dir: FileSystemDirectoryHandle, name: string) => {
 
 const dropPartial = async (id: string) => {
   try {
-    await removeQuietly(await archivesDir(), archiveName(id));
+    const dir = await archivesDir();
+    await removeQuietly(dir, archiveName(id));
+    await dir.removeEntry(assetsDirName(id), { recursive: true }).catch(() => undefined);
   } catch {
     // no directory, nothing to clean
   }
@@ -285,6 +304,114 @@ async function downloadTerrain(id: string, spec: RegionSpec, signal: AbortSignal
   }
 }
 
+async function fetchTileJson(url: string, signal: AbortSignal): Promise<TileJsonSource> {
+  const res = await fetchRetry(url, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return parseTileJson(await res.json(), res.url || url);
+}
+
+const isGzip = (b: Uint8Array) => b.length > 1 && b[0] === 0x1f && b[1] === 0x8b;
+
+/** The style, its sprites and the glyph ranges its fonts need, stored beside the archive. */
+async function cacheStyle(id: string, styleUrl: string, attribution: string, signal: AbortSignal): Promise<void> {
+  const res = await fetchRetry(styleUrl, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${styleUrl}`);
+  const style = (await res.json()) as StyleSpecification;
+  const assets = [...spriteUrls(style.sprite), ...(style.glyphs ? glyphUrls(style.glyphs, styleFontstacks(style)) : [])];
+  const dir = await (await archivesDir()).getDirectoryHandle(assetsDirName(id), { create: true });
+  for await (const got of inOrder(assets, OFM_CONCURRENCY, async (a) => {
+    const r = await fetchRetry(a.url, { signal });
+    // A missing glyph range is drawn locally by MapLibre; a missing sprite only hides icons.
+    return { ...a, bytes: r.ok ? new Uint8Array(await r.arrayBuffer()) : null };
+  })) {
+    signal.throwIfAborted();
+    // oxlint-disable-next-line no-await-in-loop -- one sequential writer
+    if (got.bytes) await writeFileBytes(dir, assetFileName(got.path), got.bytes);
+  }
+  await writeFileBytes(dir, assetFileName('style.json'), new TextEncoder().encode(JSON.stringify(localStyle(style, id, attribution))));
+}
+
+/** A basemap from a TileJSON source (OpenFreeMap): per-tile vector PBFs packed like terrain. */
+async function downloadTiles(id: string, spec: RegionSpec, signal: AbortSignal): Promise<ArchiveMeta> {
+  const tj = await fetchTileJson(spec.sourceUrl, signal);
+  const [minZoom, maxZoom] = packZooms(spec.minZoom, spec.maxZoom, tj);
+  const ids = tileIdsInBounds(spec.bbox, minZoom, maxZoom);
+  const dir = await archivesDir();
+  const tmpName = `${id}.data`;
+  const tmp = await openSync(dir, tmpName);
+  try {
+    const builder = new ArchiveBuilder(new SyncSink(tmp));
+    const report = reporter(id, ids.length);
+    let done = 0;
+    for await (const got of inOrder(ids, OFM_CONCURRENCY, async (tileId) => {
+      const [z, x, y] = tileIdToZxy(tileId);
+      const res = await fetchRetry(tileUrl(tj.template, z, x, y), { signal });
+      if (!res.ok) return { tileId, bytes: null };
+      const raw = new Uint8Array(await res.arrayBuffer());
+      // fetch undoes the server's Content-Encoding; store gzipped as PMTiles readers expect.
+      return { tileId, bytes: isGzip(raw) ? raw : await gzip(raw) };
+    })) {
+      signal.throwIfAborted();
+      done++;
+      // oxlint-disable-next-line no-await-in-loop -- one sequential writer
+      if (got.bytes) await builder.add(got.tileId, got.bytes);
+      report(done, builder.dataLength);
+    }
+    if (!builder.count) throw new Error('The source has no tiles in that area');
+
+    const prefix = await builder.finish({
+      tileType: TileType.Mvt,
+      tileCompression: Compression.Gzip,
+      minZoom,
+      maxZoom,
+      bounds: spec.bbox,
+      centre: { ...bboxCentre(spec.bbox), zoom: maxZoom },
+      metadata: { name: spec.name, attribution: tj.attribution, vector_layers: tj.vectorLayers }
+    });
+    const styleUrl = spec.styleUrl ?? OFM_STYLE;
+    await cacheStyle(id, styleUrl, tj.attribution, signal);
+    signal.throwIfAborted();
+    const bytes = await assemble(dir, id, prefix, tmp);
+    return {
+      id,
+      name: spec.name,
+      kind: ArchiveKind.Basemap,
+      bbox: spec.bbox,
+      minZoom,
+      maxZoom,
+      bytes,
+      tileCount: builder.count,
+      // The TileJSON, not the dated template, so an update picks up the newest build.
+      sourceUrl: spec.sourceUrl,
+      downloadedAt: new Date().toISOString(),
+      style: styleUrl
+    };
+  } finally {
+    tmp.close();
+    await removeQuietly(dir, tmpName);
+  }
+}
+
+/** Per-zoom tile size sampled with a HEAD of the centre tile. */
+async function estimateTiles(spec: RegionSpec, signal: AbortSignal): Promise<Estimate> {
+  const tj = await fetchTileJson(spec.sourceUrl, signal);
+  const [minZoom, maxZoom] = packZooms(spec.minZoom, spec.maxZoom, tj);
+  const zooms = Array.from({ length: maxZoom - minZoom + 1 }, (_, i) => minZoom + i);
+  let tileCount = 0;
+  let bytes = 0;
+  for await (const got of inOrder(zooms, OFM_CONCURRENCY, async (z) => {
+    const r = tileRange(spec.bbox, z)[0];
+    const tiles = tileCountInBounds(spec.bbox, z, z);
+    const res = await fetchRetry(tileUrl(tj.template, z, (r.x0 + r.x1) >> 1, (r.y0 + r.y1) >> 1), { signal, method: 'HEAD' });
+    const length = Number(res.headers.get('content-length'));
+    return { tiles, size: res.ok && length > 0 ? length : FALLBACK_TILE_BYTES };
+  })) {
+    tileCount += got.tiles;
+    bytes += got.tiles * got.size;
+  }
+  return { tileCount, bytes, exact: false, sourceUrl: spec.sourceUrl, ...(tj.build && { build: tj.build }) };
+}
+
 async function importFile(id: string, file: File, name: string, signal: AbortSignal): Promise<ArchiveMeta> {
   const header = await readHeader(file);
   const dir = await archivesDir();
@@ -309,7 +436,8 @@ async function importFile(id: string, file: File, name: string, signal: AbortSig
   return metaFromHeader(id, name, header, file.size, `import:${file.name}`, layers);
 }
 
-async function estimate(spec: RegionSpec, signal: AbortSignal) {
+async function estimate(spec: RegionSpec, signal: AbortSignal): Promise<Estimate> {
+  if (spec.kind === ArchiveKind.Basemap && !isPmtilesUrl(spec.sourceUrl)) return estimateTiles(spec, signal);
   if (spec.kind === ArchiveKind.Terrain) {
     const tileCount = tileCountInBounds(spec.bbox, TERRAIN_MIN_ZOOM, TERRAIN_MAX_ZOOM);
     return { tileCount, bytes: tileCount * TERRAIN_TILE_BYTES, exact: false, sourceUrl: spec.sourceUrl };
@@ -336,7 +464,9 @@ async function run(req: Exclude<RegionRequest, { kind: typeof RegionRequestKind.
         ? await importFile(req.id, req.file, req.name, signal)
         : req.spec.kind === ArchiveKind.Terrain
           ? await downloadTerrain(req.id, req.spec, signal)
-          : await downloadExtract(req.id, req.spec, signal);
+          : req.spec.kind === ArchiveKind.Basemap && !isPmtilesUrl(req.spec.sourceUrl)
+            ? await downloadTiles(req.id, req.spec, signal)
+            : await downloadExtract(req.id, req.spec, signal);
     await writeMeta(meta);
     announceArchives();
     post({ kind: RegionResponseKind.Done, id: req.id, meta });

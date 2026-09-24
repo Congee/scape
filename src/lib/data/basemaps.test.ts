@@ -21,6 +21,12 @@ describe('offlineBasemaps', () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ id: 'opfs:a', name: 'Region a', kind: BasemapKind.Pmtiles, url: 'opfs/a.pmtiles', flavor: PmFlavor.Dark });
   });
+
+  it('serves archives packed with a style from their cached copy', () => {
+    const out = offlineBasemaps([{ ...meta('o', ArchiveKind.Basemap), style: 'https://tiles.openfreemap.org/styles/liberty' }], PmFlavor.Dark);
+    expect(out[0]).toEqual({ id: 'opfs:o', name: 'Region o', kind: BasemapKind.Style, url: 'scape-asset://o/style.json' });
+    expect(basemapGroup(out[0])).toBe(BasemapGroup.Downloaded);
+  });
 });
 
 const byId = (id: string) => BUILTIN_BASEMAPS.find((b) => b.id === id)!;
