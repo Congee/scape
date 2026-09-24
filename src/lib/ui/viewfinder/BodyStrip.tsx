@@ -2,6 +2,7 @@ import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { moonInfo, position } from '@core/astro/positions';
 import { compass, degrees, percent } from '@core/format';
 import { useSettings } from '@state/settings';
+import { usePinSiteHeightM } from '@state/terrain';
 import { useWorld } from '@state/world';
 
 const altAz = (p: { altitude: number; azimuth: number }) => `${p.altitude >= 0 ? '+' : ''}${degrees(p.altitude, 1)} · ${degrees(p.azimuth, 1)} ${compass(p.azimuth)}`;
@@ -10,10 +11,10 @@ const altAz = (p: { altitude: number; azimuth: number }) => `${p.altitude >= 0 ?
 export function BodyStrip() {
   const time = useWorld((s) => s.time);
   const pin = useWorld((s) => s.pin);
-  const pinHeightM = useWorld((s) => s.pinHeightM);
+  const siteM = usePinSiteHeightM();
   const showGc = useSettings((s) => s.showGc);
   const date = new Date(time);
-  const obs = makeObserver(pin, pinHeightM);
+  const obs = makeObserver(pin, siteM);
   const moon = moonInfo(date);
   return (
     <div className="vf-bodies" aria-label="Sun and moon position">

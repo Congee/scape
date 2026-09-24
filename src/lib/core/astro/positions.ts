@@ -1,18 +1,18 @@
 import { Body, Equator, Horizon, Illumination, MoonPhase, type Observer } from 'astronomy-engine';
 import { BODY, type SkyBody } from './bodies';
-import { apparentAltitude } from './refraction';
+import { airDensity, apparentAltitude } from './refraction';
 
 export interface HorizontalPos {
   /** Degrees clockwise from true north. */
   azimuth: number;
-  /** Apparent altitude of the body's centre, degrees, refraction included. */
+  /** Apparent altitude of the body's centre, degrees, refracted in the air at the observer's height. */
   altitude: number;
 }
 
 export function position(body: SkyBody, date: Date, obs: Observer): HorizontalPos {
   const eq = Equator(BODY[body], date, obs, true, true);
   const hor = Horizon(date, obs, eq.ra, eq.dec, '');
-  return { azimuth: hor.azimuth, altitude: apparentAltitude(hor.altitude) };
+  return { azimuth: hor.azimuth, altitude: apparentAltitude(hor.altitude, airDensity(obs.height)) };
 }
 
 export interface MoonInfo {

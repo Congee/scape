@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { makeObserver, siteHeightM, SkyBody } from './bodies';
 import { dayEvents, EventKind } from './dayEvents';
 import { position } from './positions';
+import { airDensity } from './refraction';
 import { applyStar, horizontalOf, starFrame } from './skyFrame';
 import { eqjVector } from './stars';
 import { bearingDeg, normalizeBearing } from '@core/geo/geodesy';
@@ -15,13 +16,24 @@ const sepDeg = (az1: number, el1: number, az2: number, el2: number) =>
 
 describe('position vs JPL Horizons', () => {
   it.each([
-    ['Gornergrat sun', SkyBody.Sun, 45.9837, 7.7847, 3089, '2024-06-21T15:00:00Z', 260.065134, 42.542062],
     ['Cape Town sun', SkyBody.Sun, -33.9249, 18.4241, 10, '2001-03-20T08:00:00Z', 59.57438, 37.127407],
-    ['Tromsø moon', SkyBody.Moon, 69.6492, 18.9553, 10, '2026-09-24T21:00:00Z', 176.955081, 12.264838],
-    ['Quito moon', SkyBody.Moon, -0.2201, -78.5123, 2850, '2012-12-21T20:00:00Z', 78.509771, 24.92547]
+    ['Tromsø moon', SkyBody.Moon, 69.6492, 18.9553, 10, '2026-09-24T21:00:00Z', 176.955081, 12.264838]
   ] as const)('%s within 0.002°', (_, body, lat, lng, h, iso, az, el) => {
     const p = position(body, new Date(iso), makeObserver({ lat, lng }, h));
     expect(sepDeg(p.azimuth, p.altitude, az, el)).toBeLessThan(0.002);
+  });
+
+  // Horizons refracts for sea-level air at any height, so its refraction (REFRACTED − AIRLESS) is scaled by the site's density.
+  it.each([
+    ['Gornergrat sun', SkyBody.Sun, 45.9837, 7.7847, 3089, '2024-06-21T15:00:00Z', 260.065134, 42.523632376, 42.542062],
+    ['Quito moon', SkyBody.Moon, -0.2201, -78.5123, 2850, '2012-12-21T20:00:00Z', 78.509771, 24.889364607, 24.92547],
+    ['Gornergrat sun low', SkyBody.Sun, 45.9837, 7.7847, 3089, '2026-06-21T19:00:00Z', 301.830864458, 2.517585082, 2.769055029],
+    ['Gornergrat sun at 1°', SkyBody.Sun, 45.9837, 7.7847, 3089, '2026-06-21T19:10:00Z', 303.599246848, 1.056223086, 1.413215549],
+    ['Gornergrat sun on the horizon', SkyBody.Sun, 45.9837, 7.7847, 3089, '2026-06-21T19:20:00Z', 305.391068692, -0.375276024, 0.165662426],
+    ['Gornergrat sun below', SkyBody.Sun, 45.9837, 7.7847, 3089, '2026-06-21T19:25:00Z', 306.296305554, -1.079261287, -0.432648537]
+  ] as const)('%s refracted in thin air within 5″', (_, body, lat, lng, h, iso, az, airless, refracted) => {
+    const p = position(body, new Date(iso), makeObserver({ lat, lng }, h));
+    expect(sepDeg(p.azimuth, p.altitude, az, airless + airDensity(h) * (refracted - airless))).toBeLessThan(5 / 3600);
   });
 
   it.each([
@@ -46,7 +58,7 @@ describe('catalogue stars vs astropy', () => {
     const out = new Float64Array(3);
     const [x, y, z] = eqjVector(ra, dec);
     applyStar(starFrame(new Date(iso), makeObserver({ lat: 45, lng: 7 })), x, y, z, out);
-    const h = horizontalOf(out[0], out[1], out[2], false);
+    const h = horizontalOf(out[0], out[1], out[2], 0);
     expect(sepDeg(h.azimuthDeg, h.altitudeDeg, az, el)).toBeLessThan(2 / 3600);
   });
 });

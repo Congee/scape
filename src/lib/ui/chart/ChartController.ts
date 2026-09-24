@@ -6,7 +6,7 @@ import { horizonAngleAt } from '@core/terrain/horizon';
 import { formatTime } from '@core/time/format';
 import { dayDataStore } from '@state/dayData';
 import { settingsStore } from '@state/settings';
-import { horizonKeyFor, terrainStore } from '@state/terrain';
+import { horizonKeyFor, pinSiteHeightM, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
 
 const PAD = { l: 30, r: 10, t: 18, b: 16 };
@@ -146,12 +146,13 @@ export class ChartController {
   /** The now marker and cursor snap to whole pixels; dots move only as fast as a body climbs. */
   private clockSigNow(): string {
     const { dayStart, dayEnd } = dayDataStore.getState();
-    const { time, tz, pin, pinHeightM } = worldStore.getState();
+    const w = worldStore.getState();
+    const { time, tz, pin } = w;
     const { hour12, showGc } = settingsStore.getState();
     const X = (t: number) => (t >= dayStart && t < dayEnd ? Math.round(this.x(t, dayStart, dayEnd)) : NaN);
     const sig = [X(Date.now()), X(time)];
     if (Number.isNaN(sig[1])) return sig.join();
-    const obs = makeObserver(pin, pinHeightM);
+    const obs = makeObserver(pin, pinSiteHeightM(w, terrainStore.getState()));
     const date = new Date(time);
     for (const b of BODIES) if (b !== SkyBody.Gc || showGc) sig.push(Math.round(this.y(position(b, date, obs).altitude) * 20));
     return `${sig.join()}|${formatTime(time, tz, hour12)}`;
@@ -165,7 +166,7 @@ export class ChartController {
     const { dayStart, dayEnd, curve, events } = dayDataStore.getState();
     const world = worldStore.getState();
     const cfg = settingsStore.getState();
-    const { time, tz, pin, pinHeightM } = world;
+    const { time, tz, pin } = world;
     const { hour12, showGc } = cfg;
     if (dayEnd <= dayStart || w < 40) return;
     const X = (t: number) => this.x(t, dayStart, dayEnd);
@@ -331,7 +332,7 @@ export class ChartController {
       ctx.textBaseline = 'top';
       ctx.textAlign = x > w - 60 ? 'right' : x < 60 ? 'left' : 'center';
       ctx.fillText(formatTime(time, tz, hour12), x, 2);
-      const obs = makeObserver(pin, pinHeightM);
+      const obs = makeObserver(pin, pinSiteHeightM(world, terrainStore.getState()));
       const date = new Date(time);
       for (const b of BODIES) {
         if (b === SkyBody.Gc && !showGc) continue;

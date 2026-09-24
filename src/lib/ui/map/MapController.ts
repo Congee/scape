@@ -44,7 +44,7 @@ import { markersStore } from '@state/markers';
 import { modelsStore } from '@state/models';
 import { currentBasemap, offlineStore } from '@state/offline';
 import { settingsStore } from '@state/settings';
-import { profileKeyFor, terrainStore } from '@state/terrain';
+import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
 import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
@@ -1022,7 +1022,7 @@ export class MapController {
     let data: GeoJSON.FeatureCollection = EMPTY;
     if (s.showLiveLines) {
       const w = worldStore.getState();
-      const obs = makeObserver(w.pin, w.pinHeightM);
+      const obs = makeObserver(w.pin, pinSiteHeightM(w, terrainStore.getState()));
       const date = new Date(w.time);
       const pos = { Sun: position(SkyBody.Sun, date, obs), Moon: position(SkyBody.Moon, date, obs), Gc: position(SkyBody.Gc, date, obs) };
       data = liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc, shadowHeightM: s.shadowObjectHeightM, pin2: w.pin2, pin2HeightM: w.pin2HeightM });

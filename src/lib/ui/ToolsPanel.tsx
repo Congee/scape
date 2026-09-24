@@ -34,6 +34,7 @@ import { tideStation, tideStations, type TideStationRef } from '@data/tides';
 import { compositionStore, useComposition } from '@state/composition';
 import { sensorById, useGear } from '@state/gear';
 import { useSettings } from '@state/settings';
+import { usePinSiteHeightM } from '@state/terrain';
 import { LightPointSummary, LightPointTools, MoonSummary, MoonTools } from './LightTools';
 import { timelapseStore, useTimelapse } from '@state/timelapse';
 import { useWorld, worldStore } from '@state/world';
@@ -204,6 +205,7 @@ export function ToolsPanel() {
   const tz = useWorld((s) => s.tz);
   const pin = useWorld((s) => s.pin);
   const pinHeightM = useWorld((s) => s.pinHeightM);
+  const siteM = usePinSiteHeightM();
   const units = useSettings((s) => s.units);
   const hour12 = useSettings((s) => s.hour12);
   const c = useComposition();
@@ -231,7 +233,7 @@ export function ToolsPanel() {
   const [cloudA, setCloudA] = useState('5');
   const [cloudD, setCloudD] = useState(units === Units.Imperial ? '15' : '25');
 
-  const obs = makeObserver(pin, pinHeightM);
+  const obs = makeObserver(pin, siteM);
   const date = new Date(time);
   const sun = position(SkyBody.Sun, date, obs);
   const moon = position(SkyBody.Moon, date, obs);

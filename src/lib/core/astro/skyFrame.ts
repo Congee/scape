@@ -70,10 +70,10 @@ export function apply(m: Mat3, x: number, y: number, z: number, out: Float64Arra
   out[2] = m[6] * x + m[7] * y + m[8] * z;
 }
 
-/** A local unit vector lifted toward the zenith by refraction, written to `out`. */
-export function refractEnu(e: number, n: number, u: number, out: Float64Array): Float64Array {
+/** A local unit vector lifted toward the zenith by refraction in air of `density`, written to `out`. */
+export function refractEnu(e: number, n: number, u: number, out: Float64Array, density = 1): Float64Array {
   const g = Math.asin(Math.max(-1, Math.min(1, u)));
-  const a = apparentAltitude(g * R2D) / R2D;
+  const a = apparentAltitude(g * R2D, density) / R2D;
   const k = Math.cos(g) > 1e-9 ? Math.cos(a) / Math.cos(g) : 1;
   out[0] = e * k;
   out[1] = n * k;
@@ -86,9 +86,9 @@ export interface AzAlt {
   altitudeDeg: number;
 }
 
-/** Azimuth/altitude of a local unit vector; apparent altitude when `refract`. */
-export function horizontalOf(e: number, n: number, u: number, refract = true): AzAlt {
+/** Azimuth/altitude of a local unit vector, refracted in air of `density` (0 geometric). */
+export function horizontalOf(e: number, n: number, u: number, density = 1): AzAlt {
   const az = Math.atan2(e, n) * R2D;
   const alt = Math.asin(Math.max(-1, Math.min(1, u))) * R2D;
-  return { azimuthDeg: ((az % 360) + 360) % 360, altitudeDeg: refract ? apparentAltitude(alt) : alt };
+  return { azimuthDeg: ((az % 360) + 360) % 360, altitudeDeg: apparentAltitude(alt, density) };
 }

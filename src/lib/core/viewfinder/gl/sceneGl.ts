@@ -58,6 +58,8 @@ export interface SceneGlInput {
   milkyWay: SceneGlTexture | null;
   /** ENU → equatorial J2000, row major; null when the Milky Way is not drawn. */
   eqj: Float64Array | null;
+  /** Air at the eye relative to sea level; scales the Milky Way's refraction. */
+  airDensity: number;
   mwGain: number;
   /** Where the body casting the shadows is; they are cast only while it is up. */
   lightAzDeg: number;
@@ -151,6 +153,7 @@ uniform vec3 uEqj0;
 uniform vec3 uEqj1;
 uniform vec3 uEqj2;
 uniform float uMwGain;
+uniform float uAirDensity;
 
 uniform sampler2D uGColor;
 uniform sampler2D uGPos;
@@ -191,7 +194,7 @@ vec3 skyAt(float alt) {
 /** Mirrors refractionDeg in astro/refraction.ts. */
 float refrDeg(float g) {
   float h = max(g, -1.0);
-  return max(0.0, 1.02 / tan((h + 10.3 / (h + 5.11)) * D2R) / 60.0) * sstep(-3.0, -1.5, g);
+  return max(0.0, 1.02 / tan((h + 10.3 / (h + 5.11)) * D2R) / 60.0) * sstep(-3.0, -1.5, g) * uAirDensity;
 }
 
 /** Geometric altitude that refracts to apparent a, by Newton. */
@@ -319,7 +322,7 @@ void main() {
 const UNIFORMS = [
   'uOrigin', 'uRes', 'uFwd', 'uRight', 'uUp', 'uFocal', 'uWmm', 'uHmm',
   'uDay', 'uDusk', 'uGroundNear', 'uGroundFar', 'uEyeAboveGroundM', 'uFallbackDeg', 'uHasTerrain',
-  'uHasMw', 'uMw', 'uEqj0', 'uEqj1', 'uEqj2', 'uMwGain',
+  'uHasMw', 'uMw', 'uEqj0', 'uEqj1', 'uEqj2', 'uMwGain', 'uAirDensity',
   'uGColor', 'uGPos', 'uGNormal',
   'uShadowOn', 'uShadowGain', 'uSun', 'uMoon', 'uMoonlight',
   'uMoonBody0', 'uMoonBody1', 'uMoonBody2', 'uMoonSun', 'uMoonShine', 'uHasMoonMap', 'uMoonMap',
@@ -531,6 +534,7 @@ export class SceneGl {
       gl.uniform3f(u.uEqj1, e[3], e[4], e[5]);
       gl.uniform3f(u.uEqj2, e[6], e[7], e[8]);
       gl.uniform1f(u.uMwGain, input.mwGain);
+      gl.uniform1f(u.uAirDensity, input.airDensity);
     }
     this.bind(0, u.uMw, mw ?? this.dummy2d);
     this.bind(1, u.uGColor, this.gColor ?? this.dummy2d);

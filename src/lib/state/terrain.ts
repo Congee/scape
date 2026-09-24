@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
+import { siteHeightM } from '@core/astro/bodies';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { endpointAngleDeg, endpointHeightM } from '@core/terrain/los';
 import { TerrainKind, type HorizonResult, type MeshResult, type ProfileResult, type TerrainRequest, type TerrainResponse, type ViewResult } from '@workers/terrain.protocol';
 import { markersStore } from './markers';
 import { settingsStore, type Settings } from './settings';
 import { viewfinderStore, type MeshWindow, type ViewWindow } from './viewfinder';
-import { worldStore, type WorldState } from './world';
+import { useWorld, worldStore, type WorldState } from './world';
 
 /** Eye height above the camera location's ground, added to the observer height setting. */
 export const EYE_HEIGHT_M = 1.6;
@@ -55,6 +56,15 @@ export const terrainStore = create<TerrainState>()(
 );
 
 export const useTerrain = terrainStore;
+
+/** Camera eye above sea level, which sets the air the sky is refracted through; sea level while the ground is unknown. */
+export const pinSiteHeightM = (w: Pick<WorldState, 'pinHeightM'>, t: Pick<TerrainState, 'pinGroundM'>) => siteHeightM(t.pinGroundM, w.pinHeightM + EYE_HEIGHT_M);
+
+export function usePinSiteHeightM(): number {
+  const pinHeightM = useWorld((s) => s.pinHeightM);
+  const pinGroundM = useTerrain((t) => t.pinGroundM);
+  return pinSiteHeightM({ pinHeightM }, { pinGroundM });
+}
 
 type W = Pick<WorldState, 'pin' | 'pinHeightM' | 'pin2' | 'pin2HeightM'>;
 type S = Pick<Settings, 'terrain' | 'terrainHorizon' | 'horizonRangeKm'>;

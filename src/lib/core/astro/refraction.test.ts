@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeObserver, SkyBody } from './bodies';
 import { position } from './positions';
-import { apparentAltitude, HORIZON_ALT_DEG, TAPER_END_DEG } from './refraction';
+import { airDensity, apparentAltitude, HORIZON_ALT_DEG, refractionDeg, TAPER_END_DEG } from './refraction';
 
 describe('apparentAltitude', () => {
   it('leaves altitudes below the taper geometric', () => {
@@ -36,6 +36,27 @@ describe('apparentAltitude', () => {
 
   it('has no step at the rise/set threshold', () => {
     expect(apparentAltitude(HORIZON_ALT_DEG) - apparentAltitude(HORIZON_ALT_DEG - 1e-4)).toBeLessThan(1e-3);
+  });
+});
+
+describe('airDensity', () => {
+  // ERFA refco at the ISA pressure and temperature of 3089 m refracts 0.7355× sea level from 30° to 45°.
+  it('thins the refraction the way ERFA does at altitude', () => {
+    expect(airDensity(0)).toBeCloseTo(1, 6);
+    expect(Math.abs(airDensity(3089) - 0.7355)).toBeLessThan(5e-4);
+    expect(airDensity(-6)).toBeGreaterThan(1);
+  });
+
+  it('stays finite beyond the model range', () => {
+    expect(airDensity(-2000)).toBe(airDensity(-500));
+    expect(airDensity(200_000)).toBe(airDensity(100_000));
+    expect(airDensity(Number.NaN)).toBe(1);
+  });
+
+  it('scales refraction and leaves airless geometric', () => {
+    expect(refractionDeg(10, 0)).toBe(0);
+    expect(apparentAltitude(0.3, 0)).toBe(0.3);
+    expect(refractionDeg(0.3, 0.7)).toBeCloseTo(refractionDeg(0.3) * 0.7, 12);
   });
 });
 

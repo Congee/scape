@@ -9,7 +9,7 @@ import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, useGear, zoomPatch } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
 import { settingsStore, useSettings } from '@state/settings';
-import { targetAngleFor, useTerrain } from '@state/terrain';
+import { pinSiteHeightM, targetAngleFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 import { GearSearch } from './GearSearch';
 
@@ -60,7 +60,7 @@ export function FramePanel() {
   const setSetting = settingsStore.getState().update;
 
   const aimAt = (body: SkyBody) => {
-    const p = position(body, new Date(time), makeObserver(pin, pinHeightM));
+    const p = position(body, new Date(time), makeObserver(pin, pinSiteHeightM({ pinHeightM }, { pinGroundM })));
     compositionStore.getState().aim(p.azimuth, Math.max(0, p.altitude));
   };
   const setFocal = (v: number) => update(zoomPatch(c, v));

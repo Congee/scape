@@ -17,7 +17,7 @@ import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { useDayData } from '@state/dayData';
 import { sensorById, useGear } from '@state/gear';
 import { settingsStore, useSettings } from '@state/settings';
-import { EYE_HEIGHT_M, horizonKeyFor, targetAngleFor, useTerrain } from '@state/terrain';
+import { EYE_HEIGHT_M, horizonKeyFor, pinSiteHeightM, targetAngleFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
 
@@ -110,7 +110,7 @@ export function NightPanel() {
   const pin2GroundM = useTerrain((t) => t.pin2GroundM);
   const [pxText, setPxText] = useState('');
 
-  const obs = makeObserver(pin, pinHeightM);
+  const obs = makeObserver(pin, pinSiteHeightM({ pinHeightM }, { pinGroundM }));
   const opts = { sunMaxAltDeg: s.mwSunMaxAlt, gcMinAltDeg: s.mwGcMinAlt, moonRule: s.mwMoonRule, moonMaxIllumination: s.mwMoonMaxIllum };
   const hk = horizonKeyFor(worldStore.getState(), settingsStore.getState());
   const skyline = hk && horizon && horizonKey === hk ? horizon.profile : undefined;

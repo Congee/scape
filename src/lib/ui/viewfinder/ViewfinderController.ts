@@ -8,6 +8,7 @@ import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { lightAt, type Light } from '@core/astro/lightSource';
 import { moonView } from '@core/astro/moonSim';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
+import { airDensity } from '@core/astro/refraction';
 import { arcWindow, rainbowArc, rainbowRadiusDeg, rainbowTop, WATER_N } from '@core/astro/rainbow';
 import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
 import { distance, height } from '@core/format';
@@ -105,6 +106,8 @@ interface Scene {
   light: Light | null;
   time: Date;
   obs: Observer;
+  /** Air at the eye relative to sea level; scales refraction. */
+  airDensity: number;
   /** How dark the sky is for stars, 0 by day to 1 in astronomical night. */
   night: number;
   /** Moonlight washing out faint stars and the Milky Way, 0..1. */
@@ -165,7 +168,7 @@ export class ViewfinderController {
   private sceneGl: SceneGl | null = null;
   private glError = '';
   /** What the live clock is measured against: the last drawn instant, sun and sky scale. */
-  private drawn: { time: number; sunAlt: number; sunAz: number; pxPerDeg: number; halfDiagDeg: number; moving: boolean } | null = null;
+  private drawn: { time: number; obs: Observer; sunAlt: number; sunAz: number; pxPerDeg: number; halfDiagDeg: number; moving: boolean } | null = null;
   /** Per-object building occlusion for the current frame; the GPU picture cannot mask objects. */
   private occ: Occluder | null = null;
   private occCache: { key: string; occ: Occluder | null } | null = null;
@@ -231,7 +234,7 @@ export class ViewfinderController {
     if (!d) return true;
     const w = worldStore.getState();
     if (d.moving && skyDriftPx(w.time - d.time, d.pxPerDeg, d.halfDiagDeg) >= 0.5) return true;
-    const sun = position(SkyBody.Sun, new Date(w.time), makeObserver(w.pin, w.pinHeightM));
+    const sun = position(SkyBody.Sun, new Date(w.time), d.obs);
     return skyAngleDeg(d.sunAlt, d.sunAz, sun.altitude, sun.azimuth) >= SUN_STEP_DEG;
   }
 
@@ -246,7 +249,7 @@ export class ViewfinderController {
       return skyAngleDeg(sc.cam.elevationDeg, sc.cam.azimuthDeg, p.altitude, p.azimuth) < halfDiagDeg + 2;
     };
     const moving = sc.night > 0 || sc.light?.body === SkyBody.Moon || c.showRainbow || BODIES.some((b) => bodyVisible(b, c, s) && near(b));
-    this.drawn = { time: sc.time.getTime(), sunAlt: sc.sunAlt, sunAz: sc.sunAz, pxPerDeg: fPx * D2R, halfDiagDeg, moving };
+    this.drawn = { time: sc.time.getTime(), obs: sc.obs, sunAlt: sc.sunAlt, sunAz: sc.sunAz, pxPerDeg: fPx * D2R, halfDiagDeg, moving };
   }
 
   private schedule() {
@@ -299,7 +302,7 @@ export class ViewfinderController {
     const ground = t.pinGroundM ?? 0;
     const eyeM = view?.eyeM ?? Math.max(Number.isNaN(ground) ? 0 : ground, 0) + eyeAboveGroundM;
     const time = new Date(w.time);
-    const obs = makeObserver(w.pin, w.pinHeightM);
+    const obs = makeObserver(w.pin, eyeM);
     const sun = position(SkyBody.Sun, time, obs);
     const sunAlt = sun.altitude;
     const moon = position(SkyBody.Moon, time, obs);
@@ -311,7 +314,7 @@ export class ViewfinderController {
       if (profile) for (let i = 0; i < profile.nAz; i++) max = Math.max(max, profile.skylineDeg[i]);
       this.skylineMax = { view: profile, max };
     }
-    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, light: lightAt(s.lightSource, time, obs), time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
+    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, light: lightAt(s.lightSource, time, obs), time, obs, airDensity: airDensity(eyeM), night, moonFactor, maxSkyline: this.skylineMax.max };
   }
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
@@ -674,6 +677,7 @@ export class ViewfinderController {
         prism: this.glPrisms(sc, pal.groundFar),
         milkyWay: tex,
         eqj: tex ? enuToEqj(sc.time, sc.obs) : null,
+        airDensity: sc.airDensity,
         mwGain: 0.8 * sc.night * (1 - 0.7 * sc.moonFactor),
         lightAzDeg: sc.light?.azimuthDeg ?? sc.sunAz,
         lightAltDeg: sc.light?.altitudeDeg ?? -90,
@@ -748,13 +752,13 @@ export class ViewfinderController {
     let alt: number;
     let p: { x: number; y: number } | null;
     if (uz < SIN_10_DEG) {
-      const h = horizontalOf(e / len, n / len, uz);
+      const h = horizontalOf(e / len, n / len, uz, sc.airDensity);
       az = h.azimuthDeg;
       alt = h.altitudeDeg;
       p = this.toPx(sc, az, alt);
     } else {
       const { forward: F, right: R, up: U } = sc.basis;
-      refractEnu(e / len, n / len, uz, LIFT);
+      refractEnu(e / len, n / len, uz, LIFT, sc.airDensity);
       const le = LIFT[0];
       const ln = LIFT[1];
       const lu = LIFT[2];
@@ -1086,8 +1090,7 @@ export class ViewfinderController {
   }
 
   private drawBody(sc: Scene, body: SkyBody, date: Date): BodyLabel | null {
-    const w = worldStore.getState();
-    const pos = position(body, date, makeObserver(w.pin, w.pinHeightM));
+    const pos = position(body, date, sc.obs);
     const p = this.toPx(sc, pos.azimuth, pos.altitude);
     if (!this.inFrame(sc, p, 60)) return null;
     const { ctx } = this;

@@ -1,6 +1,6 @@
 import { Equator, Horizon, HourAngle, type Observer } from 'astronomy-engine';
 import { POLARIS_BODY } from './bodies';
-import { apparentAltitude } from './refraction';
+import { airDensity, apparentAltitude } from './refraction';
 
 export interface PolarisAid {
   /** Observer in the northern hemisphere, where Polaris serves. */
@@ -36,7 +36,7 @@ export function polarisAid(time: Date, obs: Observer): PolarisAid {
     poleAltDeg: Math.abs(obs.latitude),
     poleAzDeg: obs.latitude >= 0 ? 0 : 180,
     polarisAzDeg: hor.azimuth,
-    polarisAltDeg: apparentAltitude(hor.altitude),
+    polarisAltDeg: apparentAltitude(hor.altitude, airDensity(obs.height)),
     separationDeg: 90 - eq.dec,
     hourAngleH: ha,
     clockSky,

@@ -45,7 +45,7 @@ describe('sky frame', () => {
 
   it('finds the celestial pole at the latitude', () => {
     const [e, n, u] = poleEnu(time, obs);
-    const h = horizontalOf(e, n, u, false);
+    const h = horizontalOf(e, n, u, 0);
     expect(azDiff(h.azimuthDeg, 0)).toBeLessThan(0.01);
     expect(h.altitudeDeg).toBeCloseTo(45, 2);
   });
@@ -55,12 +55,20 @@ describe('sky frame', () => {
     for (const alt of [45, 10, 0.5, -1]) {
       const g = alt * D2R;
       refractEnu(Math.cos(g) * Math.sin(1), Math.cos(g) * Math.cos(1), Math.sin(g), out);
-      const h = horizontalOf(out[0], out[1], out[2], false);
+      const h = horizontalOf(out[0], out[1], out[2], 0);
       expect(Math.hypot(out[0], out[1], out[2])).toBeCloseTo(1, 12);
       expect(h.azimuthDeg).toBeCloseTo(1 / D2R, 9);
       expect(h.altitudeDeg).toBeCloseTo(apparentAltitude(alt), 9);
     }
     refractEnu(0, Math.cos(45 * D2R), Math.sin(45 * D2R), out);
-    expect((horizontalOf(out[0], out[1], out[2], false).altitudeDeg - 45) * 3600).toBeCloseTo(60.8, 0);
+    expect((horizontalOf(out[0], out[1], out[2], 0).altitudeDeg - 45) * 3600).toBeCloseTo(60.8, 0);
+  });
+
+  it('refracts less in thin air', () => {
+    const out = new Float64Array(3);
+    const g = 0.5 * D2R;
+    refractEnu(0, Math.cos(g), Math.sin(g), out, 0.7);
+    expect(horizontalOf(out[0], out[1], out[2], 0).altitudeDeg).toBeCloseTo(apparentAltitude(0.5, 0.7), 9);
+    expect(horizontalOf(0, Math.cos(g), Math.sin(g), 0.7).altitudeDeg).toBeCloseTo(apparentAltitude(0.5, 0.7), 9);
   });
 });

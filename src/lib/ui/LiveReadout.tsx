@@ -3,17 +3,18 @@ import { moonInfo, position, type HorizontalPos } from '@core/astro/positions';
 import { shadowLengthM } from '@core/astro/shadow';
 import { compass, degrees, distance, percent, Units } from '@core/format';
 import { useSettings } from '@state/settings';
+import { usePinSiteHeightM } from '@state/terrain';
 import { useWorld } from '@state/world';
 
 /** Live azimuth/altitude of the bodies at the simulated time. Re-renders per tick; cheap by design. */
 export function LiveReadout() {
   const time = useWorld((s) => s.time);
   const pin = useWorld((s) => s.pin);
-  const agl = useWorld((s) => s.pinHeightM);
+  const siteM = usePinSiteHeightM();
   const showGc = useSettings((s) => s.showGc);
   const units = useSettings((s) => s.units);
   const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
-  const obs = makeObserver(pin, agl);
+  const obs = makeObserver(pin, siteM);
   const date = new Date(time);
   const moon = moonInfo(date);
   const sun = position(SkyBody.Sun, date, obs);

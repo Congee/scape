@@ -1,3 +1,5 @@
+import { Atmosphere } from 'astronomy-engine';
+
 const D2R = Math.PI / 180;
 
 /** Geometric altitude of a body's centre at rise/set under standard refraction. */
@@ -13,18 +15,23 @@ function saemundssonDeg(geomAltDeg: number): number {
   return Math.max(0, 1.02 / Math.tan((h + 10.3 / (h + 5.11)) * D2R) / 60);
 }
 
-/** Refraction of a geometric altitude in the sea-level standard atmosphere, degrees. */
-export function refractionDeg(geomAltDeg: number): number {
+/** Air density relative to sea level at a height, the standard atmosphere astronomy-engine's rise/set scale by. */
+export function airDensity(heightM: number): number {
+  return Number.isFinite(heightM) ? Atmosphere(Math.min(Math.max(heightM, -500), 100_000)).density : 1;
+}
+
+/** Refraction of a geometric altitude, degrees; `density` 1 is the sea-level standard atmosphere, 0 airless. */
+export function refractionDeg(geomAltDeg: number, density = 1): number {
   if (geomAltDeg <= TAPER_END_DEG) return 0;
-  const r = saemundssonDeg(geomAltDeg);
+  const r = saemundssonDeg(geomAltDeg) * density;
   if (geomAltDeg >= TAPER_START_DEG) return r;
   const t = (geomAltDeg - TAPER_END_DEG) / (TAPER_START_DEG - TAPER_END_DEG);
   return r * t * t * (3 - 2 * t);
 }
 
 /** Apparent altitude; below the taper the geometric value, which twilight thresholds are defined on. */
-export function apparentAltitude(geomAltDeg: number): number {
-  return geomAltDeg + refractionDeg(geomAltDeg);
+export function apparentAltitude(geomAltDeg: number, density = 1): number {
+  return geomAltDeg + refractionDeg(geomAltDeg, density);
 }
 
 /** Apparent altitude of a body's centre at the standard rise/set. */

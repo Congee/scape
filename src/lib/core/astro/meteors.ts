@@ -1,4 +1,5 @@
 import { SearchSunLongitude, type Observer } from 'astronomy-engine';
+import { airDensity } from './refraction';
 import { apply, eqjToEnu, horizontalOf, type AzAlt } from './skyFrame';
 import { eqjVector } from './stars';
 
@@ -116,7 +117,7 @@ export function radiantHorizontal(status: ShowerStatus, timeMs: number, obs: Obs
   const [x, y, z] = eqjVector(raDeg, decDeg);
   const out = new Float64Array(3);
   apply(eqjToEnu(new Date(timeMs), obs), x, y, z, out);
-  return horizontalOf(out[0], out[1], out[2]);
+  return horizontalOf(out[0], out[1], out[2], airDensity(obs.height));
 }
 
 /** Showers active at the time, strongest first. */
