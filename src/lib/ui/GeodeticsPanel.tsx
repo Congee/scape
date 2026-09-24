@@ -28,6 +28,7 @@ export function GeodeticsPanel() {
   const pinH = useWorld((s) => s.pinHeightM);
   const pin2H = useWorld((s) => s.pin2HeightM);
   const pin2HAuto = useWorld((s) => s.pin2HeightAuto);
+  const pin2HFrom = useWorld((s) => s.pin2HeightFrom);
   const units = useSettings((s) => s.units);
   const terrain = useSettings((s) => s.terrain);
   const profile = useTerrain((s) => s.profile);
@@ -94,8 +95,8 @@ export function GeodeticsPanel() {
             onChange={(e) => w.setPin2Height(Math.max(0, Number(e.target.value) || 0))}
             aria-label="Target height above ground, metres"
           />
-          <span className="muted nowrap" title={pin2HAuto ? 'Height of the OpenStreetMap building under the target' : undefined}>
-            m {pin2HAuto ? '· OSM' : 'target'}
+          <span className="muted nowrap" title={pin2HAuto ? (pin2HFrom ? 'Apex of the model under the target' : 'Height of the OpenStreetMap building under the target') : undefined}>
+            m {pin2HAuto ? (pin2HFrom ? `· from model «${pin2HFrom}»` : '· OSM') : 'target'}
           </span>
         </b>
         <span className="k">Elevation angle</span>

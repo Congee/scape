@@ -6,14 +6,33 @@ import { MarkerCategory, MarkerShape, type SavedMarker } from '@core/plan';
 import { parsePointsText } from '@data/importPoints';
 import { markersStore, useMarkers } from '@state/markers';
 import { useSettings } from '@state/settings';
+import { MarkersView, useUi } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
 import { downloadText } from './download';
 import { CATEGORY_COLORS } from './map/overlays';
+import { ModelsPanel } from './ModelsPanel';
 
 const CATEGORIES = Object.values(MarkerCategory);
 const SHAPES = Object.values(MarkerShape);
 
 export function MarkersPanel() {
+  const view = useUi((s) => s.markersView);
+  const setView = useUi((s) => s.setMarkersView);
+  return (
+    <>
+      <div className="seg markers-switch" role="group" aria-label="Show">
+        {Object.values(MarkersView).map((v) => (
+          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+            {v}
+          </button>
+        ))}
+      </div>
+      {view === MarkersView.Models ? <ModelsPanel /> : <MarkerList />}
+    </>
+  );
+}
+
+function MarkerList() {
   const markers = useMarkers((s) => s.markers);
   const loaded = useMarkers((s) => s.loaded);
   const selectedId = useMarkers((s) => s.selectedId);

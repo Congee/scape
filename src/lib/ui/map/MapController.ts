@@ -14,6 +14,8 @@ import { shallow } from 'zustand/shallow';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
+import { modelHeightAt } from '@core/model/heightAt';
+import { seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
@@ -28,16 +30,17 @@ import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
-import { buildingsStore, buildingHeightAt, requestShadowMask } from '@state/buildings';
+import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { mapStatusStore } from '@state/mapStatus';
 import { markersStore } from '@state/markers';
+import { modelsStore } from '@state/models';
 import { currentBasemap, offlineStore } from '@state/offline';
 import { settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
-import { PanelTab, uiStore } from '@state/ui';
+import { MarkersView, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { paintHeat } from './heat';
@@ -171,6 +174,8 @@ export class MapController {
       const al = alignStore.getState();
       if ((al.mode === HeatMode.Align || al.mode === HeatMode.Time) && al.result && cellOf(al.result.grid, p)) return al.pick(p);
       if (this.map.getLayer('markers-circle') && this.map.queryRenderedFeatures(e.point, { layers: ['markers-circle'] }).length) return;
+      const models = modelsStore.getState();
+      if (models.picking) return this.modelBuildingAt(p);
       const ms = markersStore.getState();
       if (ms.placing || e.originalEvent.altKey) {
         ms.setPlacing(false);
@@ -276,6 +281,7 @@ export class MapController {
       gearStore.subscribe(() => this.renderFov()),
       markersStore.subscribe((st) => [st.markers, st.selectedId] as const, () => this.renderMarkers(), { equalityFn: shallow }),
       markersStore.subscribe((st) => st.placing, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
+      modelsStore.subscribe((st) => st.picking, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
       settingsStore.subscribe(
         (st) => [st.basemapId, st.customBasemaps, st.offlineFlavor] as const,
         () => this.setBasemap(currentBasemap()),
@@ -365,6 +371,24 @@ export class MapController {
     if (!this.dragging2) this.pin2.setLngLat([p.lng, p.lat]);
   }
 
+  /** Seeds a Drawn model from the Overture building under `p` and opens it in the editor. */
+  private modelBuildingAt(p: LngLat) {
+    const models = modelsStore.getState();
+    models.setPicking(false);
+    void buildingRowsAt(p).then(async (rows) => {
+      const m = rows ? seedModel(rows, `Model ${models.models.length + 1}`) : null;
+      if (!m) {
+        modelsStore.setState({ pickError: 'No Overture building there.' });
+        return;
+      }
+      await modelsStore.getState().save(m);
+      modelsStore.getState().select(m.id);
+    });
+    const ui = uiStore.getState();
+    ui.setPanelTab(PanelTab.Markers);
+    ui.setMarkersView(MarkersView.Models);
+  }
+
   /** A target placed through the map also picks up the height of the building under it. */
   private setTargetFromMap(p: LngLat) {
     worldStore.getState().setPin2(p);
@@ -375,6 +399,11 @@ export class MapController {
   private applyBuildingHeight(p: LngLat, retry: boolean) {
     const w = worldStore.getState();
     if (!w.pin2HeightAuto && w.pin2HeightM > 0) return;
+    const fromModel = modelHeightAt(modelsStore.getState().models, p);
+    if (fromModel) {
+      w.setPin2Height(Math.round(fromModel.heightM), true, fromModel.model.name);
+      return;
+    }
     void buildingHeightAt(p).then((h) => {
       const now = worldStore.getState();
       // The target moved, or the user typed a height, while we waited.

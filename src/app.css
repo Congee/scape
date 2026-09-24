@@ -1457,53 +1457,22 @@ label.file input {
   font-size: 12px;
 }
 
-/* Tools tab */
-.tools .kv input[type='text'] {
-  width: 96px;
+.markers-switch {
+  margin: 4px 6px;
 }
 
-.nd-table {
+.parts {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  margin: 4px 0 6px;
 }
 
-.nd-table th,
-.nd-table td {
-  padding: 3px 6px;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.nd-table th:first-child,
-.nd-table td:first-child {
+.parts th {
+  font-weight: 500;
   text-align: left;
-}
-
-.nd-table th {
   color: var(--fg-2);
-  font-weight: normal;
-  border-bottom: 1px solid var(--line);
 }
 
-.nd-table tbody tr {
-  cursor: pointer;
-}
-
-.nd-table tbody tr:hover {
-  background: var(--bg-3);
-}
-
-.nd-table tr.on {
-  color: var(--accent);
-}
-
-.tl-sim {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 6px;
+.parts input[type='number'] {
+  width: 4.5em;
 }

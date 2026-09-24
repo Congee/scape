@@ -15,6 +15,8 @@ export interface ModelsState {
   selectedId: string | null;
   /** Next map click seeds a model from the Overture building under it. */
   picking: boolean;
+  /** Why the last pick made no model; cleared by the next pick. */
+  pickError: string | null;
   load(): Promise<void>;
   save(m: SavedModel): Promise<SavedModel>;
   /** Applies `patch`, re-deriving the footprint from the parts. */
@@ -34,6 +36,7 @@ export const modelsStore = create<ModelsState>()(
     rev: 0,
     selectedId: null,
     picking: false,
+    pickError: null,
     load: async () => {
       const models = await listAll('models');
       set((s) => ({ models, loaded: true, rev: s.rev + 1 }));
@@ -58,7 +61,7 @@ export const modelsStore = create<ModelsState>()(
       channel?.postMessage('changed');
     },
     select: (selectedId) => set({ selectedId }),
-    setPicking: (picking) => set({ picking })
+    setPicking: (picking) => set(picking ? { picking, pickError: null } : { picking })
   }))
 );
 
