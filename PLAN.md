@@ -370,6 +370,9 @@ collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts
   them with the frame's own pinhole projection, depth-tested per pixel against the terrain sweep,
   at every focal length (`core/geo/prismRaster.ts`). The precise-model step is C, in-app modelling
   on the same rasteriser, with B as an import path; the user has delegated that choice.
+  P1 landed 2026-09-24 (`975c0b3`): models as per-triangle surfaces in the prism pass, "Model this
+  building" seeded from Overture rows, part editor, db v4 store, Overture suppression by footprint,
+  target height from the model apex. Design and phases P2–P4 in `docs/research/precise-models.md`.
 - **Buildings come from Overture, drawn to the OSM Simple 3D rules.** Decided 2026-09-13 (user:
   "let's do it then") on the source research in `docs/research/3d-models.md`, replacing
   OpenFreeMap. The `buildings.pmtiles` archive of the Overture 2026-08-19.0 release is read live
@@ -484,6 +487,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Offline buildings (merged): z14 only, "download with the terrain" on by default up to 100 tiles
   (~30 MB dense city; NYC 50 km = 686 tiles / 146 MB); separate Estimate/Download too. Open: should
   one click also fetch the basemap for the region?
+- Models P1 (merged): a hidden model does not suppress Overture rows; the map's fill-extrusion is
+  not yet hidden under a model (P2 adds `models-fill`); "Model this building" seeds from one z14 tile
+  (P2 spans tiles); `.scape.json` export omits models until P3b.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
