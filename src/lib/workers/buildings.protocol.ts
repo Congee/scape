@@ -18,6 +18,8 @@ export interface TilesRequest {
   azFromDeg: number;
   azSpanDeg: number;
   rangeM: number;
+  /** Tile keys the store already holds; a tile's batch does not depend on the wedge. */
+  have: string[];
 }
 
 /** Apex height of the building under a point (max over the building and all its parts); null when none. */

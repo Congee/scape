@@ -149,7 +149,7 @@ export function requestBuildings(pin: LngLat, azFromDeg: number, azSpanDeg: numb
   lastPin = pin;
   tilesId = ++seq;
   buildingsStore.setState({ busy: true, error: null });
-  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, azFromDeg, azSpanDeg, rangeM };
+  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, azFromDeg, azSpanDeg, rangeM, have: [...buildingsStore.getState().tiles.keys()] };
   ensureWorker().postMessage(req);
 }
 

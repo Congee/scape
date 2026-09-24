@@ -100,7 +100,8 @@ async function groundOf(decoded: DecodedBuildings): Promise<Float32Array> {
 }
 
 async function run(req: TilesRequest): Promise<void> {
-  const tiles = tilesForWedge(req.pin, req.azFromDeg, req.azSpanDeg, req.rangeM);
+  const have = new Set(req.have);
+  const tiles = tilesForWedge(req.pin, req.azFromDeg, req.azSpanDeg, req.rangeM).filter((t) => !have.has(tileKey(t.z, t.x, t.y)));
   let missing = 0;
   let sent = 0;
   // All fetches start now so the data layer's concurrency limiter runs; they are consumed nearest first.
