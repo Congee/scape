@@ -1,18 +1,26 @@
 // Frame pacing of the loaded viewfinder: idle, an aim drag, a time scrub and a zoom, each for a few seconds.
 /* oxlint-disable no-await-in-loop -- input steps are paced one frame at a time */
-// Usage: bun scripts/smoke/lod2-fps.ts <cdp> <dev-port> <scenarios,comma> [seconds] [--profile <out.json>]
-// Prints one JSON line per scenario; the page must already show the scene.
+// Usage: bun scripts/smoke/lod2-fps.ts <cdp> <dev-port> <scenarios,comma> [seconds] [--url <scene> --ready <js>] [--profile <out.json>]
+// Prints one JSON line per scenario. With --url it loads the scene itself, after the hidden-tab rAF shim is in; without, the page must already show it.
 import { Tab } from './cdp';
 
 const args = process.argv.slice(2);
-const [cdp = '9404', port = '5404', list = 'idle,drag', secs = '3'] = args;
-const profileOut = args.includes('--profile') ? args[args.indexOf('--profile') + 1] : null;
+const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
+const [cdp = '9404', port = '5404', list = 'idle,drag', secs = '3'] = args.filter((a, i) => !a.startsWith('--') && !args[i - 1]?.startsWith('--'));
+const profileOut = flag('--profile');
+const url = flag('--url');
+const ready = flag('--ready') ?? '!!window.__scape?.prism';
 const MS = Number(secs) * 1000;
 
 const Scenario = { Idle: 'idle', Drag: 'drag', Scrub: 'scrub', Zoom: 'zoom' } as const;
 type Scenario = (typeof Scenario)[keyof typeof Scenario];
 
 const tab = await Tab.open(Number(cdp), `http://localhost:${port}`);
+if (url) {
+  await tab.navigate(url);
+  if (!(await tab.until(ready, 120_000, 500))) throw new Error(`scene not ready within 120 s: ${url}`);
+  await Bun.sleep(3000);
+}
 
 // Frame intervals from an rAF loop of its own, long tasks, and how often the app drew.
 const START = `(() => {
@@ -84,7 +92,9 @@ for (const s of list.split(',') as Scenario[]) {
   const vis = await tab.eval<string>(START);
   await drive(s);
   await Bun.sleep(300);
-  const r = await tab.eval<Record<string, unknown>>(STOP);
+  const r = await tab.eval<{ frames: number } & Record<string, unknown>>(STOP);
+  // A hidden tab without the shim gets no rAF at all.
+  if (r.frames === 0) throw new Error(`${s}: no frames sampled (tab ${vis}${url ? '' : '; pass --url so the rAF shim loads first'})`);
   let hot: string[] | undefined;
   if (profileOut) {
     const { profile } = (await tab.send('Profiler.stop')) as { profile: Parameters<typeof hotspots>[0] };

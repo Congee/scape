@@ -162,15 +162,18 @@ FPS_BUDGET_MS=17.5
 until mkdir "$LOCK" 2>/dev/null; do sleep 30; done
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 for f in 200 2400; do
-  go "$(vf_url "$NL_CAM" "$NL_TGT" "$DAY" "$f" L)" "$READY"
-  sleep 3
+  ab eval '(() => { window.__scape.settings.getState().update({ terrain: true, showSunShadows: true, lightSource: "Auto" }); window.__scape.composition.getState().update({ showBuildings: true }); return "ok"; })()' >/dev/null
+  # lod2-fps loads the scene itself so the hidden-tab rAF shim is in before the app starts.
+  FPS_OUT=$(bun "$ROOT/scripts/smoke/lod2-fps.ts" "$CDP" "$PORT" idle,drag 3 --url "$(vf_url "$NL_CAM" "$NL_TGT" "$DAY" "$f" L)" --ready "$READY" 2>"$OUT/fps-$f.err")
+  FPS_RC=$?
   got=0
   while read -r line; do
+    [ -z "$line" ] && continue
     got=$((got + 1))
-    read -r sc p50 p95 long gpu <<<"$(echo "$line" | bun -e 'const r = JSON.parse(await Bun.stdin.text()); console.log(r.scenario, r.p50, r.p95, r.long.length, r.gpuP95)')"
-    check "fps $f mm day $sc: p95 ≤ $FPS_BUDGET_MS ms" "$(ok "$p95 > 0 && $p95 <= $FPS_BUDGET_MS")" "p50 $p50 ms, p95 $p95 ms, $long long tasks, GPU p95 $gpu ms"
-  done < <(bun "$ROOT/scripts/smoke/lod2-fps.ts" "$CDP" "$PORT" idle,drag 3)
-  [ "$got" = 2 ] || check "fps $f mm day: measured" 0 "$got of 2 scenarios reported"
+    read -r sc vis p50 p95 long gpu <<<"$(echo "$line" | bun -e 'const r = JSON.parse(await Bun.stdin.text()); console.log(r.scenario, r.vis, r.p50, r.p95, r.long.length, r.gpuP95)')"
+    check "fps $f mm day $sc: p95 ≤ $FPS_BUDGET_MS ms" "$(ok "$p95 <= $FPS_BUDGET_MS")" "p50 $p50 ms, p95 $p95 ms, $long long tasks, GPU p95 $gpu ms, tab $vis"
+  done <<<"$FPS_OUT"
+  [ "$FPS_RC" = 0 ] || check "fps $f mm day: measured" 0 "$(grep -m1 -io 'error: .*' "$OUT/fps-$f.err" || echo "lod2-fps exited $FPS_RC")"
 done
 rmdir "$LOCK"
 trap - EXIT
