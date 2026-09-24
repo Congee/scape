@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LightMode } from '@core/astro/lightSource';
 import { basemapGroup, BasemapGroup, BasemapKind, BUILTIN_BASEMAPS, offlineBasemaps, PmFlavor, type Basemap } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
 import { useMapStatus } from '@state/mapStatus';
@@ -6,6 +7,7 @@ import { useOffline } from '@state/offline';
 import { settingsStore, useSettings, type Settings } from '@state/settings';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
+const LIGHT_LABEL: Record<LightMode, string> = { [LightMode.Auto]: 'Sun by day, moon by night', [LightMode.Sun]: 'Sun only', [LightMode.Moon]: 'Moon only' };
 const GROUPS: BasemapGroup[] = [BasemapGroup.Vector, BasemapGroup.Raster, BasemapGroup.Downloaded, BasemapGroup.Custom];
 
 export function LayersPanel() {
@@ -21,6 +23,7 @@ export function LayersPanel() {
   const rangeKm = useSettings((s) => s.horizonRangeKm);
   const showShadow = useSettings((s) => s.showShadow);
   const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
+  const lightSource = useSettings((s) => s.lightSource);
 
   const addUrl = () => {
     const u = url.trim();
@@ -124,8 +127,18 @@ export function LayersPanel() {
 
       <h3>Buildings</h3>
       <Toggle k="showBuildings" label="3D buildings (Overture, in place of the basemap's own)" />
-      <Toggle k="showSunShadows" label="Sun shadows on the ground (terrain and buildings)" />
-      <p className="muted hint">Buildings appear from zoom 14; their shadows follow the timeline time and need the buildings layer on.</p>
+      <Toggle k="showSunShadows" label="Shadows on the ground (terrain and buildings)" />
+      <label className="toggle">
+        <span>Light from</span>
+        <select value={lightSource} onChange={(e) => update({ lightSource: e.target.value as LightMode })} aria-label="Light source for shadows" title="The moon takes over once it is up and the sun is 6° below the horizon; the viewfinder follows too">
+          {Object.values(LightMode).map((m) => (
+            <option key={m} value={m}>
+              {LIGHT_LABEL[m]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted hint">Buildings appear from zoom 14; their shadows follow the timeline time and need the buildings layer on. Shade cast by the moon is drawn a deeper blue.</p>
 
       <h3>Terrain</h3>
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
