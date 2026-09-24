@@ -22,6 +22,7 @@ import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
+import { fitPhoto, photoHfovDeg } from '@core/photo/fit';
 import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
@@ -33,6 +34,7 @@ import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { markersStore } from '@state/markers';
 import { modelSuppression, modelsStore } from '@state/models';
+import { photoStore } from '@state/photo';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, meshKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
@@ -145,13 +147,17 @@ export class ViewfinderController {
   /** Per-object building occlusion for the current frame; the GPU picture cannot mask objects. */
   private occ: Occluder | null = null;
   private occCache: { key: string; occ: Occluder | null } | null = null;
+  private meshOccCache: { key: string; occ: MeshOccluder | null } | null = null;
+  private anyOccCache: { key: string; occ: Occluder | null } | null = null;
+  /** What the overlay hid this frame, for `__scape.overlay`. */
+  private seen: { bodies: Record<string, { az: number; alt: number; x: number; y: number; r: number; hidden: boolean }>; markers: Record<string, boolean> } = { bodies: {}, markers: {} };
   /** Placed models, rebuilt when the camera location or any model changes. */
   private modelCache: { key: string; meshes: SurfaceMesh[]; ids: string[] } | null = null;
   /** The selected model's outline, eye-relative e, n, u pairs. */
   private outlineCache: { key: string; seg: Float32Array } | null = null;
   private gpuMs = -1;
 
-  constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement, private photoLayer: HTMLElement | null = null) {
     this.ctx = canvas.getContext('2d')!;
     try {
       this.sceneGl = SceneGl.create(glCanvas);
@@ -178,7 +184,8 @@ export class ViewfinderController {
       markersStore.subscribe((s) => s.markers, () => this.schedule(), { equalityFn: shallow }),
       buildingsStore.subscribe((s) => s.version, () => this.schedule()),
       modelsStore.subscribe((s) => s.rev, () => this.schedule()),
-      modelsStore.subscribe((s) => s.selectedId, () => this.schedule())
+      modelsStore.subscribe((s) => s.selectedId, () => this.schedule()),
+      photoStore.subscribe(() => this.schedule())
     );
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -487,6 +494,26 @@ export class ViewfinderController {
     if (dev) dev.modelOutline = { id, segments: drawn, box: drawn > 0 ? box : null };
   }
 
+  /** The reference photo's DOM layer, sized to the frame and scaled by its field of view. */
+  private placePhoto(sc: Scene) {
+    const el = this.photoLayer;
+    const img = el?.querySelector('img');
+    if (!el || !img) return;
+    const p = photoStore.getState();
+    el.hidden = !p.url || p.w <= 0;
+    const dev = import.meta.env.DEV ? (window as unknown as { __scape?: Record<string, unknown> }).__scape : undefined;
+    if (el.hidden || !p.url) {
+      if (dev) dev.photo = null;
+      return;
+    }
+    const f = sc.frame;
+    const b = fitPhoto(f, sc.cam.focalMm, p);
+    if (img.getAttribute('src') !== p.url) img.src = p.url;
+    Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
+    Object.assign(img.style, { left: `${b.cx - f.x - b.w / 2}px`, top: `${b.cy - f.y - b.h / 2}px`, width: `${b.w}px`, height: `${b.h}px`, transform: b.rotDeg ? `rotate(${b.rotDeg}deg)` : '', opacity: String(p.opacity) });
+    if (dev) dev.photo = { box: b, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, focalMm: sc.cam.focalMm, focal35: p.focal35, hfovDeg: p.focal35 ? photoHfovDeg(p.focal35, p.w, p.h) : sc.hfov, opacity: p.opacity };
+  }
+
   /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */
   private glPrisms(sc: Scene, hazeRgb: readonly number[]): { tiles: Iterable<PrismTile>; models: Iterable<SurfaceMesh>; shading: PrismShading } | null {
     this.prismStats = { buildings: 0, tiles: 0 };
@@ -507,11 +534,14 @@ export class ViewfinderController {
     const models = this.modelSurfaces(sc);
     if (tiles.size === 0 && models.length === 0) return null;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    const key = `${this.prismKey}|${buildingsStore.getState().version}|${rangeM}|${this.modelCache?.key}`;
-    if (this.occCache?.key !== key) {
-      this.occCache = { key, occ: anyOccluder([tiles.size > 0 ? new PrismOccluder(tiles.values(), rangeM) : null, models.length > 0 ? new MeshOccluder(models) : null]) };
-    }
-    return this.occCache.occ;
+    const key = `${this.prismKey}|${buildingsStore.getState().version}|${rangeM}`;
+    const modelKey = this.modelCache?.key ?? '';
+    // Separate caches: tiles streaming in must not re-index a large imported mesh.
+    if (this.meshOccCache?.key !== modelKey) this.meshOccCache = { key: modelKey, occ: models.length > 0 ? new MeshOccluder(models) : null };
+    if (this.occCache?.key !== key) this.occCache = { key, occ: tiles.size > 0 ? new PrismOccluder(tiles.values(), rangeM) : null };
+    const both = `${key}|${modelKey}`;
+    if (this.anyOccCache?.key !== both) this.anyOccCache = { key: both, occ: anyOccluder([this.occCache.occ, this.meshOccCache.occ]) };
+    return this.anyOccCache.occ;
   }
 
   /** True when a building stands between the eye and a direction; `distM` is Infinity for the sky. */
@@ -940,6 +970,7 @@ export class ViewfinderController {
     const semi = semidiameterDeg(body, date, sc.obs);
     const hidden = pos.altitude + semi < skyline || this.behindBuilding(pos.azimuth, pos.altitude, Infinity);
     const r = Math.max(3, discRadiusMm(sc.cam, semi) * sc.frame.pxPerMm);
+    this.seen.bodies[body] = { az: pos.azimuth, alt: pos.altitude, x: p.x, y: p.y, r, hidden };
     // The picture pass draws the discs itself, clipped per pixel; only the label is left here.
     const inPicture = !!this.sceneGl && body !== SkyBody.Gc;
     ctx.save();
@@ -1079,6 +1110,7 @@ export class ViewfinderController {
       const halfW = m.widthM > 0 ? (Math.atan(m.widthM / 2 / d) / D2R / sc.hfov) * sc.frame.w : 0;
       if (!base || !top || !(this.inFrame(sc, base, 20 + halfW) || this.inFrame(sc, top, 20 + halfW))) continue;
       const hidden = (!!sc.view && occluded(sc.view, az, topAlt, d)) || this.behindBuilding(az, topAlt, d);
+      this.seen.markers[m.id] = hidden;
       const color = CATEGORY_COLORS[m.category];
       ctx.globalAlpha = hidden ? 0.4 : 1;
       ctx.strokeStyle = color;
@@ -1217,6 +1249,7 @@ export class ViewfinderController {
     }
     if (w < 40 || h < 40) return;
     const sc = this.scene();
+    this.placePhoto(sc);
     if (!this.sceneGl) {
       this.drawGlError(sc);
       return;
@@ -1224,6 +1257,7 @@ export class ViewfinderController {
     const s = settingsStore.getState();
     const c = compositionStore.getState();
     this.occ = this.occluder(sc);
+    this.seen = { bodies: {}, markers: {} };
     this.drawSceneGl(sc, this.sceneGl);
     this.drawSky(sc);
 
@@ -1265,6 +1299,10 @@ export class ViewfinderController {
 
     this.drawBodyLabels(sc, labels);
     this.drawMarkers(sc);
+    if (import.meta.env.DEV) {
+      const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
+      if (dev) dev.overlay = { ...this.seen, at: Date.now() };
+    }
     this.drawModelOutline(sc);
     this.drawTarget(sc);
 

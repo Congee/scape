@@ -41,6 +41,49 @@ describe('MeshOccluder', () => {
   });
 });
 
+function dir(azDeg: number, altDeg: number): [number, number, number] {
+  const a = (azDeg * Math.PI) / 180;
+  const h = (altDeg * Math.PI) / 180;
+  return [Math.cos(h) * Math.sin(a), Math.cos(h) * Math.cos(a), Math.sin(h)];
+}
+
+describe('MeshOccluder edge cases', () => {
+  const occ = new MeshOccluder([wall]);
+
+  it('hides a target behind the wall but not one in front of it', () => {
+    expect(occ.occludes(0, 1, 0.2, 60)).toBe(true);
+    expect(occ.occludes(0, 1, 0.2, 49)).toBe(false);
+  });
+
+  it('hides a far target well beyond the mesh', () => {
+    expect(occ.occludes(0, 1, 0.2, 1e7)).toBe(true);
+  });
+
+  it('finds a narrow far triangle across a bucket edge from either side', () => {
+    // 0.2° wide, centred on 46° azimuth, 5 km out.
+    const [e0, n0] = dir(45.9, 0);
+    const [e1, n1] = dir(46.1, 0);
+    const sliver = new MeshOccluder([soup([e0 * 5000, n0 * 5000, -10, e1 * 5000, n1 * 5000, -10, e1 * 5000, n1 * 5000, 400, e0 * 5000, n0 * 5000, -10, e1 * 5000, n1 * 5000, 400, e0 * 5000, n0 * 5000, 400])]);
+    expect(sliver.occludes(...dir(45.95, 2), Infinity)).toBe(true);
+    expect(sliver.occludes(...dir(46.05, 2), Infinity)).toBe(true);
+    expect(sliver.occludes(...dir(45.8, 2), Infinity)).toBe(false);
+    expect(sliver.occludes(...dir(46.2, 2), Infinity)).toBe(false);
+    expect(sliver.occludes(...dir(46, 6), Infinity)).toBe(false);
+  });
+
+  it('handles near-zenith and zenith rays', () => {
+    // An overhang 1 km up, east of the zenith and clear of it.
+    const eave = new MeshOccluder([soup([1, -1, 1000, 3, -1, 1000, 2, 2, 1000])]);
+    expect(eave.occludes(...dir(90, 89.9), Infinity)).toBe(true);
+    expect(eave.occludes(...dir(270, 89.9), Infinity)).toBe(false);
+    expect(eave.occludes(0, 0, 1, Infinity)).toBe(false);
+    // A roof straight overhead catches the exact zenith whatever bucket it lands in.
+    const roof = new MeshOccluder([soup([-10, -10, 5, 10, -10, 5, 0, 15, 5])]);
+    expect(roof.occludes(0, 0, 1, Infinity)).toBe(true);
+    expect(roof.occludes(0, 0, 1, 4)).toBe(false);
+  });
+});
+
 describe('anyOccluder', () => {
   it('drops the missing parts and ORs the rest', () => {
     expect(anyOccluder([null, null])).toBeNull();
