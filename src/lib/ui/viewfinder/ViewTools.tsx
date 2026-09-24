@@ -4,6 +4,7 @@ import { compositionStore, useComposition, type Composition } from '@state/compo
 import { lod2Drawn, lod2GeoidUse, useLod2 } from '@state/lod2';
 import { useOffline } from '@state/offline';
 import { useWorld } from '@state/world';
+import { useShallow } from 'zustand/react/shallow';
 import { PhotoTools } from './PhotoTools';
 
 type BoolKey = { [K in keyof Composition]: Composition[K] extends boolean ? K : never }[keyof Composition];
@@ -25,9 +26,12 @@ const CHIPS: [BoolKey, string, string][] = [
   ['showRainbow', 'Rainbow', 'Where a rainbow would stand: the 42° and 51° arcs opposite the sun']
 ];
 
+const FLAGS: BoolKey[] = ['aimAtTarget', ...CHIPS.map(([k]) => k)];
+
 /** Layer chips for the viewfinder page; the aim chip makes the target lock visible and reversible. */
 export function ViewTools() {
-  const c = useComposition();
+  // Only the flags: the whole store changes on every step of an aim drag.
+  const c = useComposition(useShallow((s) => Object.fromEntries(FLAGS.map((k) => [k, s[k]])) as Pick<Composition, BoolKey>));
   const pin2 = useWorld((s) => s.pin2);
   const tiles = useLod2((s) => s.tiles);
   const lod2 = lod2Drawn(tiles);
