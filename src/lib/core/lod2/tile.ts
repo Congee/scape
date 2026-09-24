@@ -43,23 +43,26 @@ function median(v: number[]): number {
 /**
  * The tile's GLB world through `transform` (3D Tiles' y-up turn first) into lng/lat and sea-level
  * altitude. With a ground column the datum is the median of each building's lowest vertex above
- * its recorded ground, so the geoid is read off the data rather than assumed.
+ * its recorded ground, so the geoid is read off the data rather than assumed. `batch` holds a b3dm's
+ * batch-table columns, read where the GLB has no property table.
  */
-export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Region): Lod2Tile {
+export function lod2Tile(w: GltfWorld, transform: Float64Array, region: Lod2Region, batch: Readonly<Record<string, readonly unknown[]>> = {}): Lod2Tile {
   const nv = w.pos.length / 3;
   const m = transform;
   const geo = new Float64Array(nv * 3);
+  const [rx, ry, rz] = w.rtc ?? [0, 0, 0];
   for (let v = 0; v < nv; v++) {
-    const x = w.pos[v * 3];
-    const y = -w.pos[v * 3 + 2];
-    const z = w.pos[v * 3 + 1];
+    const x = w.pos[v * 3] + rx;
+    const y = ry - w.pos[v * 3 + 2];
+    const z = w.pos[v * 3 + 1] + rz;
     const g = ecefToGeodetic(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]);
     geo[v * 3] = g.lng;
     geo[v * 3 + 1] = g.lat;
     geo[v * 3 + 2] = g.h;
   }
-  const ground = region.groundProperty ? propertyColumn(w, 0, region.groundProperty) : undefined;
-  const ids = region.idProperty ? propertyColumn(w, 0, region.idProperty) : undefined;
+  const column = (name?: string) => (name ? (propertyColumn(w, 0, name) ?? batch[name]) : undefined);
+  const ground = column(region.groundProperty);
+  const ids = column(region.idProperty);
   const slot = new Map<number, number>();
   const building = new Int32Array(nv).fill(-1);
   const pts: [number, number][][] = [];
