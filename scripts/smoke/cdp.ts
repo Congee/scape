@@ -18,6 +18,11 @@ export class Tab {
   private waiters = new Map<number, (m: Msg) => void>();
   private workers = new Set<string>();
   private offline = false;
+  private logging = false;
+  /** False keeps the tab in the background: Page.bringToFront can raise the window over the user's. */
+  private front = true;
+  /** URLs the page and its workers requested since `logRequests()`. */
+  readonly requests: string[] = [];
 
   private constructor(
     private ws: WebSocket,
@@ -26,13 +31,14 @@ export class Tab {
     ws.addEventListener('message', (e) => {
       const m = JSON.parse(String(e.data)) as Msg;
       if (m.id != null) this.waiters.get(m.id)?.(m);
+      if (m.method === 'Network.requestWillBeSent' && this.logging) this.requests.push(String((m.params as { request: { url: string } }).request.url));
       if (m.method === 'Target.attachedToTarget') void this.adopt(String((m.params as { sessionId: string }).sessionId)).catch(() => {});
       if (m.method === 'Target.detachedFromTarget') this.workers.delete(String((m.params as { sessionId: string }).sessionId));
     });
   }
 
   /** The tab already on `origin`, or a new background tab, which opens no window. */
-  static async open(cdp: number, origin: string): Promise<Tab> {
+  static async open(cdp: number, origin: string, { front = true } = {}): Promise<Tab> {
     const list = (await (await fetch(`http://localhost:${cdp}/json/list`)).json()) as { id: string; type: string; url: string }[];
     let id = list.find((t) => t.type === 'page' && t.url.startsWith(origin))?.id;
     if (!id) {
@@ -41,6 +47,7 @@ export class Tab {
       b.ws.close();
     }
     const tab = await Tab.connect(`ws://localhost:${cdp}/devtools/page/${id}`, id);
+    tab.front = front;
     await tab.send('Page.enable');
     await tab.send('Runtime.enable');
     await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: RAF_WHEN_HIDDEN });
@@ -60,6 +67,7 @@ export class Tab {
   private async adopt(sessionId: string) {
     this.workers.add(sessionId);
     if (this.offline) await this.emulate(true, sessionId);
+    if (this.logging) await this.send('Network.enable', {}, sessionId);
     await this.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
     await this.send('Runtime.runIfWaitingForDebugger', {}, sessionId);
   }
@@ -117,7 +125,7 @@ export class Tab {
   }
 
   async activate() {
-    await this.send('Page.bringToFront');
+    if (this.front) await this.send('Page.bringToFront');
   }
 
   async viewport(width: number, height: number) {
@@ -129,6 +137,13 @@ export class Tab {
     const r = (await this.send('Page.captureScreenshot', { format: 'png', ...(clip && { clip: { ...clip, scale: 1 } }) })) as { data: string };
     await Bun.write(path, Buffer.from(r.data, 'base64'));
     return r.data;
+  }
+
+  /** Records every request of the page and the workers it starts from now on. */
+  async logRequests() {
+    this.requests.length = 0;
+    this.logging = true;
+    await this.send('Network.enable');
   }
 
   /** Network.emulateNetworkConditions on the page and every worker it runs. */

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LoD2 smoke: 3DBAG tiles replace Overture prisms in Rotterdam, in the picture, the occluder, the shadows and the credits; Zürich stays Overture.
+# LoD2 smoke: 3DBAG tiles replace Overture prisms in Rotterdam, in the picture, the occluder, the shadows and the credits; lod2-draco.ts covers Zürich, Tokyo and the Draco decoder's reach.
 # Usage: scripts/smoke/lod2.sh [port] [cdp-port] [screenshot-dir] [brave-profile] [gpu-timing-lock-dir]
 # Starts what is missing (vite dev, one background Brave) and stops only what it started.
 set -uo pipefail
@@ -47,9 +47,6 @@ ok() { awk "BEGIN { exit !($1) }" && echo 1 || echo 0; }
 NL_CAM="51.9091,4.4868"
 NL_TGT="51.90664,4.48805"
 DE_ROTTERDAM="{ lat: 51.9066, lng: 4.4880 }"
-# Lindenhof toward the Grossmünster: no LoD2 source there.
-CH_CAM="47.3769,8.5417"
-CH_TGT="47.3700,8.5441"
 DAY="2026-06-21T13:00Z"
 # Sun and the first-quarter moon both down.
 NIGHT="2026-06-21T23:45Z"
@@ -80,7 +77,6 @@ go() { # url, ready condition
 # Page helpers: the modules the app loaded (with any HMR stamp), so the stores are the app's own.
 HELPERS='const imp = (p) => import(performance.getEntriesByType("resource").map((e) => e.name).find((n) => new URL(n).pathname === p) ?? p);'
 READY='(() => { const p = window.__scape.prism; return p && p.lod2 && !p.lod2.busy && p.lod2.tiles > 0 && p.modelTris > 0 && !window.__scape.buildings.getState().busy; })()'
-READY_NONE='(() => { const p = window.__scape.prism; return p && p.lod2 && !p.lod2.busy && p.buildings > 0 && !window.__scape.buildings.getState().busy; })()'
 STATS='(() => { const p = window.__scape.prism; const l = p.lod2; const credit = [...document.querySelectorAll("[data-lod2]")].map((e) => e.textContent.trim()).join("|") || "none"; return `${l.tiles} ${l.tris} ${l.hiddenRows} ${l.missing} ${p.buildings} ${p.modelTris} ${p.shadow.on} ${p.shadow.light} ${p.shadow.casterModelTris} ${l.error ?? "-"} ${credit.replaceAll(" ", "_")}`; })()'
 # Overture rows under the De Rotterdam pin, and how many of them the drawn LoD2 rings leave.
 UNDER="(async () => { $HELPERS const [b, l, t] = await Promise.all([\"/src/lib/state/buildings.ts\", \"/src/lib/state/lod2.ts\", \"/src/lib/core/geo/buildingTiles.ts\"].map(imp)); const rows = await b.buildingRowsAt($DE_ROTTERDAM); const rings = [...l.lod2Store.getState().tiles.values()].flatMap((v) => v.rings); return rows ? \`\${rows.count} \${t.suppressRows(rows, rings).count}\` : '0 0'; })()"
@@ -140,13 +136,7 @@ wide=$(js 'document.documentElement.scrollWidth > window.innerWidth')
 check "phone 390×844: LoD2 drawn, credit shown, no sideways scroll" "$([ "$(ok "$tiles > 0 && $mtris > 0 && $hidden > 0")" = 1 ] && [[ $credit == *3DBAG* ]] && [ "$wide" = false ] && echo 1 || echo 0)" "$tiles tiles, $mtris tris, shadows $shadow, overflow $wide"
 ab set viewport 1400 900 >/dev/null
 
-# 5. Zürich: no LoD2, Overture as before.
-go "$(vf_url "$CH_CAM" "$CH_TGT" "$DAY" 24 L)" "$READY_NONE"
-ab screenshot "$OUT/ch-day-24-L.png" >/dev/null
-read -r tiles tris hidden _ prisms mtris shadow _ _ _ credit <<<"$(js "$STATS")"
-check "CH: no LoD2, Overture unchanged" "$([ "$(ok "$tiles == 0 && $tris == 0 && $hidden == 0 && $prisms > 0")" = 1 ] && [ "$credit" = none ] && echo 1 || echo 0)" "$tiles tiles, $hidden hidden, $prisms prisms, shadows $shadow, credit $credit"
-
-# 6. Map: the shadow mask stamps LoD2 and carries its credit, only where it does.
+# 5. Map: the shadow mask stamps LoD2 and carries its credit.
 map_credit() { # camera, target, tag
   ab open "$BASE/?camera=$1&target=$2&t=$DAY&z=16.5" >/dev/null 2>&1
   wait_for 'window.__scapeMap && window.__scape.buildings.getState().shadowMask && window.__scapeMap.getLayoutProperty("sun-shadow", "visibility") === "visible"' 120
@@ -157,8 +147,13 @@ map_credit() { # camera, target, tag
 }
 read -r n credit <<<"$(map_credit "$NL_CAM" "$NL_TGT" nl)"
 check "map NL: mask uses LoD2, 3DBAG credited" "$([ "$n" -gt 0 ] && [ "$credit" = true ] && echo 1 || echo 0)" "$n LoD2 sources in the mask, credit $credit"
-read -r n credit <<<"$(map_credit "$CH_CAM" "$CH_TGT" ch)"
-check "map CH: no LoD2 credit" "$([ "$n" = 0 ] && [ "$credit" = false ] && echo 1 || echo 0)" "$n LoD2 sources in the mask, credit $credit"
+
+# 6. Zürich, Tokyo and the Draco decoder, in the smoke's own CDP tab.
+DRACO=$(bun "$ROOT/scripts/smoke/lod2-draco.ts" "$CDP" "$PORT" "$OUT")
+DRACO_RC=$?
+mapfile -t DRACO_ROWS <<<"$DRACO"
+ROWS+=("${DRACO_ROWS[@]}")
+[ "$DRACO_RC" = 0 ] || FAILS=$((FAILS + 1))
 
 # 7. Frame pacing by day, holding the shared GPU timing lock; a background window must not be throttled.
 FPS_BUDGET_MS=17.5
