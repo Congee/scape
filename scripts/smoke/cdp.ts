@@ -161,6 +161,11 @@ export class Tab {
     this.requests.length = 0;
     this.logging = true;
     await this.send('Network.enable');
+    for (const w of this.workers.keys()) await this.send('Network.enable', {}, w).catch(() => {});
+  }
+
+  stopRequests() {
+    this.logging = false;
   }
 
   /** Network.emulateNetworkConditions on the page and every worker it runs. */

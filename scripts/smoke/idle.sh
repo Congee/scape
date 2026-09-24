@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Quiet smoke: per tab and scene, an idle app draws no GL frames and keeps the renderer and GPU process ≤ 2 %.
-# Usage: scripts/smoke/idle.sh [port] [cdp-port] [session] [brave-profile] [idle-seconds] [only-case-substring]
-# Starts what is missing (vite dev, one background Brave) and stops only what it started.
+# Usage: scripts/smoke/idle.sh [port] [cdp-port] [session] [brave-profile] [idle-seconds] [only-case-substring] [prod|dev]
+# prod (the gate) builds the `probe` mode and serves it with vite preview; dev reuses or starts vite dev.
+# Starts what is missing (server, one background Brave) and stops only what it started.
 set -uo pipefail
 
-PORT=${1:-5427}
+MODE=${7:-prod}
+PORT=${1:-$([ "$MODE" = dev ] && echo 5427 || echo 5428)}
 CDP=${2:-9427}
 SESSION=${3:-${AGENT_BROWSER_SESSION:-smoke-$CDP}}
 PROFILE=${4:-${TMPDIR:-/tmp}/brave-$SESSION}
@@ -15,7 +17,14 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BASE="http://localhost:$PORT"
 
 VITE=0
-if ! curl -s -o /dev/null "$BASE/"; then
+if [ "$MODE" = prod ]; then
+  # A running preview would keep serving the old build's asset list.
+  if curl -s -o /dev/null "$BASE/"; then echo "port $PORT is busy; prod mode serves its own fresh build" >&2; exit 2; fi
+  OUT=dist/idle-probe
+  (cd "$ROOT" && bunx vite build --mode probe --outDir "$OUT" --emptyOutDir >"${TMPDIR:-/tmp}/vite-build-$PORT.log" 2>&1) || { echo "vite build failed; see ${TMPDIR:-/tmp}/vite-build-$PORT.log" >&2; exit 2; }
+  (cd "$ROOT" && bunx vite preview --mode probe --outDir "$OUT" --port "$PORT" --strictPort >"${TMPDIR:-/tmp}/vite-$PORT.log" 2>&1) &
+  VITE=1
+elif ! curl -s -o /dev/null "$BASE/"; then
   (cd "$ROOT" && bunx vite --port "$PORT" --strictPort >"${TMPDIR:-/tmp}/vite-$PORT.log" 2>&1) &
   VITE=1
 fi

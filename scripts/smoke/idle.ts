@@ -1,6 +1,6 @@
 // Quiet budget: an idle app draws no frames and burns ~0 % CPU, per tab and scene, and again after input stops.
 /* oxlint-disable no-await-in-loop -- measurements are sequential */
-// Usage: bun scripts/smoke/idle.ts <cdp> <dev-port> <brave-profile> [idle-seconds] [only-case-substring]
+// Usage: bun scripts/smoke/idle.ts <cdp> <port> <brave-profile> [idle-seconds] [only-case-substring]
 // Prints a markdown table; exits non-zero on any budget breach.
 import { Tab } from './cdp';
 
@@ -20,6 +20,29 @@ const Scene = {
   Zermatt: { name: 'Zermatt terrain', camera: '46.0207,7.7491', target: '45.9766,7.6586', z: 12, t: '' },
   Night: { name: 'Night sky', camera: '46.0207,7.7491', target: '45.9766,7.6586', z: 12, t: '2026-01-15T22:00Z' }
 } as const;
+// A stand-in DevTools hook: counts React commits and the components each re-ran (a bailed-out subtree keeps its old child).
+const COMMIT_HOOK = `(() => {
+  const c = { commits: 0, renders: 0, names: {}, reset() { c.commits = c.renders = 0; c.names = {}; } };
+  window.__commits = c;
+  const kinds = new Set([0, 1, 11, 14, 15]);
+  const walk = (f) => {
+    for (; f; f = f.sibling) {
+      if (kinds.has(f.tag) && f.flags & 1) {
+        c.renders++;
+        const t = f.type?.type ?? f.type?.render ?? f.type;
+        const n = t?.displayName || t?.name || '?';
+        c.names[n] = (c.names[n] ?? 0) + 1;
+      }
+      if (!f.alternate || f.child !== f.alternate.child) walk(f.child);
+    }
+  };
+  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { supportsFiber: true, isDisabled: false, renderers: new Map(), inject: (r) => 1, checkDCE() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {}, onCommitFiberRoot(_id, root) { c.commits++; walk(root.current.child); } };
+})();`;
+
+// A covered window or a background tab: the app sees what the browser would tell it, while rAF stays alive to catch any loop.
+const HIDE = (hidden: boolean) =>
+  `(() => { for (const [k, v] of [['hidden', ${hidden}], ['visibilityState', '${hidden ? 'hidden' : 'visible'}']]) Object.defineProperty(document, k, { configurable: true, get: () => v }); document.dispatchEvent(new Event('visibilitychange')); })()`;
+
 type Scene = (typeof Scene)[keyof typeof Scene];
 
 const Tabs = ['Timeline', 'Geodetics', 'Frame', 'Night', 'Tools', 'Find', 'Markers', 'Models', 'Layers', 'Offline'] as const;
@@ -37,6 +60,7 @@ interface Case {
   tab: TabName;
   phone?: boolean;
   input?: Input;
+  hidden?: boolean;
 }
 
 const cases: Case[] = [
@@ -49,10 +73,13 @@ const cases: Case[] = [
   { scene: Scene.Rotterdam, route: Route.Map, tab: 'Timeline', input: Input.Scrub },
   { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', input: Input.Drag },
   { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', input: Input.Zoom },
-  { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', input: Input.Scrub }
+  { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', input: Input.Scrub },
+  ...[Scene.Rotterdam, Scene.Zermatt, Scene.Night].flatMap((scene) => [Route.Map, Route.Viewfinder].map((route) => ({ scene, route, tab: (route === Route.Map ? 'Timeline' : 'Frame') as TabName, hidden: true }))),
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Night', hidden: true },
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Tools', hidden: true }
 ];
 
-const label = (c: Case) => `${c.scene.name} · ${c.route || 'map'} · ${c.tab}${c.phone ? ' · phone' : ''}${c.input ? ` · after ${c.input}` : ''}`;
+const label = (c: Case) => `${c.scene.name} · ${c.route || 'map'} · ${c.tab}${c.phone ? ' · phone' : ''}${c.input ? ` · after ${c.input}` : ''}${c.hidden ? ' · hidden' : ''}`;
 
 /** Cumulative CPU seconds of this profile's renderer and GPU processes, by pid. */
 async function cpuTimes(): Promise<{ renderer: Map<string, number>; gpu: number }> {
@@ -74,6 +101,7 @@ const rendererDelta = (a: Map<string, number>, b: Map<string, number>) => Math.m
 
 const tab = await Tab.open(Number(cdp), BASE);
 await tab.send('Performance.enable');
+await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: COMMIT_HOOK });
 const taskSecs = async () => ((await tab.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] }).metrics.find((m) => m.name === 'TaskDuration')?.value ?? 0;
 
 const mouse = (type: string, x: number, y: number, extra: Record<string, unknown> = {}) => tab.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, ...extra });
@@ -109,6 +137,10 @@ interface Row {
   raf: number;
   glFrames: number;
   timers: number;
+  commits: number;
+  renders: number;
+  fetches: number;
+  top: [string, number][];
   pass: boolean;
 }
 
@@ -125,7 +157,12 @@ async function measure(c: Case): Promise<Row> {
     await drive(c);
     await Bun.sleep(1000);
   }
-  await tab.eval('window.__scape.idle.reset()');
+  if (c.hidden) {
+    await tab.eval(HIDE(true));
+    await Bun.sleep(1000);
+  }
+  await tab.logRequests();
+  await tab.eval('window.__scape.idle.reset(); window.__commits?.reset()');
   const cpu0 = await cpuTimes();
   const task0 = await taskSecs();
   const t0 = performance.now();
@@ -133,11 +170,16 @@ async function measure(c: Case): Promise<Row> {
   const dt = (performance.now() - t0) / 1000;
   const cpu1 = await cpuTimes();
   const task1 = await taskSecs();
-  const p = await tab.eval<{ raf: number; glFrames: number; timers: number }>('(() => { const p = window.__scape.idle; return { raf: p.raf, glFrames: p.glFrames, timers: p.timers }; })()');
+  const fetches = tab.requests.length;
+  tab.stopRequests();
+  const p = await tab.eval<{ raf: number; glFrames: number; timers: number; commits: number; renders: number }>('(() => { const p = window.__scape.idle, c = window.__commits ?? {}; return { raf: p.raf, glFrames: p.glFrames, timers: p.timers, commits: c.commits ?? -1, renders: c.renders ?? -1 }; })()');
   const pct = (a: number, b: number) => +((100 * (b - a)) / dt).toFixed(1);
-  const r: Row = { label: label(c), renderer: pct(0, rendererDelta(cpu0.renderer, cpu1.renderer)), gpu: pct(cpu0.gpu, cpu1.gpu), task: pct(task0, task1), ...p, pass: false };
-  const live = !c.scene.t && c.input !== Input.Scrub;
-  r.pass = r.renderer <= CPU_MAX && r.gpu <= CPU_MAX && r.glFrames <= (live ? LIVE_FRAMES_MAX : 0);
+  const r: Row = { label: label(c), renderer: pct(0, rendererDelta(cpu0.renderer, cpu1.renderer)), gpu: pct(cpu0.gpu, cpu1.gpu), task: pct(task0, task1), ...p, fetches, top: await tab.eval('Object.entries(window.__commits?.names ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8)'), pass: false };
+  if (c.hidden) await tab.eval(HIDE(false));
+  const live = !c.scene.t && c.input !== Input.Scrub && !c.hidden;
+  // Hidden, nothing may run at all: no frames, timers or fetches.
+  const quiet = !c.hidden || (r.raf === 0 && r.timers === 0 && r.fetches === 0);
+  r.pass = r.renderer <= CPU_MAX && r.gpu <= CPU_MAX && r.glFrames <= (live ? LIVE_FRAMES_MAX : 0) && quiet;
   return r;
 }
 
@@ -150,7 +192,7 @@ for (const c of cases.filter((k) => label(k).includes(only))) {
 await tab.send('Emulation.clearDeviceMetricsOverride');
 tab.close();
 
-console.log(`| case (${SECS} s idle) | renderer % | GPU % | TaskDuration % | rAF | GL frames | timers | result |`);
-console.log('|---|---|---|---|---|---|---|---|');
-for (const r of rows) console.log(`| ${r.label} | ${r.renderer} | ${r.gpu} | ${r.task} | ${r.raf} | ${r.glFrames} | ${r.timers} | ${r.pass ? 'PASS' : 'FAIL'} |`);
+console.log(`| case (${SECS} s idle) | renderer % | GPU % | TaskDuration % | rAF | GL frames | timers | React commits | renders | fetches | result |`);
+console.log('|---|---|---|---|---|---|---|---|---|---|---|');
+for (const r of rows) console.log(`| ${r.label} | ${r.renderer} | ${r.gpu} | ${r.task} | ${r.raf} | ${r.glFrames} | ${r.timers} | ${r.commits} | ${r.renders} | ${r.fetches} | ${r.pass ? 'PASS' : 'FAIL'} |`);
 process.exit(rows.every((r) => r.pass) ? 0 : 1);
