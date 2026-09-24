@@ -3,7 +3,7 @@ import { bearingDeg, distanceM, intermediatePoint, type LngLat } from '@core/geo
 import { cubicStencilTiles, elevationAt, elevationAtCubic } from '@core/terrain/dem';
 import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
 import { BlockCache } from '@core/terrain/blockCache';
-import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type BlockId, type MeshView, type Selection, type SelectOptions } from '@core/terrain/mesh';
+import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
 import { planSweep, requiredTiles, sweepColumns, sweepHorizon } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { assembleView, sweepView, type ViewProfile } from '@core/terrain/view';
@@ -178,7 +178,6 @@ async function mesh(req: MeshRequest): Promise<null> {
   const early = req.view && req.view.hfovDeg < DETAIL_PREFETCH_HFOV_DEG ? planDetail() : null;
   const releasePlan = cache.retain(plan.tiles);
   let sel: Selection;
-  let selOpts: SelectOptions;
   try {
     const coarse = cache.loadAll(plan.tiles);
     // Queued behind the coarse tiles, and unretained: the selection retains them only if it wants them.
@@ -192,7 +191,7 @@ async function mesh(req: MeshRequest): Promise<null> {
       heightBoundM: buildHeightBound(req.pin, cache, plan.zoom, metersPerPixel(req.pin.lat, plan.zoom, TERRAIN_TILE_SIZE), rootLevel),
       eyeM
     };
-    sel = selectBlocks((selOpts = opts));
+    sel = selectBlocks(opts);
     // The detail tiles cost a load and their mips, so only where even the tightest bound could buy a finer frame.
     const detail = sel.detailMayPay ? (early ?? planDetail()) : null;
     if (detail) {
@@ -200,7 +199,7 @@ async function mesh(req: MeshRequest): Promise<null> {
       try {
         await cache.loadAll(detail.tiles);
         if (latest.Mesh !== req.id) return null;
-        sel = selectBlocks((selOpts = { ...opts, detailBoundM: buildDetailBound(req.pin, cache, detail.zoom, metersPerPixel(req.pin.lat, detail.zoom, TERRAIN_TILE_SIZE)) }));
+        sel = selectBlocks({ ...opts, detailBoundM: buildDetailBound(req.pin, cache, detail.zoom, metersPerPixel(req.pin.lat, detail.zoom, TERRAIN_TILE_SIZE)) });
       } finally {
         releaseDetail();
       }
@@ -208,7 +207,16 @@ async function mesh(req: MeshRequest): Promise<null> {
   } finally {
     releasePlan();
   }
-  const plans = levelPlans(req.pin, sel);
+  const plans = sel.levels.map(({ level, blocks, skirtM }) => {
+    const zoom = zoomForResolution(req.pin.lat, levelCellM(level), demZoom(8), TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);
+    // Only the selected blocks: a level-1 leaf 10 km out would drag in thousands of the finest tiles otherwise.
+    const tiles = new Map<string, TileCoord>();
+    // The halo covers the cubic stencil's two posts past the block, or its edge would fall back to bilinear.
+    const haloM = levelCellM(level) + 2 * metersPerPixel(req.pin.lat, zoom, TERRAIN_TILE_SIZE);
+    const blockTiles = blocks.map((b) => tilesInBounds(blockUnitBounds(req.pin, b, haloM), zoom));
+    for (const ts of blockTiles) for (const t of ts) tiles.set(tileKey(t.z, t.x, t.y), t);
+    return { level, blocks, skirtM, zoom, tiles, blockTiles };
+  });
   // Warms every level while the first one builds. Unretained and unawaited on purpose: the fetch queue is
   // FIFO so the finest level stays first, and each level still awaits its own retained load, so a tile
   // evicted after the prefetch is re-fetched rather than read as sea level.
@@ -223,11 +231,21 @@ async function mesh(req: MeshRequest): Promise<null> {
       // oxlint-disable-next-line no-await-in-loop -- a level is posted before the next one is fetched
       await cache.loadAll(want);
       if (latest.Mesh !== req.id) return null;
+      // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
+      const sample = (lng: number, lat: number) => elevationAtCubic(cache, lng, lat, zoom);
       let reused = 0;
       const parts = blocks.map((b, i) => {
-        const hit = meshBlocks.get(blockKey(level, b, zoom, skirtM[i]));
-        if (hit) reused++;
-        return hit ?? cutBlock(req.pin, eyeM, level, b, zoom, skirtM[i], blockTiles[i]);
+        const drop = skirtM[i];
+        const key = `${level}/${b.ix}/${b.iy}/${zoom}/${drop}`;
+        const hit = meshBlocks.get(key);
+        if (hit) {
+          reused++;
+          return hit;
+        }
+        const part = buildBlock(req.pin, eyeM, level, b, sample, drop);
+        // A block over an absent tile holds sea level or a bilinear edge; built again once the tile lands.
+        if (part.missing === 0 && blockTiles[i].every((t) => cache.get(t.z, t.x, t.y))) meshBlocks.set(key, part);
+        return part;
       });
       const out = joinBlocks(level, parts);
       if (latest.Mesh !== req.id) return null;
@@ -237,65 +255,8 @@ async function mesh(req: MeshRequest): Promise<null> {
       release();
     }
   }
-  if (req.view) await warmAround(req, req.view, selOpts, eyeM);
   return null;
 }
-
-type LevelPlan = ReturnType<typeof levelPlans>[number];
-
-function levelPlans(pin: LngLat, sel: Selection) {
-  return sel.levels.map(({ level, blocks, skirtM }) => {
-    const zoom = zoomForResolution(pin.lat, levelCellM(level), demZoom(8), TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE);
-    // Only the selected blocks: a level-1 leaf 10 km out would drag in thousands of the finest tiles otherwise.
-    const tiles = new Map<string, TileCoord>();
-    // The halo covers the cubic stencil's two posts past the block, or its edge would fall back to bilinear.
-    const haloM = levelCellM(level) + 2 * metersPerPixel(pin.lat, zoom, TERRAIN_TILE_SIZE);
-    const blockTiles = blocks.map((b) => tilesInBounds(blockUnitBounds(pin, b, haloM), zoom));
-    for (const ts of blockTiles) for (const t of ts) tiles.set(tileKey(t.z, t.x, t.y), t);
-    return { level, blocks, skirtM, zoom, tiles, blockTiles };
-  });
-}
-
-const blockKey = (level: number, b: BlockId, zoom: number, drop: number) => `${level}/${b.ix}/${b.iy}/${zoom}/${drop}`;
-
-/** Builds a block, and caches it when every tile under it was in. */
-function cutBlock(pin: LngLat, eyeM: number, level: number, b: BlockId, zoom: number, drop: number, tiles: readonly TileCoord[]) {
-  // C1 heights: a bilinear surface creases at every DEM post, and the shadow terminator shows it.
-  const part = buildBlock(pin, eyeM, level, b, (lng, lat) => elevationAtCubic(cache, lng, lat, zoom), drop);
-  // A block over an absent tile holds sea level or a bilinear edge; built again once the tile lands.
-  if (part.missing === 0 && tiles.every((t) => cache.get(t.z, t.x, t.y))) meshBlocks.set(blockKey(level, b, zoom, drop), part);
-  return part;
-}
-
-/** Aim offsets, in frame widths, whose blocks are cut while idle so a pan finds them cached. */
-const WARM_YAW = [0.5, -0.5, 1, -1] as const;
-/** Warming waits this long for the aim to rest; mid-drag it would outbid the drag's own blocks. */
-const WARM_REST_MS = 300;
-
-/** Fills the block cache for the aims a drag reaches next; any newer request stops it between blocks. */
-async function warmAround(req: MeshRequest, frame: MeshView, opts: SelectOptions, eyeM: number): Promise<void> {
-  const stale = () => latest.Mesh !== req.id;
-  await new Promise<void>((r) => setTimeout(r, WARM_REST_MS));
-  if (stale()) return;
-  for (const f of WARM_YAW) {
-    // oxlint-disable-next-line no-await-in-loop -- one offset at a time, yielding to any new request
-    await idle();
-    if (stale()) return;
-    const plans: LevelPlan[] = levelPlans(req.pin, selectBlocks({ ...opts, view: { ...frame, azimuthDeg: frame.azimuthDeg + f * frame.hfovDeg } }));
-    for (const { level, blocks, skirtM, zoom, blockTiles } of plans)
-      for (let i = 0; i < blocks.length; i++) {
-        if (meshBlocks.has(blockKey(level, blocks[i], zoom, skirtM[i]))) continue;
-        // Only over tiles already here: fetching for a guess would queue ahead of the next real request.
-        if (!blockTiles[i].every((t) => cache.get(t.z, t.x, t.y))) continue;
-        // oxlint-disable-next-line no-await-in-loop -- yields so a new request is taken within one block
-        await idle();
-        if (stale()) return;
-        cutBlock(req.pin, eyeM, level, blocks[i], zoom, skirtM[i], blockTiles[i]);
-      }
-  }
-}
-
-const idle = () => new Promise<void>((r) => setTimeout(r, 0));
 
 function dispatch(req: TerrainRequest): Promise<TerrainResponse | null> {
   switch (req.kind) {

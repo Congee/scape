@@ -24,7 +24,6 @@ const SCENES: Record<Scene, { camera: string; target: string; day: string; low: 
 };
 const FOCALS = QUICK ? [24, 2400] : [24, 200, 600, 2400];
 const DRAG_MS = 5000;
-const WARM_QUIET_MS = 3000;
 
 const rows: string[] = [];
 let failed = 0;
@@ -287,8 +286,6 @@ try {
         check(`${s} ${f}mm settles`, false, 'terrain never settled');
         continue;
       }
-      // Idle warming must not spill into the profiled drag.
-      await Bun.sleep(WARM_QUIET_MS);
       const frame = await tab.eval<{ x: number; y: number; w: number; h: number }>('window.__td.frame()');
       const c0 = await tab.eval<{ meshReq: number; meshRes: number; viewReq: number; blocks: number; reused: number; cacheMB: number }>('(({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }) => ({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }))(window.__td)');
       const a0 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.prism.cam)');
