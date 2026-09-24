@@ -440,7 +440,26 @@ function inSuppressRing(s: SuppressRing, lng: number, lat: number): boolean {
 /** Drops each row whose centroid sits inside a model's footprint; a podium part outside it survives. */
 export function suppressRows<T extends RowBatch>(batch: T, rings: readonly SuppressRing[]): T {
   if (rings.length === 0) return batch;
-  return pickRows(batch, (i) => !rings.some((s) => inSuppressRing(s, batch.cLng[i], batch.cLat[i])));
+  const hit = ringLookup(rings);
+  return pickRows(batch, (i) => !hit(batch.cLng[i], batch.cLat[i]));
+}
+
+/** Rings per grid cell, so thousands of LoD2 hulls cost a few tests per centroid. */
+const RING_GRID_DEG = 0.002;
+
+function ringLookup(rings: readonly SuppressRing[]): (lng: number, lat: number) => boolean {
+  if (rings.length < 16) return (lng, lat) => rings.some((s) => inSuppressRing(s, lng, lat));
+  const cell = (v: number) => Math.floor(v / RING_GRID_DEG);
+  const grid = new Map<string, SuppressRing[]>();
+  for (const s of rings)
+    for (let x = cell(s.lng0); x <= cell(s.lng1); x++)
+      for (let y = cell(s.lat0); y <= cell(s.lat1); y++) {
+        const k = `${x},${y}`;
+        const list = grid.get(k);
+        if (list) list.push(s);
+        else grid.set(k, [s]);
+      }
+  return (lng, lat) => grid.get(`${cell(lng)},${cell(lat)}`)?.some((s) => inSuppressRing(s, lng, lat)) ?? false;
 }
 
 /** Every row of the buildings hit at `p`, parts included; null when `p` is on no footprint. */
@@ -454,9 +473,10 @@ export function groupRowsAt<T extends RowBatch & { group: Int32Array }>(batch: T
 /** Feature ids of the rows `suppressRows` would drop. */
 export function suppressedIds(batch: RowBatch & { featureId: (string | null)[] }, rings: readonly SuppressRing[]): string[] {
   const out: string[] = [];
+  const hit = ringLookup(rings);
   for (let i = 0; i < batch.count; i++) {
     const id = batch.featureId[i];
-    if (id !== null && rings.some((s) => inSuppressRing(s, batch.cLng[i], batch.cLat[i]))) out.push(id);
+    if (id !== null && hit(batch.cLng[i], batch.cLat[i])) out.push(id);
   }
   return out;
 }

@@ -38,6 +38,14 @@ describe('suppressRows', () => {
     const far = suppressRing([ll(900, 900), ll(950, 900), ll(950, 950)]);
     expect(suppressRows(rows, [far])).toBe(rows);
   });
+
+  it('gives the same answer through the grid once there are many rings', () => {
+    const many = [tower, ...Array.from({ length: 40 }, (_, i) => suppressRing([ll(1000 + i * 60, 0), ll(1040 + i * 60, 0), ll(1040 + i * 60, 40)]))];
+    const out = suppressRows(rows, many);
+    expect(out.count).toBe(1);
+    expect(out.heightM[0]).toBe(60);
+    expect(suppressedIds({ ...rows, featureId: ['a', 'b', 'c', 'd'] }, many)).toEqual(['a', 'b', 'c']);
+  });
 });
 
 describe('groupRowsAt', () => {
