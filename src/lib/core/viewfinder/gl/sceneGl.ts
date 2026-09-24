@@ -197,6 +197,14 @@ vec3 shadeShadow(vec3 c, float gain) {
   return c * vec3(1.0 - 0.55 * t, 1.0 - 0.5 * t, 1.0 - 0.36 * t);
 }
 
+/** Roughly how much of the sun's diameter the moon covers, 0..1. */
+float sunCover() {
+  if (uSun.w <= 0.0) return 0.0;
+  float sep = acos(clamp(dot(normalize(uSun.xyz), normalize(uMoon.xyz)), -1.0, 1.0));
+  float rs = atan(uSun.w);
+  return clamp((rs + atan(uMoon.w) - sep) / (2.0 * rs), 0.0, 1.0);
+}
+
 /** The moon at a pixel of its disc, lit as a Lommel–Seeliger sphere. */
 vec3 moonPixel(vec3 v, float sinSemi, vec3 sky) {
   vec3 d = normalize(uMoon.xyz);
@@ -213,8 +221,8 @@ vec3 moonPixel(vec3 v, float sinSemi, vec3 sky) {
   float mu0 = dot(n, uMoonSun);
   float mu = max(dot(n, -d), 0.0);
   float ls = mu0 > 0.0 ? clamp(2.0 * mu0 / (mu0 + mu + 1e-4), 0.0, 1.25) : 0.0;
-  // The unlit side hides the stars but not the air in front of it.
-  vec3 dark = sky + albedo * EARTHSHINE_RGB * uMoonShine;
+  // The unlit side hides the stars but not the air in front of it, which an eclipse darkens.
+  vec3 dark = sky * (1.0 - sunCover()) + albedo * EARTHSHINE_RGB * uMoonShine;
   return mix(dark, MOON_LIT_RGB * albedo * ls, sstep(-0.01, 0.03, mu0));
 }
 
@@ -271,7 +279,8 @@ void main() {
   if (uMoon.w > 0.0) {
     vec2 o = discOffset(v, uMoon.xyz) / uMoon.w;
     float rr = dot(o, o);
-    if (rr <= 1.0) c = mix(c, moonPixel(v, uMoon.w / sqrt(1.0 + uMoon.w * uMoon.w), skyAt(alt)), ghost);
+    // Clamped first: the albedo map lifts the disc past 255, which would defeat the ghost.
+    if (rr <= 1.0) c = mix(c, min(moonPixel(v, uMoon.w / sqrt(1.0 + uMoon.w * uMoon.w), skyAt(alt)), 255.0), ghost);
   }
   oColor = vec4(c / 255.0, 1.0);
 }
