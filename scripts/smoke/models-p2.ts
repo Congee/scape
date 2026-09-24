@@ -274,6 +274,27 @@ const healed = await js<{ was: number; now: number; ms: number } | null>(`
   return { was: m.groundM, now: g(), ms: Math.round(performance.now() - t0) };
 `);
 check('a NaN ground heals on load', !!healed && healed.now === healed.was, healed ? `${healed.was.toFixed(2)} → NaN → ${healed.now.toFixed(2)} m in ${healed.ms} ms` : 'no drawn model');
+// A burst of three 100 m east moves re-reads the ground once it settles, then the move back restores it.
+const shifted = await js<{ was: number; now: number; want: number | null; back: number; ms: number } | null>(`
+  const id = ${JSON.stringify(made?.id ?? '')}, get = () => S.models.getState().models.find((x) => x.id === id);
+  const m = get();
+  if (!m) return null;
+  const was = m.groundM, home = m.anchor;
+  for (let i = 0; i < 3; i++) { const a = get().anchor, to = geo.destination(a, 90, 100); await S.models.getState().update(id, { anchor: { ...a, lat: to.lat, lng: to.lng } }); }
+  const t0 = performance.now();
+  while (get().groundM === was && performance.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 100));
+  const ms = Math.round(performance.now() - t0), now = get().groundM;
+  const want = await buildings.groundUnder(get().footprint.map(([lng, lat]) => ({ lng, lat })));
+  await S.models.getState().update(id, { anchor: home });
+  const t1 = performance.now();
+  while (get().groundM !== was && performance.now() - t1 < 20000) await new Promise((r) => setTimeout(r, 100));
+  return { was, now, want, back: get().groundM, ms };
+`);
+check(
+  'a 300 m move re-reads the ground under the new footprint',
+  !!shifted && shifted.want !== null && Math.abs(shifted.now - shifted.was) > 0.5 && Math.abs(shifted.now - shifted.want) < 1e-6 && shifted.back === shifted.was,
+  shifted ? `${shifted.was.toFixed(2)} m → ${shifted.now.toFixed(2)} m in ${shifted.ms} ms (lowest ground there ${shifted.want?.toFixed(2) ?? 'unknown'} m); back home ${shifted.back.toFixed(2)} m` : 'no drawn model'
+);
 check('phone editor: compact pad, fields not truncated', phoneClipped.length === 0, phoneClipped.length ? phoneClipped.join(', ') : 'nudge pad in the sheet, every input fits');
 
 // The viewfinder outline follows a 1° heading nudge from the pad.
