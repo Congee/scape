@@ -52,11 +52,9 @@ export function firstLastLight(obs: Observer, curve: DayCurve, horizon: HorizonP
     }
   }
   if (since !== null) litMs += endMs - since;
-  const rises = events.filter((e) => e.kind === EventKind.TerrainRise);
-  const sets = events.filter((e) => e.kind === EventKind.TerrainSet);
   return {
-    first: rises[0]?.time ?? null,
-    last: sets.at(-1)?.time ?? null,
+    first: events.find((e) => e.kind === EventKind.TerrainRise)?.time ?? null,
+    last: events.findLast((e) => e.kind === EventKind.TerrainSet)?.time ?? null,
     litMs,
     litNow: litAt(nowMs)
   };

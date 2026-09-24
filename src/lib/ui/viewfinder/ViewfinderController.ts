@@ -5,6 +5,8 @@ import type { PreparedConstellations } from '@core/astro/constellations';
 import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
 import { apply, enuToEqj, eqjToEnu, horizontalOf, poleEnu, type Mat3 } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
+import { lightAt, type Light } from '@core/astro/lightSource';
+import { moonView } from '@core/astro/moonSim';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
 import { arcWindow, rainbowArc, rainbowRadiusDeg, rainbowTop, WATER_N } from '@core/astro/rainbow';
 import { distance, height } from '@core/format';
@@ -91,6 +93,8 @@ interface Scene {
   eyeAboveGroundM: number;
   sunAlt: number;
   sunAz: number;
+  /** The body casting shadows, from the light-source setting. */
+  light: Light | null;
   time: Date;
   obs: Observer;
   /** How dark the sky is for stars, 0 by day to 1 in astronomical night. */
@@ -259,7 +263,7 @@ export class ViewfinderController {
       if (profile) for (let i = 0; i < profile.nAz; i++) max = Math.max(max, profile.skylineDeg[i]);
       this.skylineMax = { view: profile, max };
     }
-    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
+    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, light: lightAt(s.lightSource, time, obs), time, obs, night, moonFactor, maxSkyline: this.skylineMax.max };
   }
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
@@ -522,7 +526,7 @@ export class ViewfinderController {
     const models = this.modelSurfaces(sc);
     if (tiles.size === 0 && models.length === 0) return null;
     this.prismStats = { buildings: 0, tiles: tiles.size };
-    const lightAzDeg = sc.sunAlt > 0 ? sc.sunAz : sc.aim.azimuthDeg + 135;
+    const lightAzDeg = sc.light?.azimuthDeg ?? sc.aim.azimuthDeg + 135;
     const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
     return { tiles: [...tiles.values()], models, shading: { lightAzDeg, hazeRgb, night: sc.night, rangeM } };
   }
@@ -581,10 +585,11 @@ export class ViewfinderController {
         milkyWay: tex,
         eqj: tex ? enuToEqj(sc.time, sc.obs) : null,
         mwGain: 0.8 * sc.night * (1 - 0.7 * sc.moonFactor),
-        sunAzDeg: sc.sunAz,
-        sunAltDeg: sc.sunAlt,
-        // The last degree of sun casts a shadow over everything, so fade it out rather than pop at sunset.
-        shadowGain: shadowOn ? smooth(0, 1.5, sc.sunAlt) : 0,
+        lightAzDeg: sc.light?.azimuthDeg ?? sc.sunAz,
+        lightAltDeg: sc.light?.altitudeDeg ?? -90,
+        // The last degree of light casts a shadow over everything, so fade it out rather than pop at sunset.
+        shadowGain: shadowOn && sc.light ? smooth(0, 1.5, sc.light.altitudeDeg) : 0,
+        moonlight: sc.light?.body === SkyBody.Moon ? moonInfo(sc.time).illumination : 0,
         sunDisc: comp.showSun ? this.bodyDisc(sc, SkyBody.Sun) : null,
         moonDisc: comp.showMoon ? this.bodyDisc(sc, SkyBody.Moon) : null
       },
@@ -618,8 +623,10 @@ export class ViewfinderController {
     const d = cameraBasis({ azimuthDeg: pos.azimuth, elevationDeg: pos.altitude }).forward;
     const semiDeg = semidiameterDeg(body, sc.time, sc.obs);
     if (body !== SkyBody.Moon) return { dir: [d.x, d.y, d.z], semiDeg, moon: null };
-    const info = moonInfo(sc.time);
-    return { dir: [d.x, d.y, d.z], semiDeg, moon: moonTerminator(info.illumination, info.waxing) };
+    const mv = moonView(sc.time, sc.obs);
+    const map = skyStore.getState().moonMap;
+    if (!map) skyStore.getState().ensure();
+    return { dir: [d.x, d.y, d.z], semiDeg, moon: { enuToBody: mv.enuToBody, sunDir: mv.sunFromMoonEnu, earthshine: mv.earthshine ? sc.night : 0, map } };
   }
 
   private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {
@@ -1092,8 +1099,8 @@ export class ViewfinderController {
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    // Flat shading follows the sun by day and a fixed key light from the camera's left at night.
-    const sunAz = sc.sunAlt > -6 ? sc.sunAz : null;
+    // Flat shading follows the picked light (or the sun at dusk), else a fixed key light from the camera's left.
+    const sunAz = sc.light?.azimuthDeg ?? (sc.sunAlt > -6 ? sc.sunAz : null);
     const markers: SavedMarker[] = markersStore.getState().markers.filter((m) => m.showInViewfinder);
     for (const m of markers) {
       const d = distanceM(w.pin, m);

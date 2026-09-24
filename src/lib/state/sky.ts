@@ -13,6 +13,8 @@ export interface SkyState {
   stars: StarCatalog | null;
   constellations: PreparedConstellations | null;
   milkyWay: SkyTexture | null;
+  /** Selenographic equirectangular map: longitude 0 at the centre, east to the right, north up. */
+  moonMap: SkyTexture | null;
   loading: boolean;
   error: string | null;
   /** Starts loading the bundled sky data once; cheap to call every frame. */
@@ -28,8 +30,8 @@ async function fetchOk(path: string): Promise<Response> {
   return res;
 }
 
-async function loadTexture(): Promise<SkyTexture> {
-  const bmp = await createImageBitmap(await (await fetchOk('milkyway.jpg')).blob());
+async function loadTexture(path: string): Promise<SkyTexture> {
+  const bmp = await createImageBitmap(await (await fetchOk(path)).blob());
   try {
     const canvas = new OffscreenCanvas(bmp.width, bmp.height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
@@ -44,6 +46,7 @@ export const skyStore = create<SkyState>()((set) => ({
   stars: null,
   constellations: null,
   milkyWay: null,
+  moonMap: null,
   loading: false,
   error: null,
   ensure: () => {
@@ -58,10 +61,13 @@ export const skyStore = create<SkyState>()((set) => ({
       .then((r) => r.json() as Promise<ConstellationSet>)
       .then((c) => set({ constellations: prepareConstellations(c) }))
       .catch(fail);
-    const mw = loadTexture()
+    const mw = loadTexture('milkyway.jpg')
       .then((milkyWay) => set({ milkyWay }))
       .catch(fail);
-    void Promise.allSettled([stars, lines, mw]).then(() => set({ loading: false }));
+    const moon = loadTexture('moon.jpg')
+      .then((moonMap) => set({ moonMap }))
+      .catch(fail);
+    void Promise.allSettled([stars, lines, mw, moon]).then(() => set({ loading: false }));
   }
 }));
 

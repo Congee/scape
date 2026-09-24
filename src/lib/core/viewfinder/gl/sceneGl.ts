@@ -27,8 +27,18 @@ export interface BodyDisc {
   /** Unit direction in the eye-relative ENU frame. */
   dir: readonly [number, number, number];
   semiDeg: number;
-  /** Lit-fraction geometry from `moonTerminator`; null for the sun, which also glows. */
-  moon: { rx: number; gibbous: boolean; litSide: number } | null;
+  /** The moon as a lit sphere; null for the sun, which also glows. */
+  moon: MoonShading | null;
+}
+
+export interface MoonShading {
+  /** ENU → selenographic body frame, row major. */
+  enuToBody: Float64Array;
+  /** Unit vector from the moon to the sun, ENU. */
+  sunDir: readonly [number, number, number];
+  /** Weight of the Earth-lit dark side, 0..1. */
+  earthshine: number;
+  map: SceneGlTexture | null;
 }
 
 export interface SceneGlInput {
@@ -49,10 +59,12 @@ export interface SceneGlInput {
   /** ENU → equatorial J2000, row major; null when the Milky Way is not drawn. */
   eqj: Float64Array | null;
   mwGain: number;
-  /** Where the sun is; shadows are cast only while it is up. */
-  sunAzDeg: number;
-  sunAltDeg: number;
+  /** Where the body casting the shadows is; they are cast only while it is up. */
+  lightAzDeg: number;
+  lightAltDeg: number;
   shadowGain: number;
+  /** Nonzero when that body is the moon: lit ground brightens instead of shade darkening. */
+  moonlight: number;
   sunDisc: BodyDisc | null;
   moonDisc: BodyDisc | null;
 }
@@ -103,7 +115,10 @@ const vec3 DUSK_GLOW = vec3(${SKY.duskGlow.join('.0, ')}.0);
 const vec3 SUN_RGB = vec3(255.0, 243.0, 196.0);
 const vec3 SUN_GLOW_RGB = vec3(255.0, 220.0, 120.0);
 const vec3 MOON_LIT_RGB = vec3(232.0, 238.0, 245.0);
-const vec3 MOON_DARK_RGB = vec3(43.0, 52.0, 66.0);
+const vec3 EARTHSHINE_RGB = vec3(34.0, 38.0, 46.0);
+const vec3 MOONLIGHT_RGB = vec3(3.0, 5.0, 12.0);
+/** Mean luminance of moon.jpg, so the map shifts the albedo around 1. */
+const float MOON_MEAN_ALBEDO = 0.586;
 
 uniform vec2 uOrigin;
 uniform vec2 uRes;
@@ -139,8 +154,15 @@ uniform float uShadowGain;
 /** xyz direction, w tangent of the semidiameter; w <= 0 means the body is not drawn. */
 uniform vec4 uSun;
 uniform vec4 uMoon;
-/** Moon terminator: lens half-width, +1 when the gibbous side is lit, and which limb is lit. */
-uniform vec3 uMoonTerm;
+uniform float uMoonlight;
+/** Rows of ENU → selenographic, the sun seen from the moon, and the earthshine weight. */
+uniform vec3 uMoonBody0;
+uniform vec3 uMoonBody1;
+uniform vec3 uMoonBody2;
+uniform vec3 uMoonSun;
+uniform float uMoonShine;
+uniform int uHasMoonMap;
+uniform sampler2D uMoonMap;
 
 ${SHADOW_GLSL}
 
@@ -175,6 +197,27 @@ vec3 shadeShadow(vec3 c, float gain) {
   return c * vec3(1.0 - 0.55 * t, 1.0 - 0.5 * t, 1.0 - 0.36 * t);
 }
 
+/** The moon at a pixel of its disc, lit as a Lommel–Seeliger sphere. */
+vec3 moonPixel(vec3 v, float sinSemi, vec3 sky) {
+  vec3 d = normalize(uMoon.xyz);
+  vec3 w = normalize(v);
+  vec3 q = (w - d * dot(w, d)) / sinSemi;
+  float qq = min(dot(q, q), 1.0);
+  vec3 n = q - sqrt(1.0 - qq) * d;
+  float albedo = 1.0;
+  if (uHasMoonMap == 1) {
+    vec3 b = vec3(dot(uMoonBody0, n), dot(uMoonBody1, n), dot(uMoonBody2, n));
+    vec2 uv = vec2(0.5 + atan(b.y, b.x) / (2.0 * PI), 0.5 - asin(clamp(b.z, -1.0, 1.0)) / PI);
+    albedo = dot(texture(uMoonMap, uv).rgb, vec3(0.3, 0.59, 0.11)) / MOON_MEAN_ALBEDO;
+  }
+  float mu0 = dot(n, uMoonSun);
+  float mu = max(dot(n, -d), 0.0);
+  float ls = mu0 > 0.0 ? clamp(2.0 * mu0 / (mu0 + mu + 1e-4), 0.0, 1.25) : 0.0;
+  // The unlit side hides the stars but not the air in front of it.
+  vec3 dark = sky + albedo * EARTHSHINE_RGB * uMoonShine;
+  return mix(dark, MOON_LIT_RGB * albedo * ls, sstep(-0.01, 0.03, mu0));
+}
+
 /** Offset of this pixel from a body's centre, in tangent units of the camera's own frame. */
 vec2 discOffset(vec3 v, vec3 b) {
   float dv = dot(v, uFwd);
@@ -198,9 +241,13 @@ void main() {
   if (gp.w > 0.5) {
     onSky = false;
     c = texelFetch(uGColor, bi, 0).rgb * 255.0;
-    vec4 gn = texelFetch(uGNormal, bi, 0);
-    vec3 n = normalize(gn.xyz * 2.0 - 1.0);
-    if (uShadowOn == 1) c = mix(c, shadeShadow(c, uShadowGain), sunShadow(gp.xyz, n, dot(gp.xyz, uFwd), gn.w < 0.75));
+    vec3 n = normalize(texelFetch(uGNormal, bi, 0).xyz * 2.0 - 1.0);
+    if (uShadowOn == 1) {
+      float sh = sunShadow(gp.xyz, n, dot(gp.xyz, uFwd));
+      // Night ground is too dark to shade, so moonlight shows as the lit side brightening.
+      if (uMoonlight > 0.0) c = mix(c, c * 1.8 + MOONLIGHT_RGB, uMoonlight * uShadowGain * (1.0 - sh));
+      else c = mix(c, shadeShadow(c, uShadowGain), sh);
+    }
   } else if (uHasTerrain == 0 && alt <= uFallbackDeg) {
     // Cold start: a flat ground plane until the clipmap arrives.
     onSky = false;
@@ -223,12 +270,7 @@ void main() {
   if (uMoon.w > 0.0) {
     vec2 o = discOffset(v, uMoon.xyz) / uMoon.w;
     float rr = dot(o, o);
-    if (rr <= 1.0) {
-      float wv = sqrt(max(0.0, 1.0 - o.y * o.y));
-      float edge = (uMoonTerm.y > 0.0 ? -uMoonTerm.x : uMoonTerm.x) * wv;
-      bool lit = uMoonTerm.z > 0.0 ? o.x > edge : -o.x > edge;
-      c = mix(c, lit ? MOON_LIT_RGB : MOON_DARK_RGB, ghost);
-    }
+    if (rr <= 1.0) c = mix(c, moonPixel(v, uMoon.w / sqrt(1.0 + uMoon.w * uMoon.w), skyAt(alt)), ghost);
   }
   oColor = vec4(c / 255.0, 1.0);
 }
@@ -239,12 +281,13 @@ const UNIFORMS = [
   'uDay', 'uDusk', 'uGroundNear', 'uGroundFar', 'uEyeAboveGroundM', 'uFallbackDeg', 'uHasTerrain',
   'uHasMw', 'uMw', 'uEqj0', 'uEqj1', 'uEqj2', 'uMwGain',
   'uGColor', 'uGPos', 'uGNormal',
-  'uShadowOn', 'uShadowGain', 'uSun', 'uMoon', 'uMoonTerm',
+  'uShadowOn', 'uShadowGain', 'uSun', 'uMoon', 'uMoonlight',
+  'uMoonBody0', 'uMoonBody1', 'uMoonBody2', 'uMoonSun', 'uMoonShine', 'uHasMoonMap', 'uMoonMap',
   ...SHADOW_UNIFORMS
 ];
 
-/** Shadows would be meaningless once the sun is this far under the horizon. */
-const SUN_MIN_ALT_DEG = -0.9;
+/** Shadows would be meaningless once the light is this far under the horizon. */
+const LIGHT_MIN_ALT_DEG = -0.9;
 
 export class SceneGl {
   private readonly gl: WebGL2RenderingContext;
@@ -258,6 +301,7 @@ export class SceneGl {
   private query: WebGLQuery | null = null;
   private lastGpuMs = -1;
   private mw: { key: SceneGlTexture; tex: WebGLTexture } | null = null;
+  private moonMap: { key: SceneGlTexture; tex: WebGLTexture } | null = null;
   private fbo: WebGLFramebuffer | null = null;
   private gColor: WebGLTexture | null = null;
   private gPos: WebGLTexture | null = null;
@@ -351,6 +395,7 @@ export class SceneGl {
     this.shadowGl.dispose();
     this.dropTargets();
     if (this.mw) gl.deleteTexture(this.mw.tex);
+    if (this.moonMap) gl.deleteTexture(this.moonMap.tex);
     gl.deleteTexture(this.dummy2d);
     gl.deleteProgram(this.prog);
   }
@@ -371,19 +416,19 @@ export class SceneGl {
     gl.clearBufferfv(gl.COLOR, 1, [0, 0, 0, 0]);
     gl.clearBufferfv(gl.COLOR, 2, [0, 0, 0, 0]);
     gl.clearBufferfv(gl.DEPTH, 0, [0]);
-    const lightAz = input.prism?.shading.lightAzDeg ?? input.sunAzDeg;
+    const lightAz = input.prism?.shading.lightAzDeg ?? input.lightAzDeg;
     const terrain = this.terrainGl.ready ? this.terrainGl.render(input.cam, input.basis, input.groundNear, input.groundFar, lightAz) : null;
     this.lastPrism = input.prism ? this.prismGl.render(input.cam, input.basis, input.prism.tiles, input.prism.shading, vw, vh, input.prism.models) : null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return terrain;
   }
 
-  private shadowPass(input: SceneGlInput): { cascades: Cascade[]; triangles: number; prismTriangles: number; modelTriangles: number; scene: SceneBounds | null } {
-    const none = { cascades: [], triangles: 0, prismTriangles: 0, modelTriangles: 0, scene: null };
-    if (input.sunAltDeg < SUN_MIN_ALT_DEG || input.shadowGain <= 0) return none;
+  private shadowPass(input: SceneGlInput): { cascades: Cascade[]; triangles: number; prismTriangles: number; scene: SceneBounds | null } {
+    const none = { cascades: [], triangles: 0, prismTriangles: 0, scene: null };
+    if (input.lightAltDeg < LIGHT_MIN_ALT_DEG || input.shadowGain <= 0) return none;
     if (!this.terrainGl.ready && !input.prism) return none;
     const gl = this.gl;
-    const light = lightBasis(input.sunAzDeg, input.sunAltDeg, input.basis.forward);
+    const light = lightBasis(input.lightAzDeg, input.lightAltDeg, input.basis.forward);
     // Towers reach hundreds of metres above the terrain band, so the prisms must widen the fit too.
     const terrainScene = this.terrainGl.ready ? this.terrainGl.bounds(input.cam, input.basis) : null;
     const prismScene = input.prism ? this.prismGl.bounds(input.cam, input.basis, input.prism.tiles, input.prism.models) : null;
@@ -440,6 +485,7 @@ export class SceneGl {
 
     gl.uniform1i(u.uShadowOn, cascades.length ? 1 : 0);
     gl.uniform1f(u.uShadowGain, input.shadowGain);
+    gl.uniform1f(u.uMoonlight, input.moonlight);
     if (cascades.length) {
       for (const [i, c] of cascades.entries()) {
         this.cascadeMats.set(c.matrix, i * 16);
@@ -448,7 +494,7 @@ export class SceneGl {
       gl.uniformMatrix4fv(u.uCascade, false, this.cascadeMats);
       gl.uniform4fv(u.uCascadeInfo, this.cascadeInfo);
       gl.uniform1i(u.uCascadeCount, cascades.length);
-      const s = cameraBasis({ azimuthDeg: input.sunAzDeg, elevationDeg: input.sunAltDeg }).forward;
+      const s = cameraBasis({ azimuthDeg: input.lightAzDeg, elevationDeg: input.lightAltDeg }).forward;
       gl.uniform3f(u.uSunDir, s.x, s.y, s.z);
     }
     this.shadowGl.bind(4, 5);
@@ -458,7 +504,17 @@ export class SceneGl {
     this.disc(u.uSun, input.sunDisc);
     this.disc(u.uMoon, input.moonDisc);
     const m = input.moonDisc?.moon;
-    gl.uniform3f(u.uMoonTerm, m?.rx ?? 0, m?.gibbous ? 1 : -1, m?.litSide ?? 1);
+    if (m) {
+      const e = m.enuToBody;
+      gl.uniform3f(u.uMoonBody0, e[0], e[1], e[2]);
+      gl.uniform3f(u.uMoonBody1, e[3], e[4], e[5]);
+      gl.uniform3f(u.uMoonBody2, e[6], e[7], e[8]);
+      gl.uniform3f(u.uMoonSun, m.sunDir[0], m.sunDir[1], m.sunDir[2]);
+      gl.uniform1f(u.uMoonShine, m.earthshine);
+    }
+    const moonMap = m?.map ? this.uploadMoonMap(m.map) : null;
+    gl.uniform1i(u.uHasMoonMap, moonMap ? 1 : 0);
+    this.bind(6, u.uMoonMap, moonMap ?? this.dummy2d);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.shadowGl.unbind(4, 5);
@@ -540,6 +596,22 @@ export class SceneGl {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.mw = { key: tex, tex: t };
+    return t;
+  }
+
+  private uploadMoonMap(tex: SceneGlTexture): WebGLTexture {
+    if (this.moonMap?.key === tex) return this.moonMap.tex;
+    const gl = this.gl;
+    if (this.moonMap) gl.deleteTexture(this.moonMap.tex);
+    const t = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, tex.width, tex.height);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, tex.width, tex.height, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(tex.rgba.buffer, tex.rgba.byteOffset, tex.rgba.length));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.moonMap = { key: tex, tex: t };
     return t;
   }
 }

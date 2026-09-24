@@ -44,23 +44,24 @@ const norm = (a: V3): V3 => {
 const wrap360 = (d: number) => ((d % 360) + 360) % 360;
 const wrap180 = (d: number) => wrap360(d + 180) - 180;
 
+const r1 = (t: number): [V3, V3, V3] => [
+  [1, 0, 0],
+  [0, Math.cos(t), Math.sin(t)],
+  [0, -Math.sin(t), Math.cos(t)]
+];
+const r3 = (t: number): [V3, V3, V3] => [
+  [Math.cos(t), Math.sin(t), 0],
+  [-Math.sin(t), Math.cos(t), 0],
+  [0, 0, 1]
+];
+const mul = (m: [V3, V3, V3], n: [V3, V3, V3]): [V3, V3, V3] =>
+  m.map((row) => [0, 1, 2].map((j) => row[0] * n[0][j] + row[1] * n[1][j] + row[2] * n[2][j]) as V3) as [V3, V3, V3];
+
 /** Rows of the IAU body-fixed rotation Rz(W)·Rx(90° − δ0)·Rz(90° + α0) from J2000. */
 function bodyRows(raDeg: number, decDeg: number, wDeg: number): [V3, V3, V3] {
   const a = (90 + raDeg) * D2R;
   const b = (90 - decDeg) * D2R;
   const w = wDeg * D2R;
-  const r1 = (t: number): [V3, V3, V3] => [
-    [1, 0, 0],
-    [0, Math.cos(t), Math.sin(t)],
-    [0, -Math.sin(t), Math.cos(t)]
-  ];
-  const r3 = (t: number): [V3, V3, V3] => [
-    [Math.cos(t), Math.sin(t), 0],
-    [-Math.sin(t), Math.cos(t), 0],
-    [0, 0, 1]
-  ];
-  const mul = (m: [V3, V3, V3], n: [V3, V3, V3]): [V3, V3, V3] =>
-    m.map((row) => [0, 1, 2].map((j) => row[0] * n[0][j] + row[1] * n[1][j] + row[2] * n[2][j]) as V3) as [V3, V3, V3];
   return mul(r3(w), mul(r1(b), r3(a)));
 }
 

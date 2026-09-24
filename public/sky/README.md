@@ -9,3 +9,6 @@
   (https://svs.gsfc.nasa.gov/4851), Milky Way layer without stars, equatorial J2000 equirectangular,
   downsampled from the 4k OpenEXR to 2048 × 1024. Public domain. In the image RA 0h is at the centre
   and RA increases to the left; north is up.
+- `moon.jpg`: NASA's Scientific Visualization Studio, "CGI Moon Kit" (https://svs.gsfc.nasa.gov/4720),
+  LROC colour map at 1024 × 512, unchanged. Public domain. Selenographic equirectangular: longitude 0
+  at the centre, east to the right, north up.

@@ -6,6 +6,13 @@ import { dayCurve } from './dayCurve';
 import { dayEvents, EventKind } from './dayEvents';
 import { firstLastLight, LightMode, pickLight } from './lightSource';
 
+const profile = (f: (az: number) => number): HorizonProfile => ({
+  azStepDeg: 1,
+  angleDeg: Float32Array.from({ length: 360 }, (_, i) => f(i)),
+  distM: new Float32Array(360),
+  rangeM: 1e5
+});
+
 describe('pickLight', () => {
   it('follows the sun by day and the moon once dusk is over', () => {
     expect(pickLight(LightMode.Auto, 10, 30)).toBe(SkyBody.Sun);
@@ -31,12 +38,6 @@ describe('firstLastLight', () => {
   const curve = dayCurve(obs, start, end);
   const events = dayEvents(obs, start, end);
   const find = (kind: EventKind) => events.find((e) => e.body === SkyBody.Sun && e.kind === kind)!.time;
-  const profile = (f: (az: number) => number): HorizonProfile => ({
-    azStepDeg: 1,
-    angleDeg: Float32Array.from({ length: 360 }, (_, i) => f(i)),
-    distM: new Float32Array(360),
-    rangeM: 1e5
-  });
 
   it('equals sunrise and sunset over a flat horizon', () => {
     const l = firstLastLight(obs, curve, profile(() => 0), end, find(EventKind.Rise) + 3_600_000);
