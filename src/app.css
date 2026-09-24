@@ -1508,6 +1508,26 @@ label.file input {
   padding: 6px;
 }
 
+.markers-switch {
+  margin: 4px 6px;
+}
+
+.parts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.parts th {
+  font-weight: 500;
+  text-align: left;
+  color: var(--fg-2);
+}
+
+.parts input[type='number'] {
+  width: 4.5em;
+}
+
 .tide-curve {
   display: block;
   width: 100%;

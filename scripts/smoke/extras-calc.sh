@@ -63,14 +63,14 @@ put() { # fill|select, aria-label, value
 open_tools() {
   wait_for '[...document.querySelectorAll(".tabs button")].some((b) => b.textContent === "Tools")'
   js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Tools")?.click(); "ok"' >/dev/null
-  wait_for 'document.querySelectorAll(".tools details").length === 5'
+  wait_for 'document.querySelectorAll(".tools details").length >= 5'
   # Open every group once; the panel remembers them across tab switches.
   js 'document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); "ok"' >/dev/null
   sleep 0.3
 }
 
 kv() { # value cell after a key label inside a group
-  wait_for "document.querySelectorAll('.tools details').length === 5" 8 || { echo "no panel ($(js 'location.href + " scape " + !!window.__scape + " mark " + !!window.__smokeMark'))"; return; }
+  wait_for "document.querySelectorAll('.tools details').length >= 5" 8 || { echo "no panel ($(js 'location.href + " scape " + !!window.__scape + " mark " + !!window.__smokeMark'))"; return; }
   js "(() => { const g = [...document.querySelectorAll('.tools details')][$1]; const k = [...g.querySelectorAll('.kv .k')].find((e) => e.textContent === '$2'); return k ? k.nextElementSibling.textContent : 'missing'; })()"
 }
 
