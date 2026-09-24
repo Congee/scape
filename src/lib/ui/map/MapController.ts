@@ -42,7 +42,7 @@ import { modelsStore } from '@state/models';
 import { currentBasemap, offlineStore } from '@state/offline';
 import { settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
-import { OrbitPivot, PanelTab, uiStore } from '@state/ui';
+import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { paintHeat } from './heat';
@@ -152,6 +152,9 @@ export class MapController {
   private dragging2 = false;
   private draggingFov = false;
   private shadowTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  private drawer: ModelDrawer;
+  /** Overture feature ids a visible model stands in for. */
+  private hiddenIds: string[] = [];
   /** Body behind the mask on screen; the smoke test reads it. */
   lightBody: SkyBody | null = null;
 
@@ -404,6 +407,33 @@ export class MapController {
       return;
     }
     if (!this.dragging2) this.pin2.setLngLat([p.lng, p.lat]);
+  }
+
+  /** Seeds a Drawn model from the Overture building under `p` and opens it in the editor. */
+  private modelBuildingAt(p: LngLat) {
+    const models = modelsStore.getState();
+    models.setPicking(false);
+    void buildingRowsAt(p).then(async (rows) => {
+      const m = rows ? seedModel(rows, `Model ${models.models.length + 1}`) : null;
+      if (!m) {
+        modelsStore.setState({ pickError: 'No Overture building there.' });
+        return;
+      }
+      await modelsStore.getState().save(m);
+      modelsStore.getState().select(m.id);
+    });
+    const ui = uiStore.getState();
+    ui.setPanelTab(PanelTab.Markers);
+    ui.setMarkersView(MarkersView.Models);
+  }
+
+  /** Hands the import sheet the centre of the Overture building under `p`. */
+  private importOnBuildingAt(p: LngLat) {
+    modelsStore.getState().setImportPick(false);
+    void buildingRowsAt(p).then((rows) => {
+      const c = rows && rowsCentre(rows);
+      modelsStore.setState(c ? { importAt: c } : { pickError: 'No Overture building there.' });
+    });
   }
 
   private orbitPivot(): LngLat {

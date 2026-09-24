@@ -4,6 +4,10 @@ import { persist } from 'zustand/middleware';
 export const PanelTab = { Timeline: 'Timeline', Geodetics: 'Geodetics', Frame: 'Frame', Night: 'Night', Tools: 'Tools', Find: 'Find', Markers: 'Markers', Layers: 'Layers', Offline: 'Offline' } as const;
 export type PanelTab = (typeof PanelTab)[keyof typeof PanelTab];
 
+/** Which list the Markers tab shows. */
+export const MarkersView = { Markers: 'Markers', Models: 'Models' } as const;
+export type MarkersView = (typeof MarkersView)[keyof typeof MarkersView];
+
 /** What the 3D map turns around; Off leaves the view to the user. */
 export const OrbitPivot = { Off: 'Off', Target: 'Target', Camera: 'Camera' } as const;
 export type OrbitPivot = (typeof OrbitPivot)[keyof typeof OrbitPivot];

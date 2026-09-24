@@ -561,6 +561,8 @@ export function ToolsPanel() {
         </div>
         <p className="muted hint">For a cloud overhead; clouds toward the sunset stay lit a little longer. Geometric, without refraction.</p>
       </Group>
+
+      <TidesGroup />
       <Group id="moon" summary={<MoonSummary />}>
         <MoonTools />
       </Group>

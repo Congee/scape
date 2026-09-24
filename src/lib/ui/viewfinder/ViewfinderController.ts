@@ -604,8 +604,9 @@ export class ViewfinderController {
     this.gpuMs = stats.gpuMs;
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
-      const shade = { on: stats.cascades > 0, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
+      const shade = { on: stats.cascades > 0, light: sc.light?.body ?? null, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
       if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
+      if (dev) dev.moonDisc = this.moonGeometry(sc);
     }
   }
 
@@ -627,6 +628,16 @@ export class ViewfinderController {
     const map = skyStore.getState().moonMap;
     if (!map) skyStore.getState().ensure();
     return { dir: [d.x, d.y, d.z], semiDeg, moon: { enuToBody: mv.enuToBody, sunDir: mv.sunFromMoonEnu, earthshine: mv.earthshine ? sc.night : 0, map } };
+  }
+
+  /** Where the moon disc lands, for the smoke checks. */
+  private moonGeometry(sc: Scene) {
+    const pos = position(SkyBody.Moon, sc.time, sc.obs);
+    const p = this.toPx(sc, pos.azimuth, pos.altitude);
+    const mv = moonView(sc.time, sc.obs);
+    const r = this.canvas.getBoundingClientRect();
+    const radiusPx = discRadiusMm(sc.cam, mv.semidiameterDeg) * sc.frame.pxPerMm;
+    return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
   }
 
   private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {

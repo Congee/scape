@@ -241,9 +241,10 @@ void main() {
   if (gp.w > 0.5) {
     onSky = false;
     c = texelFetch(uGColor, bi, 0).rgb * 255.0;
-    vec3 n = normalize(texelFetch(uGNormal, bi, 0).xyz * 2.0 - 1.0);
+    vec4 gn = texelFetch(uGNormal, bi, 0);
+    vec3 n = normalize(gn.xyz * 2.0 - 1.0);
     if (uShadowOn == 1) {
-      float sh = sunShadow(gp.xyz, n, dot(gp.xyz, uFwd));
+      float sh = sunShadow(gp.xyz, n, dot(gp.xyz, uFwd), gn.w < 0.75);
       // Night ground is too dark to shade, so moonlight shows as the lit side brightening.
       if (uMoonlight > 0.0) c = mix(c, c * 1.8 + MOONLIGHT_RGB, uMoonlight * uShadowGain * (1.0 - sh));
       else c = mix(c, shadeShadow(c, uShadowGain), sh);
@@ -423,8 +424,8 @@ export class SceneGl {
     return terrain;
   }
 
-  private shadowPass(input: SceneGlInput): { cascades: Cascade[]; triangles: number; prismTriangles: number; scene: SceneBounds | null } {
-    const none = { cascades: [], triangles: 0, prismTriangles: 0, scene: null };
+  private shadowPass(input: SceneGlInput): { cascades: Cascade[]; triangles: number; prismTriangles: number; modelTriangles: number; scene: SceneBounds | null } {
+    const none = { cascades: [], triangles: 0, prismTriangles: 0, modelTriangles: 0, scene: null };
     if (input.lightAltDeg < LIGHT_MIN_ALT_DEG || input.shadowGain <= 0) return none;
     if (!this.terrainGl.ready && !input.prism) return none;
     const gl = this.gl;
