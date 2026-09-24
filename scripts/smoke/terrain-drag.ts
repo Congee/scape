@@ -1,14 +1,15 @@
 // Terrain drag smoke: CPU per thread, mesh rebuilds and frame pacing over a scripted aim drag, holes mid-drag, and settled pictures against a baseline.
 /* oxlint-disable no-await-in-loop -- smoke steps run one after another */
-// Usage: bun scripts/smoke/terrain-drag.ts <cdp> <dev-port> <shot-dir> [baseline-dir|-] [gpu-lock-dir|-] [quick|drag|stills]
+// Usage: bun scripts/smoke/terrain-drag.ts <cdp> <dev-port> <shot-dir> [baseline-dir|-] [gpu-lock-dir|-] [quick|drag|stills] [scene[-mm],...]
 import { existsSync, mkdirSync, rmdirSync } from 'node:fs';
 import { Tab } from './cdp';
 
-const [cdp = '9408', port = '5408', shots = '/tmp/terrain-drag', baseline = '-', lock = '-', mode = ''] = process.argv.slice(2);
+const [cdp = '9408', port = '5408', shots = '/tmp/terrain-drag', baseline = '-', lock = '-', mode = '', only = ''] = process.argv.slice(2);
 const BASE = `http://localhost:${port}`;
 const QUICK = mode === 'quick';
 const DRAG = mode !== 'stills';
 const STILLS = mode !== 'drag';
+const ONLY = only ? only.split(',') : [];
 mkdirSync(shots, { recursive: true });
 
 const Scene = { Alps: 'alps', Flat: 'flat', Lod2: 'lod2' } as const;
@@ -23,6 +24,7 @@ const SCENES: Record<Scene, { camera: string; target: string; day: string; low: 
 };
 const FOCALS = QUICK ? [24, 2400] : [24, 200, 600, 2400];
 const DRAG_MS = 5000;
+const WARM_QUIET_MS = 3000;
 
 const rows: string[] = [];
 let failed = 0;
@@ -157,6 +159,8 @@ const HELPERS = `(() => {
 })()`;
 
 const go = async (url: string) => {
+  // The aim persists across loads; start every scene aimed at its target.
+  await tab.eval("try { localStorage.removeItem('scape.composition') } catch {}");
   await tab.navigate(url);
   await tab.until('!!(window.__scape && document.querySelector("canvas.vf"))', 30_000, 250);
   await tab.eval(HELPERS);
@@ -277,14 +281,17 @@ const release = await takeLock();
 try {
   for (const s of !DRAG ? [] : QUICK ? [Scene.Alps] : [Scene.Alps, Scene.Flat, Scene.Lod2]) {
     for (const f of FOCALS) {
+      if (ONLY.length && !ONLY.includes(s) && !ONLY.includes(`${s}-${f}`)) continue;
       await go(url(s, f, 'l', 'day'));
       if (!(await settle())) {
         check(`${s} ${f}mm settles`, false, 'terrain never settled');
         continue;
       }
+      // Idle warming must not spill into the profiled drag.
+      await Bun.sleep(WARM_QUIET_MS);
       const frame = await tab.eval<{ x: number; y: number; w: number; h: number }>('window.__td.frame()');
       const c0 = await tab.eval<{ meshReq: number; meshRes: number; viewReq: number; blocks: number; reused: number; cacheMB: number }>('(({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }) => ({ meshReq, meshRes, viewReq, blocks, reused, cacheMB }))(window.__td)');
-      const a0 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.composition.getState())');
+      const a0 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.prism.cam)');
       const mid = [1, 2, 3].map((i) => `${shots}/mid-${s}-${f}-${i}.png`);
       const p0 = await processCpu();
       const w0 = performance.now();
@@ -309,7 +316,7 @@ try {
       check(`${s} ${f}mm no hole frames mid-drag`, rec.holes === 0, `${rec.holes} of ${rec.draws} draws without terrain`);
       await settle();
       // Wall-clock pointer timing ends the drag a few degrees apart between runs; re-aim half a frame from the start in the drag's direction.
-      const a1 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.composition.getState())');
+      const a1 = await tab.eval<{ az: number; el: number }>('(({ azimuthDeg: az, elevationDeg: el }) => ({ az, el }))(window.__scape.prism.cam)');
       const turn = ((((a1.az - a0.az) % 360) + 540) % 360) - 180;
       const az = (((a0.az + Math.sign(turn) * Math.atan(18 / f) * (180 / Math.PI)) % 360) + 360) % 360;
       const el = a0.el;
