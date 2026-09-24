@@ -5,7 +5,7 @@ import { makeObserver } from '@core/astro/bodies';
 import { skySample, type SkySample } from '@core/astro/fastHorizon';
 import type { LngLat } from '@core/geo/geodesy';
 import { cellSizeM, gridAround, gridBounds, type HeatGrid } from '@core/geo/grid';
-import { elevationAt } from '@core/terrain/dem';
+import { elevationAt, withDemTiles } from '@core/terrain/dem';
 import { planSweep, requiredTiles } from '@core/terrain/horizon';
 import { lngLatToTilePixel, metersPerPixel, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { demCacheTiles, demZoom, DemCache, POINT_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
@@ -82,32 +82,35 @@ async function heat(req: HeatRequest): Promise<AlignResponse | null> {
 
   if (req.mode === HeatMode.Align || req.mode === HeatMode.Time) {
     const landmark = needLandmark(req);
-    await cache.loadAll(alignTiles(plan, landmark));
-    if (!fresh()) return null;
-    const capDeg = capFor(req.toleranceDeg);
-    const topM = landmarkTopM(cache, pointZoomFor(landmark, zoom), landmark);
-    const g = alignGrid(cache, zoom, grid, samples, req.timeMs, landmark, { eyeAboveGroundM: req.eyeAboveGroundM, offsetAzDeg: req.offsetAzDeg, offsetAltDeg: req.offsetAltDeg, capDeg }, topM);
-    return result({ values: g.sepDeg, dtMs: g.dtMs, capDeg, landmarkGroundM: g.landmarkGroundM });
+    return withDemTiles(cache, alignTiles(plan, landmark), () => {
+      if (!fresh()) return null;
+      const capDeg = capFor(req.toleranceDeg);
+      const topM = landmarkTopM(cache, pointZoomFor(landmark, zoom), landmark);
+      const g = alignGrid(cache, zoom, grid, samples, req.timeMs, landmark, { eyeAboveGroundM: req.eyeAboveGroundM, offsetAzDeg: req.offsetAzDeg, offsetAltDeg: req.offsetAltDeg, capDeg }, topM);
+      return result({ values: g.sepDeg, dtMs: g.dtMs, capDeg, landmarkGroundM: g.landmarkGroundM });
+    });
   }
 
   if (req.mode === HeatMode.Visible) {
     const ladder = rayLadder(req.centre.lat, VISIBLE_RANGE_M, { minZoom: MIN_ZOOM, maxZoom: Math.min(demZoom(12), zoom), tileSize: TERRAIN_TILE_SIZE, stepFraction: 0.02 });
     const tiles: TileCoord[] = [];
     for (const z of new Set(ladder.zoom)) tiles.push(...tilesInBounds(gridBounds(grid, ladderReachM(ladder, z)), z));
-    await cache.loadAll(tiles);
-    if (!fresh()) return null;
-    const values = bodyVisibleGrid(cache, grid, skySample(req.body, req.timeMs, makeObserver(req.centre, 0)), ladder, { eyeAboveGroundM: req.eyeAboveGroundM, minAltAboveTerrainDeg: req.minAltAboveTerrainDeg });
-    return result({ values, dtMs: null, capDeg: 1, landmarkGroundM: null });
+    return withDemTiles(cache, tiles, () => {
+      if (!fresh()) return null;
+      const values = bodyVisibleGrid(cache, grid, skySample(req.body, req.timeMs, makeObserver(req.centre, 0)), ladder, { eyeAboveGroundM: req.eyeAboveGroundM, minAltAboveTerrainDeg: req.minAltAboveTerrainDeg });
+      return result({ values, dtMs: null, capDeg: 1, landmarkGroundM: null });
+    });
   }
 
   // The sweep has to reach the grid corners.
   const sweep = planSweep(req.centre, req.rangeM * Math.SQRT2, { azStepDeg: 360 / (6 * req.cells), minDistM: 30, minZoom: MIN_ZOOM, maxZoom: zoom, tileSize: TERRAIN_TILE_SIZE, stepFraction: 0.01 });
-  await cache.loadAll([...requiredTiles(sweep), tileAt(req.centre, zoom)]);
-  if (!fresh()) return null;
-  const g = elevationAt(cache, req.centre.lng, req.centre.lat, zoom);
-  const eyeM = Math.max(Number.isNaN(g) ? 0 : g, 0) + req.eyeAboveGroundM;
-  const values = viewshedGrid(cache, sweep, grid, eyeM);
-  return result({ values, dtMs: null, capDeg: 1, landmarkGroundM: null });
+  return withDemTiles(cache, [...requiredTiles(sweep), tileAt(req.centre, zoom)], () => {
+    if (!fresh()) return null;
+    const g = elevationAt(cache, req.centre.lng, req.centre.lat, zoom);
+    const eyeM = Math.max(Number.isNaN(g) ? 0 : g, 0) + req.eyeAboveGroundM;
+    const values = viewshedGrid(cache, sweep, grid, eyeM);
+    return result({ values, dtMs: null, capDeg: 1, landmarkGroundM: null });
+  });
 }
 
 async function pick(req: PickRequest): Promise<AlignResponse | null> {
@@ -118,12 +121,14 @@ async function pick(req: PickRequest): Promise<AlignResponse | null> {
   const a = lngLatToTilePixel(req.point.lng, req.point.lat, 0, 1);
   const b = lngLatToTilePixel(landmark.lng, landmark.lat, 0, 1);
   const m = cellM / metersPerPixel(req.point.lat, 0, 1);
-  await cache.loadAll([...tilesInBounds({ x0: Math.min(a.px, b.px) - m, x1: Math.max(a.px, b.px) + m, y0: Math.min(a.py, b.py) - m, y1: Math.max(a.py, b.py) + m }, zoom), tileAt(req.point, POINT_ZOOM), tileAt(landmark, POINT_ZOOM)]);
-  if (latest.Pick !== req.id) return null;
-  const o = { eyeAboveGroundM: req.eyeAboveGroundM, offsetAzDeg: req.offsetAzDeg, offsetAltDeg: req.offsetAltDeg, capDeg: capFor(req.toleranceDeg) };
-  const topM = landmarkTopM(cache, pointZoomFor(landmark, zoom), landmark);
-  const p = alignAt(cache, zoom, req.point, samples, landmark, topM, o, cellM, pointZoomFor(req.point, zoom));
-  return { kind: AlignResponseKind.Pick, id: req.id, point: p && { ...p, lng: req.point.lng, lat: req.point.lat } };
+  const tiles = [...tilesInBounds({ x0: Math.min(a.px, b.px) - m, x1: Math.max(a.px, b.px) + m, y0: Math.min(a.py, b.py) - m, y1: Math.max(a.py, b.py) + m }, zoom), tileAt(req.point, POINT_ZOOM), tileAt(landmark, POINT_ZOOM)];
+  return withDemTiles(cache, tiles, () => {
+    if (latest.Pick !== req.id) return null;
+    const o = { eyeAboveGroundM: req.eyeAboveGroundM, offsetAzDeg: req.offsetAzDeg, offsetAltDeg: req.offsetAltDeg, capDeg: capFor(req.toleranceDeg) };
+    const topM = landmarkTopM(cache, pointZoomFor(landmark, zoom), landmark);
+    const p = alignAt(cache, zoom, req.point, samples, landmark, topM, o, cellM, pointZoomFor(req.point, zoom));
+    return { kind: AlignResponseKind.Pick, id: req.id, point: p && { ...p, lng: req.point.lng, lat: req.point.lat } };
+  });
 }
 
 scope.addEventListener('message', (e: MessageEvent<AlignRequest>) => {
