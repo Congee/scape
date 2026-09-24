@@ -241,7 +241,17 @@ function classifier(opts: SelectOptions, bound: SelectOptions['heightBoundM']): 
     // A null span is the eye inside the block, or a wedge that has grown to the whole circle.
     return !span || Math.abs(wrapPi(span.mid - viewMid)) <= span.half + viewHalf;
   };
+  // Every rung of the budget ladder walks the same blocks again.
+  const seen = new Map<number, BlockRole>();
   return (b) => {
+    const k = blockKey(b.level, b.ix, b.iy);
+    const hit = seen.get(k);
+    if (hit !== undefined) return hit;
+    const r = classify(b);
+    seen.set(k, r);
+    return r;
+  };
+  function classify(b: BlockId): BlockRole {
     const s = blockSideM(b.level);
     const e0 = b.ix * s;
     const n0 = b.iy * s;
@@ -251,7 +261,7 @@ function classifier(opts: SelectOptions, bound: SelectOptions['heightBoundM']): 
     const band = bnd ? elevationSpanRad(bnd.minM, bnd.maxM, eyeM, d, farthestDistM(e0, n0, e0 + s, n0 + s)) : null;
     if (within(e0, n0, s, band, elLo, elHi)) return BlockRole.Frame;
     return within(e0, n0, s, band, castLo, elHi) ? BlockRole.Caster : BlockRole.Coarse;
-  };
+  }
 }
 
 /** The fewest roles any bound inside `bound` could give: the block's terrain may sit at either end of it. */

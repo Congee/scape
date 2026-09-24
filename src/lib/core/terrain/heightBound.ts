@@ -178,7 +178,16 @@ interface TileMips {
   min: Float32Array[];
 }
 
+// Held per tile, not per view: a pan re-cuts the mesh over the same tiles.
+const mipsByTile = new WeakMap<DemTile, TileMips>();
+
 function tileMips(t: DemTile): TileMips {
+  let m = mipsByTile.get(t);
+  if (!m) mipsByTile.set(t, (m = buildTileMips(t)));
+  return m;
+}
+
+function buildTileMips(t: DemTile): TileMips {
   // The mesh clamps water to the datum, so the bound does too.
   const base = t.elev.map((v) => Math.max(v, 0));
   const max = [base];
