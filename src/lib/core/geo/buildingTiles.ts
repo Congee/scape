@@ -22,8 +22,8 @@ const BBOX_SAMPLE_STEP_DEG = 5;
 /** Ring vertices sampled for ground, on top of the centroid. */
 const GROUND_SAMPLES = 16;
 
-/** Decoded tile rows; `group` ties a building to its parts and never reaches the renderer. */
-export type DecodedBuildings = Omit<BuildingBatch, 'groundM'> & { group: Int32Array };
+/** Decoded tile rows; `group` ties a building to its parts, the ids tie a row to its feature across tiles, and none reach the renderer. */
+export type DecodedBuildings = Omit<BuildingBatch, 'groundM'> & { group: Int32Array; featureId: (string | null)[]; buildingId: (string | null)[] };
 
 function inSector(p: LngLat, pin: LngLat, azFromDeg: number, azSpanDeg: number, rangeM: number): boolean {
   if (distanceM(pin, p) > rangeM) return false;
@@ -176,6 +176,8 @@ function apexOf(props: Record<string, unknown>): number {
 
 interface Row {
   group: number;
+  featureId: string | null;
+  buildingId: string | null;
   heightM: number;
   minHeightM: number;
   roofShape: RoofShape;
@@ -184,7 +186,7 @@ interface Row {
   roofAcross: number;
 }
 
-function rowOf(props: Record<string, unknown>, group: number): Row {
+function rowOf(props: Record<string, unknown>, group: number, buildingId: string | null): Row {
   const heightM = apexOf(props);
   const minRaw = pick(props, ['min_height', 'render_min_height'], 0);
   const minHeightM = minRaw >= heightM ? 0 : minRaw;
@@ -192,6 +194,8 @@ function rowOf(props: Record<string, unknown>, group: number): Row {
   const shape = str(props.roof_shape);
   return {
     group,
+    featureId: str(props.id),
+    buildingId,
     heightM,
     minHeightM,
     roofShape: shape === null ? RoofShape.Flat : (ROOF_SHAPES[shape] ?? RoofShape.Other),
@@ -233,7 +237,8 @@ export function decodeBuildings(buildingLayer: VectorLayerLike | undefined, part
       const props = f.properties;
       if (props.hide_3d === true) continue;
       if (!isPart && props.has_parts === true) continue; // its parts carry the geometry
-      const row = rowOf(props, groupFor(str(isPart ? props.building_id : props.id)));
+      const buildingId = str(isPart ? props.building_id : props.id);
+      const row = rowOf(props, groupFor(buildingId), buildingId);
 
       for (const raw of f.loadGeometry()) {
         const ring = openRing(raw);
@@ -271,7 +276,9 @@ export function decodeBuildings(buildingLayer: VectorLayerLike | undefined, part
     roofAcross: Uint8Array.from(rows, (r) => r.roofAcross),
     cLng: Float64Array.from(cLng),
     cLat: Float64Array.from(cLat),
-    group: Int32Array.from(rows, (r) => r.group)
+    group: Int32Array.from(rows, (r) => r.group),
+    featureId: rows.map((r) => r.featureId),
+    buildingId: rows.map((r) => r.buildingId)
   };
 }
 
@@ -346,7 +353,7 @@ export function groundForRows(rows: GroundRows, elevationAt: (lng: number, lat: 
 }
 
 /** Per-row arrays every batch shape carries, plus the optional ones it may. */
-type RowBatch = Omit<BuildingBatch, 'groundM'> & { groundM?: Float32Array; group?: Int32Array };
+type RowBatch = Omit<BuildingBatch, 'groundM'> & { groundM?: Float32Array; group?: Int32Array; featureId?: (string | null)[]; buildingId?: (string | null)[] };
 
 /** A copy holding only the rows `keep` accepts; `batch` itself when it accepts all. */
 export function pickRows<T extends RowBatch>(batch: T, keep: (i: number) => boolean): T {
@@ -390,6 +397,8 @@ export function pickRows<T extends RowBatch>(batch: T, keep: (i: number) => bool
   };
   if (batch.groundM) out.groundM = per(batch.groundM);
   if (batch.group) out.group = per(batch.group);
+  if (batch.featureId) out.featureId = rows.map((i) => batch.featureId![i]);
+  if (batch.buildingId) out.buildingId = rows.map((i) => batch.buildingId![i]);
   return out;
 }
 

@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
-import { groundForRows, groupRowsAt, heightAtPoint, suppressRing, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
+import { groundForRows, groupRowsAt, heightAtPoint, pickRows, suppressRing, suppressRows, tilesForWedge, type SuppressRing } from '@core/geo/buildingTiles';
 import type { LngLat } from '@core/geo/geodesy';
 import { frameOf, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
+import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStitch';
 import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
 import { cubicStencilTiles, demRowAt, elevationAtCubic } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
@@ -207,15 +208,34 @@ async function heightAt(req: HeightAtRequest): Promise<void> {
   scope.postMessage({ kind: BuildingsKind.Height, id: req.id, heightM } satisfies BuildingsResponse);
 }
 
-/** Rows are clipped to the point's z14 tile, so a building across a tile edge seeds only its near half. */
+/** A building reaching past a 3×3 block of z14 tiles is too big to seed whole. */
+const SEED_MAX_TILES = 9;
+
+/** The hit building's rows from every tile it crosses, its pieces rejoined. */
 async function rowsAt(req: RowsAtRequest): Promise<void> {
-  const decoded = await fetchBuildingBatch(tileAt(req.point, BUILDINGS_ZOOM));
+  const first = tileAt(req.point, BUILDINGS_ZOOM);
+  const decoded = await fetchBuildingBatch(first);
   const hit = decoded ? groupRowsAt(decoded, req.point) : null;
   if (!hit) {
     scope.postMessage({ kind: BuildingsKind.Rows, id: req.id, batch: null } satisfies BuildingsResponse);
     return;
   }
-  const { batch, transfer } = withGround(hit, await groundOf(hit));
+  const ids = new Set(hit.buildingId.filter((id) => id !== null));
+  const got = new Map<string, TileRows>([[tileKey(first.z, first.x, first.y), { tile: first, rows: hit }]]);
+  const queue = ids.size > 0 ? edgeNeighbours(hit, first) : [];
+  while (queue.length > 0 && got.size < SEED_MAX_TILES) {
+    const t = queue.shift()!;
+    const key = tileKey(t.z, t.x, t.y);
+    if (got.has(key)) continue;
+    // oxlint-disable-next-line no-await-in-loop -- each tile names the next ones to fetch
+    const more = await fetchBuildingBatch(t);
+    const rows = more ? pickRows(more, (i) => ids.has(more.buildingId[i] ?? '')) : null;
+    if (!rows || rows.count === 0) continue;
+    got.set(key, { tile: t, rows });
+    queue.push(...edgeNeighbours(rows, t));
+  }
+  const merged = got.size > 1 ? mergeTileRows([...got.values()]) : hit;
+  const { batch, transfer } = withGround(merged, await groundOf(merged));
   scope.postMessage({ kind: BuildingsKind.Rows, id: req.id, batch } satisfies BuildingsResponse, transfer);
 }
 
