@@ -22,6 +22,7 @@ import { faceShade, facesToward, polarOf, solidOf, type Solid } from '@core/geo/
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
+import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
@@ -164,7 +165,7 @@ export class ViewfinderController {
   private meshOccCache: { key: string; occ: MeshOccluder | null } | null = null;
   private anyOccCache: { key: string; occ: Occluder | null } | null = null;
   /** What the overlay hid this frame, for `__scape.overlay`. */
-  private seen: { bodies: Record<string, { az: number; alt: number; x: number; y: number; r: number; hidden: boolean }>; markers: Record<string, boolean> } = { bodies: {}, markers: {} };
+  private seen: { bodies: Record<string, { az: number; alt: number; x: number; y: number; r: number; hidden: boolean }>; markers: Record<string, boolean>; pathLabels: { body: SkyBody; text: string; x: number; y: number; w: number; h: number; skipped: boolean }[] } = { bodies: {}, markers: {}, pathLabels: [] };
   /** Placed models, rebuilt when the camera location or any model changes. */
   private modelCache: { key: string; meshes: SurfaceMesh[]; ids: string[] } | null = null;
   /** The selected model's outline, eye-relative e, n, u pairs. */
@@ -945,6 +946,9 @@ export class ViewfinderController {
     ctx.lineWidth = 1.5;
     let prev: { x: number; y: number } | null = null;
     let prevHidden = false;
+    // The picture draws these under the overlay; ghosted ones behind geometry still show.
+    const discs: Disc[] = [SkyBody.Sun, SkyBody.Moon].flatMap((b) => this.seen.bodies[b] ?? []);
+    ctx.font = '10px system-ui, sans-serif';
     const pxs = Array.from({ length: curve.n }, (_, i) => this.toPx(sc, azs[i], alts[i]));
     const ins = pxs.map((p) => this.inFrame(sc, p, 40));
     for (let i = 0; i < curve.n; i++) {
@@ -972,10 +976,15 @@ export class ViewfinderController {
         ctx.beginPath();
         ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.font = '10px system-ui, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'bottom';
-        haloText(ctx, label, p.x + 4, p.y - 3);
+        const box = { x: p.x + 4, y: p.y - 13, w: ctx.measureText(label).width, h: 10 };
+        // Margin is the halo's half stroke.
+        const skipped = labelHitsDiscs(box, discs, 1.5);
+        this.seen.pathLabels.push({ body, text: label, ...box, skipped });
+        if (!skipped) {
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'bottom';
+          haloText(ctx, label, box.x, p.y - 3);
+        }
       }
       prev = p;
       prevHidden = hidden;
@@ -1326,7 +1335,7 @@ export class ViewfinderController {
     const s = settingsStore.getState();
     const c = compositionStore.getState();
     this.occ = this.occluder(sc);
-    this.seen = { bodies: {}, markers: {} };
+    this.seen = { bodies: {}, markers: {}, pathLabels: [] };
     this.drawSceneGl(sc, this.sceneGl);
     this.drawSky(sc);
 

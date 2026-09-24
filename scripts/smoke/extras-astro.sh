@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the tides panel, the Calendar eclipse detail and the viewfinder eclipse discs.
+# Smoke test for the tides panel, the Calendar eclipse detail, the viewfinder eclipse discs and path labels kept off them.
 # Usage: scripts/smoke/extras-astro.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port, a browser with remote debugging on the CDP port, and uv (for pixel sampling).
 set -uo pipefail
@@ -119,16 +119,46 @@ vf_shot() { # camera, instant, focal, orientation, az, alt, png → "sun dark wh
   sleep 1.5
   js "(() => { window.__scape.composition.getState().aim($5, $6); return 'ok'; })()" >/dev/null
   sleep 1
-  # The discs are the GL picture's; overlay labels (a path hour mark at 24 mm) can sit on them.
-  js 'document.querySelector("canvas.vf").style.visibility = "hidden"; "ok"' >/dev/null
   # A background window gets no animation frames; each screenshot forces one.
   ab screenshot "$7" >/dev/null
   sleep 0.5
   ab screenshot "$7" >/dev/null
-  js 'document.querySelector("canvas.vf").style.visibility = ""; "ok"' >/dev/null
   local geo; geo=$(js '(() => { const r = document.querySelector(".vf-gl").getBoundingClientRect(); return `${r.x + r.width / 2} ${r.y + r.height / 2} ${window.innerWidth}`; })()')
   # shellcheck disable=SC2086
   centre_px "$7" $geo
+}
+
+# Drawn path hour labels that touch a sun or moon disc (halo margin included), and how many were skipped.
+LABEL_CLASH='(() => { const o = window.__scape.overlay; const discs = ["Sun", "Moon"].map((b) => o.bodies[b]).filter(Boolean); const hit = (l, d) => { const dx = d.x - Math.min(Math.max(d.x, l.x - 1.5), l.x + l.w + 1.5); const dy = d.y - Math.min(Math.max(d.y, l.y - 1.5), l.y + l.h + 1.5); return dx * dx + dy * dy <= d.r * d.r; }; const drawn = o.pathLabels.filter((l) => !l.skipped); return `${drawn.filter((l) => discs.some((d) => hit(l, d))).length} ${o.pathLabels.length - drawn.length} ${drawn.length}`; })()'
+
+label_clash_check() { # name
+  local bad skipped drawn
+  read -r bad skipped drawn < <(js "$LABEL_CLASH")
+  check "$1: no hour label drawn over a disc" "$([ "${bad:-1}" = 0 ] && echo 1 || echo 0)" "$drawn drawn, $skipped skipped, $bad over a disc"
+}
+
+# The overlay's 11:30 PM moon label: "skipped darkPx", darkPx counting its halo on the overlay canvas.
+MOON_LABEL='(() => { const l = window.__scape.overlay.pathLabels.find((l) => l.body === "Moon" && l.text === "11:30 PM"); if (!l) return "missing 0"; const c = document.querySelector("canvas.vf"); const k = c.width / c.clientWidth; const d = c.getContext("2d").getImageData(Math.round(l.x * k), Math.round(l.y * k), Math.max(1, Math.round(l.w * k)), Math.round(l.h * k)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 60 && d[i] + d[i + 1] + d[i + 2] < 150) n++; return `${l.skipped} ${n}`; })()'
+
+scrub() { # 10-minute steps through the chart's own keys; negative goes back
+  js "(() => { const c = document.querySelector('canvas.chart'); const n = $1; for (let i = 0; i < Math.abs(n); i++) c.dispatchEvent(new KeyboardEvent('keydown', { key: n > 0 ? 'ArrowRight' : 'ArrowLeft', shiftKey: true, bubbles: true })); return 'ok'; })()" >/dev/null
+  sleep 0.5
+  ab screenshot "$2" >/dev/null
+  sleep 0.3
+  ab screenshot "$2" >/dev/null
+}
+
+moon_label_case() { # label, orientation, png prefix
+  local skipped dark
+  vf_shot "$DELHI" "$LUNAR_T" 24 "$2" "$LUNAR_AZ" "$LUNAR_ALT" "$3-over.png" >/dev/null
+  read -r skipped dark < <(js "$MOON_LABEL")
+  check "$1 24 mm $2 lunar maximum: 11:30 PM label on the moon is skipped" "$([ "$skipped" = true ] && [ "$dark" = 0 ] && echo 1 || echo 0)" "skipped $skipped, halo $dark px"
+  scrub 3 "$3-away.png"
+  read -r skipped dark < <(js "$MOON_LABEL")
+  check "$1 24 mm $2 +30 min: moon moved off, label drawn again" "$([ "$skipped" = false ] && [ "$dark" -gt 0 ] && echo 1 || echo 0)" "skipped $skipped, halo $dark px"
+  scrub -3 "$3-back.png"
+  read -r skipped dark < <(js "$MOON_LABEL")
+  check "$1 24 mm $2 back to maximum: skipped again" "$([ "$skipped" = true ] && [ "$dark" = 0 ] && echo 1 || echo 0)" "skipped $skipped, halo $dark px"
 }
 
 ab set viewport 1400 900 >/dev/null
@@ -143,18 +173,24 @@ for f in 24 200 600 2400; do
   for o in L P; do
     read -r sun dark white bright < <(vf_shot "$REYKJAVIK" "$CTRL_T" "$f" "$o" "$CTRL_AZ" "$CTRL_ALT" "$OUT/vf-$f-$o-before.png")
     check "viewfinder ${f} mm $o before C1: sun disc at centre" "$([ $((sun + bright)) -gt 0 ] && echo 1 || echo 0)" "sun $sun, bright $bright px"
+    label_clash_check "viewfinder ${f} mm $o before C1"
     read -r sun dark white bright < <(vf_shot "$REYKJAVIK" "$TOTAL_T" "$f" "$o" "$TOTAL_AZ" "$TOTAL_ALT" "$OUT/vf-$f-$o-total.png")
     check "viewfinder ${f} mm $o totality (C2–C3): moon covers the sun" "$([ "$sun" = 0 ] && [ "$dark" -gt 0 ] && echo 1 || echo 0)" "sun $sun, dark $dark px"
+    label_clash_check "viewfinder ${f} mm $o totality"
     read -r sun dark white bright < <(vf_shot "$DELHI" "$LUNAR_T" "$f" "$o" "$LUNAR_AZ" "$LUNAR_ALT" "$OUT/vf-$f-$o-night.png")
     check "viewfinder ${f} mm $o night, lunar maximum: moon disc at centre" "$([ "$white" -gt 0 ] && echo 1 || echo 0)" "white $white px"
+    label_clash_check "viewfinder ${f} mm $o night"
   done
 done
+moon_label_case desktop L "$OUT/label-L"
+moon_label_case desktop P "$OUT/label-P"
 
 ab set viewport 390 844 >/dev/null
 tide_checks phone
 eclipse_checks phone
 read -r sun dark white bright < <(vf_shot "$REYKJAVIK" "$TOTAL_T" 200 P "$TOTAL_AZ" "$TOTAL_ALT" "$OUT/vf-phone-total.png")
 check "phone 390×844 viewfinder 200 mm P totality" "$([ "$sun" = 0 ] && [ "$dark" -gt 0 ] && echo 1 || echo 0)" "sun $sun, dark $dark px"
+moon_label_case "phone 390×844" P "$OUT/label-phone"
 ab set viewport 1400 900 >/dev/null
 
 echo "| Check | Result | Detail |"
