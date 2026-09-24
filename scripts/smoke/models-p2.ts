@@ -249,6 +249,31 @@ await settle(800);
 await tab.shot(`${shots}/phone-drawn.png`);
 const phoneClipped = await js<string[]>(`return clipped('.model-editor');`);
 check('draw 4 corners by taps at 390×844', draftN === 4 && !!made && made.parts === 1 && made.ring === 4 && made.source === 'Drawn', made ? `${draftN} taps → ${made.source} model, ${made.parts} part, ${made.ring} corners, ${made.heightM} m` : `${draftN} taps, no model`);
+// Every model has a known ground, and the drawn one's base meets the DEM the terrain worker reads at its anchor.
+const ground = await js<{ bad: string[]; baseM: number; demM: number | null }>(`
+  const bad = S.models.getState().models.filter((m) => !Number.isFinite(m.groundM)).map((m) => m.name + ' ' + m.groundM);
+  const m = S.models.getState().models.find((m) => m.id === ${JSON.stringify(made?.id ?? '')});
+  if (!m) return { bad, baseM: NaN, demM: null };
+  S.world.getState().setPin({ lat: m.anchor.lat, lng: m.anchor.lng });
+  const key = m.anchor.lat.toFixed(5) + ',' + m.anchor.lng.toFixed(5) + '|', at = () => S.terrain.getState().elevationKey.startsWith(key), t0 = performance.now();
+  while (!at() && performance.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 100));
+  return { bad, baseM: core.modelBaseM(m.anchor, m.groundM), demM: at() ? S.terrain.getState().pinGroundM : null };
+`);
+check(
+  'every model has a finite ground; the drawn base sits on the terrain',
+  ground.bad.length === 0 && ground.demM !== null && Math.abs(ground.baseM - Math.max(ground.demM, 0)) < 2,
+  `${ground.bad.length ? `NaN ground: ${ground.bad.join(', ')}` : 'all finite'}; drawn base ${ground.baseM.toFixed(2)} m, DEM at its anchor ${ground.demM?.toFixed(2) ?? 'unknown'} m`
+);
+// A model saved while the DEM was unreadable gets its ground back on the next load.
+const healed = await js<{ was: number; now: number; ms: number } | null>(`
+  const st = S.models.getState(), m = st.models.find((m) => m.id === ${JSON.stringify(made?.id ?? '')});
+  if (!m) return null;
+  await st.save({ ...m, groundM: NaN });
+  const t0 = performance.now(), g = () => S.models.getState().models.find((x) => x.id === m.id).groundM;
+  while (Number.isNaN(g()) && performance.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 100));
+  return { was: m.groundM, now: g(), ms: Math.round(performance.now() - t0) };
+`);
+check('a NaN ground heals on load', !!healed && healed.now === healed.was, healed ? `${healed.was.toFixed(2)} → NaN → ${healed.now.toFixed(2)} m in ${healed.ms} ms` : 'no drawn model');
 check('phone editor: compact pad, fields not truncated', phoneClipped.length === 0, phoneClipped.length ? phoneClipped.join(', ') : 'nudge pad in the sheet, every input fits');
 
 // The viewfinder outline follows a 1° heading nudge from the pad.
