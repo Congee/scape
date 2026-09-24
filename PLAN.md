@@ -476,8 +476,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
 
 **Waiting on the user (2026-09-24, overnight run).** Each has a default shipped or a task held:
 
-- Basemap source for a deployed origin (deferred 2026-09-12). Held.
-- Official LoD2 buildings need a meshopt decoder dependency. Held.
+- Basemap source for a deployed origin: decided 2026-09-24 — pack OpenFreeMap per-tile PBFs into
+  PMTiles like terrain, Liberty style, sprites and glyphs cached alongside. In progress.
+- Official LoD2 buildings: `meshoptimizer` decoder approved 2026-09-24 (no Draco). In progress.
 - Target height on a model: apex (shipped default) or the roof under the target point.
 - Tools tab (Phase 7 calculators, merged): name "Tools" after Night; tab min width 62 px so 9 tabs
   fit two rows; Rainbow overlay off by default; RAW size 14-bit uncompressed (worst case); rainbow
