@@ -287,8 +287,9 @@ MapLibre view (transparent sky, light extrusions, a floor on the night dim), and
 zoom to 300 mm showed floating overzoomed slabs: MapLibre's camera model fails at pitch ≥ 90° (§8).
 The MapLibre view was removed the same day and replaced by Scape's own building rasteriser fed by
 z14 OpenStreetMap tiles (§8), the target takes the building's height for the aim and its label, and
-the texture is sampled bilinearly. Still open: the phone layout gives the viewfinder canvas about a
-quarter of the viewport.
+the texture is sampled bilinearly. On phones (≤ 900 px) the nav rail is a bottom toolbar and the collapsed
+panel keeps its tab row as a peek bar (`a6ed48e`, user's choice): the canvas at 390×844 went 19% → 57%
+collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts collapsed at 32%.
 
 ## 8. Risks and decisions taken
 
