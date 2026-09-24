@@ -148,7 +148,8 @@ void main() {
   float dim = k * clear * (1.0 - 0.45 * uNight);
   oColor = vec4((BASE * dim + uHazeRgb * (1.0 - clear)) / 255.0, 1.0);
   oPos = vec4(ray * d, 1.0);
-  oNormal = vec4(pl.xyz * 0.5 + 0.5, 1.0);
+  // Alpha marks a model face for the composite's shadow bias.
+  oNormal = vec4(pl.xyz * 0.5 + 0.5, uDouble > 0.5 ? 0.5 : 1.0);
 }
 `;
 

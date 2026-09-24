@@ -12,6 +12,9 @@ const NORMAL_OFFSET_TEXELS = 1.6;
 const CONST_BIAS_TEXELS = 0.6;
 const SLOPE_BIAS_TEXELS = 2.4;
 const MAX_BIAS_TEXELS = 12.0;
+/** Model faces are large flat planes that the low sun grazes, so they take a steeper bias. */
+const MODEL_MAX_BIAS_TEXELS = 48.0;
+const MODEL_MIN_NDL = 0.02;
 /** Widest PCF kernel, texels; past this the far cascade would blur a whole valley. */
 const MAX_FILTER_TEXELS = 10.0;
 
@@ -23,6 +26,8 @@ const float NORMAL_OFFSET_TEXELS = ${NORMAL_OFFSET_TEXELS.toFixed(5)};
 const float CONST_BIAS_TEXELS = ${CONST_BIAS_TEXELS.toFixed(5)};
 const float SLOPE_BIAS_TEXELS = ${SLOPE_BIAS_TEXELS.toFixed(5)};
 const float MAX_BIAS_TEXELS = ${MAX_BIAS_TEXELS.toFixed(5)};
+const float MODEL_MAX_BIAS_TEXELS = ${MODEL_MAX_BIAS_TEXELS.toFixed(5)};
+const float MODEL_MIN_NDL = ${MODEL_MIN_NDL.toFixed(5)};
 const float MAX_FILTER_TEXELS = ${MAX_FILTER_TEXELS.toFixed(5)};
 const float SHADOW_RES = ${CASCADE_RES.toFixed(1)};
 
@@ -51,14 +56,14 @@ bool insideCascade(vec3 c) {
 }
 
 /** 0 lit, 1 fully shadowed, for a receiver at p with outward normal n. */
-float cascadeShadow(int i, vec3 p, vec3 n, float ndl) {
+float cascadeShadow(int i, vec3 p, vec3 n, float ndl, bool model) {
   vec4 info = uCascadeInfo[i];
   float texelX = info.x;
   float rangeM = info.y;
   float texelY = info.w;
   float fineM = min(texelX, texelY);
   // Normal offset need only clear the finer axis; the coarse one is covered by the plane bias.
-  vec3 q = p + n * (NORMAL_OFFSET_TEXELS * fineM / max(ndl, 0.15));
+  vec3 q = p + n * (NORMAL_OFFSET_TEXELS * fineM / max(ndl, model ? 0.05 : 0.15));
   vec3 c = cascadeCoord(i, q);
   if (!insideCascade(c)) return -1.0;
   // The light axes fall out of the cascade matrix, whose scale is two texels over the map side.
@@ -67,8 +72,8 @@ float cascadeShadow(int i, vec3 p, vec3 n, float ndl) {
   vec3 lu = vec3(m[0][1], m[1][1], m[2][1]) * (0.5 * texelY * SHADOW_RES);
   // Receiver-plane bias: how far the surface's own depth runs across one texel, taken per axis
   // because a long lens makes the cascade tens of times coarser along the view than across it.
-  float slopeM = (abs(dot(n, lr)) * texelX + abs(dot(n, lu)) * texelY) / max(ndl, 0.05);
-  float biasM = min(CONST_BIAS_TEXELS * fineM + SLOPE_BIAS_TEXELS * slopeM, MAX_BIAS_TEXELS * max(texelX, texelY));
+  float slopeM = (abs(dot(n, lr)) * texelX + abs(dot(n, lu)) * texelY) / max(ndl, model ? MODEL_MIN_NDL : 0.05);
+  float biasM = min(CONST_BIAS_TEXELS * fineM + SLOPE_BIAS_TEXELS * slopeM, (model ? MODEL_MAX_BIAS_TEXELS : MAX_BIAS_TEXELS) * max(texelX, texelY));
   float ref = c.z + biasM / rangeM;
 
   // Blocker search: how far upwind the nearest caster is sets how wide the penumbra should be.
@@ -95,24 +100,26 @@ float cascadeShadow(int i, vec3 p, vec3 n, float ndl) {
 }
 
 /** Cascade chosen by axial depth, cross-faded at the seam so no boundary shows. */
-float sunShadow(vec3 p, vec3 n, float axialM) {
+float sunShadow(vec3 p, vec3 n, float axialM, bool model) {
   float ndl = dot(n, uSunDir);
   if (ndl <= 0.0) return 1.0;
+  // A model face the sun barely grazes gets next to no light, and no bias can hold its acne off.
+  float graze = model ? 1.0 - smoothstep(MODEL_MIN_NDL, 3.0 * MODEL_MIN_NDL, ndl) : 0.0;
   for (int i = 0; i < CASCADES; i++) {
     if (i >= uCascadeCount) break;
     float far = uCascadeInfo[i].z;
     if (axialM > far && i + 1 < uCascadeCount) continue;
-    float s = cascadeShadow(i, p, n, ndl);
+    float s = cascadeShadow(i, p, n, ndl, model);
     if (s < 0.0) continue;
     float blend = far * 0.12;
     if (i + 1 < uCascadeCount && axialM > far - blend) {
       float t = clamp((axialM - (far - blend)) / blend, 0.0, 1.0);
-      float s2 = cascadeShadow(i + 1, p, n, ndl);
-      if (s2 >= 0.0) return mix(s, s2, t);
+      float s2 = cascadeShadow(i + 1, p, n, ndl, model);
+      if (s2 >= 0.0) return max(graze, mix(s, s2, t));
     }
-    return s;
+    return max(graze, s);
   }
-  return 0.0;
+  return graze;
 }
 `;
 

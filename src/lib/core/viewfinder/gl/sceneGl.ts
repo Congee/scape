@@ -198,8 +198,9 @@ void main() {
   if (gp.w > 0.5) {
     onSky = false;
     c = texelFetch(uGColor, bi, 0).rgb * 255.0;
-    vec3 n = normalize(texelFetch(uGNormal, bi, 0).xyz * 2.0 - 1.0);
-    if (uShadowOn == 1) c = mix(c, shadeShadow(c, uShadowGain), sunShadow(gp.xyz, n, dot(gp.xyz, uFwd)));
+    vec4 gn = texelFetch(uGNormal, bi, 0);
+    vec3 n = normalize(gn.xyz * 2.0 - 1.0);
+    if (uShadowOn == 1) c = mix(c, shadeShadow(c, uShadowGain), sunShadow(gp.xyz, n, dot(gp.xyz, uFwd), gn.w < 0.75));
   } else if (uHasTerrain == 0 && alt <= uFallbackDeg) {
     // Cold start: a flat ground plane until the clipmap arrives.
     onSky = false;
