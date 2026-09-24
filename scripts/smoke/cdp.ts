@@ -20,7 +20,7 @@ export class Tab {
   private offline = false;
   private logging = false;
   /** False keeps the tab in the background: Page.bringToFront can raise the window over the user's. */
-  private front = true;
+  private front = false;
   /** URLs the page and its workers requested since `logRequests()`. */
   readonly requests: string[] = [];
 
@@ -38,7 +38,7 @@ export class Tab {
   }
 
   /** The tab already on `origin`, or a new background tab, which opens no window. */
-  static async open(cdp: number, origin: string, { front = true } = {}): Promise<Tab> {
+  static async open(cdp: number, origin: string, { front = false } = {}): Promise<Tab> {
     const list = (await (await fetch(`http://localhost:${cdp}/json/list`)).json()) as { id: string; type: string; url: string }[];
     let id = list.find((t) => t.type === 'page' && t.url.startsWith(origin))?.id;
     if (!id) {
