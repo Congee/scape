@@ -12,6 +12,7 @@ import {
 } from 'maplibre-gl';
 import { shallow } from 'zustand/shallow';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
+import { lunarShadowCoverage } from '@core/astro/eclipse';
 import { lightAt } from '@core/astro/lightSource';
 import { position } from '@core/astro/positions';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
@@ -1125,7 +1126,7 @@ export class MapController {
       const obs = makeObserver(w.pin, pinSiteHeightM(w, terrainStore.getState()));
       const date = new Date(w.time);
       const pos = { Sun: position(SkyBody.Sun, date, obs), Moon: position(SkyBody.Moon, date, obs), Gc: position(SkyBody.Gc, date, obs) };
-      data = liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc, shadowHeightM: s.shadowObjectHeightM, pin2: w.pin2, pin2HeightM: w.pin2HeightM });
+      data = liveLines(w.pin, pos, this.rayM, { showShadow: s.showShadow, showGc: s.showGc, shadowHeightM: s.shadowObjectHeightM, pin2: w.pin2, pin2HeightM: w.pin2HeightM, moonUmbra: lunarShadowCoverage(date).umbra });
     }
     if (tick && this.live?.src === src) {
       const c = this.map.getContainer();

@@ -18,6 +18,18 @@ export const EVENT_COLORS: Record<SkyBody, { rise: string; set: string }> = {
 };
 
 export const LIVE_COLORS = { Sun: '#f5a524', Moon: '#5aa9ff', Gc: '#b48cff', Shadow: '#1c1c1c' } as const;
+/** The viewfinder's umbral copper, which the live Moon line turns toward in a lunar eclipse. */
+export const ECLIPSED_MOON_COLOR = '#c0582e';
+
+const rgbOf = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+/** Live Moon blue mixed toward copper by the disc's umbra coverage, 0..1. */
+export function eclipsedMoonColor(umbra: number): string {
+  const a = rgbOf(LIVE_COLORS.Moon);
+  const b = rgbOf(ECLIPSED_MOON_COLOR);
+  const t = Math.min(1, Math.max(0, umbra));
+  return `#${a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+}
 
 export const LOS_COLORS: Record<LosStatus | 'Unknown', string> = {
   Clear: '#2ecc71',
@@ -71,6 +83,8 @@ export interface LiveLineOptions {
   /** Target location and its height, for a second shadow cast there. */
   pin2?: LngLat | null;
   pin2HeightM?: number;
+  /** Fraction of the Moon's disc inside Earth's umbra. */
+  moonUmbra?: number;
 }
 
 /** Near the horizon the true shadow runs off any useful map, so the drawn ray stops here. */
@@ -85,7 +99,7 @@ export function liveLines(
   const features: Feature<LineString, LineProps>[] = [];
   // Bodies count as up until their upper limb is below the horizon.
   if (pos.Sun.altitude > RISE_APPARENT_DEG) features.push(ray(pin, pos.Sun.azimuth, lengthM, { color: LIVE_COLORS.Sun, body: SkyBody.Sun, kind: LiveLineKind.Live }));
-  if (pos.Moon.altitude > RISE_APPARENT_DEG) features.push(ray(pin, pos.Moon.azimuth, lengthM, { color: LIVE_COLORS.Moon, body: SkyBody.Moon, kind: LiveLineKind.Live }));
+  if (pos.Moon.altitude > RISE_APPARENT_DEG) features.push(ray(pin, pos.Moon.azimuth, lengthM, { color: eclipsedMoonColor(o.moonUmbra ?? 0), body: SkyBody.Moon, kind: LiveLineKind.Live }));
   if (o.showGc && pos.Gc.altitude > 0) features.push(ray(pin, pos.Gc.azimuth, lengthM, { color: LIVE_COLORS.Gc, body: SkyBody.Gc, kind: LiveLineKind.Live }));
   if (o.showShadow) {
     const away = pos.Sun.azimuth + 180;
