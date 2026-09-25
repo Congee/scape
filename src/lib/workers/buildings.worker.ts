@@ -145,8 +145,7 @@ function fillFrameTerrain(g: HeightGrid, f: MaskFrame, zoom: number): boolean {
     const row = iy * g.nx;
     for (let ix = 0; ix < g.nx; ix++) {
       const lng = (f.x + (g.originE + ix * g.cellM) / f.mPerUnit) * 360 - 180;
-      // Terrarium reads water as bathymetry, and the datum is sea level.
-      const h = Math.max(sample(lng), 0);
+      const h = sample(lng);
       g.h[row + ix] = h;
       if (Number.isNaN(h)) complete = false;
     }
@@ -180,7 +179,7 @@ async function stampFrameBuildings(g: HeightGrid, f: MaskFrame, live: () => bool
         ringE.push(p.e);
         ringN.push(p.n);
       }
-      stampFootprint(g, ringE, ringN, Math.max(gm, 0) + b.heightM[i]);
+      stampFootprint(g, ringE, ringN, gm + b.heightM[i]);
     }
   }
   for (const m of models) {

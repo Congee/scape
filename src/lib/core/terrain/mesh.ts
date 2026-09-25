@@ -612,8 +612,7 @@ export function buildBlock(pin: LngLat, eyeM: number, level: number, { ix, iy }:
       const p = frame.fromEn(e, n);
       const g = sample(p.lng, p.lat);
       if (Number.isNaN(g)) missing++;
-      // Terrarium reads water as bathymetry, and the datum is sea level.
-      u[j * HALO + i] = (Number.isNaN(g) ? 0 : Math.max(g, 0)) - eyeM - curvatureDropM(Math.hypot(e, n));
+      u[j * HALO + i] = (Number.isNaN(g) ? 0 : g) - eyeM - curvatureDropM(Math.hypot(e, n));
     }
   }
   let e0 = Infinity;

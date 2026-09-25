@@ -24,8 +24,8 @@ export interface LosResult {
   visible: Uint8Array;
 }
 
-/** Height of an endpoint above the geoid: its DEM ground, never taken below sea level, plus its own height. */
-export const endpointHeightM = (groundM: number, aboveGroundM: number): number => Math.max(groundM, 0) + aboveGroundM;
+/** Height of an endpoint above the geoid: its ground plus its own height. */
+export const endpointHeightM = (groundM: number, aboveGroundM: number): number => groundM + aboveGroundM;
 
 /**
  * The elevation angle `analyzeSightline` reports, from the two endpoints alone. The ground samples

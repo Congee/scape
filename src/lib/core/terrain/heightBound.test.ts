@@ -68,9 +68,9 @@ describe('buildHeightBound', () => {
     expect(minM).toBeCloseTo(800 - RELIEF_PAD_POSTS * POST_M, 6);
   });
 
-  it('clamps bathymetry to the datum, the way the mesh does', () => {
-    const bound = buildHeightBound(PIN, source(() => -2000), ZOOM, POST_M, ROOT);
-    expect(bound({ level: 2, ix: 0, iy: 0 }).maxM).toBeCloseTo(RELIEF_PAD_POSTS * POST_M, 6);
+  it('follows ground below sea level, the way the mesh does', () => {
+    const bound = buildHeightBound(PIN, source(() => -6), ZOOM, POST_M, ROOT);
+    expect(bound({ level: 2, ix: 0, iy: 0 }).maxM).toBeCloseTo(-6 + RELIEF_PAD_POSTS * POST_M, 4);
   });
 
   it('a coarse block is the envelope of the fine ones under it', () => {
@@ -185,12 +185,12 @@ describe('buildDetailBound', () => {
     expect(tighter).toBeGreaterThan(0);
   });
 
-  it('pads by its own posts, and clamps water to the datum', () => {
+  it('pads by its own posts, and follows ground below sea level', () => {
     expect(buildDetailBound(PIN, source(() => 800), DETAIL_ZOOM, DETAIL_POST_M)({ level: 1, ix: 0, iy: 0 })).toEqual({
       minM: 800 - RELIEF_PAD_POSTS * DETAIL_POST_M,
       maxM: 800 + RELIEF_PAD_POSTS * DETAIL_POST_M
     });
-    expect(buildDetailBound(PIN, source(() => -50), DETAIL_ZOOM, DETAIL_POST_M)({ level: 1, ix: 0, iy: 0 })!.maxM).toBeCloseTo(RELIEF_PAD_POSTS * DETAIL_POST_M, 6);
+    expect(buildDetailBound(PIN, source(() => -6), DETAIL_ZOOM, DETAIL_POST_M)({ level: 1, ix: 0, iy: 0 })!.maxM).toBeCloseTo(-6 + RELIEF_PAD_POSTS * DETAIL_POST_M, 4);
   });
 
   it('answers null where a tile is missing, so the coarse bound stands', () => {

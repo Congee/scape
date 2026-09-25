@@ -58,7 +58,7 @@ export function rayBlocked(src: DemSource, ladder: RayLadder, from: LngLat, azDe
     const p = frame.fromEn(d * se, d * cn);
     const g = elevationAt(src, p.lng, p.lat, ladder.zoom[i]);
     if (Number.isNaN(g)) continue;
-    if (elevationAngleDeg(d, Math.max(g, 0) - eyeM) > altDeg) return true;
+    if (elevationAngleDeg(d, g - eyeM) > altDeg) return true;
   }
   return false;
 }
@@ -87,7 +87,7 @@ export function bodyVisibleGrid(src: DemSource, grid: HeatGrid, sample: SkySampl
         out[i] = 0;
         continue;
       }
-      out[i] = rayBlocked(src, ladder, p, h.azimuth, Math.max(g, 0) + o.eyeAboveGroundM, margin) ? 0 : 1;
+      out[i] = rayBlocked(src, ladder, p, h.azimuth, g + o.eyeAboveGroundM, margin) ? 0 : 1;
     }
   }
   return out;
@@ -103,7 +103,7 @@ export function viewshedGrid(src: DemSource, plan: SweepPlan, grid: HeatGrid, ey
       const lat = plan.lat[j];
       const g = elevationAt(src, lng, lat, plan.zoom[j]);
       if (Number.isNaN(g)) continue;
-      const a = elevationAngleDeg(plan.distM[j], Math.max(g, 0) - eyeM);
+      const a = elevationAngleDeg(plan.distM[j], g - eyeM);
       const cell = cellOf(grid, { lng, lat });
       if (cell) {
         const k = cell.row * grid.n + cell.col;

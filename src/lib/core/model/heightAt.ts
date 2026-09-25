@@ -8,7 +8,7 @@ import { modelTopM } from './mesh';
 export function modelHeightAt(models: readonly SavedModel[], p: LngLat): { heightM: number; model: SavedModel } | null {
   for (const m of models) {
     if (!m.visible || !inLngLatRing(m.footprint, p) || !modelOutlines(m).some((r) => inLngLatRing(r, p))) continue;
-    const ground = Number.isNaN(m.groundM) ? 0 : Math.max(m.groundM, 0);
+    const ground = Number.isNaN(m.groundM) ? 0 : m.groundM;
     const heightM = modelBaseM(m.anchor, m.groundM) - ground + modelTopM(m) * m.anchor.scale;
     if (!Number.isFinite(heightM)) throw new Error(`Model “${m.name}” height is not finite`);
     return { heightM, model: m };

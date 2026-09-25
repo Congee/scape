@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { ancestorTile, cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, lowestGroundAt, memoSource, overzoomTile, sampleGridCubic, sampleTile, type DemSource, type DemTile, type RetainingDemSource } from './dem';
+import { ancestorTile, BelowSea, groundSurface, cubicStencilTiles, decodeTerrarium, findOutlierPosts, demRowAt, elevationAt, elevationAtCubic, lowestGroundAt, memoSource, overzoomTile, sampleGridCubic, sampleTile, type DemSource, type DemTile, type RetainingDemSource } from './dem';
 import { evictionKeys, Holds } from './holds';
 import { tileKey, tilePixelToLngLat, type TileCoord } from './tiles';
+
+describe('groundSurface', () => {
+  it('puts the sea surface over bathymetry', () => {
+    expect(groundSurface(new Float32Array([-21, -6, 0, 3, NaN]), BelowSea.Seabed)).toEqual(new Float32Array([0, 0, 0, 3, NaN]));
+  });
+
+  it('keeps land below sea level where the sea is already flat', () => {
+    expect(groundSurface(new Float32Array([-6, -432, 0, 3, NaN]), BelowSea.Land)).toEqual(new Float32Array([-6, -432, 0, 3, NaN]));
+  });
+});
 
 describe('decodeTerrarium', () => {
   it('decodes known triplets', () => {

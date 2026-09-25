@@ -88,11 +88,10 @@ async function profile(req: ProfileRequest): Promise<TerrainResponse | null> {
   // Endpoints come from the same zoom as the path so their own cells cannot "block" them.
   const groundA = Number.isNaN(groundM[0]) ? 0 : groundM[0];
   const groundB = Number.isNaN(groundM[n - 1]) ? 0 : groundM[n - 1];
-  // Water reads as bathymetry in Terrarium; sightlines skim the surface instead.
-  const eyeM = Math.max(groundA, 0) + req.eyeAboveGroundM;
-  const targetM = Math.max(groundB, 0) + req.targetAboveGroundM;
+  const eyeM = groundA + req.eyeAboveGroundM;
+  const targetM = groundB + req.targetAboveGroundM;
   const cellM = metersPerPixel((a.lat + b.lat) / 2, zoom);
-  const los = analyzeSightline(distM, groundM.map((g) => (Number.isNaN(g) ? g : Math.max(g, 0))), eyeM, targetM, cellM);
+  const los = analyzeSightline(distM, groundM, eyeM, targetM, cellM);
   return {
     kind: TerrainKind.Profile,
     id: req.id,
@@ -109,7 +108,7 @@ async function horizon(req: HorizonRequest): Promise<TerrainResponse | null> {
   try {
     await cache.loadAll(tiles);
     if (latest.Horizon !== req.id) return null;
-    const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+    const eyeM = groundM + req.eyeAboveGroundM;
     const skyline = sweepHorizon(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM);
     const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
     return { kind: TerrainKind.Horizon, id: req.id, result: { profile: skyline, groundM, eyeM, tiles: tiles.length, missing } };
@@ -125,7 +124,7 @@ let lastView: { key: string; k0: number; v: ViewProfile } | null = null;
 async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   const g = await groundAt(req.pin);
   const groundM = Number.isNaN(g) ? 0 : g;
-  const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+  const eyeM = groundM + req.eyeAboveGroundM;
   const step = req.azStepDeg;
   // Columns sit on a grid of the step, so one azimuth is swept the same way from any window.
   const k0 = Math.round(req.azFromDeg / step);
@@ -173,7 +172,7 @@ async function mesh(req: MeshRequest): Promise<null> {
   const g = await groundAt(req.pin);
   if (latest.Mesh !== req.id) return null;
   const groundM = Number.isNaN(g) ? 0 : g;
-  const eyeM = Math.max(groundM, 0) + req.eyeAboveGroundM;
+  const eyeM = groundM + req.eyeAboveGroundM;
   const rootLevel = levelsForRange(req.rangeM) - 1;
   const plan = planHeightBound(req.pin, rootLevel);
   const planDetail = () => (req.view ? planDetailBound(req.pin, req.view, req.rangeM, DETAIL_ZOOMS[0], DETAIL_ZOOMS[1], TERRAIN_TILE_SIZE) : null);

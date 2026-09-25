@@ -117,9 +117,8 @@ function buildPyramid(pin: LngLat, src: DemSource, zoom: number, postM: number, 
     for (let i = 0; i < ns; i++) {
       const p = samplePoint(pin, (i - halfBlocks * per - 1) * stepM, n);
       const v = elevationAt(src, p.lng, p.lat, zoom);
-      // Terrarium reads water as bathymetry, and the mesh clamps it to the datum.
       if (Number.isNaN(v)) complete = false;
-      h[j * ns + i] = Number.isNaN(v) ? NaN : Math.max(v, 0);
+      h[j * ns + i] = v;
     }
   }
 
@@ -188,8 +187,7 @@ function tileMips(t: DemTile): TileMips {
 }
 
 function buildTileMips(t: DemTile): TileMips {
-  // The mesh clamps water to the datum, so the bound does too.
-  const base = t.elev.map((v) => Math.max(v, 0));
+  const base = t.elev;
   const max = [base];
   const min = [base];
   for (let s = t.size; s > 1; ) {

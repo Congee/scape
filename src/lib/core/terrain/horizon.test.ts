@@ -17,7 +17,7 @@ function plateauSource(): DemSource {
         for (let py = 0; py < TILE_SIZE; py++)
           for (let px = 0; px < TILE_SIZE; px++) {
             const p = tilePixelToLngLat(z, x, y, px + 0.5, py + 0.5);
-            elev[py * TILE_SIZE + px] = p.lng > pin.lng + 0.02 ? 600 : -30;
+            elev[py * TILE_SIZE + px] = p.lng > pin.lng + 0.02 ? 600 : 0;
           }
         t = { z, x, y, size: TILE_SIZE, elev };
         tiles.set(k, t);

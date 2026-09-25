@@ -11,7 +11,7 @@ const MAX_ANCESTORS = 16;
 const ancestors = new Map<string, Promise<DemTile | null>>();
 
 /** A tile's elevations, plus whatever freshness the response it came from stated. */
-export interface LoadedDem extends DecodedDem {
+export interface LoadedDem extends Omit<DecodedDem, 'belowSea'> {
   cacheControl?: string;
   expires?: string;
 }

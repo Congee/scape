@@ -1,4 +1,4 @@
-import { decodeTerrarium, overzoomTile, type DemSource, type DemTile } from '@core/terrain/dem';
+import { BelowSea, decodeTerrarium, groundSurface, overzoomTile, type DemSource, type DemTile } from '@core/terrain/dem';
 import { evictionKeys, Holds } from '@core/terrain/holds';
 import { decodePng, UnsupportedPngError } from '@core/terrain/png';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
@@ -70,6 +70,8 @@ export interface DecodedDem {
   size: number;
   elev: Float32Array;
   repaired: number;
+  /** Follows the container: only AWS serves PNG (bathymetry), only Mapterhorn WebP (sea flattened to 0). */
+  belowSea: BelowSea;
 }
 
 const isPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
@@ -87,7 +89,7 @@ export function decodeTerrainTile(data: ArrayBuffer): Promise<DecodedDem> {
 export async function decodeTerrainPng(bytes: Uint8Array<ArrayBuffer>): Promise<DecodedDem> {
   try {
     const png = await decodePng(bytes);
-    return { size: png.width, ...decodeTerrarium(png.data, png.width, png.channels) };
+    return { size: png.width, belowSea: BelowSea.Seabed, ...decodeTerrarium(png.data, png.width, png.channels) };
   } catch (e) {
     if (!(e instanceof UnsupportedPngError)) throw e;
   }
@@ -96,7 +98,7 @@ export async function decodeTerrainPng(bytes: Uint8Array<ArrayBuffer>): Promise<
     const canvas = new OffscreenCanvas(bmp.width, bmp.height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(bmp, 0, 0);
-    return { size: bmp.width, ...decodeTerrarium(ctx.getImageData(0, 0, bmp.width, bmp.height).data, bmp.width, 4) };
+    return { size: bmp.width, belowSea: BelowSea.Seabed, ...decodeTerrarium(ctx.getImageData(0, 0, bmp.width, bmp.height).data, bmp.width, 4) };
   } finally {
     bmp.close();
   }
@@ -115,7 +117,7 @@ export async function decodeTerrainWebp(data: ArrayBuffer): Promise<DecodedDem> 
     const out = new Uint8Array(image.allocationSize({ format: 'RGBA' }));
     await image.copyTo(out, { format: 'RGBA' });
     const size = image.displayWidth;
-    return { size, ...decodeTerrarium(out, size, 4) };
+    return { size, belowSea: BelowSea.Land, ...decodeTerrarium(out, size, 4) };
   } finally {
     // A leaked VideoFrame pins GPU memory.
     image?.close();
@@ -213,13 +215,13 @@ export class DemCache implements DemSource {
         if (!res.ok) return null;
         data = await res.arrayBuffer();
       }
-      const { size, elev, repaired } = await decodeTerrainTile(data);
+      const { size, elev, repaired, belowSea } = await decodeTerrainTile(data);
       // A tile with no valid post at all is data we do not have, so hand it to the missing-tile path.
       if (repaired >= size * size) {
         this.set(c, null);
         return null;
       }
-      const tile: DemTile = { ...c, size, elev, repaired };
+      const tile: DemTile = { ...c, size, elev: groundSurface(elev, belowSea), repaired };
       this.set(c, tile);
       return tile;
     } catch {

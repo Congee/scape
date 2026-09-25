@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { curvatureDropM, elevationAngleDeg } from '@core/geo/geodesy';
-import { analyzeSightline, flatHorizonDeg, LosStatus } from './los';
+import { analyzeSightline, endpointHeightM, flatHorizonDeg, LosStatus } from './los';
 
 const line = (n: number, totalM: number) => Float32Array.from({ length: n }, (_, i) => (totalM * i) / (n - 1));
+
+describe('endpointHeightM', () => {
+  it('stands on ground below sea level', () => {
+    expect(endpointHeightM(-6, 1.6)).toBeCloseTo(-4.4, 9);
+  });
+});
 
 describe('analyzeSightline', () => {
   it('sees a 30 m target across flat ground; the ground past the sea horizon is hidden', () => {

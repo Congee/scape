@@ -300,7 +300,7 @@ export class ViewfinderController {
     const here = `${w.pin.lat.toFixed(4)},${w.pin.lng.toFixed(4)}|${eyeAboveGroundM}`;
     const view = s.terrain && t.view && t.viewKey.startsWith(here) ? t.view : null;
     const ground = t.pinGroundM ?? 0;
-    const eyeM = view?.eyeM ?? Math.max(Number.isNaN(ground) ? 0 : ground, 0) + eyeAboveGroundM;
+    const eyeM = view?.eyeM ?? (Number.isNaN(ground) ? 0 : ground) + eyeAboveGroundM;
     const time = new Date(w.time);
     const obs = makeObserver(w.pin, eyeM);
     const sun = position(SkyBody.Sun, time, obs);
@@ -1229,7 +1229,7 @@ export class ViewfinderController {
       if (d < 5) continue;
       const az = bearingDeg(w.pin, m);
       const g = grounds[m.id];
-      const ground = g === undefined || Number.isNaN(g) ? null : Math.max(g, 0);
+      const ground = g === undefined || Number.isNaN(g) ? null : g;
       // Without ground data the marker sits on the visible terrain surface at its distance.
       const baseAlt = ground != null ? elevationAngleDeg(d, ground - sc.eyeM) : this.surfaceAngle(sc, az, d);
       if (baseAlt == null) continue;

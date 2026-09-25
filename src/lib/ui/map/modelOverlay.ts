@@ -22,7 +22,7 @@ export function modelFeatures(models: readonly SavedModel[], selectedId: string 
   const features: FeatureCollection<Polygon, ModelFeatureProps>['features'] = [];
   for (const m of models) {
     if (!m.visible) continue;
-    const ground = Number.isNaN(m.groundM) ? 0 : Math.max(m.groundM, 0);
+    const ground = Number.isNaN(m.groundM) ? 0 : m.groundM;
     const lift = modelBaseM(m.anchor, m.groundM) - ground;
     const s = m.anchor.scale;
     const selected = m.id === selectedId;

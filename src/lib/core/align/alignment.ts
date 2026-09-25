@@ -47,14 +47,14 @@ export function sightlineBlocked(src: DemSource, zoom: number, from: LngLat, to:
     const p = along(k / samples);
     const g = elevationAt(src, normalizeLng(p.lng), p.lat, zoom);
     if (Number.isNaN(g)) continue;
-    if (elevationAngleDeg(d, Math.max(g, 0) - eyeM) > targetAngleDeg) return true;
+    if (elevationAngleDeg(d, g - eyeM) > targetAngleDeg) return true;
   }
   return false;
 }
 
 export function landmarkTopM(src: DemSource, zoom: number, l: Landmark): number {
   const g = elevationAt(src, l.lng, l.lat, zoom);
-  return (Number.isNaN(g) ? 0 : Math.max(g, 0)) + l.heightM;
+  return (Number.isNaN(g) ? 0 : g) + l.heightM;
 }
 
 function closest(samples: SkySample[], lat: number, lng: number, azDeg: number, altDeg: number): { sepDeg: number; ms: number } {
@@ -77,7 +77,7 @@ export function alignAt(src: DemSource, zoom: number, p: LngLat, samples: SkySam
   if (Number.isNaN(g)) return null;
   const distM = distanceM(p, landmark);
   if (distM < cellM) return null;
-  const eyeM = Math.max(g, 0) + o.eyeAboveGroundM;
+  const eyeM = g + o.eyeAboveGroundM;
   const brg = bearingDeg(p, landmark);
   const angle = elevationAngleDeg(distM, topM - eyeM);
   const c = closest(samples, p.lat, p.lng, brg + o.offsetAzDeg, angle + o.offsetAltDeg);
@@ -101,7 +101,7 @@ export function alignGrid(src: DemSource, zoom: number, grid: HeatGrid, samples:
       if (Number.isNaN(g)) continue;
       const distM = distanceM(p, landmark);
       if (distM < cellM) continue;
-      const eyeM = Math.max(g, 0) + o.eyeAboveGroundM;
+      const eyeM = g + o.eyeAboveGroundM;
       const angle = elevationAngleDeg(distM, topM - eyeM);
       const c = closest(samples, p.lat, p.lng, bearingDeg(p, landmark) + o.offsetAzDeg, angle + o.offsetAltDeg);
       if (c.sepDeg > o.capDeg) continue;

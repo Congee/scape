@@ -76,8 +76,8 @@ const D2R = Math.PI / 180;
 export function modelBaseM(anchor: ModelAnchor, groundM: number): number {
   assertPlaceable(anchor, groundM);
   if (anchor.altRef === AltitudeRef.Absolute) return anchor.altM;
-  // Same rule as the prisms: no DEM is sea level, and water reads as bathymetry.
-  return (Number.isNaN(groundM) ? 0 : Math.max(groundM, 0)) + anchor.altM;
+  // Same rule as the prisms: no DEM is sea level.
+  return (Number.isNaN(groundM) ? 0 : groundM) + anchor.altM;
 }
 
 /** Throws on an anchor or ground that would place the model at NaN; a NaN ground is the "no DEM" sentinel. */

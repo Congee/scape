@@ -122,7 +122,6 @@ export function requiredTiles(plan: SweepPlan): TileCoord[] {
 /**
  * Radial sweep: per azimuth, the highest elevation angle of any terrain sample along the ray.
  * `eyeM` is the eye's absolute height; `eyeAboveGroundM` sets the fallback dip where nothing was sampled.
- * Ground below sea level counts as sea surface, so sea views come out at the sea horizon.
  */
 export function sweepHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eyeAboveGroundM: number, rangeM: number): HorizonProfile {
   const angleDeg = new Float32Array(plan.nAz);
@@ -134,7 +133,7 @@ export function sweepHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eyeA
     for (let j = plan.start[i]; j < plan.start[i + 1]; j++) {
       const g = elevationAt(src, plan.lng[j], plan.lat[j], plan.zoom[j]);
       if (Number.isNaN(g)) continue;
-      const a = elevationAngleDeg(plan.distM[j], Math.max(g, 0) - eyeM);
+      const a = elevationAngleDeg(plan.distM[j], g - eyeM);
       if (a > best) {
         best = a;
         bestD = plan.distM[j];

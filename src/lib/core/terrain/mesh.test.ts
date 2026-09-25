@@ -520,6 +520,14 @@ describe('buildLevel', () => {
     }
   });
 
+  it('lays a polder below sea level, 1.6 m under an eye standing on it', () => {
+    const block = buildBlock(PIN, -6 + 1.6, 0, { level: 0, ix: 0, iy: 0 }, () => -6);
+    let top = -Infinity;
+    for (let v = 0; v < (BLOCK_CELLS + 1) ** 2; v++) top = Math.max(top, block.pos[v * 3 + 2]);
+    expect(top).toBeLessThanOrEqual(-1.6);
+    expect(top).toBeGreaterThan(-1.61);
+  });
+
   it('counts the samples it could not read', () => {
     const holed = buildLevel(PIN, 0, 0, [{ level: 0, ix: 0, iy: 0 }], () => Number.NaN);
     expect(holed.missing).toBeGreaterThan(0);

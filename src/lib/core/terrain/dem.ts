@@ -19,6 +19,21 @@ export interface DemSource {
   get(z: number, x: number, y: number): DemTile | null | undefined;
 }
 
+/** What a DEM means by a height below sea level. */
+export const BelowSea = {
+  /** Bathymetry: the ground there is the sea surface. */
+  Seabed: 'Seabed',
+  /** The sea is already flattened to 0, so a negative height is dry land: a polder, the Dead Sea shore. */
+  Land: 'Land'
+} as const;
+export type BelowSea = (typeof BelowSea)[keyof typeof BelowSea];
+
+/** Heights of the ground an eye can stand on, in place: the sea surface replaces the seabed. */
+export function groundSurface(elev: Float32Array, below: BelowSea): Float32Array {
+  if (below === BelowSea.Seabed) for (let i = 0; i < elev.length; i++) if (elev[i] < 0) elev[i] = 0;
+  return elev;
+}
+
 /** `src` with each tile resolved once, for a synchronous burst of samples: a cache `get` builds a key and touches the LRU. */
 export function memoSource(src: DemSource): DemSource {
   const seen = new Map<number, DemTile | null | undefined>();

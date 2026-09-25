@@ -80,7 +80,7 @@ export class ProfileController {
     const { ctx, w, h } = this;
     const n = p.distM.length;
     const D = p.distM[n - 1];
-    const ground = Array.from(p.groundM, (g) => (Number.isNaN(g) ? 0 : Math.max(g, 0)));
+    const ground = Array.from(p.groundM, (g) => (Number.isNaN(g) ? 0 : g));
     let lo = Math.min(p.eyeM, p.targetM, ...ground);
     let hi = Math.max(p.eyeM, p.targetM, ...ground);
     const span = Math.max(hi - lo, 20);

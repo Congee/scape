@@ -73,10 +73,11 @@ describe('targetAngleFor', () => {
     expect(targetAngleFor(world(), settings(false), terrain())).toBe(atSea);
   });
 
-  it('never takes an endpoint below the geoid', () => {
+  it('stands an endpoint on ground below sea level', () => {
     const s = settings();
-    const below = targetAngleFor(world(), s, terrain({ pinGroundM: -400, pin2GroundM: -30 }));
-    expect(below).toBe(targetAngleFor(world(), s, terrain({ pinGroundM: 0, pin2GroundM: 0 })));
+    const level = targetAngleFor(world(), s, terrain({ pinGroundM: 0, pin2GroundM: 0 }))!;
+    expect(targetAngleFor(world(), s, terrain({ pinGroundM: -6, pin2GroundM: -6 }))).toBeCloseTo(level, 9);
+    expect(targetAngleFor(world(), s, terrain({ pinGroundM: -6, pin2GroundM: 0 }))).toBeGreaterThan(level);
   });
 
   it('has no answer without a target', () => {

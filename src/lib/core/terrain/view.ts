@@ -38,7 +38,7 @@ export function sweepView(src: DemSource, plan: SweepPlan, eyeM: number, eyeAbov
     for (let j = plan.start[i]; j < plan.start[i + 1]; j++) {
       const g = elevationAt(src, plan.lng[j], plan.lat[j], plan.zoom[j]);
       if (Number.isNaN(g)) continue;
-      const a = elevationAngleDeg(plan.distM[j], Math.max(g, 0) - eyeM);
+      const a = elevationAngleDeg(plan.distM[j], g - eyeM);
       if (a <= running) continue;
       running = a;
       runningD = plan.distM[j];

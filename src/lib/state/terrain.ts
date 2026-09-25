@@ -15,7 +15,7 @@ export const HORIZON_AZ_STEP_DEG = 0.5;
 const PROFILE_SAMPLES = 400;
 
 export interface TerrainState {
-  /** Raw DEM ground at the camera and target, metres (bathymetry where at sea); null until known. */
+  /** Ground at the camera and target, metres (the sea surface at sea); null until known. */
   pinGroundM: number | null;
   pin2GroundM: number | null;
   elevationKey: string;

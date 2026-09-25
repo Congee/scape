@@ -20,7 +20,7 @@ function wallsSource(): DemSource {
             const p = tilePixelToLngLat(z, x, y, px + 0.5, py + 0.5);
             const d = p.lng - pin.lng;
             const inBand = Math.abs(p.lat - pin.lat) < 0.005;
-            elev[py * TILE_SIZE + px] = !inBand ? -30 : d > 0.06 ? 600 : d > 0.02 && d < 0.03 ? 100 : -30;
+            elev[py * TILE_SIZE + px] = !inBand ? 0 : d > 0.06 ? 600 : d > 0.02 && d < 0.03 ? 100 : 0;
           }
         t = { z, x, y, size: TILE_SIZE, elev };
         tiles.set(k, t);

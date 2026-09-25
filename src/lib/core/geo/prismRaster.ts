@@ -123,7 +123,7 @@ export function buildPrisms(batch: BuildingBatch, pin: LngLat, eyeM: number): Pr
     faceStart[i] = faceVert.length - 1;
     const g = batch.groundM[i];
     // No DEM tile: sea level, which is where most of these footprints sit anyway.
-    const ground = Number.isNaN(g) ? 0 : Math.max(g, 0);
+    const ground = Number.isNaN(g) ? 0 : g;
     const uBase0 = ground + batch.minHeightM[i] - eyeM;
     const uApex0 = ground + batch.heightM[i] - eyeM;
     if (!Number.isFinite(uBase0) || !Number.isFinite(uApex0)) continue;
