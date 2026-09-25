@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NOAA_HARMONIC } from './noaaFixture';
 import { nearestStation, parseStation, tideExtremes, tideHeight, type TideStationRow } from './predict';
 
 const T0 = Date.UTC(2026, 9, 1);
@@ -21,7 +22,7 @@ const STATIONS: { row: TideStationRow; hilo: number[] }[] = [
 ];
 
 describe('tideExtremes', () => {
-  for (const { row, hilo } of STATIONS) {
+  for (const { row, hilo } of [...STATIONS, ...NOAA_HARMONIC]) {
     it(`matches NOAA CO-OPS published October 2026 highs/lows at ${row[1]} (${row[0]})`, () => {
       const got = tideExtremes(parseStation(row), T0, T1);
       expect(got.length).toBe(hilo.length / 3);
@@ -35,7 +36,7 @@ describe('tideExtremes', () => {
   }
 
   it('agrees with NOAA CO-OPS to a centimetre and a minute, far inside the 5 cm / 5 min budget', () => {
-    for (const { row, hilo } of STATIONS) {
+    for (const { row, hilo } of [...STATIONS, ...NOAA_HARMONIC]) {
       tideExtremes(parseStation(row), T0, T1).forEach((g, i) => {
         expect(Math.abs(g.timeMs - (T0 + hilo[i * 3] * 60_000))).toBeLessThanOrEqual(60_000);
         expect(Math.abs(g.heightM - hilo[i * 3 + 1] / 1000)).toBeLessThanOrEqual(0.01);
