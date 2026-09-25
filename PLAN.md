@@ -546,6 +546,8 @@ visible errors are design choices, each waiting on a decision (recommendation in
 - Fixed 2026-09-25 (airdensity): last light, moon view, map light, light probe, finder/align workers
   and fastHorizon refract in the eye's air too; the rise/set threshold is `riseApparentDeg(ρ)`
   (−0.247° at 3000 m, was −0.215°); fastHorizon at 3000 m matches the viewfinder to 1e-6° (was 0.1°).
+  Follow-up 2026-09-25 (firstlight): first light and alpenglow share one observer and lit-span pass (equal to the ms);
+  Calendar eclipse visibility stands on the pin's ground (was sea level).
 - Rise/set times come from 0.5° horizon columns, so a jagged near ridge can put the viewfinder's
   Sun/Moon flip up to ~30 s off the listed time (Zermatt 1–6 s). Finer azimuth steps around the
   rise/set azimuths [leave for now].
