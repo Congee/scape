@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { drawnModel } from '@core/model/draw';
-import { draftFeatures, modelFeatures } from './modelOverlay';
+import { coverProbe, draftFeatures, modelFeatures, modelLayers, MODELS_FILL_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER } from './modelOverlay';
 
 const pts = [
   { lng: 0, lat: 0 },
@@ -38,5 +38,28 @@ describe('draftFeatures', () => {
   });
   it('is empty when not drawing', () => {
     expect(draftFeatures(null).features).toHaveLength(0);
+  });
+});
+
+describe('modelLayers', () => {
+  it('draws the selected outline before the other models, so those in front hide it', () => {
+    const ids = modelLayers('models').map((l) => l.id);
+    expect(ids).toEqual([MODELS_FILL_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER, 'models-line-others']);
+  });
+
+  it('splits every feature into exactly one fill and one line by selection', () => {
+    const filters = modelLayers('models').map((l) => ('filter' in l ? l.filter : null));
+    expect(filters).toEqual([true, true, false, false].map((v) => ['==', ['get', 'selected'], v]));
+  });
+});
+
+describe('coverProbe', () => {
+  it('steps toward the centre', () => {
+    expect(coverProbe({ x: 0, y: 0 }, { x: 30, y: 40 }, 5)).toEqual({ x: 3, y: 4 });
+  });
+
+  it('stops halfway on a tiny footprint and stays put on its centre', () => {
+    expect(coverProbe({ x: 0, y: 0 }, { x: 4, y: 0 }, 5)).toEqual({ x: 2, y: 0 });
+    expect(coverProbe({ x: 1, y: 1 }, { x: 1, y: 1 }, 5)).toEqual({ x: 1, y: 1 });
   });
 });

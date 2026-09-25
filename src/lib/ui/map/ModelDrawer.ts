@@ -5,14 +5,17 @@ import { AltitudeRef, localToLngLat, lngLatToLocal, type ModelAnchor, type Saved
 import { nearestWithin, snapRightAngle, withPart } from '@core/model/draw';
 import { finishDraft, modelsStore } from '@state/models';
 import { MarkersView, PanelTab, uiStore } from '@state/ui';
-import { draftFeatures, MODEL_ACCENT, MODEL_COLOR, modelFeatures } from './modelOverlay';
+import { coverProbe, draftFeatures, MODEL_ACCENT, modelFeatures, modelLayers, OTHER_MODELS_FILL_LAYER } from './modelOverlay';
 
 const MODELS_SRC = 'models';
-export const MODELS_FILL_LAYER = 'models-fill';
 const DRAFT_SRC = 'model-draft';
 /** Screen distance a tap or drop snaps to an Overture vertex, or closes the ring on the first one. */
 const SNAP_PX = 12;
 const LONG_PRESS_MS = 600;
+/** How far inside the footprint a handle is tested for cover, in pixels. */
+const COVER_PROBE_PX = 3;
+/** MapLibre's own opacity for a marker behind terrain. */
+const COVERED_OPACITY = '0.2';
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 /** Where the panel is a bottom sheet. */
 const COMPACT = '(max-width: 900px)';
@@ -32,6 +35,8 @@ const frameAt = (p: [number, number]): ModelAnchor => ({ lng: p[0], lat: p[1], a
 /** Draws new footprints and edits the selected part's vertices on the map, and shows the models as extrusions. */
 export class ModelDrawer {
   private handles: Marker[] = [];
+  /** The selected part's handles with its ring's centre, which models and buildings in front can cover. */
+  private partHandles: { marks: Marker[]; covered: boolean[]; centre: [number, number] } | null = null;
   private dragging = false;
   /** A drag's model before it is saved. */
   private preview: SavedModel | null = null;
@@ -60,7 +65,23 @@ export class ModelDrawer {
       ),
       uiStore.subscribe((st, prev) => prev.panelCollapsed && !st.panelCollapsed && this.keepInView())
     );
+    this.map.on('idle', this.coverHandles);
   }
+
+  /** Dims the part's handles behind other models and buildings as MapLibre dims them behind terrain; once per settled render, not per frame. */
+  private coverHandles = () => {
+    const ph = this.partHandles;
+    if (!ph || this.dragging) return;
+    const layers = [OTHER_MODELS_FILL_LAYER, ...this.buildingLayers()].filter((id) => this.map.getLayer(id));
+    const c = this.map.project(ph.centre);
+    ph.marks.forEach((mk, i) => {
+      const q = coverProbe(this.map.project(mk.getLngLat()), c, COVER_PROBE_PX);
+      const covered = layers.length > 0 && this.map.queryRenderedFeatures([q.x, q.y], { layers }).length > 0;
+      if (covered === ph.covered[i]) return;
+      ph.covered[i] = covered;
+      mk.setOpacity(covered ? COVERED_OPACITY : '1');
+    });
+  };
 
   /** On a phone the map gets the screen while drawing; the tab row stays to reopen the sheet. */
   private foldSheet(drawing: boolean) {
@@ -95,35 +116,13 @@ export class ModelDrawer {
     this.map.once('resize', pan);
   }
 
-  /** Extrusions then outlines under the other extrusions, so buildings in front hide the outlines; the draft over everything. */
+  /** The models under the buildings, so buildings in front hide their outlines; the draft over everything. */
   addLayers(beforeId: string | undefined) {
     if (this.map.getSource(MODELS_SRC)) return;
     const under = this.map.getStyle().layers.find((l) => l.type === 'fill-extrusion')?.id ?? beforeId;
     this.map.addSource(MODELS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(DRAFT_SRC, { type: 'geojson', data: EMPTY });
-    this.map.addLayer(
-      {
-        id: MODELS_FILL_LAYER,
-        type: 'fill-extrusion',
-        source: MODELS_SRC,
-        paint: {
-          'fill-extrusion-color': ['case', ['get', 'current'], MODEL_ACCENT, MODEL_COLOR],
-          'fill-extrusion-base': ['get', 'base'],
-          'fill-extrusion-height': ['get', 'top'],
-          'fill-extrusion-opacity': 0.9
-        }
-      },
-      under
-    );
-    this.map.addLayer(
-      {
-        id: 'models-line',
-        type: 'line',
-        source: MODELS_SRC,
-        paint: { 'line-color': ['case', ['get', 'selected'], MODEL_ACCENT, MODEL_COLOR], 'line-width': ['case', ['get', 'current'], 2.5, 1.5] }
-      },
-      under
-    );
+    for (const layer of modelLayers(MODELS_SRC)) this.map.addLayer(layer, under);
     this.map.addLayer({ id: 'model-draft-fill', type: 'fill', source: DRAFT_SRC, filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': MODEL_ACCENT, 'fill-opacity': 0.18 } });
     this.map.addLayer({ id: 'model-draft-line', type: 'line', source: DRAFT_SRC, paint: { 'line-color': MODEL_ACCENT, 'line-width': 2, 'line-dasharray': [2, 1] } });
     this.render();
@@ -213,6 +212,7 @@ export class ModelDrawer {
   private syncHandles() {
     for (const h of this.handles) h.remove();
     this.handles = [];
+    this.partHandles = null;
     const st = modelsStore.getState();
     if (st.draft) {
       st.draft.forEach((p, i) => this.handles.push(this.handle(p, i === 0, (q, final) => this.moveDraftVertex(i, q, final), () => this.deleteDraftVertex(i), i === 0 ? () => void this.finish() : null)));
@@ -225,6 +225,8 @@ export class ModelDrawer {
       const g = localToLngLat(m.anchor, e, n);
       this.handles.push(this.handle([g.lng, g.lat], false, (q, final) => this.movePartVertex(m, part.id, i, q, final), () => this.deletePartVertex(m, part.id, i), null));
     });
+    const c = localToLngLat(m.anchor, part.ring.reduce((a, v) => a + v[0], 0) / part.ring.length, part.ring.reduce((a, v) => a + v[1], 0) / part.ring.length);
+    this.partHandles = { marks: this.handles, covered: this.handles.map(() => false), centre: [c.lng, c.lat] };
   }
 
   private handle(at: [number, number], first: boolean, move: (p: LngLat, final: boolean) => void, remove: () => void, tap: (() => void) | null): Marker {
@@ -322,6 +324,7 @@ export class ModelDrawer {
   }
 
   dispose() {
+    this.map.off('idle', this.coverHandles);
     for (const u of this.unsubs) u();
     for (const h of this.handles) h.remove();
   }

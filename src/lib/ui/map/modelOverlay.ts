@@ -1,9 +1,50 @@
 import type { FeatureCollection, LineString, Polygon } from 'geojson';
+import type { LayerSpecification } from 'maplibre-gl';
 import { localToLngLat, modelBaseM, type SavedModel } from '@core/model';
 import { modelMesh } from '@core/model/mesh';
 
 export const MODEL_COLOR = '#e0b872';
 export const MODEL_ACCENT = '#5aa9ff';
+export const MODELS_FILL_LAYER = 'models-fill';
+export const MODELS_LINE_LAYER = 'models-line';
+export const OTHER_MODELS_FILL_LAYER = 'models-fill-others';
+
+const fillLayer = (id: string, source: string, selected: boolean): LayerSpecification => ({
+  id,
+  type: 'fill-extrusion',
+  source,
+  filter: ['==', ['get', 'selected'], selected],
+  paint: {
+    'fill-extrusion-color': ['case', ['get', 'current'], MODEL_ACCENT, MODEL_COLOR],
+    'fill-extrusion-base': ['get', 'base'],
+    'fill-extrusion-height': ['get', 'top'],
+    'fill-extrusion-opacity': 0.9
+  }
+});
+
+const outlineLayer = (id: string, source: string, selected: boolean): LayerSpecification => ({
+  id,
+  type: 'line',
+  source,
+  filter: ['==', ['get', 'selected'], selected],
+  paint: { 'line-color': selected ? MODEL_ACCENT : MODEL_COLOR, 'line-width': ['case', ['get', 'current'], 2.5, 1.5] }
+});
+
+/**
+ * Bottom to top: the selected model, its outline, the other models, their outlines. Lines keep no depth, so
+ * extrusions drawn after the selected outline (other models, then buildings) hide it where they stand in front.
+ */
+export function modelLayers(source: string): LayerSpecification[] {
+  return [fillLayer(MODELS_FILL_LAYER, source, true), outlineLayer(MODELS_LINE_LAYER, source, true), fillLayer(OTHER_MODELS_FILL_LAYER, source, false), outlineLayer('models-line-others', source, false)];
+}
+
+/** Where to test a vertex handle for cover: `stepPx` inside its footprint, so a wall it shares with a neighbour does not count. */
+export function coverProbe(v: { x: number; y: number }, centre: { x: number; y: number }, stepPx: number): { x: number; y: number } {
+  const d = Math.hypot(centre.x - v.x, centre.y - v.y);
+  if (d === 0) return { x: v.x, y: v.y };
+  const k = Math.min(stepPx, d / 2) / d;
+  return { x: v.x + (centre.x - v.x) * k, y: v.y + (centre.y - v.y) * k };
+}
 
 export interface ModelFeatureProps {
   model: string;
