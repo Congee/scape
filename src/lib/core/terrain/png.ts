@@ -21,8 +21,9 @@ const CHANNELS: Record<number, 1 | 2 | 3 | 4 | undefined> = { 0: 1, 2: 3, 4: 2, 
 async function inflate(zlibData: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
   const ds = new DecompressionStream('deflate');
   const writer = ds.writable.getWriter();
-  void writer.write(zlibData);
-  void writer.close();
+  // Corrupt data rejects these too; the read below reports it.
+  writer.write(zlibData).catch(() => {});
+  writer.close().catch(() => {});
   return new Uint8Array(await new Response(ds.readable).arrayBuffer());
 }
 
@@ -72,12 +73,21 @@ export function unfilter(raw: Uint8Array, width: number, height: number, bpp: nu
   return out;
 }
 
-export async function decodePng(bytes: Uint8Array): Promise<DecodedPng> {
+interface Chunks {
+  width: number;
+  height: number;
+  depth: number;
+  colourType: number;
+  interlace: number;
+  /** PLTE entries, 0 without a palette. */
+  paletteSize: number;
+  zlib: Uint8Array<ArrayBuffer>;
+}
+
+function readChunks(bytes: Uint8Array): Chunks {
   for (let i = 0; i < 8; i++) if (bytes[i] !== SIGNATURE[i]) throw new UnsupportedPngError('Not a PNG');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let width = 0;
-  let height = 0;
-  let channels: 1 | 2 | 3 | 4 = 4;
+  const c = { width: 0, height: 0, depth: 0, colourType: 0, interlace: 0, paletteSize: 0 };
   const idat: Uint8Array[] = [];
   let total = 0;
   for (let pos = 8; pos + 8 <= bytes.length; ) {
@@ -85,23 +95,48 @@ export async function decodePng(bytes: Uint8Array): Promise<DecodedPng> {
     const type = String.fromCharCode(bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]);
     const body = bytes.subarray(pos + 8, pos + 8 + len);
     if (type === 'IHDR') {
-      width = view.getUint32(pos + 8);
-      height = view.getUint32(pos + 12);
-      const depth = bytes[pos + 16];
-      const ch = CHANNELS[bytes[pos + 17]];
-      const interlace = bytes[pos + 20];
-      if (depth !== 8 || !ch || interlace !== 0) throw new UnsupportedPngError(`PNG depth ${depth}, colour type ${bytes[pos + 17]}, interlace ${interlace}`);
-      channels = ch;
-    } else if (type === 'IDAT') {
+      c.width = view.getUint32(pos + 8);
+      c.height = view.getUint32(pos + 12);
+      c.depth = bytes[pos + 16];
+      c.colourType = bytes[pos + 17];
+      c.interlace = bytes[pos + 20];
+    } else if (type === 'PLTE') c.paletteSize = Math.floor(len / 3);
+    else if (type === 'IDAT') {
       idat.push(body);
       total += body.length;
     } else if (type === 'IEND') break;
     pos += 12 + len;
   }
-  if (!width || !height) throw new UnsupportedPngError('PNG without IHDR');
-  const zlibData = new Uint8Array(total);
-  for (let i = 0, off = 0; i < idat.length; off += idat[i].length, i++) zlibData.set(idat[i], off);
-  const raw = await inflate(zlibData);
-  if (raw.length < height * (width * channels + 1)) throw new UnsupportedPngError('PNG data truncated');
-  return { width, height, channels, data: unfilter(raw, width, height, channels) };
+  if (!c.width || !c.height) throw new UnsupportedPngError('PNG without IHDR');
+  const zlib = new Uint8Array(total);
+  for (let i = 0, off = 0; i < idat.length; off += idat[i].length, i++) zlib.set(idat[i], off);
+  return { ...c, zlib };
+}
+
+async function pixels(c: Chunks, bpp: number): Promise<Uint8Array> {
+  const raw = await inflate(c.zlib);
+  if (raw.length < c.height * (c.width * bpp + 1)) throw new UnsupportedPngError('PNG data truncated');
+  return unfilter(raw, c.width, c.height, bpp);
+}
+
+export async function decodePng(bytes: Uint8Array): Promise<DecodedPng> {
+  const c = readChunks(bytes);
+  const channels = CHANNELS[c.colourType];
+  if (c.depth !== 8 || !channels || c.interlace !== 0) throw new UnsupportedPngError(`PNG depth ${c.depth}, colour type ${c.colourType}, interlace ${c.interlace}`);
+  return { width: c.width, height: c.height, channels, data: await pixels(c, channels) };
+}
+
+export interface IndexedPng {
+  width: number;
+  height: number;
+  /** Palette index per pixel, row-major. */
+  index: Uint8Array;
+  paletteSize: number;
+}
+
+/** 8-bit paletted (colour type 3) PNGs, whose indices carry the data (GIBS colormap refs). */
+export async function decodeIndexedPng(bytes: Uint8Array): Promise<IndexedPng> {
+  const c = readChunks(bytes);
+  if (c.depth !== 8 || c.colourType !== 3 || c.interlace !== 0 || !c.paletteSize) throw new UnsupportedPngError(`PNG depth ${c.depth}, colour type ${c.colourType}, interlace ${c.interlace}, palette ${c.paletteSize}`);
+  return { width: c.width, height: c.height, index: await pixels(c, 1), paletteSize: c.paletteSize };
 }

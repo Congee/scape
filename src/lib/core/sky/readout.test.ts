@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { bortleOf } from './brightness';
-import { domeText, GlowLevel, glowLevel, glowTowardText, moonCurve, skyReadout } from './readout';
+import { domeText, GlowLevel, glowLevel, glowTowardText, moonCurve, skyReadout, SkySourceKind } from './readout';
 import type { Skyglow } from './skyglow';
 
 const sky = (mag: number): Skyglow => ({ artificialCdm2: 0, mag, bortle: bortleOf(mag), sectorShare: new Float64Array(36), sectorDistKm: new Float64Array(36), domes: [] });
 
 describe('sky readout', () => {
   it('reads as the brief spells it', () => {
-    expect(skyReadout(sky(21.34), 2024)).toBe('Sky ≈ 21.3 mag/arcsec² · Bortle ≈ 3 · VIIRS 2024 model');
-    expect(skyReadout(sky(17.2), 2023)).toContain('Bortle ≈ 8–9');
+    expect(skyReadout(sky(21.34), { kind: SkySourceKind.Yearly, year: 2024 })).toBe('Sky ≈ 21.3 mag/arcsec² · Bortle ≈ 3 · VIIRS 2024 model');
+    expect(skyReadout(sky(17.2), { kind: SkySourceKind.Yearly, year: 2023 })).toContain('Bortle ≈ 8–9');
+    expect(skyReadout(sky(21.34), { kind: SkySourceKind.Nightly, nights: ['2026-09-20', '2026-09-12'] })).toBe('Sky ≈ 21.3 mag/arcsec² · Bortle ≈ 3 · VIIRS nightly, 2 nights to 2026-09-20');
   });
 
   it('names domes by azimuth and height', () => {

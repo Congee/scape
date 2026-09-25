@@ -40,8 +40,14 @@ const tab = await Tab.open(Number(cdp), BASE);
 const ev = <T>(e: string) => tab.eval<T>(e);
 
 let stubbed = 0;
-tab.listeners.push((method, p) => {
+const GIBS = '*gibs.earthdata.nasa.gov*';
+// GIBS stays unreachable so the yearly import alone decides the readouts.
+tab.listeners.push((method, p, sessionId) => {
   if (method !== 'Fetch.requestPaused') return;
+  if (String((p.request as { url: string }).url).includes('gibs.earthdata.nasa.gov')) {
+    void tab.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'InternetDisconnected' }, sessionId).catch(() => {});
+    return;
+  }
   stubbed++;
   const body = JSON.stringify({ content: LISTED.map((t) => ({ name: `VNP46A4.A${YEAR}001.${t}.002.2025000000000.h5` })) });
   void tab.send('Fetch.fulfillRequest', {
@@ -54,7 +60,8 @@ tab.listeners.push((method, p) => {
     body: Buffer.from(body).toString('base64')
   });
 });
-await tab.send('Fetch.enable', { patterns: [{ urlPattern: '*ladsweb.modaps.eosdis.nasa.gov/archive/allData/5200/VNP46A4/*/001.json*' }] });
+await tab.send('Fetch.enable', { patterns: [{ urlPattern: '*ladsweb.modaps.eosdis.nasa.gov/archive/allData/5200/VNP46A4/*/001.json*' }, { urlPattern: GIBS }] });
+tab.workerSetup.push((s) => tab.send('Fetch.enable', { patterns: [{ urlPattern: GIBS }] }, s).catch(() => {}));
 
 const withLock = async <T>(f: () => Promise<T>): Promise<T> => {
   if (lock === '-') return f();
@@ -135,8 +142,8 @@ await ev('window.__scape.offline.getState().removeViirs()');
 for (const v of views) {
   await tab.viewport(v.w, v.h);
   await go(url('rotterdam'));
-  const ok = await settle('NoData');
   await openNight();
+  const ok = await settle('NoData');
   const m = await ev<{ cam: string; tgt: string; badge: boolean } | null>(`(() => {
     const c = document.querySelector('.sky-missing[data-sky="Camera"]'), t = document.querySelector('.sky-missing[data-sky="Target"]');
     return c && t ? { cam: c.textContent.trim(), tgt: t.textContent.trim(), badge: !!document.querySelector('.sky-badge') } : null;

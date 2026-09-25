@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { makeObserver, siteHeightM, SkyBody } from '@core/astro/bodies';
 import { dayEvents, EventKind, type DayEvent } from '@core/astro/dayEvents';
 import { activeShowers, radiantHorizontal, upcomingPeaks, type ShowerStatus } from '@core/astro/meteors';
@@ -23,7 +23,7 @@ import { darkHoursUrl } from '@core/sky/darkhours';
 import { domeText, glowTowardText, MOON_DARK_DMAG, moonCurve, SKY_TOOLTIP, skyReadout, type MoonSample } from '@core/sky/readout';
 import { glowToward, SKYGLOW_PARAMS, skyglowFrom } from '@core/sky/skyglow';
 import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
-import { GlowStatus, useSkyglow, type GlowPoint } from '@state/skyglow';
+import { GlowStatus, skyglowStore, useSkyglow, type GlowPoint } from '@state/skyglow';
 import type { LngLat } from '@core/geo/geodesy';
 import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 
@@ -150,6 +150,15 @@ function PointSky({ label, p, g, heightM, skyline, time, tz }: { label: string; 
         </b>
       </>
     );
+  if (g.status === GlowStatus.Loading)
+    return (
+      <>
+        <span className="k">{label}</span>
+        <b className="v sky-loading muted" data-sky={label}>
+          loading VIIRS nightly…
+        </b>
+      </>
+    );
   if (g.status === GlowStatus.Error)
     return (
       <>
@@ -159,13 +168,13 @@ function PointSky({ label, p, g, heightM, skyline, time, tz }: { label: string; 
         </b>
       </>
     );
-  if (g.status !== GlowStatus.Ready || !g.bins || g.year === null) return null;
+  if (g.status !== GlowStatus.Ready || !g.bins || !g.source) return null;
   const sky = skyglowFrom(g.bins, heightM, SKYGLOW_PARAMS, skyline);
   return (
     <>
       <span className="k">{label}</span>
       <b className="v sky-readout" data-sky={label} title={SKY_TOOLTIP}>
-        {skyReadout(sky, g.year)} · {link}
+        {skyReadout(sky, g.source)} · {link}
         {sky.domes.length > 0 && <span className="muted domes"> · {sky.domes.map(domeText).join('; ')}</span>}
         {g.missing.length > 0 && <span className="muted"> · without {g.missing.join(', ')}, reads too dark</span>}
       </b>
@@ -178,6 +187,7 @@ function SkyGroup({ obs, skyline, aim, night, time, tz, hour12, heights }: { obs
   const target = useSkyglow((s) => s.target);
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
+  useEffect(() => skyglowStore.getState().want(), []);
   const sl = skyline ? (az: number) => horizonAngleAt(skyline, az) : undefined;
   const camSky = camera.status === GlowStatus.Ready && camera.bins ? skyglowFrom(camera.bins, heights.camera, SKYGLOW_PARAMS, sl) : null;
   const toward = camSky && pin2 ? glowToward(camSky, aim.azimuthDeg, aim.elevationDeg, sl) : null;
@@ -192,7 +202,9 @@ function SkyGroup({ obs, skyline, aim, night, time, tz, hour12, heights }: { obs
         ? 'Sky brightness · no data here'
         : camera.status === GlowStatus.Error
           ? 'Sky brightness · model failed'
-          : 'Sky brightness';
+          : camera.status === GlowStatus.Loading
+            ? 'Sky brightness · loading…'
+            : 'Sky brightness';
   return (
     <Group id="sky" summary={summary}>
       <div className="kv">
@@ -215,7 +227,7 @@ function SkyGroup({ obs, skyline, aim, night, time, tz, hour12, heights }: { obs
         </b>
       </div>
       {curve.length > 1 && worst <= MOON_DARK_DMAG && <MoonChart curve={curve} time={time} tz={tz} hour12={hour12} />}
-      <p className="muted hint">{SKY_TOOLTIP} Zenith from NASA VIIRS Black Marble (VNP46A4) through a Walker-law kernel calibrated to 23 SQM sites; domes follow DarkHours (MIT).</p>
+      <p className="muted hint">{SKY_TOOLTIP} Zenith from NASA GIBS VIIRS nightly radiance (median of 8 nights), or an imported VIIRS Black Marble (VNP46A4) year where present, through a Walker-law kernel calibrated to 23 SQM sites; domes follow DarkHours (MIT).</p>
     </Group>
   );
 }

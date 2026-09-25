@@ -6,7 +6,15 @@ import type { Dome, GlowToward, Skyglow } from './skyglow';
 
 export const SKY_TOOLTIP = 'Models artificial light only, on a moonless, clear night.';
 
-export const skyReadout = (g: Skyglow, year: number): string => `Sky ≈ ${g.mag.toFixed(1)} mag/arcsec² · Bortle ≈ ${g.bortle.label} · VIIRS ${year} model`;
+export const SkySourceKind = { Yearly: 'Yearly', Nightly: 'Nightly' } as const;
+export type SkySourceKind = (typeof SkySourceKind)[keyof typeof SkySourceKind];
+
+/** Where a reading's radiance came from: an imported VNP46A4 year, or GIBS nightly tiles (nights newest first). */
+export type SkySource = { kind: typeof SkySourceKind.Yearly; year: number } | { kind: typeof SkySourceKind.Nightly; nights: readonly string[] };
+
+export const sourceText = (s: SkySource): string => (s.kind === SkySourceKind.Yearly ? `VIIRS ${s.year} model` : `VIIRS nightly, ${s.nights.length} night${s.nights.length === 1 ? '' : 's'} to ${s.nights[0]}`);
+
+export const skyReadout = (g: Skyglow, s: SkySource): string => `Sky ≈ ${g.mag.toFixed(1)} mag/arcsec² · Bortle ≈ ${g.bortle.label} · ${sourceText(s)}`;
 
 export const domeText = (d: Dome): string => `dome ${Math.round(d.azimuthDeg)}° ${compass(d.azimuthDeg)}, ~${d.heightDeg < 1 ? d.heightDeg.toFixed(1) : Math.round(d.heightDeg)}° high${d.hidden ? ', behind terrain' : ''}`;
 

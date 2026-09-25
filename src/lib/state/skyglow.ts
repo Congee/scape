@@ -1,21 +1,24 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { LngLat } from '@core/geo/geodesy';
+import { SkySourceKind, type SkySource } from '@core/sky/readout';
 import { referenceBins, REACH_KM, SKYGLOW_PARAMS, type GlowBins } from '@core/sky/skyglow';
 import { tileName, tileOf, tilesForWindow, VIIRS_MARGIN_KM, windowAround, type ViirsWindow } from '@core/sky/viirs';
 import { readViirsWindow, type ViirsStore } from '@data/viirs';
 import { SkyglowGl } from '@ui/sky/skyglowGl';
+import { GibsOutcome, type GibsRequest, type GibsResponse } from '../workers/gibs.protocol';
 import { offlineStore } from './offline';
 import { worldStore } from './world';
 
-export const GlowStatus = { NoPoint: 'NoPoint', NoData: 'NoData', Ready: 'Ready', Error: 'Error' } as const;
+/** Idle: no imported year here and nothing asks for a GIBS reading. */
+export const GlowStatus = { NoPoint: 'NoPoint', Idle: 'Idle', Loading: 'Loading', NoData: 'NoData', Ready: 'Ready', Error: 'Error' } as const;
 export type GlowStatus = (typeof GlowStatus)[keyof typeof GlowStatus];
 
 export interface GlowPoint {
   status: GlowStatus;
   /** Sector × ring sums; heights and the calibration constant apply at read time. */
   bins: GlowBins | null;
-  year: number | null;
+  source: SkySource | null;
   /** Tiles within the model margin that are published but not imported, e.g. "h18v03". */
   missing: string[];
   error: string | null;
@@ -28,13 +31,19 @@ export interface SkyglowState {
   runs: number;
   /** Wall time of the last refresh's reads and GPU work, ms. */
   lastMs: number;
+  /** Panels showing a sky reading; GIBS is only fetched while above zero. */
+  wanted: number;
+  /** Holds a GIBS demand until the returned release runs. */
+  want(): () => void;
+  /** Each point's last GIBS reading: tile count and what it downloaded. */
+  gibsLast: Partial<Record<'camera' | 'target', { tiles: number; fetchedTiles: number; fetchedBytes: number; nights: string[] }>>;
   /** Test aid: relative difference of the camera's GPU total from the exact CPU sum. */
   compareReference(): Promise<{ gpu: number; ref: number; rel: number } | null>;
 }
 
 const sum = (b: GlowBins) => b.w.reduce((s, v) => s + v, 0);
 
-const empty = (status: GlowStatus): GlowPoint => ({ status, bins: null, year: null, missing: [], error: null });
+const empty = (status: GlowStatus): GlowPoint => ({ status, bins: null, source: null, missing: [], error: null });
 
 export const skyglowStore = create<SkyglowState>()(
   subscribeWithSelector(
@@ -43,11 +52,22 @@ export const skyglowStore = create<SkyglowState>()(
       target: empty(GlowStatus.NoPoint),
       runs: 0,
       lastMs: 0,
+      wanted: 0,
+      want: () => {
+        skyglowStore.setState((s) => ({ wanted: s.wanted + 1 }));
+        let held = true;
+        return () => {
+          if (held) skyglowStore.setState((s) => ({ wanted: s.wanted - 1 }));
+          held = false;
+        };
+      },
+      gibsLast: {},
       compareReference: async () => {
         const pin = worldStore.getState().pin;
         const cam = skyglowStore.getState().camera;
-        if (!cam.bins || cam.year === null) return null;
-        const { win } = await readViirsWindow(cam.year, windowAround(pin, REACH_KM));
+        if (!cam.bins || !cam.source) return null;
+        const win = cam.source.kind === SkySourceKind.Yearly ? (await readViirsWindow(cam.source.year, windowAround(pin, REACH_KM))).win : camGibs?.key === gibsKey(pin) ? camGibs.win : null;
+        if (!win) return null;
         const ref = sum(referenceBins(win, pin.lat, pin.lng, SKYGLOW_PARAMS.lambdaKm));
         const gpu = sum(cam.bins);
         return { gpu, ref, rel: ref > 0 ? gpu / ref - 1 : 0 };
@@ -81,47 +101,111 @@ export function offerYear(store: ViirsStore, now = new Date()): number {
 }
 
 const CACHE_MAX = 64;
-const cache = new Map<string, GlowBins>();
+const cache = new Map<string, { bins: GlowBins; source: SkySource }>();
 // ~100 m cells: finer moves cannot change a 15″ (~460 m) raster's answer by much.
-const cacheKey = (year: number, p: LngLat) => `${year}|${p.lat.toFixed(3)},${p.lng.toFixed(3)}|${SKYGLOW_PARAMS.lambdaKm}`;
+const cell = (p: LngLat) => `${p.lat.toFixed(3)},${p.lng.toFixed(3)}|${SKYGLOW_PARAMS.lambdaKm}`;
+const cacheKey = (year: number, p: LngLat) => `${year}|${cell(p)}`;
+const gibsKey = (p: LngLat) => `gibs|${cell(p)}`;
+
+const remember = (key: string, v: { bins: GlowBins; source: SkySource }) => {
+  cache.set(key, v);
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+};
 
 let gpu: SkyglowGl | null = null;
-let loadedYear: number | null = null;
+/** What the GPU holds: a year, or one GIBS point's key. */
+let loaded: number | string | null = null;
+/** The camera's last GIBS window, for compareReference. */
+let camGibs: { key: string; win: ViirsWindow } | null = null;
+
+function ensureGpu(): SkyglowGl {
+  if (!gpu || gpu.lost) {
+    gpu = new SkyglowGl();
+    loaded = null;
+  }
+  return gpu;
+}
+
+let worker: Worker | null = null;
+let nextId = 0;
+const pending = new Map<number, (r: GibsResponse) => void>();
+
+function askGibs(req: Omit<GibsRequest, 'id'>): Promise<GibsResponse> {
+  if (!worker) {
+    worker = new Worker(new URL('../workers/gibs.worker.ts', import.meta.url), { type: 'module' });
+    worker.addEventListener('message', (e: MessageEvent<GibsResponse>) => {
+      pending.get(e.data.id)?.(e.data);
+      pending.delete(e.data.id);
+    });
+  }
+  const id = nextId++;
+  return new Promise((resolve) => {
+    pending.set(id, resolve);
+    worker!.postMessage({ ...req, id } satisfies GibsRequest);
+  });
+}
 
 const inside = (a: Omit<ViirsWindow, 'data'>, b: Omit<ViirsWindow, 'data'>) => a.row0 >= b.row0 && a.row0 + a.rows <= b.row0 + b.rows && a.col0 >= b.col0 && a.col0 + a.cols <= b.col0 + b.cols;
 
 /** Slack loaded around a point so nearby moves reuse the pyramid. */
 const SLACK_KM = 50;
 
-async function binsAt(p: LngLat, year: number): Promise<GlowBins> {
-  const key = cacheKey(year, p);
-  const hit = cache.get(key);
-  if (hit) return hit;
-  if (!gpu || gpu.lost) {
-    gpu = new SkyglowGl();
-    loadedYear = null;
-  }
-  const cur = gpu.current;
-  if (loadedYear !== year || !cur || !inside(windowAround(p, REACH_KM, gpu.maxTexture), cur)) {
-    const { win } = await readViirsWindow(year, windowAround(p, REACH_KM + SLACK_KM, gpu.maxTexture));
-    gpu.load(win, p.lat);
-    loadedYear = year;
-  }
-  const bins = gpu.run(p.lat, p.lng, SKYGLOW_PARAMS.lambdaKm);
+function runAt(g: SkyglowGl, p: LngLat): GlowBins {
+  const bins = g.run(p.lat, p.lng, SKYGLOW_PARAMS.lambdaKm);
   skyglowStore.setState((s) => ({ runs: s.runs + 1 }));
-  cache.set(key, bins);
-  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
   return bins;
 }
 
-async function pointState(p: LngLat | null, store: ViirsStore): Promise<GlowPoint> {
+async function binsAt(p: LngLat, year: number): Promise<GlowBins> {
+  const key = cacheKey(year, p);
+  const hit = cache.get(key);
+  if (hit) return hit.bins;
+  const g = ensureGpu();
+  const cur = g.current;
+  if (loaded !== year || !cur || !inside(windowAround(p, REACH_KM, g.maxTexture), cur)) {
+    const { win } = await readViirsWindow(year, windowAround(p, REACH_KM + SLACK_KM, g.maxTexture));
+    g.load(win, p.lat);
+    loaded = year;
+  }
+  const bins = runAt(g, p);
+  remember(key, { bins, source: { kind: SkySourceKind.Yearly, year } });
+  return bins;
+}
+
+const Point = { Camera: 'camera', Target: 'target' } as const;
+type Point = (typeof Point)[keyof typeof Point];
+
+/** Imported yearly data wins where the point's own tile is imported; GIBS nightly covers the rest. */
+async function gibsState(p: LngLat, store: ViirsStore, which: Point): Promise<GlowPoint> {
+  const key = gibsKey(p);
+  const hit = cache.get(key);
+  if (hit) return { ...empty(GlowStatus.Ready), bins: hit.bins, source: hit.source };
+  if (skyglowStore.getState().wanted <= 0) return empty(GlowStatus.Idle);
+  skyglowStore.setState({ [which]: empty(GlowStatus.Loading) });
+  const g = ensureGpu();
+  const res = await askGibs({ p, win: windowAround(p, REACH_KM, g.maxTexture), nowMs: Date.now() });
+  if (res.outcome === GibsOutcome.Offline) return { ...empty(GlowStatus.NoData), missing: missingTiles(p, offerYear(store), store) };
+  if (res.outcome === GibsOutcome.Error) return { ...empty(GlowStatus.Error), error: res.error };
+  if (!res.nights.length) return { ...empty(GlowStatus.NoData), missing: missingTiles(p, offerYear(store), store) };
+  skyglowStore.setState((s) => ({ gibsLast: { ...s.gibsLast, [which]: { tiles: res.tiles, fetchedTiles: res.fetchedTiles, fetchedBytes: res.fetchedBytes, nights: res.nights } } }));
+  const glow = ensureGpu();
+  glow.load(res.win, p.lat);
+  loaded = key;
+  if (which === Point.Camera) camGibs = { key, win: res.win };
+  const source: SkySource = { kind: SkySourceKind.Nightly, nights: res.nights };
+  const bins = runAt(glow, p);
+  remember(key, { bins, source });
+  return { ...empty(GlowStatus.Ready), bins, source };
+}
+
+async function pointState(p: LngLat | null, store: ViirsStore, which: Point): Promise<GlowPoint> {
   if (!p) return empty(GlowStatus.NoPoint);
   const year = yearFor(p, store);
-  if (year === null) return { ...empty(GlowStatus.NoData), missing: missingTiles(p, offerYear(store), store) };
   try {
-    return { status: GlowStatus.Ready, bins: await binsAt(p, year), year, missing: missingTiles(p, year, store), error: null };
+    if (year === null) return await gibsState(p, store, which);
+    return { status: GlowStatus.Ready, bins: await binsAt(p, year), source: { kind: SkySourceKind.Yearly, year }, missing: missingTiles(p, year, store), error: null };
   } catch (e) {
-    return { ...empty(GlowStatus.Error), year, error: e instanceof Error ? e.message : String(e) };
+    return { ...empty(GlowStatus.Error), error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -135,14 +219,14 @@ async function update(): Promise<void> {
   const store = offlineStore.getState().viirs;
   const t0 = performance.now();
   // Sequential: both points may share one loaded window.
-  const camera = await pointState(pin, store);
-  const target = await pointState(pin2, store);
+  const camera = await pointState(pin, store, Point.Camera);
+  const target = await pointState(pin2, store, Point.Target);
   skyglowStore.setState({ camera, target, lastMs: performance.now() - t0 });
 }
 
 const DEBOUNCE_MS = 250;
 
-/** Recomputes on camera, target or VIIRS changes, debounced; nothing runs while they stand still. */
+/** Recomputes on camera, target, VIIRS, demand or connectivity changes, debounced; nothing runs while they stand still. */
 export function startSkyglowSync(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const schedule = () => {
@@ -158,12 +242,15 @@ export function startSkyglowSync(): () => void {
     worldStore.subscribe((s) => s.pin2, schedule),
     offlineStore.subscribe((s) => s.viirs, () => {
       cache.clear();
-      loadedYear = null;
+      loaded = null;
       schedule();
-    })
+    }),
+    skyglowStore.subscribe((s) => s.wanted > 0, (on) => on && schedule())
   ];
+  window.addEventListener('online', schedule);
   return () => {
     if (timer) clearTimeout(timer);
+    window.removeEventListener('online', schedule);
     for (const off of offs) off();
   };
 }

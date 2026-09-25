@@ -8,10 +8,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bytesSource } from '../../src/lib/core/io/hdf5';
 import { bortleOf, cdm2ToMag, magToCdm2, NATURAL_SKY_MAG } from '../../src/lib/core/sky/brightness';
-import { altitudeFactor, KM_PER_DEG_LAT, KM_PER_DEG_LON, kernel, REACH_KM, SKYGLOW_PARAMS } from '../../src/lib/core/sky/skyglow';
+import { histSum, radialHistogram, type Hist, type Win } from '../../src/lib/core/sky/radial';
+import { altitudeFactor, REACH_KM, SKYGLOW_PARAMS } from '../../src/lib/core/sky/skyglow';
 import { SQM_SITES } from '../../src/lib/core/sky/skyglow.sites';
 import { decodeViirsTile } from '../../src/lib/core/sky/viirsTile';
-import { parseViirsName, tileName, tilesForWindow, VIIRS_COLS, VIIRS_PX_PER_DEG, VIIRS_SCALE, VIIRS_TILE_PX, type ViirsWindow, windowAround } from '../../src/lib/core/sky/viirs';
+import { parseViirsName, tileName, tilesForWindow, VIIRS_COLS, VIIRS_SCALE, VIIRS_TILE_PX, windowAround } from '../../src/lib/core/sky/viirs';
 import { BASKET } from './basket';
 
 const args = process.argv.slice(2);
@@ -28,12 +29,6 @@ interface Site {
   lat: number;
   lng: number;
   elevM: number;
-}
-
-/** A window with its own quantum and saturation count (GIBS), or VNP46A4's. */
-interface Win extends ViirsWindow {
-  scale: number;
-  satCount: number;
 }
 
 const siteKey = (s: Site) => s.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -69,43 +64,10 @@ function windowFromFile(d: string, s: Site): Win {
   return { scale: VIIRS_SCALE, satCount: Infinity, ...meta, data: new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength / 2) };
 }
 
-const BIN_KM = 0.05;
-interface Hist {
-  /** Radiance·area by distance bin, unsaturated and saturated pixels apart, so every λ and gain reuses one pass. */
-  lit: Float64Array;
-  sat: Float64Array;
-  /** Radiance of the observer's own pixel, nW/(cm²·sr). */
-  local: number;
-}
-
-function radialHistogram(win: Win, s: Site): Hist {
-  const lit = new Float64Array(Math.ceil(REACH_KM / BIN_KM));
-  const sat = new Float64Array(lit.length);
-  const d2r = Math.PI / 180;
-  const px = 1 / VIIRS_PX_PER_DEG;
-  const kx = KM_PER_DEG_LON * Math.cos(s.lat * d2r);
-  for (let r = 0; r < win.rows; r++) {
-    const pLat = 90 - (win.row0 + r + 0.5) * px;
-    const dy = (pLat - s.lat) * KM_PER_DEG_LAT;
-    const area = px * KM_PER_DEG_LAT * px * KM_PER_DEG_LON * Math.cos(pLat * d2r);
-    for (let c = 0; c < win.cols; c++) {
-      const v = win.data[r * win.cols + c];
-      if (!v) continue;
-      let dLon = (win.col0 + c + 0.5) * px - 180 - s.lng;
-      dLon -= 360 * Math.round(dLon / 360);
-      const i = Math.floor(Math.hypot(dLon * kx, dy) / BIN_KM);
-      if (i < lit.length) (v >= win.satCount ? sat : lit)[i] += v * win.scale * area;
-    }
-  }
-  const r = Math.floor((90 - s.lat) * VIIRS_PX_PER_DEG) - win.row0;
-  const c = Math.floor((s.lng + 180) * VIIRS_PX_PER_DEG) - win.col0;
-  return { lit, sat, local: win.data[r * win.cols + c] * win.scale };
-}
-
 const load = (d: string, tiles: Map<string, Uint16Array> | null, sites: readonly Site[]) => sites.map((s) => radialHistogram(tiles ? windowFromTiles(tiles, s) : windowFromFile(d, s), s));
 const tiles = mode === '--h5' ? await h5Tiles() : null;
 const hist = load(dir, tiles, SQM_SITES);
-const sum = (h: Float64Array, lambda: number) => h.reduce((a, v, i) => a + v * kernel((i + 0.5) * BIN_KM, lambda), 0);
+const sum = histSum;
 const natural = magToCdm2(NATURAL_SKY_MAG);
 
 interface Fit {

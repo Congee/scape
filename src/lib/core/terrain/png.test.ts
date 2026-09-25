@@ -1,7 +1,8 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { decodeTerrarium } from './dem';
-import { decodePng, UnsupportedPngError } from './png';
+import { decodeIndexedPng, decodePng, UnsupportedPngError } from './png';
+import { encodeIndexedPng } from './pngFixture';
 
 const be32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
 const chunk = (type: string, body: number[]) => [...be32(body.length), ...[...type].map((c) => c.charCodeAt(0)), ...body, 0, 0, 0, 0];
@@ -53,5 +54,25 @@ describe('decodePng', () => {
     const interlaced = encodePng(1, 1, [1, 2, 3], [0]);
     interlaced[8 + 8 + 12] = 1;
     await expect(decodePng(interlaced)).rejects.toBeInstanceOf(UnsupportedPngError);
+  });
+});
+
+describe('decodeIndexedPng', () => {
+  const index = Array.from({ length: 6 * 3 }, (_, i) => (i * 29) % 181);
+
+  it('returns raw palette indices', async () => {
+    const png = await decodeIndexedPng(encodeIndexedPng(6, 3, index, { palette: 181 }));
+    expect(png).toMatchObject({ width: 6, height: 3, paletteSize: 181 });
+    expect(Array.from(png.index)).toEqual(index);
+  });
+
+  it('rejects unpaletted or palette-less images', async () => {
+    await expect(decodeIndexedPng(encodeIndexedPng(6, 3, index, { palette: 0 }))).rejects.toBeInstanceOf(UnsupportedPngError);
+    await expect(decodeIndexedPng(encodePng(1, 1, [1, 2, 3], [0]))).rejects.toBeInstanceOf(UnsupportedPngError);
+  });
+
+  it('rejects truncated data', async () => {
+    const png = encodeIndexedPng(6, 3, index);
+    await expect(decodeIndexedPng(png.slice(0, png.length - 20))).rejects.toThrow();
   });
 });

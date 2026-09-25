@@ -23,11 +23,12 @@ precision highp usampler2D;
 uniform usampler2D uCounts;
 uniform float uRow0;
 uniform float uCosLat0;
+uniform float uScale;
 out vec4 o;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   float lat = radians(90.0 - (uRow0 + float(p.y) + 0.5) / ${VIIRS_PX_PER_DEG.toFixed(1)});
-  o = vec4(float(texelFetch(uCounts, p, 0).r) * ${VIIRS_SCALE.toFixed(4)} * cos(lat) / uCosLat0, 0.0, 0.0, 1.0);
+  o = vec4(float(texelFetch(uCounts, p, 0).r) * uScale * cos(lat) / uCosLat0, 0.0, 0.0, 1.0);
 }`;
 
 const REDUCE = `#version 300 es
@@ -182,6 +183,7 @@ export class SkyglowGl {
     gl.uniform1i(gl.getUniformLocation(this.density, 'uCounts'), 0);
     gl.uniform1f(gl.getUniformLocation(this.density, 'uRow0'), win.row0);
     gl.uniform1f(gl.getUniformLocation(this.density, 'uCosLat0'), Math.cos((lat0 * Math.PI) / 180));
+    gl.uniform1f(gl.getUniformLocation(this.density, 'uScale'), win.scale ?? VIIRS_SCALE);
     this.draw(levels[0].tex, win.cols, win.rows);
     gl.deleteTexture(counts);
     gl.useProgram(this.reduce);

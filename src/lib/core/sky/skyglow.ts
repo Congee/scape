@@ -60,6 +60,7 @@ export function referenceBins(win: ViirsWindow, lat: number, lng: number, lambda
   const d2r = Math.PI / 180;
   const pxDeg = 1 / VIIRS_PX_PER_DEG;
   const kx = KM_PER_DEG_LON * Math.cos(lat * d2r);
+  const scale = win.scale ?? VIIRS_SCALE;
   for (let r = 0; r < win.rows; r++) {
     const pLat = 90 - (win.row0 + r + 0.5) * pxDeg;
     const dy = (pLat - lat) * KM_PER_DEG_LAT;
@@ -75,7 +76,7 @@ export function referenceBins(win: ViirsWindow, lat: number, lng: number, lambda
       if (k < 0) continue;
       const az = (Math.atan2(dx, dy) / d2r + 360) % 360;
       const s = Math.floor(az / SECTOR_DEG) % SECTORS;
-      const w = v * VIIRS_SCALE * area * kernel(d, lambdaKm);
+      const w = v * scale * area * kernel(d, lambdaKm);
       bins.w[k * SECTORS + s] += w;
       bins.wd[k * SECTORS + s] += w * d;
     }

@@ -79,8 +79,10 @@ export interface ViirsWindow {
   col0: number;
   rows: number;
   cols: number;
-  /** Counts of VIIRS_SCALE nW/(cm²·sr); 0 where there is no data or no light. */
+  /** Counts of `scale` nW/(cm²·sr); 0 where there is no data or no light. */
   data: Uint16Array;
+  /** nW/(cm²·sr) per count; VIIRS_SCALE when absent. */
+  scale?: number;
 }
 
 /** Global pixel rows and columns covering `km` around a point, at most `maxPx` a side; columns may run past ±180° and wrap. */

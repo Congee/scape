@@ -4,7 +4,7 @@ import { settingsStore, useSettings } from '@state/settings';
 import { pinSiteHeightM, useTerrain } from '@state/terrain';
 import { TerrainKind } from '@workers/terrain.protocol';
 import { useWorld } from '@state/world';
-import { SKY_TOOLTIP } from '@core/sky/readout';
+import { SKY_TOOLTIP, sourceText } from '@core/sky/readout';
 import { SKYGLOW_PARAMS, skyglowFrom } from '@core/sky/skyglow';
 import { GlowStatus, useSkyglow } from '@state/skyglow';
 import { PanelTab, uiStore } from '@state/ui';
@@ -36,7 +36,7 @@ export function Badges() {
         </span>
       )}
       {sky && (
-        <button className="badge sky-badge" onClick={() => uiStore.getState().setPanelTab(PanelTab.Night)} title={`Sky ≈ ${sky.mag.toFixed(2)} mag/arcsec² at the camera, VIIRS ${glow.year} model. ${SKY_TOOLTIP}`}>
+        <button className="badge sky-badge" onClick={() => uiStore.getState().setPanelTab(PanelTab.Night)} title={`Sky ≈ ${sky.mag.toFixed(2)} mag/arcsec² at the camera, ${glow.source ? sourceText(glow.source) : 'VIIRS'}. ${SKY_TOOLTIP}`}>
           ✦ Bortle ≈ {sky.bortle.label}
         </button>
       )}
