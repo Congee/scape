@@ -47,7 +47,7 @@ import { currentBasemap, offlineStore } from '@state/offline';
 import { ClickMode, settingsStore } from '@state/settings';
 import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
 import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
-import { worldStore } from '@state/world';
+import { planTime, worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { CloudOverlay } from './cloudOverlay';
 import { paintHeat } from './heat';
@@ -334,8 +334,9 @@ export class MapController {
         },
         { equalityFn: samePoint }
       ),
-      worldStore.subscribe((st) => st.time, () => {
-        this.renderLive(true);
+      worldStore.subscribe((st) => st.time, () => this.renderLive(true)),
+      // Live, shadows follow the minute: a clock showing seconds must not rebuild them.
+      worldStore.subscribe(planTime, () => {
         // A live tick needs no debounce, and a timer per tick keeps an idle page awake.
         if (worldStore.getState().live) this.requestShadows();
         else this.scheduleShadows();
@@ -955,7 +956,7 @@ export class MapController {
     const s = settingsStore.getState();
     if (!s.showSunShadows || this.map.getZoom() < SHADOW_MIN_ZOOM) return this.hideShadows();
     const w = worldStore.getState();
-    const light = lightAt(s.lightSource, new Date(w.time), makeObserver(w.pin, w.pinHeightM));
+    const light = lightAt(s.lightSource, new Date(planTime(w)), makeObserver(w.pin, w.pinHeightM));
     this.lightBody = light?.body ?? null;
     if (!light) return this.hideShadows();
     const buildings = s.showBuildings && this.map.getZoom() >= BLD_MIN_ZOOM;

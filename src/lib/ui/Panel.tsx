@@ -8,7 +8,6 @@ import { NightPanel } from './NightPanel';
 import { ToolsPanel } from './ToolsPanel';
 import { OfflinePanel } from './OfflinePanel';
 import { Timeline } from './Timeline';
-import { useSecondsTick } from '@state/clock';
 import { PanelTab, uiStore, useUi } from '@state/ui';
 
 const TABS: PanelTab[] = [PanelTab.Timeline, PanelTab.Geodetics, PanelTab.Frame, PanelTab.Night, PanelTab.Tools, PanelTab.Weather, PanelTab.Find, PanelTab.Markers, PanelTab.Layers, PanelTab.Offline];
@@ -33,8 +32,6 @@ export function Panel() {
   const tab = useUi((s) => s.panelTab);
   const collapsed = useUi((s) => s.panelCollapsed);
   const ui = uiStore.getState();
-  // The Timeline's live readout is the view that tracks the sky by the second.
-  useSecondsTick(tab === PanelTab.Timeline && !collapsed);
   return (
     <div className="panel-inner">
       <div className="tabs" role="tablist">

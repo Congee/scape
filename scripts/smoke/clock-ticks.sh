@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test that the live DateBar clock shows minutes, ticks seconds only on hover, focus or the Timeline tab, and that the panels follow a time change, on desktop and phone.
+# Smoke test that the live DateBar clock shows minutes, ticks seconds only on hover or focus, and that the panels follow a time change, on desktop and phone.
 # Usage: scripts/smoke/clock-ticks.sh [port] [cdp-port] [screenshot-dir]
 # Needs a server (dev or probe build) on the port and a browser with remote debugging on the CDP port.
 set -uo pipefail
@@ -90,7 +90,9 @@ pass() { # viewport label, width, height
   js '(() => { document.activeElement?.blur(); return "ok"; })()' >/dev/null
 
   js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Timeline"); u.setPanelCollapsed(false); return "ok"; })()' >/dev/null
-  ticks "$tag Timeline tab ticks seconds"
+  sleep 0.3
+  c0=$(clock)
+  check "$tag Timeline tab shows minutes" "$([ "$(colons "$c0")" = 1 ] && echo 1 || echo 0)" "$c0"
   ab screenshot "$OUT/$tag-live-timeline.png" >/dev/null
 
   set_time 2026-06-21T06:30:00Z
