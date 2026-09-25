@@ -104,7 +104,8 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 Explicitly out of scope: accounts/sync server, AR camera overlay (no reliable web compass),
 Google Street View / photorealistic tiles (paid, non-relightable); a bring-your-own-key
 Google 3D Tiles viewfinder backdrop is ultra-low priority (2026-09-24). Apple 3D / Look Around:
-MapKit JS offers only its own Look Around view, no camera or FOV control, no mesh access.
+MapKit JS offers only its own Look Around view, no camera or FOV control, no mesh access. A native macOS shell could drive MKMapCamera (picture-only, fixed FOV); deferred
+(2026-09-24).
 
 ## 3. Architecture
 
@@ -158,7 +159,7 @@ search params.
 | Geocoding | Photon public API online; GeoNames cities offline | |
 | 3D viewfinder | MapLibre terrain under the 2D canvas: camera placed at the eye (`calculateCameraOptionsFromCameraLngLatAltRotation`, pitch to 180°, vertical FOV = frame), DEM sweep for skyline, occlusion and sky | Three.js unused |
 | Sky data | HYG v4.1 (CC BY-SA), NASA SVS Deep Star Maps (PD), d3-celestial lines (BSD-3) | built into `public/sky` by `scripts/build-sky.ts`; sources listed in `public/sky/README.md` |
-| Light pollution | NASA GIBS VIIRS Black Marble raster (PD) | Falchi's atlas and the usual tile sets are CC BY-NC, so night lights stand in for now |
+| Light pollution | NASA GIBS VIIRS Black Marble raster (PD) | Falchi's atlas and the usual tile sets are CC BY-NC; estimated Bortle and mag/arcsec² at camera and target come from our own scattering model on VIIRS radiance (2026-09-24) |
 | Tests | Vitest for core; Playwright later for UI smoke | pure unit tests, no I/O |
 
 ## 5. UI layout
