@@ -30,7 +30,7 @@ export interface SkyglowParams {
 }
 
 /** Fitted by scripts/viirs/calibrate.ts against the SQM sites in skyglow.sites.ts. */
-export const SKYGLOW_PARAMS: SkyglowParams = { k: 1.0e-6, lambdaKm: 60 };
+export const SKYGLOW_PARAMS: SkyglowParams = { k: 2.528e-5, lambdaKm: 19 };
 
 // Walker's d^-2.5 law softened at the source and cut by extinction: a Garstang (1986) shape without its integral.
 export const kernel = (dKm: number, lambdaKm: number): number => (dKm * dKm + SOFTEN_KM * SOFTEN_KM) ** -1.25 * Math.exp(-dKm / lambdaKm);
