@@ -1,42 +1,11 @@
 import { addSourceType, RasterDEMTileSource, type Dispatcher, type Evented, type MessageType, type SourceClass, type Tile } from 'maplibre-gl';
-import type { TileCoord } from '@core/terrain/tiles';
-import type { DemRequest, DemResponse } from '@workers/dem.protocol';
+import { DemFormat } from '@workers/dem.protocol';
+import { requestDem } from './demWorker';
 
 /** The spec MapLibre's own DEM source takes; ours differs only in the `type` that selects it. */
 type DemSpec = ConstructorParameters<typeof RasterDEMTileSource>[1];
 
 const EXACT_TYPE = 'scape-raster-dem';
-
-type DemPixels = Extract<DemResponse, { rgba: unknown }>;
-
-let worker: Worker | undefined;
-let nextId = 0;
-const waiters = new Map<number, { resolve: (r: DemPixels) => void; reject: (e: Error) => void }>();
-
-/** Decode, outlier repair and encode off the main thread: a steep tile's repair alone takes ~100 ms. */
-function loadDemPixels(tile: TileCoord, signal: AbortSignal): Promise<DemPixels> {
-  if (!worker) {
-    worker = new Worker(new URL('../workers/dem.worker.ts', import.meta.url), { type: 'module' });
-    worker.addEventListener('message', (e: MessageEvent<DemResponse>) => {
-      const res = e.data;
-      const waiter = waiters.get(res.id);
-      waiters.delete(res.id);
-      if ('error' in res) waiter?.reject(new Error(res.error));
-      else waiter?.resolve(res);
-    });
-  }
-  const w = worker;
-  const id = ++nextId;
-  return new Promise((resolve, reject) => {
-    waiters.set(id, { resolve, reject });
-    signal.addEventListener('abort', () => {
-      waiters.delete(id);
-      w.postMessage({ id, cancel: true } satisfies DemRequest);
-      reject(new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
-    w.postMessage({ id, tile } satisfies DemRequest);
-  });
-}
 
 /**
  * Elevations decoded by us rather than by MapLibre.
@@ -60,7 +29,7 @@ class ExactRasterDEMTileSource extends RasterDEMTileSource {
     tile.neighboringTiles = this._getNeighboringTiles(tile.tileID);
     tile.abortController = new AbortController();
     try {
-      const dem = await loadDemPixels({ z, x, y }, tile.abortController.signal);
+      const dem = await requestDem({ z, x, y }, DemFormat.Pixels, tile.abortController.signal);
       delete (tile as Partial<Tile>).abortController;
       if (tile.aborted) {
         tile.state = 'unloaded';

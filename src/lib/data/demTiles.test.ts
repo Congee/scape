@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeRgbaPng } from '@core/terrain/pngEncode';
 import { encodeTerrarium } from '@core/terrain/terrarium';
+import type { DemRequest } from '@workers/dem.protocol';
 
 vi.mock('./localTiles', () => ({ localTerrain: { tile: async () => null } }));
 
@@ -15,10 +16,22 @@ vi.mock('maplibre-gl', () => ({
 const SIZE = 4;
 const png = (m: number) => encodeRgbaPng(encodeTerrarium(new Float32Array(SIZE * SIZE).fill(m), SIZE), SIZE, SIZE);
 
-/** Answers by `z/x/y`: a status, or elevation in metres for a 200. */
-let answers: Record<string, number | { status: number }>;
+/** Answers by `z/x/y`: a status, elevation in metres for a 200, or raw bytes for one. */
+let answers: Record<string, number | Uint8Array | { status: number }>;
 const fetched: string[] = [];
 let demTiles: typeof import('./demTiles');
+
+/** Requests the page posted to the DEM worker. */
+const posted: DemRequest[] = [];
+
+/** The real worker loop in-process; messages hop a microtask as they would a thread. */
+class FakeWorker extends EventTarget {
+  private serve = import('@workers/dem.serve').then(({ demServer }) => demServer((res) => this.dispatchEvent(new MessageEvent('message', { data: res }))));
+  postMessage(req: DemRequest) {
+    posted.push(req);
+    void this.serve.then((serve) => serve(req));
+  }
+}
 
 beforeEach(async () => {
   answers = {};
@@ -27,8 +40,11 @@ beforeEach(async () => {
     const k = /(\d+\/\d+\/\d+)\.\w+$/.exec(url)![1];
     fetched.push(k);
     const a = answers[k] ?? { status: 404 };
-    return typeof a === 'number' ? new Response(png(a).slice().buffer) : new Response(null, { status: a.status });
+    if (typeof a === 'number') return new Response(png(a).slice().buffer);
+    return a instanceof Uint8Array ? new Response(a.slice().buffer) : new Response(null, { status: a.status });
   });
+  posted.length = 0;
+  vi.stubGlobal('Worker', FakeWorker);
   // The ancestor cache is module state.
   vi.resetModules();
   demTiles = await import('./demTiles');
@@ -82,5 +98,36 @@ describe('scape-dem protocol', () => {
     const { data } = await handler({ url: 'scape-dem://17/2/3' }, new AbortController());
     expect(data).toEqual(png(12));
     expect(fetched).toEqual(['17/2/3']);
+    expect(posted).toEqual([{ id: 1, tile: { z: 17, x: 2, y: 3 }, format: 'encoded' }]);
+  });
+
+  it('lets an unreadable tile through for MapLibre to judge', async () => {
+    const { ensureDemProtocol } = await import('./demProtocol');
+    ensureDemProtocol();
+    const junk = new Uint8Array([1, 2, 3, 4, 5]);
+    answers['17/2/3'] = junk;
+    const { data } = await handler({ url: 'scape-dem://17/2/3' }, new AbortController());
+    expect(data).toEqual(junk);
+  });
+
+  it('errors the tile when its parent fails transiently', async () => {
+    const { ensureDemProtocol } = await import('./demProtocol');
+    ensureDemProtocol();
+    answers['17/2/3'] = -32768;
+    answers['16/1/1'] = { status: 503 };
+    answers['15/0/0'] = 3;
+    await expect(handler({ url: 'scape-dem://17/2/3' }, new AbortController())).rejects.toThrow(/HTTP 503/);
+    expect(fetched).not.toContain('15/0/0');
+  });
+
+  it('cancels the worker request on abort', async () => {
+    const { ensureDemProtocol } = await import('./demProtocol');
+    ensureDemProtocol();
+    answers['17/2/3'] = 12;
+    const abort = new AbortController();
+    const p = handler({ url: 'scape-dem://17/2/3' }, abort);
+    abort.abort();
+    await expect(p).rejects.toThrow(/Aborted/);
+    expect(posted).toEqual([{ id: 1, tile: { z: 17, x: 2, y: 3 }, format: 'encoded' }, { id: 1, cancel: true }]);
   });
 });

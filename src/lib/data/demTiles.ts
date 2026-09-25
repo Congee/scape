@@ -1,5 +1,7 @@
 import { ancestorTile, DEM_MAX_M, DEM_MIN_M, overzoomTile, type DemTile } from '@core/terrain/dem';
 import { decodePng } from '@core/terrain/png';
+import { encodeRgbaPng } from '@core/terrain/pngEncode';
+import { encodeTerrarium } from '@core/terrain/terrarium';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
 import { localTerrain } from './localTiles';
 import { decodeTerrainTile, terrainTileUrl, type DecodedDem } from './terrainTiles';
@@ -31,6 +33,18 @@ export async function loadDemTile(c: TileCoord, signal?: AbortSignal): Promise<L
   }
   const { size, elev, repaired } = await overzoom(c);
   return { size, elev, repaired: repaired ?? 0 };
+}
+
+/**
+ * Encoded bytes for MapLibre's own decode, where WebCodecs is missing: a tile with a valid post
+ * verbatim, anything else rebuilt from its nearest ancestor.
+ */
+export async function loadDemBytes(c: TileCoord, signal?: AbortSignal): Promise<FetchedTile> {
+  const got = await fetchTile(c, signal);
+  // A tile with no valid post at all falls back like a 404 rather than drawing a -32768 m pit.
+  if (got && (await hasValidPost(got.data))) return got;
+  const tile = await overzoom(c);
+  return { data: encodeRgbaPng(encodeTerrarium(tile.elev, tile.size), tile.size, tile.size).buffer as ArrayBuffer };
 }
 
 interface FetchedTile {
