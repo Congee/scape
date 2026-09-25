@@ -3,11 +3,6 @@ const D2R = Math.PI / 180;
 /** Apparent sidereal drift of a star on the celestial equator. */
 export const SIDEREAL_DEG_PER_S = 360 / 86_164.0905;
 
-/** Longest exposure before stars trail by the "500 rule" (or 600, 400…), seconds. */
-export function ruleOfN(focalMm: number, cropFactor = 1, constant = 500): number {
-  return constant / (focalMm * cropFactor);
-}
-
 export function pixelPitchUm(sensorWidthMm: number, pixelsWide: number): number {
   return (sensorWidthMm / pixelsWide) * 1000;
 }

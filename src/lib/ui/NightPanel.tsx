@@ -8,9 +8,9 @@ import { polarisAid } from '@core/astro/polaris';
 import { moonInfo, position } from '@core/astro/positions';
 import { apply, enuToEqj } from '@core/astro/skyFrame';
 import { compass, degrees, percent } from '@core/format';
-import { cropFactor, effectiveOptics, equivalentFocalMm } from '@core/optics/fov';
+import { effectiveOptics } from '@core/optics/fov';
 import { dirFromAzAlt } from '@core/optics/projection';
-import { npfShutterS, pixelPitchUm, ruleOfN, trailAngleDeg, trailLengthPx } from '@core/optics/startrails';
+import { npfShutterS, pixelPitchUm, trailAngleDeg, trailLengthPx } from '@core/optics/startrails';
 import { formatDateShort, formatTime } from '@core/time/format';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { useDayData } from '@state/dayData';
@@ -24,7 +24,6 @@ import { domeText, glowTowardText, MOON_DARK_DMAG, moonCurve, SKY_TOOLTIP, skyRe
 import { glowToward, SKYGLOW_PARAMS, skyglowFrom } from '@core/sky/skyglow';
 import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { GlowStatus, useSkyglow, type GlowPoint } from '@state/skyglow';
-import { PanelTab, uiStore } from '@state/ui';
 import type { LngLat } from '@core/geo/geodesy';
 import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 
@@ -146,9 +145,7 @@ function PointSky({ label, p, g, heightM, skyline, time, tz }: { label: string; 
       <>
         <span className="k">{label}</span>
         <b className="v sky-missing" data-sky={label}>
-          <button className="link" onClick={() => uiStore.getState().setPanelTab(PanelTab.Offline)} title="Import VNP46A4 tiles in the Offline tab">
-            download VIIRS for this region
-          </button>
+          no sky data here
           {g.missing.length > 0 && <span className="muted"> · {g.missing.join(', ')}</span>} · {link}
         </b>
       </>
@@ -192,7 +189,7 @@ function SkyGroup({ obs, skyline, aim, night, time, tz, hour12, heights }: { obs
     camera.status === GlowStatus.Ready && camSky
       ? `Sky ≈ ${camSky.mag.toFixed(1)} mag/arcsec² · Bortle ≈ ${camSky.bortle.label}`
       : camera.status === GlowStatus.NoData
-        ? 'Sky brightness · download VIIRS for this region'
+        ? 'Sky brightness · no data here'
         : camera.status === GlowStatus.Error
           ? 'Sky brightness · model failed'
           : 'Sky brightness';
@@ -254,7 +251,6 @@ export function NightPanel() {
   const aim = aimFor(c, { pin, pin2 }, targetAngleDeg);
   const dec = aimDeclination(time, obs, aim.azimuthDeg, aim.elevationDeg);
   const opt = effectiveOptics(c);
-  const r500 = ruleOfN(opt.focalMm, cropFactor(sensor));
   const npf = pitch ? npfShutterS(opt.fNumber, opt.focalMm, pitch, dec) : null;
   const trailS = c.trailMinutes * 60;
   const { active, upcoming } = showersFor(time);
@@ -283,7 +279,7 @@ export function NightPanel() {
   const moonFree = moonFreeWindow(night, tonight.events, moonUpAtNightfall);
   const moonSummary = `${moon.name} ${percent(moon.illumination, 0)}${nextMoon ? ` · ${nextMoon.kind === EventKind.Rise ? 'rises' : 'sets'} ${formatTime(nextMoon.time, tz, s.hour12)}` : ''}`;
 
-  const starsSummary = `${npf ? `NPF ${npf.toFixed(1)} s` : `500 rule ${r500.toFixed(1)} s`} at ${opt.focalMm} mm${polaris.northern ? ` · Polaris ${signed(polaris.polarisAltDeg)}` : ''}`;
+  const starsSummary = `${npf ? `NPF ${npf.toFixed(1)} s at ${opt.focalMm} mm` : 'NPF needs the camera or pixel count'}${polaris.northern ? ` · Polaris ${signed(polaris.polarisAltDeg)}` : ''}`;
   const meteorSummary = active[0]
     ? `${active[0].shower.name} active · peak ${formatDateShort(active[0].peakMs, tz)}`
     : upcoming[0]
@@ -420,10 +416,6 @@ export function NightPanel() {
                 <span className="muted">px wide (or pick the camera in Frame)</span>
               </>
             )}
-          </b>
-          <span className="k">500 rule</span>
-          <b className="v">
-            {r500.toFixed(1)} s <span className="muted">· {equivalentFocalMm(sensor, opt.focalMm).toFixed(0)} mm equivalent</span>
           </b>
           <span className="k">NPF rule</span>
           <b className="v">{npf ? `${npf.toFixed(1)} s` : 'needs the pixel count'} <span className="muted">· f/{opt.fNumber}, {opt.focalMm} mm, declination {signed(dec, 0)}</span></b>

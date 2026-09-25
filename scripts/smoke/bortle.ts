@@ -143,12 +143,12 @@ for (const v of views) {
   })()`);
   await tab.shot(join(shots, `${v.name}-missing.png`));
   const fits = await noSideways();
-  check(`${v.name}: missing state for camera and target`, ok && !!m && m.cam.includes('download VIIRS for this region') && m.cam.includes('h18v03') && m.tgt.includes('download VIIRS') && !m.badge && fits, m ? `${m.cam} · badge ${m.badge} · fits ${fits}` : 'no missing rows');
+  check(`${v.name}: missing state for camera and target`, ok && !!m && m.cam.includes('no sky data here') && m.cam.includes('h18v03') && m.tgt.includes('no sky data here') && !m.cam.includes('download') && !m.badge && fits, m ? `${m.cam} · badge ${m.badge} · fits ${fits}` : 'no missing rows');
 }
 await tab.viewport(1400, 900);
 
-// 2. The missing link opens the Offline tab; Check LAADS lists the year from the stub.
-await ev(`document.querySelector('.sky-missing[data-sky="Camera"] button').click()`);
+// 2. Offline tab: Check LAADS lists the year from the stub.
+await ev(`window.__scape.ui.getState().setPanelTab('Offline')`);
 const tabNow = await ev<string>('window.__scape.ui.getState().panelTab');
 await tab.until(`[...document.querySelectorAll('button')].some((b) => /Check LAADS|Recheck LAADS/.test(b.textContent))`, 20_000);
 await ev(`(() => {
@@ -161,7 +161,7 @@ await ev(`[...document.querySelectorAll('button')].find((b) => /Check LAADS|Rech
 const listed = await tab.until<string>(`(() => { const l = window.__scape.offline.getState().viirs.listings[${YEAR}]; return l ? l.join(' ') : ''; })()`, 20_000);
 const chips = await ev<string>(`[...document.querySelectorAll('.viirs-need [data-tile]')].map((c) => c.dataset.tile + ':' + c.className.replace('chip ', '')).join(' ')`);
 await tab.shot(join(shots, 'desktop-offline-listing.png'));
-check('Missing link opens Offline; stubbed LAADS listing stored', tabNow === 'Offline' && stubbed >= 1 && listed === LISTED.join(' ') && chips.includes('h18v03:viirs-missing') && chips.includes('h17v04:viirs-ocean'), `tab ${tabNow}, ${stubbed} stubbed, chips ${chips}`);
+check('Offline tab; stubbed LAADS listing stored', tabNow === 'Offline' && stubbed >= 1 && listed === LISTED.join(' ') && chips.includes('h18v03:viirs-missing') && chips.includes('h17v04:viirs-ocean'), `tab ${tabNow}, ${stubbed} stubbed, chips ${chips}`);
 
 // 3. Import the synthetic tiles through the Offline file input.
 const files = readdirSync(tiles)
