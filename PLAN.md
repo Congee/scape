@@ -541,8 +541,10 @@ visible errors are design choices, each waiting on a decision (recommendation in
   3.5′ off Horizons.
 - Fixed 2026-09-24 (astro2): viewfinder, star and Milky Way refraction scale by air density at the
   eye (ERFA within 0.2 % above 10°); constellation vertices snap to the brightest catalogue star
-  within 120″ (were 13″ median, 95″ max off). Still sea-level density: last light, moon view, map
-  light, finder/align workers, fastHorizon, `RISE_APPARENT_DEG`.
+  within 120″ (were 13″ median, 95″ max off).
+- Fixed 2026-09-25 (airdensity): last light, moon view, map light, light probe, finder/align workers
+  and fastHorizon refract in the eye's air too; the rise/set threshold is `riseApparentDeg(ρ)`
+  (−0.247° at 3000 m, was −0.215°); fastHorizon at 3000 m matches the viewfinder to 1e-6° (was 0.1°).
 - Rise/set times come from 0.5° horizon columns, so a jagged near ridge can put the viewfinder's
   Sun/Moon flip up to ~30 s off the listed time (Zermatt 1–6 s). Finer azimuth steps around the
   rise/set azimuths [leave for now].
