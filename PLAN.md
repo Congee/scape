@@ -496,6 +496,7 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Offline buildings (merged): z14 only, "download with the terrain" on by default up to 100 tiles
   (~30 MB dense city; NYC 50 km = 686 tiles / 146 MB); separate Estimate/Download too. Open: should
   one click also fetch the basemap for the region? Yes, up to 100 tiles.
+- Hidden buildings (or terrain off, or the viewfinder closed) stop both building streams: queued fetches dropped, on-wire ones aborted, no redraws; showing them reloads (smoke `coldtiles.sh`).
 - Models P1 (merged): a hidden model does not suppress Overture rows, nor the map's fill-extrusion
   under it (`models-fill` hides it under a visible one); "Model this building" seeds from every z14
   tile the building spans; `.scape.json` export omits models until P3b.
