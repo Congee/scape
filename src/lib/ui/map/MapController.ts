@@ -56,6 +56,7 @@ import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
 import { MapLayers } from './mapLayers';
 import { MapMenu } from './mapMenu';
 import { ModelDrawer } from './ModelDrawer';
+import { installMotionLod } from './motionLod';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 import { installTrackpadWheel } from './wheelZoom';
 
@@ -203,6 +204,7 @@ export class MapController {
     this.scale = new ScaleControl({ unit: s.units });
     this.map.addControl(this.scale, 'bottom-left');
     this.unsubs.push(installTrackpadWheel(this.map));
+    this.unsubs.push(installMotionLod(this.map));
     if (import.meta.env.DEV) Object.assign(window, { __scapeMap: this.map, __scapeMapCtl: this });
     if (import.meta.env.DEV || ZOOM_PROBE) {
       let off: (() => void) | undefined;
