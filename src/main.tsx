@@ -26,6 +26,7 @@ import { installIdleProbe } from '@ui/idleProbe';
 import { worldStore } from '@state/world';
 import { weatherStore } from '@state/weather';
 import { weatherStats } from '@data/weather';
+import { cloudStats } from '@ui/map/cloudOverlay';
 import { routeTree } from './routeTree.gen';
 
 const router = createRouter({ routeTree, defaultPreload: 'intent' });
@@ -39,7 +40,7 @@ declare module '@tanstack/react-router' {
 if (import.meta.env.DEV) {
   window.addEventListener('error', (e) => console.error('[scape] error:', e.message, e.filename, e.lineno, e.error?.stack));
   window.addEventListener('unhandledrejection', (e) => console.error('[scape] rejection:', e.reason));
-  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, models: modelsStore, plans: plansStore, gear: gearStore, sky: skyStore, dayData: dayDataStore, finder: finderStore, align: alignStore, searches: searchesStore, offline: offlineStore, buildings: buildingsStore, lightProbe: lightProbeStore, ui: uiStore, weather: weatherStore, weatherStats, idle: installIdleProbe() };
+  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, models: modelsStore, plans: plansStore, gear: gearStore, sky: skyStore, dayData: dayDataStore, finder: finderStore, align: alignStore, searches: searchesStore, offline: offlineStore, buildings: buildingsStore, lightProbe: lightProbeStore, ui: uiStore, weather: weatherStore, weatherStats, cloudStats, idle: installIdleProbe() };
   (window as unknown as Record<string, unknown>)['__scapeRequestBuildings'] = requestBuildings;
 }
 

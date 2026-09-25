@@ -10,6 +10,7 @@ import { useDayData } from '@state/dayData';
 import { useSettings } from '@state/settings';
 import { useWeather, weatherStore } from '@state/weather';
 import { useWorld } from '@state/world';
+import { CloudLayerControls } from './CloudLayerControls';
 import { Sightlines } from './Sightlines';
 import { Credit, fetchedText, WindyLink, fogAt, missingText, noDataAt, useForecast } from './CloudChart';
 
@@ -62,6 +63,7 @@ export function WeatherPanel() {
       <Card title="Camera" at={pin} result={loading ? undefined : (results?.[0] ?? null)} time={time} now={now} onRetry={retry} />
       {pin2 && <Card title="Target" at={pin2} result={loading ? undefined : (results?.[1] ?? null)} time={time} now={now} onRetry={retry} />}
       <Sightlines />
+      <CloudLayerControls />
       <Credit />
     </div>
   );

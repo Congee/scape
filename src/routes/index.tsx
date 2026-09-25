@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { mapSearchFor, parseInstant, parsePoint, validateScene, type SceneSearch } from '@state/urlState';
 import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
+import { CloudLegend } from '@ui/CloudLayerControls';
 import { DateBar } from '@ui/DateBar';
 import { Panel, PanelExpand, usePanelClass } from '@ui/Panel';
 import { Search } from '@ui/Search';
@@ -69,6 +70,7 @@ function MapPage() {
       <div className="map-area">
         <MapView />
         <PanelExpand />
+        <CloudLegend />
         <div className="map-badges">
           <Badges />
         </div>

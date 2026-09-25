@@ -49,6 +49,7 @@ import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
 import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
+import { CloudOverlay } from './cloudOverlay';
 import { paintHeat } from './heat';
 import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
@@ -167,9 +168,7 @@ export class MapController {
   private live: { src: GeoJSONSource; data: GeoJSON.FeatureCollection } | null = null;
   private painted: { src: ImageSource; mask: ShadowMaskField } | null = null;
   private drawer: ModelDrawer;
-  private menu: MapMenu;
-  /** Fingers on the map; the browser's own long-press contextmenu is left to `LongPress`. */
-  private touches = 0;
+  private clouds: CloudOverlay;
   /** Overture feature ids a visible model stands in for. */
   private hiddenIds: string[] = [];
   /** Body behind the mask on screen; the smoke test reads it. */
@@ -216,6 +215,7 @@ export class MapController {
     this.pin = this.makeMarker({ at: w.pin, color: PIN_COLOR, scale: 1 }, (p) => worldStore.getState().setPin(p), (d) => (this.dragging = d));
     this.syncPin2(w.pin2);
     this.drawer = new ModelDrawer(this.map, () => [BLD_LAYER, BLD_PART_LAYER]);
+    this.clouds = new CloudOverlay(this.map);
 
     this.map.on('click', (e: MapMouseEvent) => {
       if (this.drawingRegion || this.drawer.onClick(e)) return;
@@ -287,6 +287,7 @@ export class MapController {
       this.applyNightLights();
       this.applyBuildings();
       this.drawer.addLayers(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
+      this.clouds.addLayer(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
       this.applyShadows();
       this.updateRay();
       this.renderAll();
@@ -303,6 +304,7 @@ export class MapController {
     this.unsubs.push(
       () => clearTimeout(this.shadowTimer),
       () => this.drawer.dispose(),
+      () => this.clouds.dispose(),
       modelsStore.subscribe((st) => st.rev, () => void this.refreshSuppression()),
       buildingsStore.subscribe((st) => st.shadowMask, () => this.paintShadowMask()),
       worldStore.subscribe(

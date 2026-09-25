@@ -1,10 +1,9 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, subscribeWithSelector } from 'zustand/middleware';
+import { CloudLayer } from '@core/weather/layer';
 import { WeatherModel } from '@core/weather/models';
 
-/** What the map's cloud overlay shows. */
-export const CloudLayer = { Off: 'Off', Total: 'Total', Low: 'Low', Mid: 'Mid', High: 'High', Fog: 'Fog' } as const;
-export type CloudLayer = (typeof CloudLayer)[keyof typeof CloudLayer];
+export { CloudLayer };
 
 export interface WeatherState {
   model: WeatherModel;
@@ -13,19 +12,36 @@ export interface WeatherState {
   setModel(model: WeatherModel): void;
   setLayer(layer: CloudLayer): void;
   setOpacity(opacity: number): void;
+  /** What the map overlay last drew; not persisted. */
+  cloudInfo: CloudInfo | null;
+  setCloudInfo(info: CloudInfo | null): void;
+}
+
+export interface CloudInfo {
+  stepKm: number;
+  cells: number;
+  unknown: number;
+  fetchedAt: number;
+  /** When this was drawn; ages are frozen here. */
+  at: number;
+  note: string;
 }
 
 export const weatherStore = create<WeatherState>()(
-  persist(
-    (set) => ({
-      model: WeatherModel.BestMatch,
-      layer: CloudLayer.Off,
-      opacity: 0.7,
-      setModel: (model) => set({ model }),
-      setLayer: (layer) => set({ layer }),
-      setOpacity: (opacity) => set({ opacity })
-    }),
-    { name: 'scape.weather', partialize: ({ model, layer, opacity }) => ({ model, layer, opacity }) }
+  subscribeWithSelector(
+    persist(
+      (set) => ({
+        model: WeatherModel.BestMatch,
+        layer: CloudLayer.Off,
+        opacity: 0.7,
+        setModel: (model) => set({ model }),
+        setLayer: (layer) => set({ layer }),
+        setOpacity: (opacity) => set({ opacity }),
+        cloudInfo: null,
+        setCloudInfo: (cloudInfo) => set({ cloudInfo })
+      }),
+      { name: 'scape.weather', partialize: ({ model, layer, opacity }) => ({ model, layer, opacity }) }
+    )
   )
 );
 
