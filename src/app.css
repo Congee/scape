@@ -2175,6 +2175,20 @@ label.file-pick input[type='file'] {
 
 .wx-missing .link { margin-left: 8px; }
 
+.glow .wx-model { margin: 4px 6px; font-size: 12px; }
+.glow-list { list-style: none; margin: 4px 0; padding: 0 6px; }
+.glow-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3ch;
+  gap: 0 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+.glow-list li.shaky { opacity: 0.6; }
+.glow-list .link { padding: 2px 0; }
+.glow-score { text-align: right; font-variant-numeric: tabular-nums; }
+.glow-why { grid-column: 1 / -1; font-size: 12px; }
+
 .wx-windy {
   display: inline-block;
   margin: 4px 6px;

@@ -1,7 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { LngLat } from '@core/geo/geodesy';
 import { emptyBudget, rateLimited, refusal, spend, succeeded, type BudgetState } from '@core/weather/budget';
-import { callWeight, forecastUrl, forecastWindow, parseForecast, roundCoord, windowDays, type HourlyVar, type PointSeries } from '@core/weather/openMeteo';
+import { callWeight, forecastUrl, forecastWindow, parseForecast, roundCoord, windowDays, type DateWindow, type HourlyVar, type PointSeries } from '@core/weather/openMeteo';
 
 /** Cached forecasts are refetched after this, and only when something asks. */
 export const STALE_MS = 3_600_000;
@@ -39,11 +39,24 @@ interface MetaEntry {
   key: string;
   fetchedAt: number;
   runMs: number;
+  /** When that run became downloadable; absent in records from before it was kept. */
+  availMs?: number;
+}
+
+/** Everything one alpenglow forecast fetched for a point: the point, then samples toward the Sun. */
+export interface GlowEntry {
+  key: string;
+  fetchedAt: number;
+  window: DateWindow;
+  bearings: number[];
+  points: LngLat[];
+  series: PointSeries[];
 }
 
 interface WeatherDB extends DBSchema {
   forecasts: { key: string; value: Entry; indexes: { byFetched: number } };
   meta: { key: string; value: MetaEntry };
+  glow: { key: string; value: GlowEntry };
 }
 
 /** Request counters for the smoke tests and the budget readout. */
@@ -52,11 +65,14 @@ export const weatherStats = { requests: 0, weight: 0, refused: 0, errors: 0, las
 let dbp: Promise<IDBPDatabase<WeatherDB> | null> | null = null;
 
 // Kept apart from the exported `scape` database: this is a disposable cache.
-function db(): Promise<IDBPDatabase<WeatherDB> | null> {
-  dbp ??= openDB<WeatherDB>('scape-weather', 1, {
-    upgrade(d) {
-      d.createObjectStore('forecasts', { keyPath: 'key' }).createIndex('byFetched', 'fetchedAt');
-      d.createObjectStore('meta', { keyPath: 'key' });
+export function db(): Promise<IDBPDatabase<WeatherDB> | null> {
+  dbp ??= openDB<WeatherDB>('scape-weather', 2, {
+    upgrade(d, from) {
+      if (from < 1) {
+        d.createObjectStore('forecasts', { keyPath: 'key' }).createIndex('byFetched', 'fetchedAt');
+        d.createObjectStore('meta', { keyPath: 'key' });
+      }
+      if (from < 2) d.createObjectStore('glow', { keyPath: 'key' });
     }
   })
     .then(async (d) => {
@@ -116,13 +132,14 @@ async function cached(keys: string[]): Promise<(Entry | undefined)[]> {
   return out;
 }
 
-async function fetchBatch(points: LngLat[], keys: string[], model: string, vars: readonly HourlyVar[], w: { startDate: string; endDate: string }): Promise<string> {
+/** One budgeted request; throws with a short note (offline, rate limited, the API's reason). */
+export async function requestSeries(points: readonly LngLat[], model: string, vars: readonly HourlyVar[], w: DateWindow): Promise<PointSeries[]> {
   const weight = callWeight(points.length, vars.length, windowDays(w));
   const now = Date.now();
   const no = refusal(budget, now, weight);
   if (no) {
     weatherStats.refused++;
-    return no;
+    throw new Error(no);
   }
   saveBudget(spend(budget, now, weight));
   const url = forecastUrl(points, model, vars, w);
@@ -134,24 +151,34 @@ async function fetchBatch(points: LngLat[], keys: string[], model: string, vars:
     res = await fetch(url);
   } catch {
     weatherStats.errors++;
-    return 'offline';
+    throw new Error('offline');
   }
   if (res.status === 429) {
     saveBudget(rateLimited(budget, Date.now()));
-    return 'rate limited by Open-Meteo';
+    throw new Error('rate limited by Open-Meteo');
   }
   let series: PointSeries[];
   try {
     series = parseForecast(await res.json(), vars);
   } catch (err) {
     weatherStats.errors++;
-    return err instanceof Error ? err.message : 'bad response';
+    throw new Error(err instanceof Error ? err.message : 'bad response', { cause: err });
   }
   if (!res.ok || series.length !== points.length) {
     weatherStats.errors++;
-    return `Open-Meteo ${res.status}`;
+    throw new Error(`Open-Meteo ${res.status}`);
   }
   saveBudget(succeeded(budget));
+  return series;
+}
+
+async function fetchBatch(points: LngLat[], keys: string[], model: string, vars: readonly HourlyVar[], w: DateWindow): Promise<string> {
+  let series: PointSeries[];
+  try {
+    series = await requestSeries(points, model, vars, w);
+  } catch (err) {
+    return (err as Error).message;
+  }
   const fetchedAt = Date.now();
   const entries = series.map((s, i): Entry => ({ key: keys[i], fetchedAt, series: s }));
   for (const e of entries) remember(e);
@@ -209,21 +236,35 @@ export async function forecastPoints(points: readonly LngLat[], model: string, v
 
 const metaMem = new Map<string, MetaEntry>();
 
-/** Start of the model's latest run, epoch ms; null when unknown. Cached for an hour. */
-export async function modelRun(metaId: string): Promise<number | null> {
+export interface ModelRun {
+  /** Start of the model's latest run and when it became available, epoch ms. */
+  runMs: number;
+  availMs: number | null;
+  /** When this was read from Open-Meteo. */
+  fetchedAt: number;
+}
+
+/** The model's latest run; null when unknown. Read at most hourly; an older record stands in offline. */
+export async function modelRunInfo(metaId: string): Promise<ModelRun | null> {
   const key = metaId;
   let e = metaMem.get(key) ?? (await (await db())?.get('meta', key));
-  if (e && Date.now() - e.fetchedAt < STALE_MS) return e.runMs;
+  if (e && Date.now() - e.fetchedAt < STALE_MS && e.availMs !== undefined) return { runMs: e.runMs, availMs: e.availMs, fetchedAt: e.fetchedAt };
   try {
     const res = await fetch(`https://api.open-meteo.com/data/${metaId}/static/meta.json`);
     if (!res.ok) throw new Error(String(res.status));
-    const j = (await res.json()) as { last_run_initialisation_time?: number };
+    const j = (await res.json()) as { last_run_initialisation_time?: number; last_run_availability_time?: number };
     if (typeof j.last_run_initialisation_time !== 'number') throw new Error('no run time');
-    e = { key, fetchedAt: Date.now(), runMs: j.last_run_initialisation_time * 1000 };
+    const avail = j.last_run_availability_time;
+    e = { key, fetchedAt: Date.now(), runMs: j.last_run_initialisation_time * 1000, availMs: typeof avail === 'number' ? avail * 1000 : 0 };
     metaMem.set(key, e);
     await (await db())?.put('meta', e).catch(() => undefined);
   } catch {
     // Offline or unreported: an older record still says something.
   }
-  return e?.runMs ?? null;
+  return e ? { runMs: e.runMs, availMs: e.availMs || null, fetchedAt: e.fetchedAt } : null;
+}
+
+/** Start of the model's latest run, epoch ms; null when unknown. Cached for an hour. */
+export async function modelRun(metaId: string): Promise<number | null> {
+  return (await modelRunInfo(metaId))?.runMs ?? null;
 }

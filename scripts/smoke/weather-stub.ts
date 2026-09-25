@@ -3,7 +3,7 @@ import { forecastBody } from '../../src/lib/core/weather/fixture';
 import type { HourlyVar } from '../../src/lib/core/weather/openMeteo';
 import type { Tab } from './cdp';
 
-export const StubMode = { Fixture: 'Fixture', Fail: 'Fail', Live: 'Live' } as const;
+export const StubMode = { Fixture: 'Fixture', Fail: 'Fail', Error: 'Error', Live: 'Live' } as const;
 export type StubMode = (typeof StubMode)[keyof typeof StubMode];
 
 export interface Hit {
@@ -59,6 +59,10 @@ export class OpenMeteoStub {
   mode: StubMode = StubMode.Fixture;
   /** Live mode passes this many requests through, then falls back to the fixture. */
   liveLeft = 0;
+  /** meta.json's last_run_availability_time, epoch ms; unset leaves it out. */
+  availableAt: number | null = null;
+  /** Overrides the fixture per forecast request. */
+  value: ((v: HourlyVar, hour: number, lat: number, lng: number, model: string) => number | null) | null = null;
   readonly hits: Hit[] = [];
 
   constructor(private tab: Tab) {}
@@ -95,6 +99,10 @@ export class OpenMeteoStub {
     let body: unknown;
     if (u.pathname.endsWith('/meta.json')) {
       body = { last_run_initialisation_time: Math.floor((Date.now() - 5 * 3_600_000) / 3_600_000) * 3600, update_interval_seconds: 3600 };
+      if (this.availableAt !== null) Object.assign(body as object, { last_run_availability_time: Math.floor(this.availableAt / 1000) });
+    } else if (this.mode === StubMode.Error) {
+      status = 500;
+      body = { error: true, reason: 'stub server error' };
     } else {
       const start = u.searchParams.get('start_date') ?? '';
       const end = u.searchParams.get('end_date') ?? start;
@@ -106,7 +114,7 @@ export class OpenMeteoStub {
         const hours = Math.round((dateMs(end) - dateMs(start)) / 3_600_000) + 24;
         const h0 = Math.round((dateMs(start) - today) / 3_600_000);
         // Past the fixture's 10-day horizon the hours are null, like a model running out.
-        body = forecastBody(lats.map((lat, i) => ({ lat, lng: lngs[i] })), start, hours, vars, (v, h, i) => (h0 + h > 240 ? null : fixtureValue(v, h, lats[i], lngs[i], model)));
+        body = forecastBody(lats.map((lat, i) => ({ lat, lng: lngs[i] })), start, hours, vars, (v, h, i) => (h0 + h > 240 ? null : (this.value ?? fixtureValue)(v, h, lats[i], lngs[i], model)));
       }
     }
     await this.tab.send('Fetch.fulfillRequest', {

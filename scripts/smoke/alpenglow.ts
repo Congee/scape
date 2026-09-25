@@ -1,0 +1,213 @@
+// Alpenglow smoke: Tools › Light at a point › Alpenglow forecast, Open-Meteo stubbed through CDP Fetch (plus one live request), desktop and phone.
+// Usage: bun scripts/smoke/alpenglow.ts <cdp> <dev-port> <screenshot-dir>
+/* oxlint-disable no-await-in-loop -- checks run one at a time against one page */
+import { mkdirSync } from 'node:fs';
+import type { HourlyVar } from '../../src/lib/core/weather/openMeteo';
+import { Tab } from './cdp';
+import { OpenMeteoStub, StubMode } from './weather-stub';
+
+const [cdp, port, out] = process.argv.slice(2);
+const BASE = `http://localhost:${port}`;
+const POINT = { lat: 51.9225, lng: 4.4792 };
+const MAX_REQUESTS = 20;
+mkdirSync(out, { recursive: true });
+
+const rows: string[] = [];
+let fails = 0;
+const check = (name: string, ok: boolean, detail: string) => {
+  if (!ok) fails++;
+  console.error(ok ? 'PASS' : 'FAIL', name, detail);
+  rows.push(`| ${name} | ${ok ? 'PASS' : 'FAIL'} | ${detail.replace(/\|/g, '/').replace(/\s+/g, ' ')} |`);
+};
+
+/** Low cloud only west of the point, some high cloud, no fog: sunrise clear, sunset blocked. */
+function westLow(v: HourlyVar, _h: number, _lat: number, lng: number): number | null {
+  switch (v) {
+    case 'cloud_cover_low':
+      return lng < POINT.lng - 0.1 ? 90 : 0;
+    case 'cloud_cover_high':
+      return 40;
+    case 'visibility':
+      return 24_000;
+    case 'weather_code':
+      return 2;
+  }
+  return 0;
+}
+const foggy = (v: HourlyVar, h: number, lat: number, lng: number) => (v === 'weather_code' ? 45 : v === 'visibility' ? 300 : westLow(v, h, lat, lng));
+
+const tab = await Tab.open(Number(cdp), BASE);
+const stub = new OpenMeteoStub(tab);
+await stub.install();
+const js = <T = string>(e: string) => tab.eval<T>(e);
+const text = (sel: string) => js(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? ''`);
+const until = <T = unknown>(e: string, ms = 20_000) => tab.until<T>(e, ms, 250);
+const row = (kind: string, day = 1) => `.glow-list li[data-glow-event="${kind}"][data-day="${day}"]`;
+const stats = () => js<{ fetches: number; cacheHits: number }>('({ ...window.__scape.glowStats })');
+
+async function fresh() {
+  const mode = stub.mode;
+  stub.mode = StubMode.Fail;
+  await tab.navigate(`${BASE}/`);
+  await js(`new Promise((r) => { window.__scape?.settings.getState().update({ weather: true }); localStorage.removeItem('scape.weatherBudget'); localStorage.removeItem('scape.weather'); const q = indexedDB.open('scape-weather'); q.onupgradeneeded = () => q.transaction.abort(); q.onerror = () => r(1); q.onsuccess = () => { const db = q.result, names = [...db.objectStoreNames]; if (!names.length) return (db.close(), r(1)); const t = db.transaction(names, 'readwrite'); for (const n of names) t.objectStore(n).clear(); t.oncomplete = t.onerror = () => (db.close(), r(1)); }; })`);
+  stub.mode = mode;
+  await tab.navigate(`${BASE}/`);
+  await until('window.__scape && document.querySelector(".tabs button")', 30_000);
+  await js(`(() => { const u = window.__scape.ui.getState(); u.setPanelTab('Tools'); u.setPanelCollapsed(false); window.__scape.lightProbe.getState().setPoint({ lat: ${POINT.lat}, lng: ${POINT.lng} }); return 1; })()`);
+  await until('window.__scape.lightProbe.getState().horizon', 120_000);
+  await js('(() => { document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); return 1; })()');
+  await until('document.querySelector("button[data-glow-toggle]:not([disabled])")');
+}
+
+/** Opens the forecast (closing it first if open) and waits for its answer. */
+async function open() {
+  await js(`(() => { const b = document.querySelector('button[data-glow-toggle]'); if (b.getAttribute('aria-expanded') === 'true') b.click(); return 1; })()`);
+  await until(`document.querySelector('button[data-glow-toggle]').getAttribute('aria-expanded') === 'false'`, 5000);
+  await js(`(() => { document.querySelector('button[data-glow-toggle]').click(); return 1; })()`);
+  const st = await until<string>(`(() => { const g = document.querySelector('[data-glow]'); return g && g.dataset.glow !== 'loading' ? g.dataset.glow : ''; })()`, 30_000);
+  await js('document.querySelector(".glow, [data-glow]")?.scrollIntoView()');
+  return st ?? 'timeout';
+}
+
+/** Ages every stored copy past the model's run, after a reload empties the memory cache. */
+async function ageCache(hours: number) {
+  await tab.navigate(`${BASE}/`);
+  await js(`new Promise((r) => { const q = indexedDB.open('scape-weather'); q.onsuccess = () => { const db = q.result, t = db.transaction('glow', 'readwrite'), s = t.objectStore('glow'); s.getAll().onsuccess = (e) => { for (const v of e.target.result) s.put({ ...v, fetchedAt: Date.now() - ${hours} * 3600000 }); }; t.oncomplete = () => (db.close(), r(1)); }; })`);
+  await tab.navigate(`${BASE}/`);
+  await until('window.__scape && document.querySelector(".tabs button")', 30_000);
+  await js(`(() => { const u = window.__scape.ui.getState(); u.setPanelTab('Tools'); u.setPanelCollapsed(false); window.__scape.lightProbe.getState().setPoint({ lat: ${POINT.lat}, lng: ${POINT.lng} }); return 1; })()`);
+  await until('window.__scape.lightProbe.getState().horizon', 120_000);
+  await js('(() => { document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); return 1; })()');
+  await until('document.querySelector("button[data-glow-toggle]:not([disabled])")');
+}
+
+async function run(vp: 'desktop' | 'phone') {
+  await tab.send('Emulation.setDeviceMetricsOverride', vp === 'phone' ? { width: 390, height: 844, deviceScaleFactor: 3, mobile: true } : { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
+  stub.mode = StubMode.Fixture;
+  stub.value = westLow;
+  stub.availableAt = null;
+  await js(`(() => { window.__scape?.weather.getState().setModel('best_match'); return 1; })()`).catch(() => 0);
+  await fresh();
+  await js(`(() => { window.__scape.weather.getState().setModel('best_match'); return 1; })()`);
+
+  // Nothing leaves before the forecast is opened.
+  const since = Date.now();
+  await Bun.sleep(1500);
+  check(`${vp}: nothing fetched until opened`, stub.forecasts(since).length === 0, `${stub.forecasts(since).length} requests`);
+
+  // Offline, nothing cached.
+  await tab.setOffline(true);
+  const off0 = await open();
+  const offNote = await text('[data-glow-note]');
+  check(`${vp}: offline without a copy says none is downloaded`, off0 === 'None' && /Offline/.test(offNote) && /no alpenglow forecast downloaded/.test(offNote) && stub.forecasts(since).length === 0, `${off0} · ${offNote}`);
+  await tab.shot(`${out}/${vp}-offline-none.png`);
+  await tab.setOffline(false);
+
+  // Fixture: sunrise clear under high cloud, sunset behind low cloud to the west.
+  const s0 = await stats();
+  const st = await open();
+  const hits = stub.forecasts(since);
+  const rise = await js<{ score: string; why: string }>(`(() => { const r = document.querySelector('${row('sunrise')}'); return { score: r?.dataset.score ?? '', why: r?.querySelector('.glow-why')?.textContent ?? '' }; })()`);
+  const set = await js<{ score: string; why: string }>(`(() => { const r = document.querySelector('${row('sunset')}'); return { score: r?.dataset.score ?? '', why: r?.querySelector('.glow-why')?.textContent ?? '' }; })()`);
+  check(`${vp}: one request for point and paths`, st === 'Ok' && hits.length === 1 && hits[0].locations % 5 === 1 && hits[0].locations >= 11 && (await stats()).fetches === s0.fetches + 1, `${st} · ${hits.length} request, ${hits[0]?.locations} points`);
+  check(`${vp}: sunrise clear with high cloud scores 100`, rise.score === '100' && rise.why === 'clear toward the Sun, high cloud 40% overhead', `${rise.score} · ${rise.why}`);
+  check(`${vp}: sunset names low cloud toward the Sun`, set.score === '10' && /^low cloud 90% toward the Sun, 25 km$/.test(set.why), `${set.score} · ${set.why}`);
+  const days = await js<number[]>(`[...new Set([...document.querySelectorAll('.glow-list li')].map((l) => +l.dataset.day))]`);
+  const shaky = await js<boolean>(`[...document.querySelectorAll('.glow-list li')].every((l) => l.classList.contains('shaky') === (+l.dataset.day >= 3))`);
+  const credit = await js(`document.querySelector('.glow .wx-credit a')?.href ?? ''`);
+  const hint = await text('.glow .hint');
+  check(`${vp}: 7 days, shaky from day 3, caveat and CC BY credit`, days.length === 7 && days[6] === 6 && shaky && /2–3 days/.test(hint) && credit.startsWith('https://open-meteo.com') && /CC BY 4\.0/.test(await text('.glow .wx-credit')), `days ${days.join(',')} · ${credit}`);
+  check(`${vp}: model line shows age`, /Best match · fetched .* ago/.test(await text('[data-glow-age]')), await text('[data-glow-age]'));
+  const t0 = await js<number>(`(() => { document.querySelector('${row('sunset')} button.link').click(); return window.__scape.world.getState().time; })()`);
+  await tab.shot(`${out}/${vp}-fixture.png`);
+  check(`${vp}: time button jumps to the window`, t0 > Date.now(), new Date(t0).toISOString());
+
+  // Reopen: same run, no second request.
+  const s1 = await stats();
+  const n1 = stub.forecasts(since).length;
+  const again = await open();
+  const s2 = await stats();
+  check(`${vp}: reopen reuses the cache`, again === 'Ok' && stub.forecasts(since).length === n1 && s2.cacheHits === s1.cacheHits + 1 && s2.fetches === s1.fetches, `${again} · hits ${s1.cacheHits} → ${s2.cacheHits}, requests +${stub.forecasts(since).length - n1}`);
+
+  // Offline with a copy older than the hour: shown with its age.
+  await ageCache(2);
+  await tab.setOffline(true);
+  const offC = await open();
+  const cNote = await text('[data-glow-note]');
+  check(`${vp}: offline shows the last copy with its age`, offC === 'Cached' && /Offline · showing the copy fetched 2 h ago/.test(cNote) && (await js<string>(`document.querySelector('${row('sunset')}')?.dataset.score ?? ''`)) === '10', `${offC} · ${cNote}`);
+  await tab.shot(`${out}/${vp}-offline-cached.png`);
+  await tab.setOffline(false);
+
+  // Server error: loud, over the old copy.
+  stub.mode = StubMode.Error;
+  const bad = await open();
+  const eNote = await js<{ cls: string; t: string }>(`(() => { const n = document.querySelector('[data-glow-note]'); return { cls: n?.className ?? '', t: n?.textContent ?? '' }; })()`);
+  check(`${vp}: server error fails loudly over the copy`, bad === 'Cached' && eNote.cls === 'error' && /Alpenglow forecast failed: .+ · showing the copy fetched 2 h ago/.test(eNote.t), `${bad} · ${eNote.t}`);
+  await tab.shot(`${out}/${vp}-error.png`);
+  stub.mode = StubMode.Fixture;
+  // Retry refetches.
+  const r0 = stub.forecasts(since).length;
+  await js(`(() => { document.querySelector('[data-glow-note] button.link').click(); return 1; })()`);
+  const retried = await until(`document.querySelector('[data-glow]')?.dataset.glow === 'Ok'`, 15_000);
+  check(`${vp}: Retry refetches`, !!retried && stub.forecasts(since).length === r0 + 1, `+${stub.forecasts(since).length - r0} request`);
+
+  // A model that reports its run: reused while no newer run is out.
+  stub.availableAt = Date.now() - 3_600_000;
+  await js(`(() => { window.__scape.weather.getState().setModel('ecmwf_ifs025'); return 1; })()`);
+  const m0 = stub.forecasts(since).length;
+  const ec = await open();
+  const ec2 = await open();
+  check(`${vp}: ECMWF fetched once, then reused until its next run`, ec === 'Ok' && ec2 === 'Ok' && stub.forecasts(since).length === m0 + 1, `+${stub.forecasts(since).length - m0} requests`);
+  await js(`(() => { window.__scape.weather.getState().setModel('best_match'); return 1; })()`);
+
+  // Fog at the point.
+  stub.value = foggy;
+  await fresh();
+  await js(`(() => { window.__scape.weather.getState().setModel('best_match'); return 1; })()`);
+  await open();
+  const fog = await js<{ score: string; why: string }>(`(() => { const r = document.querySelector('${row('sunrise')}'); return { score: r?.dataset.score ?? '', why: r?.querySelector('.glow-why')?.textContent ?? '' }; })()`);
+  check(`${vp}: fog at the point scores 0`, fog.score === '0' && fog.why === 'fog at the point', `${fog.score} · ${fog.why}`);
+  stub.value = westLow;
+
+  const wide = await js<boolean>('document.documentElement.scrollWidth > window.innerWidth || [...document.querySelectorAll(".glow-list li")].some((l) => l.scrollWidth > l.clientWidth + 1)');
+  check(`${vp}: no sideways scroll`, !wide, `overflow ${wide}`);
+  await tab.shot(`${out}/${vp}-fog.png`);
+
+  // Privacy off: nothing sent.
+  await js(`(() => { window.__scape.settings.getState().update({ weather: false }); return 1; })()`);
+  const p0 = stub.hits.length;
+  const offSt = await open();
+  await Bun.sleep(1000);
+  check(`${vp}: privacy off sends nothing and says so`, offSt === 'off' && stub.hits.length === p0 && /off for privacy/.test(await text('[data-glow="off"]')), `${offSt} · +${stub.hits.length - p0} requests`);
+  await js(`(() => { window.__scape.settings.getState().update({ weather: true }); return 1; })()`);
+
+  const all = stub.forecasts(since);
+  check(`${vp}: requests within budget`, all.length <= MAX_REQUESTS && (await js<number>('window.__scape.weatherStats.refused')) === 0, `${all.length} forecast requests, ${all.reduce((a, h) => a + h.locations, 0)} points`);
+}
+
+await run('desktop');
+await run('phone');
+
+// One real request, so the shape is checked against Open-Meteo.
+await tab.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
+stub.mode = StubMode.Live;
+stub.liveLeft = 1;
+stub.value = null;
+const since = Date.now();
+await fresh();
+await js(`(() => { window.__scape.weather.getState().setModel('best_match'); return 1; })()`);
+const lst = await open();
+const live = stub.forecasts(since).filter((h) => h.live);
+const scores = await js<string[]>(`[...document.querySelectorAll('.glow-list li[data-day="1"]')].map((l) => l.dataset.score)`);
+check('desktop: one live Open-Meteo request parses', lst === 'Ok' && live.length === 1 && scores.length === 2 && scores.every((s) => /^\d+$/.test(s)) && (await js<number>('window.__scape.weatherStats.errors')) === 0, `${lst} · ${live.length} live · day 1 scores ${scores.join(', ')}`);
+await tab.shot(`${out}/desktop-live.png`);
+stub.mode = StubMode.Fixture;
+
+await tab.send('Emulation.clearDeviceMetricsOverride');
+await tab.send('Fetch.disable');
+tab.close();
+console.log('| Check | Result | Detail |');
+console.log('|---|---|---|');
+console.log(rows.join('\n'));
+console.log(`Screenshots: ${out}`);
+process.exit(fails ? 1 : 0);
