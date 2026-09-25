@@ -1,6 +1,7 @@
 import type { Observer } from 'astronomy-engine';
 import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { SkyBody } from './bodies';
+import { lunarEclipseLight } from './eclipse';
 import type { DayCurve } from './dayCurve';
 import { EventKind } from './dayEvents';
 import { position } from './positions';
@@ -12,6 +13,9 @@ export type LightMode = (typeof LightMode)[keyof typeof LightMode];
 
 /** Civil dusk: past it the moon outshines what is left of the day. */
 export const MOON_TAKES_OVER_DEG = -6;
+
+/** An eclipsed moon this dim casts no shadow worth drawing. */
+const ECLIPSED_MOON_MIN_LIGHT = 0.02;
 
 export type LightBody = typeof SkyBody.Sun | typeof SkyBody.Moon;
 
@@ -74,6 +78,7 @@ export function lightAt(mode: LightMode, date: Date, obs: Observer): Light | nul
   const moon = position(SkyBody.Moon, date, obs);
   const body = pickLight(mode, sun.altitude, moon.altitude);
   if (!body) return null;
+  if (body === SkyBody.Moon && lunarEclipseLight(date) < ECLIPSED_MOON_MIN_LIGHT) return null;
   const p = body === SkyBody.Sun ? sun : moon;
   return { body, azimuthDeg: p.azimuth, altitudeDeg: p.altitude };
 }

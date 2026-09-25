@@ -4,7 +4,7 @@ import { dayBounds } from '@core/time/localDay';
 import { makeObserver, SkyBody } from './bodies';
 import { dayCurve } from './dayCurve';
 import { dayEvents, EventKind } from './dayEvents';
-import { firstLastLight, LightMode, pickLight, sunLitAt } from './lightSource';
+import { firstLastLight, lightAt, LightMode, pickLight, sunLitAt } from './lightSource';
 
 const profile = (f: (az: number) => number): HorizonProfile => ({
   azStepDeg: 1,
@@ -26,6 +26,14 @@ describe('pickLight', () => {
     expect(pickLight(LightMode.Moon, 20, -1)).toBeNull();
     expect(pickLight(LightMode.Sun, -8, 30)).toBeNull();
     expect(pickLight(LightMode.Sun, 5, 30)).toBe(SkyBody.Sun);
+  });
+});
+
+describe('lightAt', () => {
+  it('drops the moon as a light at totality (2025-09-07, Delhi)', () => {
+    const obs = makeObserver({ lat: 28.6, lng: 77.2 });
+    expect(lightAt(LightMode.Moon, new Date('2025-09-07T15:00:00Z'), obs)?.body).toBe(SkyBody.Moon);
+    expect(lightAt(LightMode.Moon, new Date('2025-09-07T18:11:43Z'), obs)).toBeNull();
   });
 });
 

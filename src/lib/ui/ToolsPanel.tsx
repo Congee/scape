@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { depressionForHeightDeg, lastLightMs, litHeightM } from '@core/astro/earthShadow';
+import { lunarEclipseLight } from '@core/astro/eclipse';
 import { moonInfo, position } from '@core/astro/positions';
 import { rainbowTop, SECONDARY_DEG } from '@core/astro/rainbow';
 import { bytes, compass, degrees, distance, height, Units } from '@core/format';
@@ -233,7 +234,7 @@ export function ToolsPanel() {
     const s = snapped(solved, ISO_THIRDS);
     return `ISO ${Math.round(solved)}${s ? ` ≈ ${s}` : ''}`;
   })();
-  const scenes = sceneExposure({ sunAltDeg: sun.altitude, moonAltDeg: moon.altitude, moonIllumination: moonLit });
+  const scenes = sceneExposure({ sunAltDeg: sun.altitude, moonAltDeg: moon.altitude, moonIllumination: moonLit, moonEclipse: lunarEclipseLight(date) });
   const field = (which: ExposureSolve, input: ReactNode) => (solve === which ? <b className="v">{solvedText}</b> : <b className="v">{input}</b>);
 
   // ND: one stops value drives the factor and density fields.

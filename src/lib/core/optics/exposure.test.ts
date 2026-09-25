@@ -102,6 +102,17 @@ describe('scene suggestion', () => {
     expect(sceneExposure({ sunAltDeg: -30, moonAltDeg: 50, moonIllumination: 1 }).some((r) => r.label === 'Moon disc, full' && r.ev === 15)).toBe(true);
   });
 
+  it('a lunar eclipse takes its stops off the moonlight and the disc', () => {
+    const rows = sceneExposure({ sunAltDeg: -30, moonAltDeg: 50, moonIllumination: 1, moonEclipse: 2 ** -12 });
+    const disc = rows.find((r) => r.label === 'Moon disc, full, eclipsed');
+    expect(disc?.ev).toBe(3);
+    // Totality's moonlight sinks under the Milky Way row.
+    expect(rows[0].label).toBe('Starlight, Milky Way core');
+    const pen = sceneExposure({ sunAltDeg: -30, moonAltDeg: 50, moonIllumination: 1, moonEclipse: 0.5 })[0];
+    expect([pen.lo, pen.hi]).toEqual([-4, -3]);
+    expect(pen.label).toBe('Full moonlight, eclipsed');
+  });
+
   it('no rainbow row once the sun is above 42°', () => {
     expect(sceneExposure({ sunAltDeg: 50, ...none }).some((r) => r.label.startsWith('Rainbow'))).toBe(false);
   });

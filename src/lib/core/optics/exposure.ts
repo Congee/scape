@@ -98,6 +98,8 @@ export interface SceneWorld {
   sunAltDeg: number;
   moonAltDeg: number;
   moonIllumination: number;
+  /** What a lunar eclipse leaves of the moon's light, 0..1; 1 when absent. */
+  moonEclipse?: number;
 }
 
 const row = (label: string, lo: number, hi = lo, estimate = false): SceneEv => ({ label, ev: (lo + hi) / 2, lo, hi, estimate });
@@ -109,12 +111,17 @@ function moonlight(w: SceneWorld): SceneEv | null {
   if (w.moonAltDeg <= 0 || w.moonIllumination < 0.05) return null;
   const f = w.moonIllumination;
   const base = f > 0.9 ? row('Full moonlight', -3, -2) : f > 0.6 ? row('Gibbous moonlight', -4) : f > 0.35 ? row('Quarter moonlight', -6) : row('Crescent moonlight', -8, -8, true);
-  if (w.moonAltDeg >= MOON_TABLE_ALT) return base;
+  const e = eclipseStops(w);
+  if (w.moonAltDeg >= MOON_TABLE_ALT && e === 0) return base;
   // Below the table's 40° the ground light falls roughly with sin(altitude).
-  const d = Math.log2(Math.sin((w.moonAltDeg * Math.PI) / 180) / Math.sin((MOON_TABLE_ALT * Math.PI) / 180));
-  const low = row(`${base.label}, moon low`, base.lo + d, base.hi + d, true);
+  const d = w.moonAltDeg >= MOON_TABLE_ALT ? 0 : Math.log2(Math.sin((w.moonAltDeg * Math.PI) / 180) / Math.sin((MOON_TABLE_ALT * Math.PI) / 180));
+  const label = `${base.label}${d < 0 ? ', moon low' : ''}${e < 0 ? ', eclipsed' : ''}`;
+  const low = row(label, base.lo + d + e, base.hi + d + e, true);
   return low.hi > MILKY_WAY.hi ? low : null;
 }
+
+/** Stops a lunar eclipse takes off the moon and its light. */
+const eclipseStops = (w: SceneWorld) => Math.log2(Math.max(w.moonEclipse ?? 1, 1e-6));
 
 /**
  * Tabulated EV100 for the light at this sun and moon position (ANSI PH2.7 via
@@ -140,7 +147,9 @@ export function sceneExposure(w: SceneWorld): SceneEv[] {
   if (s > 0 && s < 42) out.push(row('Rainbow, clear sky behind', 15), row('Rainbow, cloudy sky behind', 14));
   if (w.moonAltDeg > 0) {
     const f = w.moonIllumination;
-    out.push(f > 0.9 ? row('Moon disc, full', 15) : f > 0.6 ? row('Moon disc, gibbous', 14) : f > 0.35 ? row('Moon disc, quarter', 13) : row('Moon disc, crescent', 12));
+    const disc = f > 0.9 ? row('Moon disc, full', 15) : f > 0.6 ? row('Moon disc, gibbous', 14) : f > 0.35 ? row('Moon disc, quarter', 13) : row('Moon disc, crescent', 12);
+    const e = eclipseStops(w);
+    out.push(e < 0 ? row(`${disc.label}, eclipsed`, disc.lo + e, disc.hi + e, true) : disc);
   }
   return out;
 }

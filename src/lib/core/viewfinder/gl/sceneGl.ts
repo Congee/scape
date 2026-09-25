@@ -5,6 +5,7 @@
  * known, so a disc straddling a tower edge clips instead of popping.
  */
 
+import { UMBRA_AXIS_LIGHT, UMBRA_RISE } from '@core/astro/eclipse';
 import type { PrismShading, PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import { cameraBasis, type Camera, type CameraBasis } from '@core/optics/projection';
@@ -39,6 +40,8 @@ export interface MoonShading {
   /** Weight of the Earth-lit dark side, 0..1. */
   earthshine: number;
   map: SceneGlTexture | null;
+  /** Earth's shadow during a lunar eclipse, axis in ENU; null otherwise. */
+  shadow: { axis: readonly [number, number, number]; umbra: number; penumbra: number } | null;
 }
 
 export interface SceneGlInput {
@@ -129,6 +132,8 @@ const vec3 EARTHSHINE_RGB = vec3(34.0, 38.0, 46.0);
 const vec3 MOONLIGHT_RGB = vec3(3.0, 5.0, 12.0);
 /** Mean luminance of moon.jpg, so the map shifts the albedo around 1. */
 const float MOON_MEAN_ALBEDO = 0.586;
+const float UMBRA_AXIS_LIGHT = ${UMBRA_AXIS_LIGHT};
+const float UMBRA_RISE = ${UMBRA_RISE};
 
 uniform vec2 uOrigin;
 uniform vec2 uRes;
@@ -173,6 +178,9 @@ uniform vec3 uMoonBody2;
 uniform vec3 uMoonSun;
 uniform float uMoonShine;
 uniform int uHasMoonMap;
+/** Earth's shadow: axis direction, and umbral/penumbral radii in radians; y <= 0 means no eclipse. */
+uniform vec3 uShadowAxis;
+uniform vec2 uShadowR;
 uniform sampler2D uMoonMap;
 
 ${SHADOW_GLSL}
@@ -235,6 +243,25 @@ float sunCover() {
   return clamp((rs + atan(uMoon.w) - sep) / (2.0 * rs), 0.0, 1.0);
 }
 
+/** Direct sun, umbral glow and depth into the umbra at a point of the moon; mirrors eclipse.ts shadowLight. */
+vec3 eclipseLight(vec3 w) {
+  if (uShadowR.y <= 0.0) return vec3(1.0, 0.0, 1.0);
+  float ru = uShadowR.x;
+  float rp = uShadowR.y;
+  float rho = asin(min(length(cross(w, uShadowAxis)), 1.0));
+  float e = (rp + ru) / (rp - ru);
+  float d = e - 1.0 + 2.0 * (rho - ru) / (rp - ru);
+  float sun = 1.0;
+  if (d <= e - 1.0) sun = 0.0;
+  else if (d < e + 1.0) {
+    float a = acos(clamp((d * d + 1.0 - e * e) / (2.0 * d), -1.0, 1.0)) + e * e * acos(clamp((d * d + e * e - 1.0) / (2.0 * d * e), -1.0, 1.0))
+      - 0.5 * sqrt(max((-d + 1.0 + e) * (d + 1.0 - e) * (d - 1.0 + e) * (d + 1.0 + e), 0.0));
+    sun = 1.0 - a / PI;
+  }
+  float x = min(rho / ru, 1.0);
+  return vec3(sun, UMBRA_AXIS_LIGHT * exp(UMBRA_RISE * x * x) * (1.0 - sun), x);
+}
+
 /** The moon at a pixel of its disc, lit as a Lommel–Seeliger sphere. */
 vec3 moonPixel(vec3 v, float sinSemi, vec3 sky) {
   vec3 d = normalize(uMoon.xyz);
@@ -256,7 +283,16 @@ vec3 moonPixel(vec3 v, float sinSemi, vec3 sky) {
   float ls = mu0 > 0.0 ? clamp(2.0 * mu0 / (mu0 + mu + 1e-4), 0.0, 1.25) : 0.0;
   // The unlit side hides the stars but not the air in front of it, which an eclipse darkens.
   vec3 dark = sky * (1.0 - sunCover()) + albedo * EARTHSHINE_RGB * uMoonShine;
-  return mix(dark, MOON_LIT_RGB * albedo * ls, sstep(-0.01, 0.03, mu0));
+  vec3 lit = MOON_LIT_RGB * albedo * ls;
+  vec3 el = eclipseLight(w);
+  if (el.x < 1.0) {
+    float l = min(el.x + el.y, 1.0);
+    // Copper at the umbra's rim, deep red at its axis; the eye's cube-root response keeps totality visible.
+    vec3 glow = mix(vec3(0.95, 0.2, 0.07), vec3(1.0, 0.48, 0.22), el.z);
+    float p = pow(l, 1.0 / 3.0);
+    lit = lit * (el.x + el.y * glow) / max(l, 1e-9) * p + sky * (1.0 - p);
+  }
+  return mix(dark, lit, sstep(-0.01, 0.03, mu0));
 }
 
 /** Offset of this pixel from a body's centre, in tangent units of the camera's own frame. */
@@ -325,7 +361,7 @@ const UNIFORMS = [
   'uHasMw', 'uMw', 'uEqj0', 'uEqj1', 'uEqj2', 'uMwGain', 'uAirDensity',
   'uGColor', 'uGPos', 'uGNormal',
   'uShadowOn', 'uShadowGain', 'uSun', 'uMoon', 'uMoonlight',
-  'uMoonBody0', 'uMoonBody1', 'uMoonBody2', 'uMoonSun', 'uMoonShine', 'uHasMoonMap', 'uMoonMap',
+  'uMoonBody0', 'uMoonBody1', 'uMoonBody2', 'uMoonSun', 'uMoonShine', 'uHasMoonMap', 'uMoonMap', 'uShadowAxis', 'uShadowR',
   ...SHADOW_UNIFORMS
 ];
 
@@ -570,6 +606,9 @@ export class SceneGl {
       gl.uniform3f(u.uMoonSun, m.sunDir[0], m.sunDir[1], m.sunDir[2]);
       gl.uniform1f(u.uMoonShine, m.earthshine);
     }
+    const sh = m?.shadow;
+    if (sh) gl.uniform3f(u.uShadowAxis, sh.axis[0], sh.axis[1], sh.axis[2]);
+    gl.uniform2f(u.uShadowR, sh?.umbra ?? 0, sh?.penumbra ?? 0);
     const moonMap = m?.map ? this.uploadMoonMap(m.map) : null;
     gl.uniform1i(u.uHasMoonMap, moonMap ? 1 : 0);
     this.bind(6, u.uMoonMap, moonMap ?? this.dummy2d);

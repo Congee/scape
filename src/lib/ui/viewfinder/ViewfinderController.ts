@@ -3,8 +3,9 @@ import { shallow } from 'zustand/shallow';
 import { BODIES, bodyVisible, makeObserver, SkyBody } from '@core/astro/bodies';
 import type { PreparedConstellations } from '@core/astro/constellations';
 import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
-import { applyStar, enuToEqj, horizontalOf, poleEnu, refractEnu, starFrame, type StarFrame } from '@core/astro/skyFrame';
+import { apply, applyStar, enuToEqj, eqjToEnu, horizontalOf, poleEnu, refractEnu, starFrame, type StarFrame } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
+import { lunarEclipseLight, shadowView } from '@core/astro/eclipse';
 import { lightAt, type Light } from '@core/astro/lightSource';
 import { moonView } from '@core/astro/moonSim';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
@@ -24,7 +25,7 @@ import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
-import { SceneGl, type BodyDisc } from '@core/viewfinder/gl/sceneGl';
+import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges } from '@core/model/draw';
@@ -112,6 +113,8 @@ interface Scene {
   night: number;
   /** Moonlight washing out faint stars and the Milky Way, 0..1. */
   moonFactor: number;
+  /** Moon's lit fraction times what a lunar eclipse leaves of its light. */
+  moonLight: number;
   /** Highest skyline angle in the sweep; directions above it need no occlusion test. */
   maxSkyline: number;
 }
@@ -307,14 +310,15 @@ export class ViewfinderController {
     const sunAlt = sun.altitude;
     const moon = position(SkyBody.Moon, time, obs);
     const night = smooth(-4, -14, sunAlt);
-    const moonFactor = night > 0 ? smooth(-2, 8, moon.altitude) * moonInfo(time).illumination : 0;
+    const moonLight = moonInfo(time).illumination * lunarEclipseLight(time);
+    const moonFactor = night > 0 ? smooth(-2, 8, moon.altitude) * moonLight : 0;
     const profile = view?.profile ?? null;
     if (this.skylineMax.view !== profile) {
       let max = flatHorizonDeg(eyeAboveGroundM);
       if (profile) for (let i = 0; i < profile.nAz; i++) max = Math.max(max, profile.skylineDeg[i]);
       this.skylineMax = { view: profile, max };
     }
-    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, light: lightAt(s.lightSource, time, obs), time, obs, airDensity: airDensity(eyeM), night, moonFactor, maxSkyline: this.skylineMax.max };
+    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, light: lightAt(s.lightSource, time, obs), time, obs, airDensity: airDensity(eyeM), night, moonFactor, moonLight, maxSkyline: this.skylineMax.max };
   }
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
@@ -683,7 +687,7 @@ export class ViewfinderController {
         lightAltDeg: sc.light?.altitudeDeg ?? -90,
         // The last degree of light casts a shadow over everything, so fade it out rather than pop at sunset.
         shadowGain: shadowOn && sc.light ? smooth(0, 1.5, sc.light.altitudeDeg) : 0,
-        moonlight: sc.light?.body === SkyBody.Moon ? moonInfo(sc.time).illumination : 0,
+        moonlight: sc.light?.body === SkyBody.Moon ? sc.moonLight : 0,
         sunDisc: comp.showSun ? this.bodyDisc(sc, SkyBody.Sun) : null,
         moonDisc: comp.showMoon ? this.bodyDisc(sc, SkyBody.Moon) : null
       },
@@ -721,7 +725,23 @@ export class ViewfinderController {
     const mv = moonView(sc.time, sc.obs);
     const map = skyStore.getState().moonMap;
     if (!map) skyStore.getState().ensure();
-    return { dir: [d.x, d.y, d.z], semiDeg, moon: { enuToBody: mv.enuToBody, sunDir: mv.sunFromMoonEnu, earthshine: mv.earthshine ? sc.night : 0, map } };
+    return { dir: [d.x, d.y, d.z], semiDeg, moon: { enuToBody: mv.enuToBody, sunDir: mv.sunFromMoonEnu, earthshine: mv.earthshine ? sc.night : 0, map, shadow: this.earthShadow(sc, [d.x, d.y, d.z]) } };
+  }
+
+  /** Earth's shadow placed against the drawn, refracted disc: its offset from the geometric moon rides along. */
+  private earthShadow(sc: Scene, disc: readonly [number, number, number]): MoonShading['shadow'] {
+    const v = shadowView(sc.time, sc.obs);
+    if (!v) return null;
+    const m = eqjToEnu(sc.time, sc.obs);
+    const a = new Float64Array(3);
+    const b = new Float64Array(3);
+    apply(m, ...v.axis, a);
+    apply(m, ...v.moon, b);
+    const x = disc[0] + a[0] - b[0];
+    const y = disc[1] + a[1] - b[1];
+    const z = disc[2] + a[2] - b[2];
+    const k = 1 / Math.hypot(x, y, z);
+    return { axis: [x * k, y * k, z * k], umbra: v.umbra, penumbra: v.penumbra };
   }
 
   /** Where the moon disc lands, for the smoke checks. */
@@ -731,7 +751,7 @@ export class ViewfinderController {
     const mv = moonView(sc.time, sc.obs);
     const r = this.canvas.getBoundingClientRect();
     const radiusPx = discRadiusMm(sc.cam, mv.semidiameterDeg) * sc.frame.pxPerMm;
-    return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
+    return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
   }
 
   private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {
