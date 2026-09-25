@@ -163,7 +163,8 @@ const lineShare = async (tag: string, view: string) => {
   return js<number>(`return diff(${JSON.stringify(on)}, ${JSON.stringify(off)});`);
 };
 const mapOutline = async (tag: string) => {
-  await js(`const m = await block(${JSON.stringify(Tag.Lawn)}, ${JSON.stringify(LAWN)}, 30, 10); S.models.getState().select(m.id); return true;`);
+  // No current part: an accent outline over the accent current-part fill is below the diff tolerance.
+  await js(`const m = await block(${JSON.stringify(Tag.Lawn)}, ${JSON.stringify(LAWN)}, 30, 10); S.models.getState().select(m.id); S.models.getState().selectPart(null); return true;`);
   const clear = await lineShare(`${tag}-top`, `{ center: ${JSON.stringify(LAWN)}, zoom: 19, pitch: 0, bearing: 0 }`);
   const behind = await lineShare(`${tag}-behind`, `{ center: { lng: ${LAWN.lng}, lat: ${LAWN.lat - 0.0012} }, zoom: 17.5, pitch: 75, bearing: 0 }`);
   return { clear, behind };
