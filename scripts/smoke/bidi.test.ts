@@ -2,30 +2,34 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BidiTab, Signals, type BidiDeps, type Socket } from './bidi';
 
 type Cmd = { id: number; method: string; params: Record<string, unknown> };
-/** What the fake Firefox does with a command: a reply, silence, or dropping the socket. */
-type Answer = { result: Record<string, unknown> } | { error: string; message: string } | 'hang' | 'drop';
+/** What the fake Firefox does with a command: a reply, silence, dropping the socket, or a reply and then dropping it. */
+type Answer = { result: Record<string, unknown> } | { error: string; message: string } | 'hang' | 'drop' | 'end';
 type Firefox = (cmd: Cmd, url: string) => Answer;
 
+/** Firefox 156 as observed: session.end replies, then closes the socket. */
 const firefox =
   (over: Partial<Record<string, Answer>> = {}): Firefox =>
   ({ method }) =>
     over[method] ??
+    (method === 'session.end' ? 'end' : undefined) ??
     { result: { 'session.new': { sessionId: 's1' }, 'browsingContext.getTree': { contexts: [{ context: 'ctx1' }] } }[method] ?? {} };
+
+type Ev = { data?: unknown; code?: number; reason?: string };
 
 class FakeSocket implements Socket {
   readyState = 0;
   sent: Cmd[] = [];
-  private fns = new Map<string, ((e: { data?: unknown }) => void)[]>();
+  private fns = new Map<string, ((e: Ev) => void)[]>();
 
   constructor(
     readonly url: string,
     private ff: Firefox
   ) {}
 
-  addEventListener(type: string, fn: (e: { data?: unknown }) => void) {
+  addEventListener(type: string, fn: (e: Ev) => void) {
     this.fns.set(type, [...(this.fns.get(type) ?? []), fn]);
   }
-  emit(type: string, e: { data?: unknown } = {}) {
+  emit(type: string, e: Ev = {}) {
     for (const fn of this.fns.get(type) ?? []) fn(e);
   }
   open() {
@@ -42,14 +46,17 @@ class FakeSocket implements Socket {
     if (a === 'hang') return;
     queueMicrotask(() => {
       if (a === 'drop') this.close();
-      else if ('error' in a) this.message({ type: 'error', id: cmd.id, ...a });
+      else if (a === 'end') {
+        this.message({ type: 'success', id: cmd.id, result: {} });
+        this.close();
+      } else if ('error' in a) this.message({ type: 'error', id: cmd.id, ...a });
       else this.message({ type: 'success', id: cmd.id, result: a.result });
     });
   }
-  close() {
+  close(code = 1000, reason = '') {
     if (this.readyState === 3) return;
     this.readyState = 3;
-    this.emit('close');
+    this.emit('close', { code, reason });
   }
   methods() {
     return this.sent.map((c) => c.method);
@@ -60,7 +67,6 @@ class FakeSocket implements Socket {
 function harness(ff = firefox(), connect: (s: FakeSocket) => void = (s) => queueMicrotask(() => s.open())) {
   const sockets: FakeSocket[] = [];
   const timers = new Set<{ fn: () => void; ms: number }>();
-  const files = new Map<string, string>();
   const on = new Map<string, ((e?: unknown) => void)[]>();
   const exits: number[] = [];
   const deps: BidiDeps = {
@@ -78,9 +84,7 @@ function harness(ff = firefox(), connect: (s: FakeSocket) => void = (s) => queue
     clearTimeout: (t) => void timers.delete(t as { fn: () => void; ms: number }),
     sleep: () => Promise.resolve(),
     now: () => 0,
-    read: async (p) => files.get(p) ?? Promise.reject(new Error('ENOENT')),
-    write: async (p, d) => void files.set(p, String(d)),
-    unlink: async (p) => void files.delete(p),
+    write: async () => {},
     proc: {
       on: (ev, fn) => on.set(ev, [...(on.get(ev) ?? []), fn]),
       off: (ev, fn) => on.set(ev, (on.get(ev) ?? []).filter((f) => f !== fn)),
@@ -96,31 +100,46 @@ function harness(ff = firefox(), connect: (s: FakeSocket) => void = (s) => queue
       }
   };
   const listeners = (ev: string) => on.get(ev) ?? [];
-  return { deps, sockets, timers, files, exits, fire, listeners, open: () => BidiTab.open(9432, '/s', deps) };
+  return { deps, sockets, timers, exits, fire, listeners, open: () => BidiTab.open(9432, deps) };
 }
 
 afterEach(() => vi.restoreAllMocks());
 
+const held = { error: 'session not created', message: 'Maximum number of active sessions' };
+/** How Bun reports a failed handshake: an error, then a close whose reason says why. */
+const refuse = (code: number, reason: string) => (s: FakeSocket) =>
+  queueMicrotask(() => {
+    s.emit('error');
+    s.close(code, reason);
+  });
+
 describe('BidiTab.open', () => {
-  it('starts a session, saves its id and finds the tab', async () => {
+  it('starts a BiDi-only session and finds the tab', async () => {
     const h = harness();
     const tab = await h.open();
-    expect(h.sockets[0].url).toBe('ws://127.0.0.1:9432/session');
-    expect(h.sockets[0].methods()).toEqual(['session.new', 'browsingContext.getTree']);
-    expect(h.files.get('/s')).toBe('s1');
+    expect(h.sockets.map((s) => s.url)).toEqual(['ws://127.0.0.1:9432/session']);
+    expect(h.sockets[0].sent.map((c) => [c.method, c.params])).toEqual([
+      ['session.new', { capabilities: {} }],
+      ['browsingContext.getTree', { maxDepth: 0 }]
+    ]);
     expect(tab.context).toBe('ctx1');
     for (const ev of ['SIGHUP', 'SIGINT', 'SIGTERM', 'unhandledRejection', 'uncaughtException']) expect(h.listeners(ev)).toHaveLength(1);
     expect(h.timers.size).toBe(0);
   });
 
-  it('names the port when nothing answers on it', async () => {
-    const h = harness(firefox(), (s) =>
-      queueMicrotask(() => {
-        s.emit('error');
-        s.close();
-      })
-    );
-    await expect(h.open()).rejects.toThrow(/cannot connect BiDi at ws:\/\/127\.0\.0\.1:9432\/session: connection failed .*port 9432: start it/);
+  it('names the port when nothing listens on it', async () => {
+    const h = harness(firefox(), refuse(1006, 'Failed to connect'));
+    await expect(h.open()).rejects.toThrow(/cannot connect BiDi at ws:\/\/127\.0\.0\.1:9432\/session: Failed to connect .*port 9432: start it/);
+  });
+
+  it('passes on why a server that is not Firefox refused the upgrade', async () => {
+    const h = harness(firefox(), refuse(1002, 'Expected 101 status code'));
+    await expect(h.open()).rejects.toThrow(/9432\/session: Expected 101 status code \(no Firefox remote agent on port 9432/);
+  });
+
+  it('falls back to the close code without a reason', async () => {
+    const h = harness(firefox(), refuse(1006, ''));
+    await expect(h.open()).rejects.toThrow('9432/session: connection closed (1006)');
   });
 
   it('gives up on a handshake that never finishes', async () => {
@@ -131,30 +150,13 @@ describe('BidiTab.open', () => {
     expect(h.sockets[0].readyState).toBe(3);
   });
 
-  it('rejoins the saved session when Firefox allows no second one', async () => {
-    const h = harness((cmd, url) =>
-      url.endsWith('/session') && cmd.method === 'session.new' ? { error: 'session not created', message: 'Maximum number of active sessions' } : firefox()(cmd, url)
-    );
-    h.files.set('/s', 'old\n');
-    const tab = await h.open();
-    expect(h.sockets.map((s) => s.url)).toEqual(['ws://127.0.0.1:9432/session', 'ws://127.0.0.1:9432/session/old']);
+  it('says to restart Firefox when an orphaned session holds the only slot', async () => {
+    const h = harness(firefox({ 'session.new': held }));
+    await expect(h.open()).rejects.toThrow(/Maximum number of active sessions \(Firefox on port 9432 still holds a session .*restart that Firefox/);
+    expect(h.sockets).toHaveLength(1);
+    expect(h.sockets[0].methods()).toEqual(['session.new']);
     expect(h.sockets[0].readyState).toBe(3);
-    expect(h.sockets[1].methods()).toEqual(['browsingContext.getTree']);
-    expect(tab.context).toBe('ctx1');
-  });
-
-  it('explains a held session it has no id for', async () => {
-    const h = harness(firefox({ 'session.new': { error: 'session not created', message: 'Maximum number of active sessions' } }));
-    await expect(h.open()).rejects.toThrow(/another client holds the session on port 9432/);
-    expect(h.sockets[0].readyState).toBe(3);
-  });
-
-  it('explains a saved session that is gone', async () => {
-    const h = harness(firefox({ 'session.new': { error: 'session not created', message: 'Maximum number of active sessions' } }), (s) =>
-      queueMicrotask(() => (s.url.endsWith('/session') ? s.open() : s.close()))
-    );
-    h.files.set('/s', 'old');
-    await expect(h.open()).rejects.toThrow(/session old from \/s is gone or held by another client/);
+    expect(h.listeners('SIGINT')).toHaveLength(0);
   });
 
   it('ends the session when finding the tab fails', async () => {
@@ -207,42 +209,39 @@ describe('BidiTab.send', () => {
 });
 
 describe('BidiTab.close', () => {
-  it('ends the session, removes its file, closes the socket and unhooks', async () => {
+  it('ends the session once, closes the socket and unhooks', async () => {
+    const err = vi.spyOn(console, 'error');
     const h = harness();
     const tab = await h.open();
     await Promise.all([tab.close(), tab.close()]);
     expect(h.sockets[0].methods().filter((m) => m === 'session.end')).toHaveLength(1);
-    expect(h.files.has('/s')).toBe(false);
     expect(h.sockets[0].readyState).toBe(3);
+    expect(err).not.toHaveBeenCalled();
     for (const ev of ['SIGHUP', 'SIGINT', 'SIGTERM', 'unhandledRejection', 'uncaughtException']) expect(h.listeners(ev)).toHaveLength(0);
   });
 
-  it('counts a socket dropped right after session.end as ended', async () => {
-    const h = harness(firefox({ 'session.end': 'drop' }));
-    await (await h.open()).close();
-    expect(h.files.has('/s')).toBe(false);
-  });
-
-  it('keeps the file for a rejoin when session.end times out', async () => {
+  it.each([
+    ['times out', 'hang'],
+    ['drops the socket unanswered', 'drop']
+  ] as const)('warns the session may linger when session.end %s', async (_, a) => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const h = harness(firefox({ 'session.end': 'hang' }));
+    const h = harness(firefox({ 'session.end': a }));
     const tab = await h.open();
     const p = tab.close();
     h.fire(5000);
     await p;
-    expect(h.files.get('/s')).toBe('s1');
     expect(h.sockets[0].readyState).toBe(3);
-    expect(err).toHaveBeenCalledWith(expect.stringContaining('/s kept'));
+    expect(err).toHaveBeenCalledWith(expect.stringMatching(/^BiDi: session\.end.*; Firefox on port 9432 may keep the session until it restarts$/));
   });
 
-  it('keeps the file when the socket was already gone', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('warns without sending when the socket was already gone', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const h = harness();
     const tab = await h.open();
     h.sockets[0].close();
     await tab.close();
     expect(h.sockets[0].methods()).not.toContain('session.end');
-    expect(h.files.get('/s')).toBe('s1');
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('may keep the session'));
   });
 });
 
@@ -253,7 +252,6 @@ describe('BidiTab.quit', () => {
     await tab.quit();
     await tab.close();
     expect(h.sockets[0].methods()).toEqual(['session.new', 'browsingContext.getTree', 'browser.close']);
-    expect(h.files.has('/s')).toBe(false);
   });
 });
 
@@ -265,7 +263,6 @@ describe('interrupts', () => {
     await tab.close();
     await Promise.resolve();
     expect(h.sockets[0].methods()).toContain('session.end');
-    expect(h.files.has('/s')).toBe(false);
     expect(h.exits).toEqual([code]);
     expect(h.listeners(sig)).toHaveLength(0);
   });

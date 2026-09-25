@@ -1,11 +1,9 @@
 // A minimal WebDriver BiDi client for Firefox's remote agent: one session, one tab, the calls the smokes need.
 /* oxlint-disable no-await-in-loop -- BiDi steps are sequential */
 
-import { unlink } from 'node:fs/promises';
-
 type Msg = { id?: number | null; type?: string; method?: string; result?: Record<string, unknown>; error?: string; message?: string };
 type Remote = { type: string; value?: unknown };
-type Listener = (e: { data?: unknown }) => void;
+type Listener = (e: { data?: unknown; code?: number; reason?: string }) => void;
 
 /** The WebSocket surface the client uses. */
 export type Socket = {
@@ -22,10 +20,7 @@ export type BidiDeps = {
   clearTimeout: (t: unknown) => void;
   sleep: (ms: number) => Promise<unknown>;
   now: () => number;
-  /** Rejects when the file is missing. */
-  read: (path: string) => Promise<string>;
   write: (path: string, data: string | Uint8Array) => Promise<unknown>;
-  unlink: (path: string) => Promise<unknown>;
   proc: { on(ev: string, fn: (e?: unknown) => void): unknown; off(ev: string, fn: (e?: unknown) => void): unknown; exit(code: number): void };
 };
 
@@ -35,9 +30,7 @@ const defaults: BidiDeps = {
   clearTimeout: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
   sleep: (ms) => Bun.sleep(ms),
   now: () => Date.now(),
-  read: (p) => Bun.file(p).text(),
   write: (p, d) => Bun.write(p, d),
-  unlink: (p) => unlink(p),
   proc: process
 };
 
@@ -57,7 +50,7 @@ export class BidiTab {
 
   private constructor(
     private ws: Socket,
-    private sessionFile: string,
+    private port: number,
     private deps: BidiDeps,
     url: string
   ) {
@@ -67,7 +60,8 @@ export class BidiTab {
     ws.addEventListener('error', () => this.drop(new Error(`BiDi socket ${url} failed`)));
   }
 
-  private static connect(url: string, sessionFile: string, deps: BidiDeps, timeoutMs = 10_000): Promise<BidiTab> {
+  private static connect(port: number, deps: BidiDeps, timeoutMs = 10_000): Promise<BidiTab> {
+    const url = `ws://127.0.0.1:${port}/session`;
     return new Promise((resolve, reject) => {
       const ws = deps.socket(url);
       let settled = false;
@@ -79,39 +73,30 @@ export class BidiTab {
         reject(new Error(`cannot connect BiDi at ${url}: ${why}`));
       };
       const t = deps.setTimeout(() => fail(`no handshake in ${timeoutMs} ms`), timeoutMs);
-      ws.addEventListener('error', () => fail('connection failed'));
-      ws.addEventListener('close', () => fail('connection closed'));
+      // Bun fires error then close; only close carries the reason, e.g. "Expected 101 status code" from a non-BiDi server.
+      ws.addEventListener('close', (e) => fail(e.reason || `connection closed (${e.code ?? 'no code'})`));
       ws.addEventListener('open', () => {
         if (settled) return;
         settled = true;
         deps.clearTimeout(t);
-        resolve(new BidiTab(ws, sessionFile, deps, url));
+        resolve(new BidiTab(ws, port, deps, url));
       });
     });
   }
 
   /**
-   * A session on the browser at `port`, driving its first tab; the window is never raised. Firefox keeps a session after its
-   * socket closes and allows only one, so the id goes to `sessionFile`, and webSocketUrl lets a later run rejoin one a crash left behind.
+   * A session on the browser at `port`, driving its first tab; the window is never raised. Firefox allows one session, keeps it
+   * when its socket drops and cannot rejoin one made over BiDi, so only session.end frees it; after a SIGKILL, restart that Firefox.
    */
-  static async open(port: number, sessionFile = `${process.env.TMPDIR ?? '/tmp'}/bidi-${port}.session`, deps: BidiDeps = defaults): Promise<BidiTab> {
-    let tab = await BidiTab.connect(`ws://127.0.0.1:${port}/session`, sessionFile, deps).catch((e: Error) => {
+  static async open(port: number, deps: BidiDeps = defaults): Promise<BidiTab> {
+    const tab = await BidiTab.connect(port, deps).catch((e: Error) => {
       throw new Error(`${e.message} (no Firefox remote agent on port ${port}: start it with --remote-debugging-port ${port}, or free the port)`, { cause: e });
     });
-    let id = '';
-    try {
-      const { sessionId } = (await tab.send('session.new', { capabilities: { alwaysMatch: { webSocketUrl: true } } })) as { sessionId: string };
-      await deps.write(sessionFile, sessionId);
-    } catch (e) {
+    await tab.send('session.new', { capabilities: {} }).catch((e: Error) => {
       tab.ws.close();
-      if (!/Maximum number of active sessions|already started/i.test(String(e))) throw e;
-      id = (await deps.read(sessionFile).catch(() => '')).trim();
-      if (!id) throw new Error(`${(e as Error).message} (another client holds the session on port ${port} and ${sessionFile} has no id to rejoin; restart that Firefox)`, { cause: e });
-    }
-    if (id)
-      tab = await BidiTab.connect(`ws://127.0.0.1:${port}/session/${id}`, sessionFile, deps).catch((err: Error) => {
-        throw new Error(`${err.message} (session ${id} from ${sessionFile} is gone or held by another client; restart that Firefox)`, { cause: err });
-      });
+      if (!/Maximum number of active sessions/i.test(e.message)) throw e;
+      throw new Error(`${e.message} (Firefox on port ${port} still holds a session whose client died without session.end; restart that Firefox)`, { cause: e });
+    });
     tab.hook();
     try {
       const tree = (await tab.send('browsingContext.getTree', { maxDepth: 0 })) as { contexts: { context: string }[] };
@@ -232,19 +217,15 @@ export class BidiTab {
     return (this.closing ??= (async () => {
       this.unhook();
       await this.send('browser.close', {}, 30_000).catch(() => {});
-      await this.deps.unlink(this.sessionFile).catch(() => {});
       await this.hangUp();
     })());
   }
 
-  /** Ends the session; an unconfirmed end keeps the id file, so the next run rejoins instead of hitting the one-session limit. */
+  /** Ends the session; Firefox replies to session.end, then closes the socket. */
   close(): Promise<void> {
     return (this.closing ??= (async () => {
       this.unhook();
-      // Firefox drops the session's sockets as it ends it, so losing the socket after sending also counts.
-      const ended = this.up && (await this.send('session.end', {}, 5000).then(() => true, () => this.lost != null));
-      if (ended) await this.deps.unlink(this.sessionFile).catch(() => {});
-      else console.error(`BiDi: session.end unconfirmed; ${this.sessionFile} kept for the next run to rejoin`);
+      await this.send('session.end', {}, 5000).catch((e: Error) => console.error(`BiDi: ${e.message}; Firefox on port ${this.port} may keep the session until it restarts`));
       await this.hangUp();
     })());
   }
