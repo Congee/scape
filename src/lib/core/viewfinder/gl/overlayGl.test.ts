@@ -44,8 +44,31 @@ describe('OverlayBatch', () => {
   });
 
   it('keeps shape and flags in separate bits', () => {
-    const all = OverlayFlag.RoundStart | OverlayFlag.RoundEnd | OverlayFlag.Hidden;
+    const all = OverlayFlag.RoundStart | OverlayFlag.RoundEnd | OverlayFlag.Hidden | OverlayFlag.Over;
     for (const s of Object.values(OverlayShape)) expect((s | all) & 3).toBe(s);
+    const flags = Object.values(OverlayFlag);
+    expect(new Set(flags).size).toBe(flags.length);
+    for (const f of flags) expect(f & (f - 1)).toBe(0);
+  });
+
+  it('dashes a polyline with the phase carried across vertices', () => {
+    const b = new OverlayBatch();
+    b.dashed([0, 0, 5, 0, 5, 12], 1, 4, 6, OverlayFlag.Over, WHITE);
+    const segs = Array.from({ length: b.count }, (_, i) => [...b.data.subarray(i * OVERLAY_STRIDE, i * OVERLAY_STRIDE + 4)]);
+    expect(segs).toEqual([
+      [0, 0, 4, 0],
+      [5, 5, 5, 9],
+    ]);
+    for (let i = 0; i < b.count; i++) {
+      expect(b.data[i * OVERLAY_STRIDE + 5]).toBe(OverlayShape.Segment | OverlayFlag.Over);
+      expect(b.data[i * OVERLAY_STRIDE + 6]).toBe(0);
+    }
+  });
+
+  it('dashes nothing from fewer than two points', () => {
+    const b = new OverlayBatch();
+    b.dashed([1, 1], 1, 4, 6, 0, WHITE);
+    expect(b.count).toBe(0);
   });
 });
 

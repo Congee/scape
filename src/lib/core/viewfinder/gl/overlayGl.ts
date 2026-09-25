@@ -14,7 +14,9 @@ export const OverlayFlag = {
   RoundStart: 4,
   RoundEnd: 8,
   /** Hidden whatever the depth says: the terrain skyline is known only on the CPU. */
-  Hidden: 16
+  Hidden: 16,
+  /** Drawn over geometry: only `Hidden` ghosts it. */
+  Over: 32
 } as const;
 
 /** Floats per instance: segment ends, (half width, flags, ghost alpha, 0), straight RGBA. */
@@ -46,6 +48,26 @@ export class OverlayBatch {
   /** `ghost` 0 drops what is behind geometry; above 0 draws it dashed at that alpha. */
   segment(x0: number, y0: number, x1: number, y1: number, width: number, flags: number, ghost: number, rgba: Rgba): void {
     this.push(x0, y0, x1, y1, width / 2, OverlayShape.Segment | flags, ghost, rgba);
+  }
+
+  /** A polyline of flat x, y pairs dashed `on`, `off` from its start, as `setLineDash` strokes it. */
+  dashed(pts: readonly number[], width: number, on: number, off: number, flags: number, rgba: Rgba): void {
+    let phase = 0;
+    for (let i = 2; i + 1 < pts.length; i += 2) {
+      const x0 = pts[i - 2];
+      const y0 = pts[i - 1];
+      const dx = pts[i] - x0;
+      const dy = pts[i + 1] - y0;
+      const len = Math.hypot(dx, dy);
+      let t = 0;
+      while (t < len) {
+        const inOn = phase < on;
+        const step = Math.min(len - t, (inOn ? on : on + off) - phase);
+        if (inOn && step > 0) this.segment(x0 + (dx * t) / len, y0 + (dy * t) / len, x0 + (dx * (t + step)) / len, y0 + (dy * (t + step)) / len, width, flags, 0, rgba);
+        t += step;
+        phase = (phase + step) % (on + off);
+      }
+    }
   }
 
   private push(x0: number, y0: number, x1: number, y1: number, hw: number, flags: number, ghost: number, rgba: Rgba): void {
@@ -154,7 +176,7 @@ void main() {
   }
   if (cov <= 0.0) discard;
   float a = vColor.a;
-  bool behind = (flags & ${OverlayFlag.Hidden}) != 0 || texelFetch(uGPos, ivec2(f - uOrigin), 0).w > 0.5;
+  bool behind = (flags & ${OverlayFlag.Hidden}) != 0 || ((flags & ${OverlayFlag.Over}) == 0 && texelFetch(uGPos, ivec2(f - uOrigin), 0).w > 0.5);
   if (behind) {
     float ghost = vShape.z;
     if (ghost <= 0.0 || mod(t / uDpr, ${(PATH_DASH[0] + PATH_DASH[1]).toFixed(1)}) >= ${PATH_DASH[0].toFixed(1)}) discard;

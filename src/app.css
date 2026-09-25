@@ -1319,19 +1319,6 @@ label.file input {
   pointer-events: none;
 }
 
-.vf-photo {
-  position: absolute;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.vf-photo img {
-  position: absolute;
-  max-width: none;
-  transform-origin: center;
-  user-select: none;
-}
-
 .vf {
   position: absolute;
   inset: 0;

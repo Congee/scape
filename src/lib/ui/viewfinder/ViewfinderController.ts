@@ -24,6 +24,7 @@ import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayGl';
+import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
@@ -70,6 +71,7 @@ const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', G
 /** Red to violet; each colour's own index sets its radius, so the secondary comes out reversed. */
 const BOW_COLORS = ['#e8453c', '#f59a23', '#f2dc3c', '#4cc35a', '#3a8ee8', '#8a5cd6'];
 const BOW_STEPS = 240;
+const HORIZON_RGBA = [230 / 255, 237 / 255, 243 / 255, 0.35] as const;
 /** Text inside the picture: a dark outline keeps it readable over sun-lit white towers. */
 const haloText = (ctx: CanvasRenderingContext2D, text: string, x: number, y: number) => {
   ctx.save();
@@ -192,8 +194,10 @@ export class ViewfinderController {
   /** The selected model's outline, eye-relative e, n, u pairs. */
   private outlineCache: { key: string; seg: Float32Array } | null = null;
   private gpuMs = -1;
+  /** The reference photo decoded for the picture pass; `image` null while it decodes. */
+  private photo: { url: string; image: ImageBitmap | null } | null = null;
 
-  constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement, private photoLayer: HTMLElement | null = null) {
+  constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
     try {
       this.sceneGl = SceneGl.create(glCanvas);
@@ -570,51 +574,41 @@ export class ViewfinderController {
     if (dev) dev.modelOutline = { id, segments: drawn, box: drawn > 0 ? box : null };
   }
 
-  /** The outline's pieces not behind terrain or a building, sampled every few pixels within a per-frame budget. */
-  private visibleOutline(sc: Scene, seg: Float32Array, px: (e: number, n: number, u: number) => { x: number; y: number } | null): Float32Array {
-    const occ = this.occ;
-    const view = sc.view;
-    if (!occ && !view) return seg;
-    const lenPx = new Float32Array(seg.length / 6);
-    let total = 0;
-    for (let i = 0; i < lenPx.length; i++) {
-      const p = px(seg[i * 6], seg[i * 6 + 1], seg[i * 6 + 2]);
-      const q = px(seg[i * 6 + 3], seg[i * 6 + 4], seg[i * 6 + 5]);
-      lenPx[i] = p && q ? Math.min(Math.hypot(q.x - p.x, q.y - p.y), OUTLINE_MAX_PX) : OUTLINE_MAX_PX / 8;
-      total += lenPx[i] / OUTLINE_STEP_PX;
-    }
-    const scale = Math.min(1, OUTLINE_SAMPLES / Math.max(total, 1));
-    return visibleRuns(
-      seg,
-      (i) => Math.ceil((lenPx[i] / OUTLINE_STEP_PX) * scale),
-      (e, n, u) => {
-        const h = Math.hypot(e, n);
-        const d = Math.hypot(h, u);
-        // Short of the point itself, so the model's own faces through it do not count.
-        const slack = 0.05 + d * 1e-4;
-        return (!!view && occluded(view, Math.atan2(e, n) * R2D, Math.atan2(u, h) * R2D, h - slack)) || (!!occ && occ.occludes(e, n, u, d - slack));
-      }
-    );
-  }
-
-  /** The reference photo's DOM layer, sized to the frame and scaled by its field of view. */
-  private placePhoto(sc: Scene) {
-    const el = this.photoLayer;
-    const img = el?.querySelector('img');
-    if (!el || !img) return;
+  /** The reference photo for the picture pass, sized to the frame and scaled by its field of view. */
+  private photoLayer(sc: Scene): PhotoLayer | null {
     const p = photoStore.getState();
-    el.hidden = !p.url || p.w <= 0;
     const dev = import.meta.env.DEV ? (window as unknown as { __scape?: Record<string, unknown> }).__scape : undefined;
-    if (el.hidden || !p.url) {
+    if (!p.url || p.w <= 0 || !this.sceneGl) {
+      this.photo?.image?.close();
+      this.photo = null;
       if (dev) dev.photo = null;
-      return;
+      return null;
+    }
+    if (this.photo?.url !== p.url) {
+      this.photo?.image?.close();
+      this.photo = { url: p.url, image: null };
+      void this.decodePhoto(this.photo, p.w, p.h, this.sceneGl.maxTextureSize);
     }
     const f = sc.frame;
     const b = fitPhoto(f, sc.cam.focalMm, p);
-    if (img.getAttribute('src') !== p.url) img.src = p.url;
-    Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
-    Object.assign(img.style, { left: `${b.cx - f.x - b.w / 2}px`, top: `${b.cy - f.y - b.h / 2}px`, width: `${b.w}px`, height: `${b.h}px`, transform: b.rotDeg ? `rotate(${b.rotDeg}deg)` : '', opacity: String(p.opacity) });
-    if (dev) dev.photo = { box: b, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, focalMm: sc.cam.focalMm, focal35: p.focal35, fromExif: p.fromExif, hfovDeg: photoHfovDeg(p.focal35, p.w, p.h), opacity: p.opacity };
+    const image = this.photo.image;
+    if (dev) dev.photo = { box: b, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, focalMm: sc.cam.focalMm, focal35: p.focal35, hfovDeg: p.focal35 ? photoHfovDeg(p.focal35, p.w, p.h) : sc.hfov, opacity: p.opacity, nat: image && { w: image.width, h: image.height } };
+    return image && { image, box: b, dpr: this.dpr, opacity: p.opacity };
+  }
+
+  /** Decodes with the Exif orientation, as the store measured it, within the texture limit. */
+  private async decodePhoto(slot: { url: string; image: ImageBitmap | null }, w: number, h: number, max: number) {
+    try {
+      const blob = await (await fetch(slot.url)).blob();
+      const k = Math.min(1, max / Math.max(w, h));
+      const image = await createImageBitmap(blob, { premultiplyAlpha: 'none', ...(k < 1 ? { resizeWidth: Math.floor(w * k), resizeHeight: Math.floor(h * k), resizeQuality: 'high' } : {}) });
+      if (this.photo !== slot) return image.close();
+      if (Math.abs(image.width / image.height - w / h) > 0.01) throw new Error(`decoded ${image.width}×${image.height}, expected ${w}×${h}`);
+      slot.image = image;
+      this.schedule();
+    } catch (err) {
+      if (this.photo === slot) photoStore.setState({ error: `Could not draw the photo: ${err instanceof Error ? err.message : String(err)}` });
+    }
   }
 
   /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */
@@ -709,7 +703,8 @@ export class ViewfinderController {
         moonlight: sc.light?.body === SkyBody.Moon ? sc.moonLight : 0,
         sunDisc: comp.showSun ? this.bodyDisc(sc, SkyBody.Sun) : null,
         moonDisc: comp.showMoon ? this.bodyDisc(sc, SkyBody.Moon) : null,
-        overlay: { batch: this.marks, dpr: this.dpr }
+        overlay: { batch: this.marks, dpr: this.dpr },
+        photo: this.photoLayer(sc)
       },
       vx,
       vy,
@@ -1089,9 +1084,19 @@ export class ViewfinderController {
     ctx.globalAlpha = 1;
   }
 
+  /** Horizon (0°) as a faint dashed line, over the ground. */
+  private drawHorizon(sc: Scene) {
+    const pts: number[] = [];
+    for (let i = 0; i <= 40; i++) {
+      const az = sc.aim.azimuthDeg - sc.hfov * 0.75 + (sc.hfov * 1.5 * i) / 40;
+      const p = this.toPx(sc, az, 0);
+      if (p) pts.push(p.x, p.y);
+    }
+    this.marks.dashed(pts, 1, 4, 6, OverlayFlag.Over, HORIZON_RGBA);
+  }
+
   /** Primary and secondary bows as colour bands; dashed and dim where terrain or a building is in front. */
   private drawRainbow(sc: Scene) {
-    const { ctx } = this;
     const minAlt = flatHorizonDeg(sc.eyeAboveGroundM) - 0.5;
     const seen = { clear: 0, dim: 0 };
     for (const [k, alpha] of [[1, 0.8], [2, 0.45]] as const) {
@@ -1103,30 +1108,23 @@ export class ViewfinderController {
       if (!range) continue;
       const centre = rainbowArc(sc.sunAz, sc.sunAlt, mid, -90, BOW_STEPS, range);
       const hidden = centre.map((p) => p.altitudeDeg < minAlt || this.hiddenBySkyline(sc, p.azimuthDeg, p.altitudeDeg) || this.behindBuilding(p.azimuthDeg, p.altitudeDeg, Infinity));
-      ctx.lineWidth = Math.max(1.5, (sc.frame.pxPerMm * sc.cam.focalMm * width * D2R) / (BOW_COLORS.length - 1));
+      const lineWidth = Math.max(1.5, (sc.frame.pxPerMm * sc.cam.focalMm * width * D2R) / (BOW_COLORS.length - 1));
       BOW_COLORS.forEach((color, ci) => {
         const n = WATER_N.Red + ((WATER_N.Violet - WATER_N.Red) * ci) / (BOW_COLORS.length - 1);
         const pts = rainbowArc(sc.sunAz, sc.sunAlt, rainbowRadiusDeg(n, k), -90, BOW_STEPS, range);
-        ctx.strokeStyle = color;
+        const rgba = hexRgba(color, alpha);
         let prev: { x: number; y: number } | null = null;
         for (let i = 0; i < pts.length; i++) {
           const p = pts[i].altitudeDeg >= minAlt ? this.toPx(sc, pts[i].azimuthDeg, pts[i].altitudeDeg) : null;
           if (p && prev && (this.inFrame(sc, p, 40) || this.inFrame(sc, prev, 40))) {
             const dim = hidden[i] || hidden[i - 1];
             if (this.inFrame(sc, p)) seen[dim ? 'dim' : 'clear']++;
-            ctx.globalAlpha = dim ? alpha * 0.35 : alpha;
-            ctx.setLineDash(dim ? [3, 4] : []);
-            ctx.beginPath();
-            ctx.moveTo(prev.x, prev.y);
-            ctx.lineTo(p.x, p.y);
-            ctx.stroke();
+            this.marks.segment(prev.x, prev.y, p.x, p.y, lineWidth, OverlayFlag.Over | (dim ? OverlayFlag.Hidden : 0), alpha * 0.35, rgba);
           }
           prev = p;
         }
       });
     }
-    ctx.globalAlpha = 1;
-    ctx.setLineDash([]);
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       if (dev) dev.rainbow = { ...seen, at: Date.now() };
@@ -1423,7 +1421,6 @@ export class ViewfinderController {
     if (w < 40 || h < 40) return;
     const sc = this.scene();
     this.noteDrawn(sc);
-    this.placePhoto(sc);
     if (!this.sceneGl) {
       this.drawGlError(sc);
       return;
@@ -1434,6 +1431,9 @@ export class ViewfinderController {
     this.seen = { bodies: {}, markers: {}, pathLabels: [] };
     this.marks.clear();
     this.probe = import.meta.env.DEV && (window as unknown as { __scape?: { markProbe?: boolean } }).__scape?.markProbe ? [] : null;
+    // First in the batch, so every mark draws over them.
+    this.drawHorizon(sc);
+    if (c.showRainbow) this.drawRainbow(sc);
     this.drawSky(sc);
 
     const date = new Date(worldStore.getState().time);
@@ -1443,27 +1443,10 @@ export class ViewfinderController {
       const l = this.drawBody(sc, b, date);
       if (l) labels.push(l);
     }
-    // Horizon (0°) as a faint dashed line.
     ctx.save();
     ctx.beginPath();
     ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(230,237,243,0.35)';
-    ctx.setLineDash([4, 6]);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    let started = false;
-    for (let i = 0; i <= 40; i++) {
-      const az = sc.aim.azimuthDeg - sc.hfov * 0.75 + (sc.hfov * 1.5 * i) / 40;
-      const p = this.toPx(sc, az, 0);
-      if (!p) continue;
-      if (!started) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-      started = true;
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-    if (c.showRainbow) this.drawRainbow(sc);
     if (c.showPaths) {
       for (const b of BODIES) {
         if (!bodyVisible(b, c, s)) continue;
@@ -1512,6 +1495,8 @@ export class ViewfinderController {
   }
 
   dispose() {
+    this.photo?.image?.close();
+    this.photo = null;
     this.sceneGl?.dispose();
     for (const u of this.unsubs) u();
     this.ro.disconnect();

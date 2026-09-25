@@ -2,7 +2,8 @@
  * The viewfinder's picture: a G-buffer pass for the terrain mesh and the building prisms, a
  * cascaded shadow map along the sun, and a fullscreen composite that adds the sky, the Milky Way
  * and the sun and moon discs. The discs are drawn here because only here is the geometry depth
- * known, so a disc straddling a tower edge clips instead of popping. The sky marks follow, over it.
+ * known, so a disc straddling a tower edge clips instead of popping. The reference photo follows,
+ * then the sky marks over it.
  */
 
 import { UMBRA_AXIS_LIGHT, UMBRA_RISE } from '@core/astro/eclipse';
@@ -12,6 +13,7 @@ import { cameraBasis, type Camera, type CameraBasis } from '@core/optics/project
 import type { MeshLevel } from '@core/terrain/mesh';
 import { GROUND_HAZE_M, SKY } from '../palette';
 import { OverlayGl, type OverlayBatch } from './overlayGl';
+import { PhotoGl, type PhotoLayer } from './photoGl';
 import { linkProgram, PrismGl, uniforms, type PrismGlStats } from './prismGl';
 import { CASCADE_COUNT, fitCascades, lightBasis, mergeScene, type Cascade, type SceneBounds } from './shadowFit';
 import { SHADOW_GLSL, SHADOW_UNIFORMS, ShadowGl } from './shadowGl';
@@ -75,6 +77,7 @@ export interface SceneGlInput {
   moonDisc: BodyDisc | null;
   /** Stars, figures, trails and paths in CSS px of a canvas `dpr` times smaller than this one. */
   overlay: { batch: OverlayBatch; dpr: number } | null;
+  photo: PhotoLayer | null;
 }
 
 export interface SceneGlStats {
@@ -379,6 +382,7 @@ export class SceneGl {
   private readonly terrainGl: TerrainGl;
   private readonly shadowGl: ShadowGl;
   private readonly overlayGl: OverlayGl;
+  private readonly photoGl: PhotoGl;
   private readonly dummy2d: WebGLTexture;
   private readonly timer: TimerExt | null;
   private lastGpuMs = -1;
@@ -411,12 +415,17 @@ export class SceneGl {
     this.terrainGl = new TerrainGl(gl);
     this.shadowGl = new ShadowGl(gl);
     this.overlayGl = new OverlayGl(gl);
+    this.photoGl = new PhotoGl(gl);
     this.timer = gl.getExtension('EXT_disjoint_timer_query_webgl2') as TimerExt | null;
     this.dummy2d = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.dummy2d);
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 1, 1);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  }
+
+  get maxTextureSize(): number {
+    return this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number;
   }
 
   /** Sizes the drawing buffer; the picture itself is drawn into `viewport` inside it. */
@@ -456,6 +465,7 @@ export class SceneGl {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.viewport(vx, vy, vw, vh);
     this.composite(input, shadow.cascades, vx, vy, vw, vh);
+    this.photoGl.render(input.photo);
     if (input.overlay && this.gPos) this.overlayGl.render(input.overlay.batch, this.gPos, input.overlay.dpr, vx, vy, vw, vh);
 
     lap();
@@ -493,6 +503,7 @@ export class SceneGl {
     this.terrainGl.dispose();
     this.shadowGl.dispose();
     this.overlayGl.dispose();
+    this.photoGl.dispose();
     this.dropTargets();
     if (this.mw) gl.deleteTexture(this.mw.tex);
     if (this.moonMap) gl.deleteTexture(this.moonMap.tex);

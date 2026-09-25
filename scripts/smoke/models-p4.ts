@@ -23,7 +23,7 @@ const FULL_FRAME_DIAG_MM = Math.hypot(36, 24);
 
 type Box = { x: number; y: number; width: number; height: number };
 type Disc = { az: number; alt: number; x: number; y: number; r: number; hidden: boolean };
-type Fit = { box: { cx: number; cy: number; w: number; h: number; rotDeg: number }; frame: { x: number; y: number; w: number; h: number }; pxPerMm: number; focalMm: number; focal35: number; nat: { w: number; h: number }; img: { cx: number; cy: number; w: number; h: number }; opacity: string; vf: { x: number; y: number } };
+type Fit = { box: { cx: number; cy: number; w: number; h: number; rotDeg: number }; frame: { x: number; y: number; w: number; h: number }; pxPerMm: number; focalMm: number; focal35: number | null; nat: { w: number; h: number }; opacity: number };
 
 const rows: string[] = [];
 let failed = 0;
@@ -80,12 +80,11 @@ const HELPERS = `(async () => {
     let s = ''; for (const v of b) s += String.fromCharCode(v);
     return btoa(s);
   };
-  /** Where the controller put the photo, and where the img really is. */
+  /** Where the controller put the photo it drew. */
   const fit = () => {
-    const p = S.photo, img = document.querySelector('.vf-photo img'), vf = document.querySelector('canvas.vf').getBoundingClientRect();
-    if (!p || !img) return null;
-    const r = img.getBoundingClientRect();
-    return { box: p.box, frame: p.frame, pxPerMm: S.prism.cam.frame.pxPerMm, focalMm: p.focalMm, focal35: p.focal35, nat: { w: img.naturalWidth, h: img.naturalHeight }, img: { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height }, opacity: img.style.opacity, vf: { x: vf.left, y: vf.top } };
+    const p = S.photo;
+    if (!p?.nat) return null;
+    return { box: p.box, frame: p.frame, pxPerMm: S.prism.cam.frame.pxPerMm, focalMm: p.focalMm, focal35: p.focal35, nat: p.nat, opacity: p.opacity };
   };
   window.__smoke = { buildings, seed, geo, named, frame, sky, fresh, disc, luma, contrast, card, fit };
   return true;
@@ -157,7 +156,7 @@ const pickPhoto = async (path: string) => {
   const r = (await tab.send('Runtime.evaluate', { expression: `document.querySelector('input[aria-label="Reference photo file"]')` })) as { result: { objectId?: string } };
   if (!r.result.objectId) throw new Error('no photo file input');
   await tab.send('DOM.setFileInputFiles', { files: [path], objectId: r.result.objectId });
-  return tab.until<boolean>(`window.__scape.photo?.box?.w > 0 && document.querySelector('.vf-photo img')?.complete`, 10_000, 100);
+  return tab.until<boolean>(`window.__scape.photo?.box?.w > 0 && !!window.__scape.photo.nat`, 10_000, 100);
 };
 /** The photo's expected box from its Exif lens, worked here rather than by fit.ts. */
 const fitError = (p: Fit, focal35: number) => {
@@ -165,9 +164,7 @@ const fitError = (p: Fit, focal35: number) => {
   const w = 2 * ((FULL_FRAME_DIAG_MM * p.nat.w) / Math.hypot(p.nat.w, p.nat.h) / (2 * focal35)) * p.focalMm * p.pxPerMm;
   const cx = p.frame.x + p.frame.w / 2, cy = p.frame.y + p.frame.h / 2;
   const model = Math.max(Math.abs(p.box.w - w), Math.abs(p.box.h - w * aspect), Math.abs(p.box.cx - cx), Math.abs(p.box.cy - cy));
-  // Page layout: the img where the box says, rotation 0.
-  const dom = Math.max(Math.abs(p.img.w - p.box.w), Math.abs(p.img.h - p.box.h), Math.abs(p.img.cx - (p.vf.x + p.box.cx)), Math.abs(p.img.cy - (p.vf.y + p.box.cy)));
-  return { model, dom, w, ratio: p.box.w / p.frame.w };
+  return { model, w, ratio: p.box.w / p.frame.w };
 };
 
 await tab.viewport(DESKTOP.w, DESKTOP.h);
@@ -257,7 +254,7 @@ const hint = await tab.eval<string>(`document.querySelector('.vf-photo-tools .hi
 const first = await js<Fit | null>('return fit();');
 const e200 = first && fitError(first, PHOTO_FOCAL35);
 check('photo loads from a file pick, Exif focal read', !!loaded && first?.focal35 === PHOTO_FOCAL35 && hint.includes(`${PHOTO_FOCAL35} mm`), `${first?.nat.w}×${first?.nat.h}, focal35 ${first?.focal35}; hint "${hint}"`);
-check('200 mm: photo fills the frame', !!e200 && e200.model < 0.5 && e200.dom < 1 && Math.abs(e200.ratio - 1) < 0.01, e200 ? `box ${first.box.w.toFixed(1)}×${first.box.h.toFixed(1)} in frame ${first.frame.w.toFixed(1)}×${first.frame.h.toFixed(1)}; off the lens by ${e200.model.toFixed(2)} px, img off the box by ${e200.dom.toFixed(2)} px` : 'no photo');
+check('200 mm: photo fills the frame', !!e200 && e200.model < 0.5 && Math.abs(e200.ratio - 1) < 0.01, e200 ? `box ${first.box.w.toFixed(1)}×${first.box.h.toFixed(1)} in frame ${first.frame.w.toFixed(1)}×${first.frame.h.toFixed(1)}; off the lens by ${e200.model.toFixed(2)} px` : 'no photo');
 const setOpacity = (v: number) =>
   tab.eval(`(() => { const i = document.querySelector('input[aria-label="Photo opacity"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '${v}'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
 const centre = async (name: string) => {
@@ -267,11 +264,11 @@ const centre = async (name: string) => {
 };
 await setOpacity(0.2);
 await settle(500);
-const o20 = await js<{ style: string; dev: number }>(`await fresh(); return { style: document.querySelector('.vf-photo img').style.opacity, dev: S.photo.opacity };`);
+const o20 = await js<{ style: string; dev: number }>(`await fresh(); return { style: String(S.photo.opacity), dev: S.photo.opacity };`);
 const l20 = await centre('photo-opacity-20');
 await setOpacity(0.9);
 await settle(500);
-const o90 = await js<{ style: string; dev: number }>(`await fresh(); return { style: document.querySelector('.vf-photo img').style.opacity, dev: S.photo.opacity };`);
+const o90 = await js<{ style: string; dev: number }>(`await fresh(); return { style: String(S.photo.opacity), dev: S.photo.opacity };`);
 const l90 = await centre('photo-opacity-90');
 check('opacity slider fades the photo', o20.style === '0.2' && o20.dev === 0.2 && o90.style === '0.9' && o90.dev === 0.9 && l90.mean > l20.mean + 60, `20%: style ${o20.style}, mean luma ${l20.mean}; 90%: style ${o90.style}, mean luma ${l90.mean}`);
 await setOpacity(0.5);
@@ -283,11 +280,10 @@ await settle(500);
 const after = await js<{ box: Fit['box'] }>('await fresh(); return fit();');
 const moved = { dx: after.box.cx - before.box.cx, dy: after.box.cy - before.box.cy, rot: after.box.rotDeg - before.box.rotDeg };
 const step = 0.002 * before.box.w;
-const rotated = await tab.eval<string>(`document.querySelector('.vf-photo img').style.transform`);
 await click('Reset');
 await settle(300);
 const reset = await js<{ box: Fit['box'] }>('await fresh(); return fit();');
-check('photo nudges: offset and rotation', Math.abs(moved.dx - step) < 0.01 && Math.abs(moved.dy + step) < 0.01 && Math.abs(moved.rot - 0.1) < 1e-9 && rotated.includes('rotate(0.1') && reset.box.cx === before.box.cx && reset.box.rotDeg === 0, `right/up moved ${moved.dx.toFixed(3)}/${(-moved.dy).toFixed(3)} px (step ${step.toFixed(3)}), turned ${moved.rot.toFixed(2)}° (${rotated}); Reset back to centre`);
+check('photo nudges: offset and rotation', Math.abs(moved.dx - step) < 0.01 && Math.abs(moved.dy + step) < 0.01 && Math.abs(moved.rot - 0.1) < 1e-9 && reset.box.cx === before.box.cx && reset.box.rotDeg === 0, `right/up moved ${moved.dx.toFixed(3)}/${(-moved.dy).toFixed(3)} px (step ${step.toFixed(3)}), turned ${moved.rot.toFixed(2)}°; Reset back to centre`);
 
 // The matrix, desktop: the body behind the model and the photo on the lens at every frame.
 const matrix: string[] = [];
@@ -300,11 +296,11 @@ for (const light of [Light.Day, Light.Night]) {
       const d = await frameBody(BODY[light], f, orient);
       const p = await js<Fit | null>('return fit();');
       const e = p && fitError(p, PHOTO_FOCAL35);
-      const ok = !!d?.hidden && !!e && e.model < 0.5 && e.dom < 1;
+      const ok = !!d?.hidden && !!e && e.model < 0.5;
       matrixOk &&= ok;
       const name = `${light}-${orient[0]}-${f}`;
       await tab.shot(`${shots}/${name}.png`, await js<Box>('return frame();'));
-      matrix.push(`| ${name} | ${ok ? 'PASS' : 'FAIL'} | ${BODY[light]} hidden ${d?.hidden}; photo ${e ? `${e.ratio.toFixed(3)}× frame width, off the lens ${e.model.toFixed(2)} px, img off ${e.dom.toFixed(2)} px` : 'missing'} |`);
+      matrix.push(`| ${name} | ${ok ? 'PASS' : 'FAIL'} | ${BODY[light]} hidden ${d?.hidden}; photo ${e ? `${e.ratio.toFixed(3)}× frame width, off the lens ${e.model.toFixed(2)} px` : 'missing'} |`);
     }
   }
 }
@@ -319,11 +315,11 @@ const lockHint = await tab.eval<string>(`document.querySelector('.vf-photo-tools
 let lockOk = lockHint.includes('locked to the lens') && lockHint.includes('200 mm');
 for (const [f, orient] of [[200, 'Landscape'], [24, 'Landscape'], [600, 'Landscape'], [600, 'Portrait']] as const) {
   await frameBody('Moon', f, orient);
-  const p = await js<(Fit & { fromExif: boolean }) | null>('return { ...fit(), fromExif: S.photo.fromExif };');
-  const e = p && fitError(p, PHOTO_FOCAL35);
-  const ok = !!p && p.fromExif === false && Math.abs(p.focal35! - PHOTO_FOCAL35) < 0.01 && !!e && e.model < 0.5 && e.dom < 1;
-  lockOk &&= ok;
-  locks.push(`${f} ${orient[0]} ${e?.ratio.toFixed(3)}×`);
+  const p = await js<Fit | null>('return fit();');
+  const e = p && fitError(p, null);
+  const ok = !!p && p.focal35 === null && !!e && e.model < 0.5;
+  spanOk &&= ok;
+  spans.push(`${f} ${orient[0]} ${e?.ratio.toFixed(3)}×`);
 }
 check('no Exif: photo locked to the lens at pick', lockOk, `${locks.join(', ')}; hint "${lockHint}"`);
 
@@ -337,8 +333,8 @@ for (const [f, orient] of [[200, 'Portrait'], [600, 'Landscape']] as const) {
   await frameBody('Moon', f, orient);
   const p = await js<Fit | null>('return fit();');
   const e = p && fitError(p, PHOTO_FOCAL35);
-  phoneOk &&= !!e && e.model < 0.5 && e.dom < 1;
-  phone.push(`${f} ${orient[0]}: ${e ? `${e.ratio.toFixed(3)}× frame, off ${Math.max(e.model, e.dom).toFixed(2)} px` : 'missing'}`);
+  phoneOk &&= !!e && e.model < 0.5;
+  phone.push(`${f} ${orient[0]}: ${e ? `${e.ratio.toFixed(3)}× frame, off ${e.model.toFixed(2)} px` : 'missing'}`);
   await tab.shot(`${shots}/phone-${orient[0]}-${f}.png`);
 }
 const tools = await tab.eval<{ fits: boolean; controls: number }>(`(() => { const t = document.querySelector('.vf-photo-tools'); t.scrollIntoView({ block: 'center' }); const r = t.getBoundingClientRect(); return { fits: r.left >= 0 && r.right <= innerWidth + 0.5 && r.width > 0, controls: t.querySelectorAll('button, input[type=range]').length }; })()`);
@@ -347,7 +343,7 @@ await tab.shot(`${shots}/phone-photo-tools.png`);
 check('phone 390×844: photo fits, controls in reach', phoneOk && tools.fits && tools.controls >= 10, `${phone.join('; ')}; ${tools.controls} controls, ${tools.fits ? 'within the width' : 'overflowing'}`);
 
 await click('Clear photo');
-const cleared = await tab.until<boolean>(`window.__scape.photo === null && document.querySelector('.vf-photo').hidden`, 5000, 100);
+const cleared = await tab.until<boolean>(`window.__scape.photo === null`, 5000, 100);
 check('Clear photo removes the layer', !!cleared, cleared ? 'layer hidden, no photo state' : 'still shown');
 
 await js(`
