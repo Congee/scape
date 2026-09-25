@@ -6,7 +6,7 @@ import type { SightVerdict } from '@core/weather/sightline';
 import { tideDay } from '@data/tides';
 import { useDayData } from '@state/dayData';
 import { settingsStore, useSettings } from '@state/settings';
-import { useWorld, worldStore } from '@state/world';
+import { usePlanTime, useWorld, worldStore } from '@state/world';
 import { CloudRow } from './CloudChart';
 import { sightKey, useSightlines, VERDICT_TEXT } from './Sightlines';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
@@ -119,7 +119,7 @@ function Row({ ev, active, tz, hour12, sight }: { ev: DayEvent; active: boolean;
 /** The day's tide at the pin's nearest station; absent when none is in range. */
 function TideRow() {
   const { site, distM } = useNearestTide();
-  const time = useWorld((s) => s.time);
+  const time = usePlanTime();
   const tz = useWorld((s) => s.tz);
   const dayStart = useDayData((s) => s.dayStart);
   const dayEnd = useDayData((s) => s.dayEnd);

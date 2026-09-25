@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
-import { longestShadowM, shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
+import { shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
+import { adoptPrismSlots } from '@core/geo/prismOcclude';
 import type { Lod2Source } from '@core/lod2/regions';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
@@ -145,11 +146,9 @@ function ensureMaskWorker(): Worker {
     const res = e.data;
     if (res.kind === BuildingsKind.Shade) {
       const { centre, originE, originN, nx, ny, cellM, mask, lod2 } = res;
-      if (res.id === maskId && lastMask) {
-        // Measured under the sun it was built for, so a later sun can tell how far those shadows move.
-        builtShadow = { tallM: Math.max(0, longestShadowM(mask, nx, ny, cellM, lastMask.sunAzDeg) * Math.tan(lastMask.sunAltDeg * (Math.PI / 180))) };
-      }
-      if (res.id === maskId) buildingsStore.setState({ shadowMask: { centre, originE, originN, nx, ny, cellM, mask, lod2 }, shadowMaskMs: res.ms });
+      if (res.id !== maskId) return;
+      builtShadow = { tallM: res.tallM };
+      buildingsStore.setState({ shadowMask: { centre, originE, originN, nx, ny, cellM, mask, lod2 }, shadowMaskMs: res.ms });
     } else if (res.kind === BuildingsKind.Error) {
       buildingsStore.setState({ error: res.error });
     }

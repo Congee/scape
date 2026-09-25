@@ -59,7 +59,7 @@ export function FramePanel() {
   const setSetting = settingsStore.getState().update;
 
   const aimAt = (body: SkyBody) => {
-    const p = position(body, new Date(worldStore.getState().time), makeObserver(pin, pinHeightM));
+    const p = position(body, new Date(worldStore.getState().time), makeObserver(pin, pinSiteHeightM({ pinHeightM }, { pinGroundM })));
     compositionStore.getState().aim(p.azimuth, Math.max(0, p.altitude));
   };
   const setFocal = (v: number) => update(zoomPatch(c, v));

@@ -4,7 +4,7 @@ import type { LngLat } from '@core/geo/geodesy';
 import { meshOccluderParts } from '@core/geo/meshOcclude';
 import { prismSlots } from '@core/geo/prismOcclude';
 import { buildPrisms, prismFrameKey } from '@core/geo/prismRaster';
-import { frameOf, frameToLngLat, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
+import { frameOf, frameToLngLat, longestShadowM, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
 import { lod2CoverOf, type Lod2Cover } from '@core/lod2/cover';
 import { lod2RegionsNear, type Lod2Region, type Lod2Source } from '@core/lod2/regions';
 import { lod2BuildingAt, lod2HeightAboveM, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
@@ -352,7 +352,9 @@ async function shade(req: MaskRequest): Promise<void> {
   if (!built || latestMask !== req.id) return;
   const { mask, lod2 } = built;
   const { id, centre, originE, originN, nx, ny, cellM } = req;
-  scope.postMessage({ kind: BuildingsKind.Shade, id, centre, originE, originN, nx, ny, cellM, mask, lod2, ms: performance.now() - t0 } satisfies BuildingsResponse, [mask.buffer]);
+  // Measured under the sun it was built for, so a later sun can tell how far those shadows move.
+  const tallM = Math.max(0, longestShadowM(mask, nx, ny, cellM, req.sunAzDeg) * Math.tan(req.sunAltDeg * (Math.PI / 180)));
+  scope.postMessage({ kind: BuildingsKind.Shade, id, centre, originE, originN, nx, ny, cellM, mask, lod2, tallM, ms: performance.now() - t0 } satisfies BuildingsResponse, [mask.buffer]);
 }
 
 /** Apex of the LoD2 building under `p` above the ground there; null where none stands. */

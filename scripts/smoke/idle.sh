@@ -30,11 +30,7 @@ elif ! curl -s -o /dev/null "$BASE/"; then
 fi
 BRAVE=0
 if ! curl -s -o /dev/null "http://localhost:$CDP/json/version"; then
-  mkdir -p "$PROFILE"
-  # Headless only: any headed launch can take the user's focus.
-  nohup "${BRAVE_BIN:-/nix/store/4fripln844kh7xfjfh803hr2nm235v4x-brave-1.94.121/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}" \
-    --headless=new --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run \
-    --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling about:blank >/dev/null 2>&1 &
+  brave_launch "$CDP" "$PROFILE" || exit 1
   BRAVE=1
 fi
 for u in "$BASE/" "http://localhost:$CDP/json/version"; do

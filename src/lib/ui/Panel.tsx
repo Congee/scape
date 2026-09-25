@@ -8,6 +8,7 @@ import { NightPanel } from './NightPanel';
 import { ToolsPanel } from './ToolsPanel';
 import { OfflinePanel } from './OfflinePanel';
 import { Timeline } from './Timeline';
+import { WeatherPanel } from './WeatherPanel';
 import { PanelTab, uiStore, useUi } from '@state/ui';
 
 const TABS: PanelTab[] = [PanelTab.Timeline, PanelTab.Geodetics, PanelTab.Frame, PanelTab.Night, PanelTab.Tools, PanelTab.Weather, PanelTab.Find, PanelTab.Markers, PanelTab.Layers, PanelTab.Offline];
