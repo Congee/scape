@@ -526,9 +526,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
 within 0.003° and 4 s of JPL Horizons, stars within 25″, LoD2 roofs within 1.3 cm of source. The
 visible errors are design choices, each waiting on a decision (recommendation in brackets):
 
-- Spherical geodesy: bearings off by ≤0.19°, destination points by ≤0.56 % of distance, while the
-  Sun's azimuth is ellipsoidal, so terrain can sit 0.19° off the Sun. [Ellipsoidal `geodesy.ts` and
-  `pinFrame.ts` together, with the terrain work.]
+- Fixed 2026-09-24 (ellipsoid): WGS84 geodesics (GeographicLib port) and an exact ENU pin frame on
+  every placement path; terrain, buildings and horizon agree with the Sun to 1e-6° (was 0.03–0.19°).
+  The vertical stays a spherical drop with k = 0.13 (≤0.5 % of the drop).
 - Fixed 2026-09-24 (astrofix): refraction tapers to zero by −3° (≤24″ vs Horizons below the
   horizon, was ≤39′); stars and the Milky Way are refracted; catalogue stars carry aberration and
   proper motion to 2025 (<1″ vs astropy, was 15–20″); rise/set use sampled ground plus eye height
@@ -545,14 +545,10 @@ visible errors are design choices, each waiting on a decision (recommendation in
 
 **Known code glitches (2026-09-24).**
 
-- Smoke scripts pass `--cdp` but no `AGENT_BROWSER_SESSION`, so parallel agents share the default
-  session and can drive each other's tabs; models-p2 also inherits the saved camera and its first
-  building lookup after reload can time out at 15 s (set camera and warm up first).
 - Overture prism build and `occludes` run on the main thread (170–250 ms/s dragging in Rotterdam);
   the terrain-drag work is cutting it, moving the build into the worker is still open.
 - The mask worker warns once per skipped LoD2 tile on every rebuild, so a permanently bad tile
   repeats its warning.
-- `zip.ts` does not check per-entry 0xFFFFFFFF (Zip64) sizes; harmless at GSI file sizes.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
