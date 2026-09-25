@@ -4,7 +4,7 @@ import { cubicStencilTiles, elevationAt, elevationAtCubic, memoSource } from '@c
 import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
 import { BlockCache } from '@core/terrain/blockCache';
 import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
-import { planSweep, requiredTiles, sweepColumns, sweepHorizon } from '@core/terrain/horizon';
+import { planSweep, refineHorizon, requiredTiles, sweepColumns, type HorizonProfile } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { assembleView, sweepView, type ViewProfile } from '@core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, tileKey, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
@@ -105,14 +105,23 @@ async function horizon(req: HorizonRequest): Promise<TerrainResponse | null> {
   const plan = planSweep(req.pin, req.rangeM, { azStepDeg: req.azStepDeg, minZoom: demZoom(8), maxZoom: demZoom(14), tileSize: TERRAIN_TILE_SIZE });
   const tiles = requiredTiles(plan);
   const release = cache.retain(tiles);
+  let releaseFine: (() => void) | null = null;
   try {
     await cache.loadAll(tiles);
     if (latest.Horizon !== req.id) return null;
     const eyeM = groundM + req.eyeAboveGroundM;
-    const skyline = sweepHorizon(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM);
+    const r = refineHorizon(cache, plan, eyeM, req.eyeAboveGroundM, req.rangeM, { minZoom: demZoom(8), maxZoom: demZoom(16), tileSize: TERRAIN_TILE_SIZE });
     const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
-    return { kind: TerrainKind.Horizon, id: req.id, result: { profile: skyline, groundM, eyeM, tiles: tiles.length, missing } };
+    const result = (skyline: HorizonProfile, refined: boolean, fine: number): TerrainResponse => ({ kind: TerrainKind.Horizon, id: req.id, result: { profile: skyline, groundM, eyeM, tiles: tiles.length + fine, missing, refined } });
+    if (!r.samples) return result(r.coarse, true, 0);
+    // The coarse skyline shows at once; the refined one replaces it when its tiles arrive.
+    scope.postMessage(result(r.coarse, false, 0));
+    releaseFine = cache.retain(r.tiles);
+    await cache.loadAll(r.tiles);
+    if (latest.Horizon !== req.id) return null;
+    return result(r.sweep(cache), true, r.tiles.length);
   } finally {
+    releaseFine?.();
     release();
   }
 }

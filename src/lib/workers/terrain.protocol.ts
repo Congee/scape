@@ -93,6 +93,8 @@ export interface HorizonResult {
   eyeM: number;
   tiles: number;
   missing: number;
+  /** False for the coarse skyline posted while the refinement's tiles load. */
+  refined: boolean;
 }
 
 export interface ViewResult {

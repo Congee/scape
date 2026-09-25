@@ -63,10 +63,11 @@ export function startDayDataSync(): () => void {
     // Only a horizon swept for the current pin may shape the events; a stale one is left out.
     const t = terrainStore.getState();
     const hk = horizonKeyFor(w, s);
-    const horizon = hk && t.horizon && t.horizonKey === hk ? t.horizon.profile : undefined;
+    const fresh = hk && t.horizon && t.horizonKey === hk ? t.horizon : null;
+    const horizon = fresh?.profile;
     const milkyWay = { sunMaxAltDeg: s.mwSunMaxAlt, gcMinAltDeg: s.mwGcMinAlt, moonRule: s.mwMoonRule, moonMaxIllumination: s.mwMoonMaxIllum };
     const groundM = t.pinGroundM === null || Number.isNaN(t.pinGroundM) ? null : Math.round(t.pinGroundM);
-    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, groundM, w.tz, b.isoDate, s.goldenAltitude, ...Object.values(milkyWay), horizon ? hk : '-'].join('|');
+    const key = [w.pin.lat.toFixed(5), w.pin.lng.toFixed(5), w.pinHeightM, groundM, w.tz, b.isoDate, s.goldenAltitude, ...Object.values(milkyWay), fresh ? `${hk}|${fresh.refined}` : '-'].join('|');
     return { w, s, b, horizon, milkyWay, groundM, key };
   };
 

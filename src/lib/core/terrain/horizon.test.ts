@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { elevationAngleDeg } from '@core/geo/geodesy';
+import { pinFrame } from '@core/geo/pinFrame';
 import type { DemSource, DemTile } from './dem';
-import { horizonAngleAt, planSweep, requiredTiles, sweepHorizon, type HorizonProfile } from './horizon';
+import { horizonAngleAt, planSweep, refineHorizon, requiredTiles, sweepHorizon, type HorizonProfile } from './horizon';
 import { TILE_SIZE, tileKey, tilePixelToLngLat } from './tiles';
 
 const pin = { lng: -74.1553, lat: 40.7463 };
@@ -66,6 +68,71 @@ describe('sweepHorizon', () => {
     expect(west).toBeLessThan(0);
     expect(west).toBeGreaterThan(-0.1);
     expect(horizonAngleAt(h, 0)).toBeLessThan(0);
+  });
+});
+
+/** Flat ground with a cone `eastM` east of the pin; every post is its cell's mean, like a real DEM pyramid. */
+function peakSource(eastM: number, heightM: number, radiusM: number): DemSource {
+  const frame = pinFrame(pin);
+  const tiles = new Map<string, DemTile>();
+  const cone = (lng: number, lat: number) => {
+    const [e, n] = frame.toEn(lng, lat);
+    return heightM * Math.max(0, 1 - Math.hypot(e - eastM, n) / radiusM);
+  };
+  return {
+    get(z, x, y) {
+      const k = tileKey(z, x, y);
+      let t = tiles.get(k);
+      if (!t) {
+        const elev = new Float32Array(TILE_SIZE * TILE_SIZE);
+        const sw = tilePixelToLngLat(z, x, y, 0, TILE_SIZE);
+        const ne = tilePixelToLngLat(z, x, y, TILE_SIZE, 0);
+        const [w, s] = frame.toEn(sw.lng, sw.lat);
+        const [e, n] = frame.toEn(ne.lng, ne.lat);
+        if (eastM > w - radiusM && eastM < e + radiusM && s < radiusM && n > -radiusM) {
+          const sub = Math.min(16, Math.ceil((e - w) / TILE_SIZE / (radiusM / 20)));
+          for (let py = 0; py < TILE_SIZE; py++)
+            for (let px = 0; px < TILE_SIZE; px++) {
+              let sum = 0;
+              for (let i = 0; i < sub; i++)
+                for (let j = 0; j < sub; j++) {
+                  const p = tilePixelToLngLat(z, x, y, px + (i + 0.5) / sub, py + (j + 0.5) / sub);
+                  sum += cone(p.lng, p.lat);
+                }
+              elev[py * TILE_SIZE + px] = sum / (sub * sub);
+            }
+        }
+        t = { z, x, y, size: TILE_SIZE, elev };
+        tiles.set(k, t);
+      }
+      return t;
+    }
+  };
+}
+
+describe('refineHorizon', () => {
+  const eyeM = 1.6;
+  for (const km of [10, 50]) {
+    it(`recovers a summit ${km} km away that the coarse sweep reads low`, () => {
+      const src = peakSource(km * 1000, 400, 1000);
+      const truth = elevationAngleDeg(km * 1000, 400 - eyeM);
+      const plan = planSweep(pin, 60_000, { azFromDeg: 88, azSpanDeg: 4, azStepDeg: 0.5 });
+      const r = refineHorizon(src, plan, eyeM, eyeM, 60_000);
+      const east = (90 - 88) / 0.5;
+      const fine = r.sweep(src);
+      expect(truth - r.coarse.angleDeg[east]).toBeGreaterThan(0.02);
+      expect(Math.abs(truth - fine.angleDeg[east])).toBeLessThan(0.01);
+      for (let i = 0; i < plan.nAz; i++) expect(fine.angleDeg[i]).toBeLessThanOrEqual(truth + 1e-4);
+    });
+  }
+
+  it('leaves flat ground alone', () => {
+    const plan = planSweep(pin, 20_000, { azStepDeg: 10 });
+    const flat: DemSource = { get: (z, x, y) => ({ z, x, y, size: TILE_SIZE, elev: new Float32Array(TILE_SIZE * TILE_SIZE) }) };
+    const r = refineHorizon(flat, plan, 1.6, 1.6, 20_000);
+    expect(r.samples).toBe(0);
+    expect(r.tiles).toEqual([]);
+    expect(r.sweep(flat).angleDeg).toEqual(sweepHorizon(flat, plan, 1.6, 1.6, 20_000).angleDeg);
   });
 });
 
