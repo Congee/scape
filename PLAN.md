@@ -1253,6 +1253,30 @@ visible errors are design choices, each waiting on a decision (recommendation in
     200–640 ms, i.e. after the 250 ms mesh debounce in nine of the ten, so nine of them would have
     committed pitch 0 before the fix.
 
+23. **Quiet budget re-measured** (2026-09-25) — `scripts/smoke/idle.sh`, 44 cases, 30 s idle each
+    after a 45 s settle, headless Brave at 1400×900 DPR 2. Scrub cases now start from a pinned
+    instant (Rotterdam day, 2026-06-21 13:00 Z), so they sweep the same sky every run. Results:
+
+    - 43/44 cases pass first time.
+    - Renderer ≤ 0.5 % in every map case and ≤ 0.2 % in every untouched viewfinder case. GPU ≤ 0.2 %.
+    - Hidden and pinned-time cases do nothing at all: 0 rAF, 0 timers, 0 fetches.
+    - The live clock costs 1–4 GL frames per 30 s (one repaint a minute), which is within budget.
+
+    One case is still over 2 %: **viewfinder after zoom** (1.9–2.8 % over four runs). A trace puts
+    about 0.5 s of the 0.76 s it spends in V8 GC (background marking and a memory-reducing major
+    GC) cleaning up after the zoom's mesh rebuild. Main-thread JS is 0.1 s. The one GL frame is
+    the minute tick, not the zoom. **Open**: to cut this, the viewfinder mesh rebuild has to
+    allocate less.
+
+    **Fixed:** the map's shadow mask re-stamped terrain and buildings (about 0.5 s of worker time)
+    on roughly every third live-clock minute, because the moving sun changed the shape of the padded
+    rect. It now keeps the current grid while that grid still covers the pad (`rectCovers`), so on a
+    still map each tick only recomputes the shadows (4–14 ms).
+
+    **Harness:** V8's post-load memory reducer runs GCs for about 45 s (up to 54 % renderer in the
+    first 10 s). The old 20 s settle measured that instead of the app, so a cold phone case read
+    18.9 %. The settle is now 45 s.
+
 **Answered by the user**
 
 19. **Variable zoom apertures — only the two ends** (2026-09-23, `97a55fe`). No per-focal database,
