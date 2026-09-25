@@ -22,7 +22,8 @@ research with versions and licenses, TPE screenshots).
    Rise = lighter shade, set = darker shade (TPE convention).
 4. **Pure geometry, honest boundaries.** Compute astronomy, optics and terrain exactly. Weather
    is a forecast (Open-Meteo, 2026-09-24): always shown with its model, age and attribution,
-   never drawn into the viewfinder, never shown as clear when data is missing.
+   never drawn into the viewfinder, never shown as clear when data is missing. We stay a maps + 3D viewfinder app: deeper weather and
+   dark-sky detail links out to windy.com and darkhours.app.
 5. **Offline first, no account.** All user data lives in the browser (IndexedDB) with
    export/import. Map, terrain and sky data are downloadable by region and updated when the
    user says so. The app shell itself is a PWA.
