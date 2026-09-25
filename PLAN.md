@@ -543,20 +543,13 @@ visible errors are design choices, each waiting on a decision (recommendation in
   eye (ERFA within 0.2 % above 10°); constellation vertices snap to the brightest catalogue star
   within 120″ (were 13″ median, 95″ max off). Still sea-level density: last light, moon view, map
   light, finder/align workers, fastHorizon, `RISE_APPARENT_DEG`.
-- Horizon sweep reads summits low, 12–53 m at 10 km, up to 205 m at 50 km (≤0.30°), so the Sun
-  clears ridges early and sets late (`horizon.ts`, zoom ceiling in `terrain.worker.ts`). Max-per-cell
-  or a finer coarsening floor, both cost speed. [After the terrain-drag work.]
+- Viewfinder `sweepView` (z14) still reads summits low; apply the hzsweep refinement.
 - Safari/iOS (AWS terrain) reads ground up to 197 m low (1.1° at 10 km). Software WebP decode (new
   path or dependency) or accept.
 - Fixed 2026-09-24 (astro2): Mapterhorn ground below sea level reaches eye and mesh (Zuidplaspolder
   eye −4.53 m, was 1.60 m); AWS Terrarium negatives are seabed and clamp to 0, so on Safari polders
   and the Dead Sea read 0 [accept]. Mapterhorn flattens hydro water to −1.5 m, so the Hudson sits
   1.5 m below sea level [accept now, water mask later].
-
-**Known code glitches (2026-09-24).**
-
-- Overture prism build and `occludes` run on the main thread (170–250 ms/s dragging in Rotterdam);
-  the terrain-drag work is cutting it, moving the build into the worker is still open.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
