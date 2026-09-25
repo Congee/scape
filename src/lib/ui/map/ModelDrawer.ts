@@ -8,6 +8,7 @@ import { MarkersView, PanelTab, uiStore } from '@state/ui';
 import { draftFeatures, MODEL_ACCENT, MODEL_COLOR, modelFeatures } from './modelOverlay';
 
 const MODELS_SRC = 'models';
+export const MODELS_LINE_LAYER = 'models-line';
 const DRAFT_SRC = 'model-draft';
 /** Screen distance a tap or drop snaps to an Overture vertex, or closes the ring on the first one. */
 const SNAP_PX = 12;
@@ -94,7 +95,7 @@ export class ModelDrawer {
     this.map.once('resize', pan);
   }
 
-  /** Extrusions under the labels, the draft over everything. */
+  /** Extrusions under the labels, outlines under every extrusion so what stands in front hides them, the draft over everything. */
   addLayers(beforeId: string | undefined) {
     if (this.map.getSource(MODELS_SRC)) return;
     this.map.addSource(MODELS_SRC, { type: 'geojson', data: EMPTY });
@@ -113,12 +114,15 @@ export class ModelDrawer {
       },
       beforeId
     );
-    this.map.addLayer({
-      id: 'models-line',
-      type: 'line',
-      source: MODELS_SRC,
-      paint: { 'line-color': ['case', ['get', 'selected'], MODEL_ACCENT, MODEL_COLOR], 'line-width': ['case', ['get', 'current'], 2.5, 1.5] }
-    });
+    this.map.addLayer(
+      {
+        id: MODELS_LINE_LAYER,
+        type: 'line',
+        source: MODELS_SRC,
+        paint: { 'line-color': ['case', ['get', 'selected'], MODEL_ACCENT, MODEL_COLOR], 'line-width': ['case', ['get', 'current'], 2.5, 1.5] }
+      },
+      this.map.getStyle().layers.find((l) => l.type === 'fill-extrusion')?.id ?? beforeId
+    );
     this.map.addLayer({ id: 'model-draft-fill', type: 'fill', source: DRAFT_SRC, filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': MODEL_ACCENT, 'fill-opacity': 0.18 } });
     this.map.addLayer({ id: 'model-draft-line', type: 'line', source: DRAFT_SRC, paint: { 'line-color': MODEL_ACCENT, 'line-width': 2, 'line-dasharray': [2, 1] } });
     this.render();

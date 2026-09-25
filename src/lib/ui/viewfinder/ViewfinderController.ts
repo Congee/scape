@@ -27,7 +27,7 @@ import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayG
 import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
-import { applyNudge, nudgeForKey, silhouetteEdges } from '@core/model/draw';
+import { applyNudge, nudgeForKey, silhouetteEdges, visibleRuns } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
 import { fitPhoto, photoHfovDeg } from '@core/photo/fit';
 import { MarkerShape, type SavedMarker } from '@core/plan';
@@ -52,6 +52,7 @@ import { MODEL_ACCENT } from '../map/modelOverlay';
 import { CATEGORY_COLORS } from '../map/overlays';
 
 const D2R = Math.PI / 180;
+const R2D = 180 / Math.PI;
 const DAY_MS = 86_400_000;
 const SIN_10_DEG = Math.sin(10 * D2R);
 const LIFT = new Float64Array(3);
@@ -60,6 +61,11 @@ const MAX_COLUMNS = 2400;
 const SUN_STEP_DEG = 0.05;
 /** Buildings are only worth fetching and drawing this far out. */
 const BUILDING_RANGE_M = 20_000;
+/** The selected model's outline is tested for occluders about this often along its length. */
+const OUTLINE_STEP_PX = 3;
+const OUTLINE_MAX_PX = 4000;
+/** Occlusion tests per frame for the outline; a dense mesh gets coarser steps. */
+const OUTLINE_SAMPLES = 6000;
 const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
 /** Red to violet; each colour's own index sets its radius, so the secondary comes out reversed. */
 const BOW_COLORS = ['#e8453c', '#f59a23', '#f2dc3c', '#4cc35a', '#3a8ee8', '#8a5cd6'];
@@ -505,7 +511,7 @@ export class ViewfinderController {
     return [...lod2Store.getState().tiles.values()].map((t) => t.mesh);
   }
 
-  /** Accent silhouette of the selected model, over the picture; it ignores occluders so a hidden model can still be lined up. */
+  /** Accent silhouette of the selected model, over the picture; terrain and buildings in front hide it. */
   private drawModelOutline(sc: Scene) {
     const dev = import.meta.env.DEV ? (window as unknown as { __scape?: Record<string, unknown> }).__scape : undefined;
     const id = modelsStore.getState().selectedId;
@@ -518,7 +524,6 @@ export class ViewfinderController {
     }
     const key = `${cache.key}|${id}`;
     if (this.outlineCache?.key !== key) this.outlineCache = { key, seg: silhouetteEdges(cache.meshes[at].pos, cache.meshes[at].idx) };
-    const seg = this.outlineCache.seg;
     const { ctx } = this;
     const F = sc.basis.forward;
     const cx = sc.frame.x + sc.frame.w / 2;
@@ -527,6 +532,7 @@ export class ViewfinderController {
       const p = projectDir(sc.cam, sc.basis, { x: e, y: n, z: u });
       return p && { x: cx + p.x * sc.frame.pxPerMm, y: cy - p.y * sc.frame.pxPerMm };
     };
+    const seg = this.visibleOutline(sc, this.outlineCache.seg, px);
     const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     let drawn = 0;
     ctx.save();
@@ -562,6 +568,33 @@ export class ViewfinderController {
     ctx.stroke();
     ctx.restore();
     if (dev) dev.modelOutline = { id, segments: drawn, box: drawn > 0 ? box : null };
+  }
+
+  /** The outline's pieces not behind terrain or a building, sampled every few pixels within a per-frame budget. */
+  private visibleOutline(sc: Scene, seg: Float32Array, px: (e: number, n: number, u: number) => { x: number; y: number } | null): Float32Array {
+    const occ = this.occ;
+    const view = sc.view;
+    if (!occ && !view) return seg;
+    const lenPx = new Float32Array(seg.length / 6);
+    let total = 0;
+    for (let i = 0; i < lenPx.length; i++) {
+      const p = px(seg[i * 6], seg[i * 6 + 1], seg[i * 6 + 2]);
+      const q = px(seg[i * 6 + 3], seg[i * 6 + 4], seg[i * 6 + 5]);
+      lenPx[i] = p && q ? Math.min(Math.hypot(q.x - p.x, q.y - p.y), OUTLINE_MAX_PX) : OUTLINE_MAX_PX / 8;
+      total += lenPx[i] / OUTLINE_STEP_PX;
+    }
+    const scale = Math.min(1, OUTLINE_SAMPLES / Math.max(total, 1));
+    return visibleRuns(
+      seg,
+      (i) => Math.ceil((lenPx[i] / OUTLINE_STEP_PX) * scale),
+      (e, n, u) => {
+        const h = Math.hypot(e, n);
+        const d = Math.hypot(h, u);
+        // Short of the point itself, so the model's own faces through it do not count.
+        const slack = 0.05 + d * 1e-4;
+        return (!!view && occluded(view, Math.atan2(e, n) * R2D, Math.atan2(u, h) * R2D, h - slack)) || (!!occ && occ.occludes(e, n, u, d - slack));
+      }
+    );
   }
 
   /** The reference photo's DOM layer, sized to the frame and scaled by its field of view. */

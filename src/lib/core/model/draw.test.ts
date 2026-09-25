@@ -3,7 +3,7 @@ import { distanceM, bearingDeg } from '@core/geo/geodesy';
 import { lngLatToLocal, localToLngLat } from '@core/model';
 import { RoofShape } from '@workers/buildings.protocol';
 import { partsMesh } from './mesh';
-import { applyNudge, apexOf, drawnModel, nearestWithin, NudgeKind, nudgeForKey, ringEdges, silhouetteEdges, snapRightAngle, withEdgeBearing, withEdgeLength } from './draw';
+import { applyNudge, apexOf, drawnModel, nearestWithin, NudgeKind, nudgeForKey, ringEdges, silhouetteEdges, snapRightAngle, visibleRuns, withEdgeBearing, withEdgeLength } from './draw';
 
 const flat = { headingDeg: 0, scale: 1 };
 
@@ -124,5 +124,27 @@ describe('silhouetteEdges', () => {
     // Only the south wall faces an eye straight in front and level: its four edges.
     expect(seg.length / 6).toBe(4);
     for (let i = 1; i < seg.length; i += 3) expect(seg[i]).toBeCloseTo(45, 6);
+  });
+});
+
+describe('visibleRuns', () => {
+  const seg = Float32Array.of(0, 10, 0, 10, 10, 0);
+  it('keeps a clear segment whole', () => {
+    expect([...visibleRuns(seg, () => 4, () => false)]).toEqual([0, 10, 0, 10, 10, 0]);
+  });
+
+  it('drops the pieces behind an occluder and splits around it', () => {
+    const runs = visibleRuns(seg, () => 10, (e) => e > 3 && e < 6);
+    expect([...runs]).toEqual([0, 10, 0, 3, 10, 0, 6, 10, 0, 10, 10, 0]);
+  });
+
+  it('drops a segment hidden throughout', () => {
+    expect(visibleRuns(seg, () => 8, () => true).length).toBe(0);
+  });
+
+  it('samples piece midpoints, never the shared end points', () => {
+    const at: number[] = [];
+    visibleRuns(seg, () => 2, (e) => (at.push(e), false));
+    expect(at).toEqual([2.5, 7.5]);
   });
 });

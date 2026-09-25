@@ -217,6 +217,29 @@ export function silhouetteEdges(pos: Float32Array, idx: Uint32Array): Float32Arr
   return Float32Array.from(out);
 }
 
+/**
+ * The runs of each e, n, u × 2 segment whose pieces are not `hidden`, tested at each piece's midpoint so
+ * a vertex the model shares with its own faces is never the sample; segment `i` splits into `pieces(i)`.
+ */
+export function visibleRuns(seg: Float32Array, pieces: (i: number) => number, hidden: (e: number, n: number, u: number) => boolean): Float32Array {
+  const out: number[] = [];
+  for (let i = 0; i + 5 < seg.length; i += 6) {
+    const [ae, an, au] = [seg[i], seg[i + 1], seg[i + 2]];
+    const [de, dn, du] = [seg[i + 3] - ae, seg[i + 4] - an, seg[i + 5] - au];
+    const k = Math.max(1, Math.round(pieces(i / 6)));
+    let from = -1;
+    for (let j = 0; j <= k; j++) {
+      const seen = j < k && !hidden(ae + de * ((j + 0.5) / k), an + dn * ((j + 0.5) / k), au + du * ((j + 0.5) / k));
+      if (seen && from < 0) from = j;
+      if (seen || from < 0) continue;
+      const [t0, t1] = [from / k, j / k];
+      out.push(ae + de * t0, an + dn * t0, au + du * t0, ae + de * t1, an + dn * t1, au + du * t1);
+      from = -1;
+    }
+  }
+  return Float32Array.from(out);
+}
+
 /** Azimuth and elevation, degrees, from an eye to a point `riseM` above or below it. */
 export function azElTo(eye: LngLat, p: LngLat, riseM: number): { azDeg: number; elDeg: number; distM: number } {
   const d = distanceM(eye, p);
