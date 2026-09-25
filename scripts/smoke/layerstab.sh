@@ -218,6 +218,25 @@ js '(() => { window.__scape.ui.getState().setPanelCollapsed(true); return "ok"; 
 q=$(quiet)
 check "phone idle 3 s: 0 rAF" "$([ "${q% *}" = 0 ] && echo 1 || echo 0)" "rAF/timers $q"
 
+# Every legend at once: stacked, none overlap, all inside the map.
+legends() { # viewport
+  vp "$1"
+  set_s "{ ...$OFF, showDayNight: true, showElevation: true, showSlope: true, showAspect: true }"
+  js '(() => { window.__scape.weather.getState().setLayer("Total"); const u = window.__scape.ui.getState(); u.setCloudLegendOpen(true); u.setPanelCollapsed(true); return "ok"; })()' >/dev/null
+  wait_for '!!document.querySelector(".map-legend") && !!document.querySelector("div.cloud-legend")' 40
+  sleep 0.5
+  local r
+  r=$(js '(() => { const a = document.querySelector(".map-area").getBoundingClientRect(), top = [...document.querySelectorAll(".map-legend, .cloud-legend")].map((e) => e.getBoundingClientRect()); const out = top.filter((b) => b.left < a.left - 0.5 || b.top < a.top - 0.5 || b.right > a.right + 0.5 || b.bottom > a.bottom + 0.5).length; let hit = 0; for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) { const p = top[i], q = top[j]; if (p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom) hit++; } return `${top.length} ${hit} ${out} ${document.documentElement.scrollWidth > innerWidth}`; })()')
+  local n hit out wide
+  read -r n hit out wide <<<"$r"
+  check "$1 all legends: none overlap" "$([ "$n" = 2 ] && [ "$hit" = 0 ] && echo 1 || echo 0)" "$n boxes, $hit overlaps"
+  check "$1 all legends: inside the map" "$([ "$out" = 0 ] && echo 1 || echo 0)" "$out outside"
+  check "$1 all legends: no sideways scroll" "$([ "$wide" = false ] && echo 1 || echo 0)" "overflow $wide"
+  ab screenshot "$OUT/$1-legends.png" >/dev/null
+}
+legends phone
+legends desktop
+
 # Leave the profile as found.
 set_s "$OFF"
 set_s "{ basemapId: 'ofm-liberty', showEventLines: true, showLiveLines: true, showShadow: true, showGc: true, showBuildings: true, showSunShadows: true }"

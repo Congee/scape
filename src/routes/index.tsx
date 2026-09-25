@@ -4,6 +4,7 @@ import { mapSearchFor, parseInstant, parsePoint, validateScene, type SceneSearch
 import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
 import { CloudLegend } from '@ui/CloudLayerControls';
+import { MapLegend } from '@ui/map/MapLegend';
 import { DateBar } from '@ui/DateBar';
 import { Panel, PanelExpand, usePanelClass } from '@ui/Panel';
 import { Search } from '@ui/Search';
@@ -70,7 +71,11 @@ function MapPage() {
       <div className="map-area">
         <MapView />
         <PanelExpand />
-        <CloudLegend />
+        {/* One stack, so legends never overlap. */}
+        <div className="map-legends">
+          <CloudLegend />
+          <MapLegend />
+        </div>
         <div className="map-badges">
           <Badges />
         </div>

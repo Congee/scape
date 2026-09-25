@@ -150,14 +150,23 @@ select {
   left: 10px;
 }
 
-.map-legend {
+.map-legends {
   position: absolute;
-  z-index: 4;
+  z-index: 5;
   left: 10px;
   bottom: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  pointer-events: none;
+}
+
+.map-legend {
   display: grid;
   gap: 6px;
-  max-width: min(360px, calc(100% - 20px));
+  max-width: min(360px, 100%);
   padding: 6px 8px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--bg) 85%, transparent);
@@ -2158,11 +2167,8 @@ label.file-pick input[type='file'] {
 .wx-dist th { color: var(--fg-3); font-weight: normal; }
 
 .cloud-legend {
-  position: absolute;
-  z-index: 5;
-  left: 10px;
-  bottom: 40px;
-  max-width: min(320px, calc(100% - 20px));
+  max-width: min(320px, 100%);
+  pointer-events: auto;
   padding: 6px 8px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--bg) 85%, transparent);
