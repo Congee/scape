@@ -27,6 +27,7 @@ import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayG
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
+import { segmentHitsRect } from '@core/viewfinder/segmentRect';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges, visibleRuns } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
@@ -1050,7 +1051,7 @@ export class ViewfinderController {
       const col = sc.view ? columnAt(sc.view, azs[i]) : -1;
       const sky = col >= 0 && alts[i] < sc.view!.skylineDeg[col];
       // Segments are clipped per pixel in the picture pass; the skyline is only known here.
-      if (p && prev && (inside || this.inFrame(sc, prev, 40))) {
+      if (p && prev && segmentHitsRect(prev, p, sc.frame, 40)) {
         this.marks.segment(prev.x, prev.y, p.x, p.y, 1.5, sky || prevSky ? OverlayFlag.Hidden : 0, 0.35, line);
         if (this.probe) {
           const a = this.behindBuilding(azs[i - 1], alts[i - 1], Infinity);
@@ -1116,7 +1117,7 @@ export class ViewfinderController {
         let prev: { x: number; y: number } | null = null;
         for (let i = 0; i < pts.length; i++) {
           const p = pts[i].altitudeDeg >= minAlt ? this.toPx(sc, pts[i].azimuthDeg, pts[i].altitudeDeg) : null;
-          if (p && prev && (this.inFrame(sc, p, 40) || this.inFrame(sc, prev, 40))) {
+          if (p && prev && segmentHitsRect(prev, p, sc.frame, 40)) {
             const dim = hidden[i] || hidden[i - 1];
             if (this.inFrame(sc, p)) seen[dim ? 'dim' : 'clear']++;
             this.marks.segment(prev.x, prev.y, p.x, p.y, lineWidth, OverlayFlag.Over | (dim ? OverlayFlag.Hidden : 0), alpha * 0.35, rgba);
