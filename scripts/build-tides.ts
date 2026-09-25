@@ -1,9 +1,10 @@
 /**
- * Builds the bundled tide station table in public/tides from the NOAA CO-OPS metadata API:
- *   bun scripts/build-tides.ts
- * Harmonic (type R) stations only; subordinate stations are offsets from these and are left out.
+ * Builds the bundled tide station tables in public/tides from the NOAA CO-OPS metadata API:
+ *   bun scripts/build-tides.ts [--subordinate]
+ * Harmonic (type R) stations go to stations.json; subordinate (type S) stations, as high/low offsets
+ * from one of those, go to subordinate.json. `--subordinate` rebuilds only that, against the bundled stations.json.
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONSTITUENT_NAMES } from '../src/lib/core/tides/constituents';
 
@@ -21,6 +22,14 @@ interface Meta {
   state: string;
   type: string;
 }
+interface Offsets {
+  refStationId: string;
+  heightOffsetHighTide: number | null;
+  heightOffsetLowTide: number | null;
+  timeOffsetHighTide: number | null;
+  timeOffsetLowTide: number | null;
+  heightAdjustedType: string;
+}
 interface Harcon {
   name: string;
   amplitude: number;
@@ -30,10 +39,13 @@ interface Harcon {
 async function json<T>(url: string, attempt = 0): Promise<T> {
   const res = await fetch(url);
   if (res.ok) return (await res.json()) as T;
-  if (attempt >= 3) throw new Error(`${res.status} ${url}`);
-  await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+  if (attempt >= 5) throw new Error(`${res.status} ${url}`);
+  // CO-OPS answers a burst with 403 for a minute or more.
+  await new Promise((r) => setTimeout(r, (res.status === 403 ? 30_000 : 1000) * 2 ** attempt));
   return json(url, attempt + 1);
 }
+
+const label = (m: Meta) => (m.state ? `${m.name}, ${m.state}` : m.name);
 
 type Row = [id: string, name: string, lat: number, lng: number, z0Mm: number, constituents: number[]];
 
@@ -53,26 +65,60 @@ async function station(m: Meta): Promise<Row | null> {
     if (i < 0 || amp < MIN_AMP_MM) continue;
     cs.push(i, amp, Math.round(c.phase_GMT * 10));
   }
-  const name = m.state ? `${m.name}, ${m.state}` : m.name;
-  return [m.id, name, round4(m.lat), round4(m.lng), Math.round((msl - mllw) * 1000), cs];
+  return [m.id, label(m), round4(m.lat), round4(m.lng), Math.round((msl - mllw) * 1000), cs];
+}
+
+type SubRow = [id: string, name: string, lat: number, lng: number, refId: string, highMin: number, lowMin: number, highH: number, lowH: number, kind: string];
+
+// R: heights are the reference's times a ratio; F: plus an offset in feet.
+const HEIGHT_KINDS = new Set(['R', 'F']);
+
+async function subordinate(m: Meta): Promise<SubRow | null> {
+  const o = await json<Offsets>(`${API}/stations/${m.id}/tidepredoffsets.json`);
+  const { heightOffsetHighTide: hh, heightOffsetLowTide: lh, timeOffsetHighTide: ht, timeOffsetLowTide: lt } = o;
+  if (hh === null || lh === null || ht === null || lt === null || !o.refStationId) return null;
+  if (!HEIGHT_KINDS.has(o.heightAdjustedType)) throw new Error(`${m.id}: unknown heightAdjustedType ${o.heightAdjustedType}`);
+  return [m.id, label(m), round4(m.lat), round4(m.lng), o.refStationId, ht, lt, hh, lh, o.heightAdjustedType];
+}
+
+async function batched<T>(items: Meta[], fn: (m: Meta) => Promise<T | null>): Promise<{ rows: T[]; skipped: string[] }> {
+  const rows: T[] = [];
+  const skipped: string[] = [];
+  for (let i = 0; i < items.length; i += 8) {
+    const slice = items.slice(i, i + 8);
+    // oxlint-disable-next-line no-await-in-loop -- small batches; CO-OPS refuses bursts
+    const batch = await Promise.all(slice.map(fn));
+    // oxlint-disable-next-line no-await-in-loop -- a pause between batches keeps CO-OPS from blocking the run
+    await new Promise((r) => setTimeout(r, 250));
+    batch.forEach((r, j) => (r ? rows.push(r) : skipped.push(slice[j].id)));
+  }
+  return { rows, skipped };
 }
 
 const list = await json<{ stations: Meta[] }>(`${API}/stations.json?type=tidepredictions`);
-const harmonic = list.stations.filter((s) => s.type === 'R');
-const rows: Row[] = [];
-let skipped = 0;
-for (let i = 0; i < harmonic.length; i += 16) {
-  // oxlint-disable-next-line no-await-in-loop -- small batches; CO-OPS refuses bursts
-  const batch = await Promise.all(harmonic.slice(i, i + 16).map(station));
-  for (const r of batch) {
-    if (r) rows.push(r);
-    else skipped++;
-  }
-}
-rows.sort((a, b) => a[0].localeCompare(b[0]));
-
 const date = new Date().toISOString().slice(0, 10);
-const source = `NOAA CO-OPS harmonic constituents and datums, public domain, downloaded ${date}`;
-const body = JSON.stringify({ source, constituents: CONSTITUENT_NAMES, stations: rows });
-writeFileSync(join(out, 'stations.json'), body);
-console.log(`stations: ${rows.length}, skipped without MSL/MLLW: ${skipped}, subordinate left out: ${list.stations.length - harmonic.length}, ${body.length} bytes`);
+
+let rows: Row[];
+if (process.argv.includes('--subordinate')) rows = (JSON.parse(readFileSync(join(out, 'stations.json'), 'utf8')) as { stations: Row[] }).stations;
+else {
+  const harmonic = await batched(
+    list.stations.filter((s) => s.type === 'R'),
+    station
+  );
+  rows = harmonic.rows.toSorted((a, b) => a[0].localeCompare(b[0]));
+  const source = `NOAA CO-OPS harmonic constituents and datums, public domain, downloaded ${date}`;
+  const body = JSON.stringify({ source, constituents: CONSTITUENT_NAMES, stations: rows });
+  writeFileSync(join(out, 'stations.json'), body);
+  console.log(`harmonic: ${rows.length}, skipped without MSL/MLLW: ${harmonic.skipped.length}, ${body.length} bytes`);
+}
+
+const sub = await batched(
+  list.stations.filter((s) => s.type === 'S'),
+  subordinate
+);
+const refs = new Set(rows.map((r) => r[0]));
+const subRows = sub.rows.filter((r) => refs.has(r[4])).toSorted((a, b) => a[0].localeCompare(b[0]));
+const subSource = `NOAA CO-OPS subordinate station high/low offsets, public domain, downloaded ${date}`;
+const subBody = JSON.stringify({ source: subSource, stations: subRows });
+writeFileSync(join(out, 'subordinate.json'), subBody);
+console.log(`subordinate: ${subRows.length}, skipped without offsets: ${sub.skipped.length}, without a bundled reference: ${sub.rows.length - subRows.length}, ${subBody.length} bytes`);

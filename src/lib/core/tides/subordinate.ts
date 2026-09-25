@@ -1,0 +1,44 @@
+import { tideExtremes, type TideExtreme, type TideStation } from './predict';
+
+const FT = 0.3048;
+const MIN_MS = 60_000;
+
+export const HeightOffset = { Ratio: 'Ratio', AddFeet: 'AddFeet' } as const;
+export type HeightOffset = (typeof HeightOffset)[keyof typeof HeightOffset];
+
+/** A NOAA subordinate station: highs and lows are its reference station's, shifted and scaled. */
+export interface SubordinateStation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  refId: string;
+  highMin: number;
+  lowMin: number;
+  highH: number;
+  lowH: number;
+  heightOffset: HeightOffset;
+}
+
+/** Bundled row: [id, name, lat, lng, reference id, high/low time offsets in minutes, high/low height offsets, 'R' ratio | 'F' feet added]. */
+export type SubordinateRow = [string, string, number, number, string, number, number, number, number, string];
+
+export function parseSubordinate(row: SubordinateRow): SubordinateStation {
+  const [id, name, lat, lng, refId, highMin, lowMin, highH, lowH, kind] = row;
+  if (kind !== 'R' && kind !== 'F') throw new Error(`tide station ${id}: unknown height offset ${kind}`);
+  return { id, name, lat, lng, refId, highMin, lowMin, highH, lowH, heightOffset: kind === 'R' ? HeightOffset.Ratio : HeightOffset.AddFeet };
+}
+
+/** NOAA's subordinate method: each reference high/low moves by its time offset and takes its height offset. */
+export function subordinateExtremes(sub: SubordinateStation, ref: TideStation, fromMs: number, toMs: number): TideExtreme[] {
+  const margin = Math.max(Math.abs(sub.highMin), Math.abs(sub.lowMin)) * MIN_MS;
+  const out: TideExtreme[] = [];
+  for (const e of tideExtremes(ref, fromMs - margin, toMs + margin)) {
+    const timeMs = e.timeMs + (e.high ? sub.highMin : sub.lowMin) * MIN_MS;
+    if (timeMs < fromMs || timeMs >= toMs) continue;
+    const h = e.high ? sub.highH : sub.lowH;
+    out.push({ timeMs, heightM: sub.heightOffset === HeightOffset.Ratio ? e.heightM * h : e.heightM + h * FT, high: e.high });
+  }
+  // Unequal high and low offsets can swap a close pair.
+  return out.toSorted((a, b) => a.timeMs - b.timeMs);
+}
