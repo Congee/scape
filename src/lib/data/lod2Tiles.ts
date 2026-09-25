@@ -1,6 +1,7 @@
 import { MeshoptDecoder } from 'meshoptimizer/decoder';
 import { geoidAt, type GeoidGrid } from '@core/geo/geoid';
-import { isB3dm, readB3dm } from '@core/lod2/b3dm';
+import { isB3dm, readB3dm, type B3dm } from '@core/lod2/b3dm';
+import { fetchFault, httpFault, Lod2Failures, Lod2Fault } from '@core/lod2/failures';
 import { lod2Tile, type Lod2Tile } from '@core/lod2/tile';
 import { walkTileset, type TilesetJson, type WalkContent, type WalkView } from '@core/lod2/tileset';
 import type { Lod2Region } from '@core/lod2/regions';
@@ -20,21 +21,33 @@ export function setLod2TileCacheSize(n: number): void {
 
 const tilesets = new Map<string, TilesetJson>();
 const tilesetInflight = new Map<string, Promise<void>>();
-/** A tileset that failed is retried on the next walk, not within this one. */
-const failed = new Set<string>();
+/** Failed tilesets and tiles; a failed tileset also stays out of the rest of its walk. */
+const faults = new Lod2Failures(() => performance.now());
+
+function fault(url: string, f: Lod2Fault, detail: unknown): void {
+  if (faults.record(url, f)) console.warn(`[scape] LoD2 ${f === Lod2Fault.Permanent ? 'skipped' : 'failed, will retry'}:`, url, detail);
+}
+
+async function fetchTileset(url: string): Promise<void> {
+  let text: string;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return fault(url, httpFault(res.status), `HTTP ${res.status}`);
+    text = await res.text();
+  } catch (err) {
+    return fault(url, fetchFault(err), err);
+  }
+  try {
+    tilesets.set(url, JSON.parse(text) as TilesetJson);
+  } catch (err) {
+    fault(url, Lod2Fault.Permanent, err);
+  }
+}
 
 function loadTileset(url: string): Promise<void> {
   let p = tilesetInflight.get(url);
   if (!p) {
-    p = (async () => {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`${res.status}`);
-        tilesets.set(url, (await res.json()) as TilesetJson);
-      } catch {
-        failed.add(url);
-      }
-    })().finally(() => tilesetInflight.delete(url));
+    p = fetchTileset(url).finally(() => tilesetInflight.delete(url));
     tilesetInflight.set(url, p);
   }
   return p;
@@ -42,10 +55,9 @@ function loadTileset(url: string): Promise<void> {
 
 /** Contents the view needs, nearest first, after fetching every external tileset the walk reaches. */
 export async function walkRegion(region: Lod2Region, view: WalkView): Promise<WalkContent[]> {
-  failed.clear();
   for (let round = 0; ; round++) {
     const r = walkTileset(region.tileset, (u) => tilesets.get(u), view);
-    const todo = r.pending.filter((u) => !failed.has(u));
+    const todo = r.pending.filter((u) => !faults.blocked(u));
     if (todo.length === 0 || round === WALK_ROUNDS) return r.contents;
     // oxlint-disable-next-line no-await-in-loop -- each round's tilesets name the next ones
     await Promise.all(todo.map(loadTileset));
@@ -109,31 +121,67 @@ function release(): void {
   waiting.shift()?.();
 }
 
+/** Null when the tile is absent or unreachable; a decode failure rejects. */
 async function load(c: WalkContent, region: Lod2Region): Promise<Lod2Tile | null> {
   const gen = geoidGen;
   await acquire();
   let buf: ArrayBuffer;
   try {
     const res = await fetch(c.url);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      fault(c.url, httpFault(res.status), `HTTP ${res.status}`);
+      return null;
+    }
     buf = await res.arrayBuffer();
-  } catch {
+  } catch (err) {
+    fault(c.url, fetchFault(err), err);
     return null;
   } finally {
     release();
   }
-  const b = isB3dm(buf) ? readB3dm(buf) : { glb: buf, rtc: undefined, batch: {} };
+  let b: B3dm;
+  let needsDraco: boolean;
+  try {
+    b = isB3dm(buf) ? readB3dm(buf) : { glb: buf, rtc: undefined, batch: {} };
+    needsDraco = gltfUsesDraco(b.glb);
+  } catch (err) {
+    throw undecodable(c.url, err);
+  }
   await MeshoptDecoder.ready;
-  const w = readGlbWorld(b.glb, { meshopt: MeshoptDecoder, draco: gltfUsesDraco(b.glb) ? await dracoDecoder() : undefined });
-  w.rtc ??= b.rtc;
-  const grid = region.gsiGeoid && geoidKey ? await gsiGeoid() : null;
-  const t = lod2Tile(w, c.transform, region, b.batch, grid ? (lat, lng) => geoidAt(grid, lat, lng) : undefined);
+  let dec: DracoDecoder | undefined;
+  try {
+    dec = needsDraco ? await dracoDecoder() : undefined;
+  } catch (err) {
+    fault(c.url, Lod2Fault.Transient, err);
+    return null;
+  }
+  let t: Lod2Tile;
+  try {
+    const w = readGlbWorld(b.glb, { meshopt: MeshoptDecoder, draco: dec });
+    w.rtc ??= b.rtc;
+    const grid = region.gsiGeoid && geoidKey ? await gsiGeoid() : null;
+    t = lod2Tile(w, c.transform, region, b.batch, grid ? (lat, lng) => geoidAt(grid, lat, lng) : undefined);
+  } catch (err) {
+    throw undecodable(c.url, err);
+  }
+  faults.succeeded(c.url);
   if (gen === geoidGen) touch(c.url, t);
   return t;
 }
 
-/** One content tile in lng/lat/sea level; null when the network fails, a rejection when the content does not decode. */
+/** Content that did not decode, kept so a later request rejects the same way without the work. */
+const undecoded = new Map<string, unknown>();
+
+function undecodable(url: string, err: unknown): unknown {
+  fault(url, Lod2Fault.Permanent, err);
+  undecoded.set(url, err);
+  return err;
+}
+
+/** One content tile in lng/lat/sea level; null when absent or unreachable, a rejection when it does not decode. A known failure costs no fetch. */
 export function fetchLod2Tile(c: WalkContent, region: Lod2Region): Promise<Lod2Tile | null> {
+  if (undecoded.has(c.url)) return Promise.reject(undecoded.get(c.url));
+  if (faults.blocked(c.url)) return Promise.resolve(null);
   const hit = cache.get(c.url);
   if (hit) {
     touch(c.url, hit);

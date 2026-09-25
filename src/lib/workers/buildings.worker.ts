@@ -235,11 +235,9 @@ async function stampFrameLod2(g: HeightGrid, f: MaskFrame, live: () => boolean):
   let tris = 0;
   for (const { c, region } of around) {
     if (!live()) break;
+    // fetchLod2Tile warns once per bad tile and skips it after.
     // oxlint-disable-next-line no-await-in-loop -- nearest first until the budget runs out
-    const t = await fetchLod2Tile(c, region).catch((err: unknown) => {
-      console.warn('[scape] LoD2 tile skipped in the shadow mask:', c.url, err);
-      return null;
-    });
+    const t = await fetchLod2Tile(c, region).catch(() => null);
     if (!t) continue;
     if (tris + t.idx.length / 3 > LOD2_MASK_TRIS) break;
     tris += t.idx.length / 3;
