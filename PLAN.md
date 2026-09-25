@@ -557,8 +557,6 @@ visible errors are design choices, each waiting on a decision (recommendation in
 
 - Overture prism build and `occludes` run on the main thread (170–250 ms/s dragging in Rotterdam);
   the terrain-drag work is cutting it, moving the build into the worker is still open.
-- The mask worker warns once per skipped LoD2 tile on every rebuild, so a permanently bad tile
-  repeats its warning.
 
 **Nothing else in this register is waiting on a decision.** **19** and **20** were answered on
 2026-09-23 and are closed below. **2** is closed: the fine region is bounded to what the frame draws
