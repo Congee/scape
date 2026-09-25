@@ -104,7 +104,8 @@ const tap = async (x: number, y: number) => {
   await settle(250);
 };
 const click = (label: string) => tab.eval<boolean>(`(() => { const b = [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)} || b.textContent.trim() === ${JSON.stringify(label)}); b?.click(); return !!b; })()`);
-const openModels = () => js(`ui.uiStore.getState().setPanelTab('Markers'); ui.uiStore.getState().setMarkersView('Models'); return true;`);
+// The collapse persists, so a run can inherit a hidden panel.
+const openModels = () => js(`ui.uiStore.getState().setPanelCollapsed(false); ui.uiStore.getState().setPanelTab('Markers'); ui.uiStore.getState().setMarkersView('Models'); return true;`);
 // Its own camera: the stored one is wherever the last smoke left it, and a far one keeps the buildings worker busy there.
 const home = async () => {
   await tab.navigate(`${BASE}/?camera=${HOBOKEN}&target=${TOWER.lat},${TOWER.lng}&z=15`);
@@ -147,7 +148,9 @@ await tab.viewport(DESKTOP.w, DESKTOP.h);
 await home();
 const renderer = await Tab.renderer(Number(cdp));
 check('renderer is ANGLE Metal', /ANGLE Metal/.test(renderer), renderer);
-await js(`for (const m of S.models.getState().models.filter((m) => m.notes === 'p2-smoke')) await S.models.getState().remove(m.id); return true;`);
+// A crashed run leaves its models, and a suppressing tower hides the building the warm-up asks for.
+const clear = () => js(`for (const m of S.models.getState().models.filter((m) => m.notes === 'p2-smoke' || m.name === ${JSON.stringify(TOWER_NAME)} || m.name === ${JSON.stringify(LIBRARY_NAME)})) await S.models.getState().remove(m.id); return true;`);
+await clear();
 
 // A building across a z14 column edge seeds whole.
 const warm = await warmUp();
@@ -204,8 +207,9 @@ const corner = await js<{ at: [number, number]; x: number; y: number } | null>(`
   map().jumpTo({ center: [${BLOCK.lng}, ${BLOCK.lat}], zoom: 18.5, pitch: 0, bearing: 0 });
   await idle(); await new Promise((r) => setTimeout(r, 1500)); await idle();
   const r = map().getCanvas().getBoundingClientRect();
-  // Clear of the controls and the pin chips.
-  const safe = (p) => p.x > 40 && p.x < r.width - 80 && p.y > 70 && p.y < r.height - 50;
+  // Nothing over the map there: controls, chips, markers, the attribution maplibre opens on load.
+  const bare = (x, y) => document.elementFromPoint(r.left + x, r.top + y) === map().getCanvas();
+  const safe = (p) => p.x > 40 && p.x < r.width - 80 && p.y > 70 && p.y < r.height - 50 && bare(p.x, p.y) && bare(p.x + 5, p.y + 4);
   const pts = [];
   for (const f of map().queryRenderedFeatures({ layers: ['overture-building', 'overture-building-part'] })) {
     const g = f.geometry, polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
@@ -238,7 +242,10 @@ const before = await js<number>('return S.models.getState().models.length;');
 const taps = await js<{ x: number; y: number }[]>(`
   map().jumpTo({ center: [${LAWN.lng}, ${LAWN.lat}], zoom: 17, pitch: 0, bearing: 0 });
   await idle();
-  const r = map().getCanvas().getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2, d = 70;
+  // Above the attribution, which covers the bottom of the short phone map.
+  const r = map().getCanvas().getBoundingClientRect(), attrib = document.querySelector('.maplibregl-ctrl-attrib')?.getBoundingClientRect();
+  const top = r.top + 70, bottom = Math.min(r.bottom, attrib?.top ?? r.bottom) - 10;
+  const cx = r.left + r.width / 2, cy = (top + bottom) / 2, d = Math.min(70, (bottom - top) / 2);
   return [{ x: cx - d, y: cy - d }, { x: cx + d, y: cy - d }, { x: cx + d, y: cy + d }, { x: cx - d, y: cy + d }];
 `);
 await click('Draw a building');
@@ -273,7 +280,7 @@ const ground = await js<{ bad: string[]; baseM: number; demM: number | null }>(`
 check(
   'every model has a finite ground; the drawn base sits on the terrain',
   ground.bad.length === 0 && ground.demM !== null && Math.abs(ground.baseM - Math.max(ground.demM, 0)) < 2,
-  `${ground.bad.length ? `NaN ground: ${ground.bad.join(', ')}` : 'all finite'}; drawn base ${ground.baseM.toFixed(2)} m, DEM at its anchor ${ground.demM?.toFixed(2) ?? 'unknown'} m`
+  `${ground.bad.length ? `NaN ground: ${ground.bad.join(', ')}` : 'all finite'}; drawn base ${ground.baseM?.toFixed(2) ?? 'none'} m, DEM at its anchor ${ground.demM?.toFixed(2) ?? 'unknown'} m`
 );
 // A model saved while the DEM was unreadable gets its ground back on the next load.
 const healed = await js<{ was: number; now: number; ms: number } | null>(`
@@ -374,7 +381,7 @@ const bandShot = await tab.shot(`${shots}/shadow-600-low.png`, await js<Box>('re
 const band = await js<{ p95: number; max: number; sun: number }>(`return { ...(await banding(${JSON.stringify(bandShot)})), sun: S.prism.cam.sunAlt };`);
 check('no shadow banding at 600 mm, low sun', band.p95 <= 3, `p95 ${band.p95} slope flips per column (max ${band.max}), sun ${band.sun.toFixed(1)}°`);
 
-await js(`for (const m of S.models.getState().models.filter((m) => m.notes === 'p2-smoke' || m.name === ${JSON.stringify(TOWER_NAME)} || m.name === ${JSON.stringify(LIBRARY_NAME)})) await S.models.getState().remove(m.id); return true;`);
+await clear();
 await tab.send('Emulation.clearDeviceMetricsOverride', {});
 await tab.navigate(`${BASE}/`);
 tab.close();
