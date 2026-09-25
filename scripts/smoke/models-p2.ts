@@ -12,9 +12,9 @@ const TOWER = { lat: 40.754, lng: -74.0008 };
 const LIBRARY = { lat: 40.7532, lng: -73.9822 };
 const Z14_EDGE_LNG = (4825 / 16384) * 360 - 180;
 const HOBOKEN = '40.7527,-74.0225';
-// Bryant Park's lawn to draw on; the camera 300 m west along 42nd Street.
+// Bryant Park's lawn to draw on; the camera 120 m west in the park, clear of the buildings in front.
 const LAWN = { lat: 40.7536, lng: -73.9837 };
-const LAWN_CAMERA = '40.7536,-73.9873';
+const LAWN_CAMERA = '40.7536,-73.9851';
 // A dense block south of the park, for a vertex to snap to.
 const BLOCK = { lat: 40.7515, lng: -73.9845 };
 const Light = { Day: 'day', Low: 'low', Night: 'night' } as const;
@@ -329,7 +329,7 @@ if (made) {
   await openModels();
   await drawn(200, 'Landscape');
   await tab.until(`window.__scape.modelOutline?.id === ${JSON.stringify(made.id)}`, 10_000, 200);
-  const read = () => js<{ o: Edges & { segments: number }; p: Edges; h: number }>(`const m = S.models.getState().models.find((m) => m.id === ${JSON.stringify(made.id)}); return { o: outline(), p: predicted(m), h: m.anchor.headingDeg };`);
+  const read = () => js<{ o: (Edges & { segments: number }) | null; p: Edges; h: number }>(`const m = S.models.getState().models.find((m) => m.id === ${JSON.stringify(made.id)}); return { o: outline(), p: predicted(m), h: m.anchor.headingDeg };`);
   const a = await read();
   await tab.shot(`${shots}/phone-vf-before.png`);
   const raw = await tab.eval<string>('JSON.stringify(window.__scape.modelOutline?.box)');
@@ -339,13 +339,16 @@ if (made) {
   const b = await read();
   await tab.shot(`${shots}/phone-vf-after.png`);
   const k = ['x0', 'y0', 'x1', 'y1'] as const;
-  const fit = Math.max(...k.map((q) => Math.abs(a.o[q] - a.p[q])), ...k.map((q) => Math.abs(b.o[q] - b.p[q])));
-  const moved = Math.max(...k.map((q) => Math.abs(b.o[q] - a.o[q])));
-  const follow = Math.max(...k.map((q) => Math.abs(b.o[q] - a.o[q] - (b.p[q] - a.p[q]))));
-  nudge = {
-    ok: pressed && Math.abs(b.h - a.h - 1) < 1e-6 && a.o.segments > 0 && moved > 1 && follow < 0.5 && fit < 2,
-    detail: `heading ${a.h.toFixed(2)}° → ${b.h.toFixed(2)}°, ${b.o.segments} segments; outline moved ${moved.toFixed(2)} px, off the projected prism by ${fit.toFixed(2)} px, change off by ${follow.toFixed(3)} px; edges off ${k.map((q) => (a.o[q] - a.p[q]).toFixed(2)).join('/')}`
-  };
+  if (!a.o || !b.o) nudge = { ok: false, detail: `no outline drawn ${a.o ? 'after' : 'before'} the nudge: hidden or out of frame` };
+  else {
+    const fit = Math.max(...k.map((q) => Math.abs(a.o[q] - a.p[q])), ...k.map((q) => Math.abs(b.o[q] - b.p[q])));
+    const moved = Math.max(...k.map((q) => Math.abs(b.o[q] - a.o[q])));
+    const follow = Math.max(...k.map((q) => Math.abs(b.o[q] - a.o[q] - (b.p[q] - a.p[q]))));
+    nudge = {
+      ok: pressed && Math.abs(b.h - a.h - 1) < 1e-6 && a.o.segments > 0 && moved > 1 && follow < 0.5 && fit < 2,
+      detail: `heading ${a.h.toFixed(2)}° → ${b.h.toFixed(2)}°, ${b.o.segments} segments; outline moved ${moved.toFixed(2)} px, off the projected prism by ${fit.toFixed(2)} px, change off by ${follow.toFixed(3)} px; edges off ${k.map((q) => (a.o[q] - a.p[q]).toFixed(2)).join('/')}`
+    };
+  }
 }
 check('outline follows a 1° heading nudge (phone viewfinder)', nudge.ok, nudge.detail);
 
