@@ -27,6 +27,7 @@ export interface LightProbeState {
 let worker: Worker | null = null;
 let seq = 0;
 let dayKey = '';
+let litFrom: HorizonResult | null = null;
 
 export const lightProbeStore = create<LightProbeState>()((set) => ({
   point: null,
@@ -75,12 +76,14 @@ function relight() {
   const obs = lightPointObserver(point, horizon);
   const key = `${b.isoDate}|${w.tz}`;
   const prev = lightProbeStore.getState().light;
-  if (key === dayKey && prev) {
+  // The refined skyline replaces the coarse one within the same day.
+  if (key === dayKey && horizon === litFrom && prev) {
     const now = sunLitAt(obs, horizon.profile, w.time);
     if (now !== prev.litNow) lightProbeStore.setState({ light: { ...prev, litNow: now } });
     return;
   }
   dayKey = key;
+  litFrom = horizon;
   const startMs = b.start.getTime();
   const endMs = b.end.getTime();
   lightProbeStore.setState({ light: firstLastLight(obs, dayCurve(obs, startMs, endMs), horizon.profile, endMs, w.time) });
