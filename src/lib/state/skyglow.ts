@@ -6,7 +6,8 @@ import { referenceBins, REACH_KM, SKYGLOW_PARAMS, type GlowBins } from '@core/sk
 import { tileName, tileOf, tilesForWindow, VIIRS_MARGIN_KM, windowAround, type ViirsWindow } from '@core/sky/viirs';
 import { readViirsWindow, type ViirsStore } from '@data/viirs';
 import { SkyglowGl } from '@ui/sky/skyglowGl';
-import { GibsOutcome, type GibsRequest, type GibsResponse } from '../workers/gibs.protocol';
+import { clearGibs as clearGibsStore } from '@data/gibs';
+import { GibsOutcome, type GibsClearRequest, type GibsRequest, type GibsResponse } from '../workers/gibs.protocol';
 import { offlineStore } from './offline';
 import { worldStore } from './world';
 
@@ -130,7 +131,7 @@ let worker: Worker | null = null;
 let nextId = 0;
 const pending = new Map<number, (r: GibsResponse) => void>();
 
-function askGibs(req: Omit<GibsRequest, 'id'>): Promise<GibsResponse> {
+function askGibs(req: Omit<GibsRequest, 'id'> | Omit<GibsClearRequest, 'id'>): Promise<GibsResponse> {
   if (!worker) {
     worker = new Worker(new URL('../workers/gibs.worker.ts', import.meta.url), { type: 'module' });
     worker.addEventListener('message', (e: MessageEvent<GibsResponse>) => {
@@ -141,7 +142,7 @@ function askGibs(req: Omit<GibsRequest, 'id'>): Promise<GibsResponse> {
   const id = nextId++;
   return new Promise((resolve) => {
     pending.set(id, resolve);
-    worker!.postMessage({ ...req, id } satisfies GibsRequest);
+    worker!.postMessage({ ...req, id } satisfies GibsRequest | GibsClearRequest);
   });
 }
 
@@ -186,7 +187,8 @@ async function gibsState(p: LngLat, store: ViirsStore, which: Point): Promise<Gl
   const res = await askGibs({ p, win: windowAround(p, REACH_KM, g.maxTexture), nowMs: Date.now() });
   if (res.outcome === GibsOutcome.Offline) return { ...empty(GlowStatus.NoData), missing: missingTiles(p, offerYear(store), store) };
   if (res.outcome === GibsOutcome.Error) return { ...empty(GlowStatus.Error), error: res.error };
-  if (!res.nights.length) return { ...empty(GlowStatus.NoData), missing: missingTiles(p, offerYear(store), store) };
+  if (res.outcome !== GibsOutcome.Ready || !res.nights.length) return { ...empty(GlowStatus.NoData), missing: missingTiles(p, offerYear(store), store) };
+  if (res.fetchedBytes) void offlineStore.getState().refreshGibs();
   skyglowStore.setState((s) => ({ gibsLast: { ...s.gibsLast, [which]: { tiles: res.tiles, fetchedTiles: res.fetchedTiles, fetchedBytes: res.fetchedBytes, nights: res.nights } } }));
   const glow = ensureGpu();
   glow.load(res.win, p.lat);
@@ -222,6 +224,21 @@ async function update(): Promise<void> {
   const camera = await pointState(pin, store, Point.Camera);
   const target = await pointState(pin2, store, Point.Target);
   skyglowStore.setState({ camera, target, lastMs: performance.now() - t0 });
+}
+
+/** Empties the GIBS cache; the next reading refetches, and only once a panel wants one. */
+export async function clearGibs(): Promise<void> {
+  // Without a worker nothing is in flight or decoded.
+  if (worker) {
+    const res = await askGibs({ clear: true });
+    if (res.outcome === GibsOutcome.Error) throw new Error(res.error);
+  } else await clearGibsStore();
+  for (const k of cache.keys()) if (k.startsWith('gibs|')) cache.delete(k);
+  if (typeof loaded === 'string') loaded = null;
+  camGibs = null;
+  skyglowStore.setState({ gibsLast: {} });
+  await offlineStore.getState().refreshGibs();
+  void refresh();
 }
 
 const DEBOUNCE_MS = 250;

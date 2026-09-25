@@ -9,7 +9,13 @@ export interface GibsRequest {
   nowMs: number;
 }
 
-export const GibsOutcome = { Ready: 'Ready', Offline: 'Offline', Error: 'Error' } as const;
+/** Waits out requests in flight, then drops the decoded tiles and the OPFS cache. */
+export interface GibsClearRequest {
+  id: number;
+  clear: true;
+}
+
+export const GibsOutcome = { Ready: 'Ready', Offline: 'Offline', Error: 'Error', Cleared: 'Cleared' } as const;
 export type GibsOutcome = (typeof GibsOutcome)[keyof typeof GibsOutcome];
 
 export type GibsResponse =
@@ -25,4 +31,5 @@ export type GibsResponse =
       tiles: number;
     }
   | { id: number; outcome: typeof GibsOutcome.Offline }
+  | { id: number; outcome: typeof GibsOutcome.Cleared }
   | { id: number; outcome: typeof GibsOutcome.Error; error: string };

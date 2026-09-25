@@ -12,7 +12,7 @@ import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
 import { defaultBasemapSourceUrl, GEOID_DOWNLOAD_URL, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
 import { EARTHDATA_SIGNUP, laadsYearUrl, tilesNear, VIIRS_FIRST_YEAR, VIIRS_MARGIN_KM } from '@core/sky/viirs';
-import { offerYear } from '@state/skyglow';
+import { clearGibs, offerYear } from '@state/skyglow';
 import { useWorld } from '@state/world';
 import { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 
@@ -97,7 +97,7 @@ export function OfflinePanel() {
   useEffect(() => {
     const s = offlineStore.getState();
     if (!s.loaded) void s.load();
-    void s.refreshStorage();
+    void s.refreshGibs();
   }, []);
 
   const o = offlineStore.getState();
@@ -384,6 +384,8 @@ export function OfflinePanel() {
 
       <ViirsSection />
 
+      <GibsSection />
+
       <GeoidSection />
     </div>
   );
@@ -494,6 +496,43 @@ function ViirsSection() {
         <input type="file" accept=".h5" multiple disabled={busy !== null} aria-label="Import VNP46A4 tiles" onChange={(e) => importFiles(e.currentTarget)} />
         {busy ?? 'Import VNP46A4 .h5 tiles'}
       </label>
+      {error && <p className="error">{error}</p>}
+    </>
+  );
+}
+
+function GibsSection() {
+  const gibs = useOffline((s) => s.gibs);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const clear = async () => {
+    if (!window.confirm('Clear the cached VIIRS nightly tiles? The Night tab downloads them again when it next shows the sky.')) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await clearGibs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <h3>Nightly lights (GIBS)</h3>
+      <p className="muted hint">Where no year is imported, the Night tab reads the last nights of VIIRS from NASA GIBS and keeps them here; older nights are dropped on their own.</p>
+      <div className="list" data-gibs={gibs.bytes}>
+        <span className="detail">
+          {gibs.nights} night{gibs.nights === 1 ? '' : 's'} · {gibs.tiles} tile{gibs.tiles === 1 ? '' : 's'} · {bytes(gibs.bytes)}
+        </span>
+        <div className="actions">
+          <button className="link" disabled={busy || gibs.bytes === 0} onClick={() => void clear()}>
+            {busy ? 'Clearing…' : 'Clear'}
+          </button>
+        </div>
+      </div>
       {error && <p className="error">{error}</p>}
     </>
   );

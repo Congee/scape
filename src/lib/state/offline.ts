@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { Bbox } from '@core/geo/bbox';
 import { DEFAULT_BASEMAP_ID, offlineBasemaps, styleAssetUrls, type Basemap, type PmFlavor } from '@data/basemaps';
+import { gibsUsage, NO_GIBS, type GibsUsage } from '@data/gibs';
 import { readGeoidMeta, removeGeoid, type GeoidMeta } from '@data/geoid';
 import { fetchViirsListing, listViirs, removeViirs, type ViirsStore, type ViirsTileMeta } from '@data/viirs';
 import { localBuildings, localTerrain } from '@data/localTiles';
@@ -67,6 +68,9 @@ export interface OfflineState {
   importViirs(file: File): Promise<ViirsTileMeta>;
   fetchViirsListing(year: number): Promise<string[]>;
   removeViirs(year?: number): Promise<void>;
+  /** What the GIBS nightly cache holds in OPFS. */
+  gibs: GibsUsage;
+  refreshGibs(): Promise<void>;
 }
 
 // --- worker plumbing ----------------------------------------------------
@@ -127,14 +131,15 @@ export const offlineStore = create<OfflineState>()(
       viewSeq: 0,
       geoid: null,
       viirs: { tiles: [], listings: {} },
+      gibs: NO_GIBS,
 
       load: async () => {
         if (!opfsSupported()) return set({ supported: false, loaded: true });
-        const [archives, geoid, viirs] = await Promise.all([listArchives(), readGeoidMeta(), listViirs()]);
+        const [archives, geoid, viirs, gibs] = await Promise.all([listArchives(), readGeoidMeta(), listViirs(), gibsUsage()]);
         for (const meta of archives) registerArchive(meta);
         localTerrain.refresh();
         localBuildings.refresh();
-        set({ supported: true, loaded: true, archives, geoid, viirs });
+        set({ supported: true, loaded: true, archives, geoid, viirs, gibs });
         await get().refreshStorage();
       },
 
@@ -291,6 +296,11 @@ export const offlineStore = create<OfflineState>()(
       removeViirs: async (year) => {
         await removeViirs(year);
         set({ viirs: await listViirs() });
+        await get().refreshStorage();
+      },
+
+      refreshGibs: async () => {
+        set({ gibs: await gibsUsage() });
         await get().refreshStorage();
       }
     };

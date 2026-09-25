@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 import { GIBS_NEAR_ZOOM, GIBS_TILE_PX, gibsNights, gibsPlan, gibsTileKey, mercX, mercY, medianWindow, type GibsNight, type GibsTile } from '@core/sky/gibs';
 import { decodeIndexedPng } from '@core/terrain/png';
-import { GibsOfflineError, gibsTile, newestNight } from '@data/gibs';
-import { GibsOutcome, type GibsRequest, type GibsResponse } from './gibs.protocol';
+import { clearGibs, GibsOfflineError, gibsTile, newestNight } from '@data/gibs';
+import { GibsOutcome, type GibsClearRequest, type GibsRequest, type GibsResponse } from './gibs.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -62,9 +62,21 @@ async function handle(req: GibsRequest): Promise<GibsResponse> {
   return { id, outcome: GibsOutcome.Ready, win: out, nights: withData, fetchedTiles, fetchedBytes, tiles: plan.tiles.length };
 }
 
-scope.addEventListener('message', (e: MessageEvent<GibsRequest>) => {
+const inflight = new Set<Promise<unknown>>();
+
+async function clear(id: number): Promise<GibsResponse> {
+  await Promise.allSettled(inflight);
+  mem.clear();
+  await clearGibs();
+  return { id, outcome: GibsOutcome.Cleared };
+}
+
+scope.addEventListener('message', (e: MessageEvent<GibsRequest | GibsClearRequest>) => {
   const id = e.data.id;
-  handle(e.data).then(
+  const job = 'clear' in e.data ? clear(id) : handle(e.data);
+  inflight.add(job);
+  void job.finally(() => inflight.delete(job)).catch(() => {});
+  job.then(
     (res) => scope.postMessage(res, res.outcome === GibsOutcome.Ready ? [res.win.data.buffer] : []),
     (err: unknown) => {
       const res: GibsResponse = err instanceof GibsOfflineError ? { id, outcome: GibsOutcome.Offline } : { id, outcome: GibsOutcome.Error, error: err instanceof Error ? err.message : String(err) };

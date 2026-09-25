@@ -111,6 +111,84 @@ export async function newestNight(probe: GibsTile, nowMs: number): Promise<strin
   return hit.date;
 }
 
+export interface GibsUsage {
+  bytes: number;
+  /** Night folders holding at least one tile. */
+  nights: number;
+  /** Stored tiles; empty "no tile" markers do not count. */
+  tiles: number;
+}
+
+export const NO_GIBS: GibsUsage = { bytes: 0, nights: 0, tiles: 0 };
+
+/** One stored file; `night` is empty for files at the cache root. */
+export interface GibsFileSize {
+  night: string;
+  bytes: number;
+}
+
+export function summarizeGibs(files: readonly GibsFileSize[]): GibsUsage {
+  const nights = new Set<string>();
+  let bytes = 0;
+  let tiles = 0;
+  for (const f of files) {
+    bytes += f.bytes;
+    if (!f.night || !f.bytes) continue;
+    tiles++;
+    nights.add(f.night);
+  }
+  return { bytes, nights: nights.size, tiles };
+}
+
+/** The slice of an OPFS directory the usage walk reads. */
+export interface SizedDir {
+  kind: 'directory';
+  entries(): AsyncIterable<[string, SizedDir | SizedFile]>;
+}
+export interface SizedFile {
+  kind: 'file';
+  getFile(): Promise<{ size: number }>;
+}
+
+/** Every file under the cache root, one folder deep. */
+export async function gibsFiles(dir: SizedDir): Promise<GibsFileSize[]> {
+  const out: GibsFileSize[] = [];
+  const walk = async (d: SizedDir, night: string): Promise<void> => {
+    const subs: Promise<void>[] = [];
+    for await (const [name, h] of d.entries()) {
+      if (h.kind === 'file') subs.push(h.getFile().then((f) => void out.push({ night, bytes: f.size })));
+      else if (!night) subs.push(walk(h, name));
+    }
+    await Promise.all(subs);
+  };
+  await walk(dir, '');
+  return out;
+}
+
+async function existingRoot(): Promise<FileSystemDirectoryHandle | null> {
+  if (!opfsSupported()) return null;
+  try {
+    return await (await navigator.storage.getDirectory()).getDirectoryHandle(DIR);
+  } catch {
+    return null;
+  }
+}
+
+export async function gibsUsage(): Promise<GibsUsage> {
+  const dir = await existingRoot();
+  return dir ? summarizeGibs(await gibsFiles(dir as unknown as SizedDir)) : NO_GIBS;
+}
+
+/** Drops every stored night and the newest-night record. */
+export async function clearGibs(): Promise<void> {
+  if (!opfsSupported()) return;
+  try {
+    await (await navigator.storage.getDirectory()).removeEntry(DIR, { recursive: true });
+  } catch (e) {
+    if (!(e instanceof DOMException && e.name === 'NotFoundError')) throw e;
+  }
+}
+
 /** The first date with the tile, tried in order. */
 async function firstNight(dates: readonly string[], t: GibsTile): Promise<{ date: string; bytes: Uint8Array } | null> {
   if (!dates.length) return null;
