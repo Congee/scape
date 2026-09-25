@@ -44,11 +44,6 @@ let latest = 0;
 let latestLod2 = 0;
 /** Triangles per placed url, so a tile the caller holds is kept without decoding it again. */
 const lod2Tris = new Map<string, number>();
-/** Placed tiles for one exact placement, least recently used first, so a tile the caller dropped comes back as a copy. */
-const lod2Placed = new Map<string, Lod2Placed>();
-let lod2PlacedKey = '';
-let lod2PlacedTris = 0;
-const LOD2_PLACED_TRIS = 2 * LOD2_VIEW_TRIS;
 /** Newest map-mask id; the map centre is not the camera pin, so it gets its own counter and cache. */
 let latestMask = 0;
 let models: WorkerModel[] = [];
@@ -135,6 +130,23 @@ function touchCover(c: Lod2Cover): void {
 }
 
 /** Places the wedge's tiles and any held tile whose models, LoD2 cover or frame changed; a tile still matching is skipped. */
+/** A macrotask turn, so a newer request's message lands before the next tile is placed. */
+function yieldTurn(): Promise<void> {
+  const { port1, port2 } = new MessageChannel();
+  return new Promise((resolve) => {
+    port1.addEventListener(
+      'message',
+      () => {
+        port1.close();
+        resolve();
+      },
+      { once: true }
+    );
+    port1.start();
+    port2.postMessage(null);
+  });
+}
+
 async function run(req: TilesRequest): Promise<void> {
   const frame = prismFrameKey(req.pin, req.eyeM);
   const wedge = tilesForWedge(req.pin, req.azFromDeg, req.azSpanDeg, req.rangeM);
@@ -163,6 +175,8 @@ async function run(req: TilesRequest): Promise<void> {
   // All fetches start now so the data layer's concurrency limiter runs; they are consumed nearest first.
   const pending = tiles.map(({ t }) => fetchBuildingBatch(t));
   for (let n = 0; n < tiles.length; n++) {
+    // oxlint-disable-next-line no-await-in-loop -- tiles stream nearest first, one at a time
+    await yieldTurn();
     if (latest !== req.id) return;
     // oxlint-disable-next-line no-await-in-loop -- tiles stream nearest first, one at a time
     const decoded = await pending[n];
@@ -412,20 +426,6 @@ function placed(t: Lod2Tile, c: WalkContent, region: Lod2Region, req: Lod2Reques
   return { tile, transfer };
 }
 
-/** Moves a placed tile to the recent end, dropping the oldest past the triangle budget. */
-function keepPlaced(t: Lod2Placed): void {
-  const old = lod2Placed.get(t.url);
-  if (old) lod2PlacedTris -= old.tris;
-  lod2Placed.delete(t.url);
-  lod2Placed.set(t.url, t);
-  lod2PlacedTris += t.tris;
-  for (const [url, o] of lod2Placed) {
-    if (lod2PlacedTris <= LOD2_PLACED_TRIS || url === t.url) break;
-    lod2Placed.delete(url);
-    lod2PlacedTris -= o.tris;
-  }
-}
-
 /** Streams the wedge's LoD2 tiles nearest first until the triangle budget is spent. */
 async function lod2Run(req: Lod2Request): Promise<void> {
   const have = new Set(req.have);
@@ -441,15 +441,9 @@ async function lod2Run(req: Lod2Request): Promise<void> {
     if (latestLod2 !== req.id) return;
   }
   list.sort((a, b) => a.c.distM - b.c.distM);
-  const placeKey = `${req.pin.lat},${req.pin.lng}|${req.eyeM}|${geoidKey}`;
-  if (placeKey !== lod2PlacedKey) {
-    lod2PlacedKey = placeKey;
-    lod2Placed.clear();
-    lod2PlacedTris = 0;
-  }
   const started = new Map<number, Promise<Lod2Tile | null>>();
   const start = (i: number) => {
-    if (i >= list.length || started.has(i) || lod2Placed.has(list[i].c.url) || (have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) return;
+    if (i >= list.length || started.has(i) || (have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) return;
     const p = fetchLod2Tile(list[i].c, list[i].region);
     // A prefetch left behind by a newer request or the budget is never awaited.
     p.catch(() => undefined);
@@ -465,17 +459,6 @@ async function lod2Run(req: Lod2Request): Promise<void> {
       if (cover) touchCover(cover);
       tris += known;
       urls.push(c.url);
-      continue;
-    }
-    const kept = lod2Placed.get(c.url);
-    if (kept) {
-      if (tris + kept.tris > LOD2_VIEW_TRIS) break;
-      keepPlaced(kept);
-      tris += kept.tris;
-      urls.push(c.url);
-      const cover = lod2Covers.get(c.url);
-      if (cover) touchCover(cover);
-      scope.postMessage({ kind: BuildingsKind.Lod2Tile, id: req.id, tile: { ...kept, ms: 0 } } satisfies BuildingsResponse);
       continue;
     }
     for (let k = i; k <= i + LOD2_AHEAD; k++) start(k);
@@ -494,8 +477,6 @@ async function lod2Run(req: Lod2Request): Promise<void> {
     }
     if (tris + t.idx.length / 3 > LOD2_VIEW_TRIS) break;
     const { tile, transfer } = placed(t, c, region, req, t0);
-    // The copy is taken before the transfer detaches the arrays.
-    keepPlaced(structuredClone(tile));
     lod2Tris.set(c.url, tile.tris);
     touchCover({ url: c.url, bbox: t.bbox, rings: t.buildings.map((b) => suppressRing(b.hull)) });
     tris += tile.tris;

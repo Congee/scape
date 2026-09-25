@@ -35,7 +35,7 @@ import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@c
 import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
 import { buildingsStore, requestBuildings, requestLod2 } from '@state/buildings';
-import { lod2Store } from '@state/lod2';
+import { lod2HeldStats, lod2Store } from '@state/lod2';
 import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
@@ -619,7 +619,7 @@ export class ViewfinderController {
 
   private lod2Stats() {
     const l = lod2Store.getState();
-    return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows: this.prismHidden };
+    return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows: this.prismHidden, held: lod2HeldStats() };
   }
 
   /** True when a building stands between the eye and a direction; `distM` is Infinity for the sky. */

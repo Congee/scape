@@ -43,22 +43,80 @@ export const lod2Store = create<Lod2State>()(
 
 export const useLod2 = lod2Store;
 
+/** Placed tiles not drawn now, least recently used first; zooming back redraws them without asking the worker again. */
+const held = new Map<string, Lod2View>();
+let heldTris = 0;
+/** Held beyond the drawn tiles; battery over memory, so zooming back and forth never re-places. */
+export const LOD2_HELD_TRIS = 8_000_000;
+
+/** Every placed tile the store can draw without the worker, drawn or held. */
+export function lod2HeldUrls(): string[] {
+  return [...lod2Store.getState().tiles.keys(), ...held.keys()];
+}
+
+/** Triangles held off screen, for the debug readout. */
+export function lod2HeldStats(): { tiles: number; tris: number } {
+  return { tiles: held.size, tris: heldTris };
+}
+
+function hold(t: Lod2View): void {
+  unhold(t.url);
+  held.set(t.url, t);
+  heldTris += t.tris;
+  for (const [url, o] of held) {
+    if (heldTris <= LOD2_HELD_TRIS) break;
+    held.delete(url);
+    heldTris -= o.tris;
+  }
+}
+
+function unhold(url: string): Lod2View | undefined {
+  const t = held.get(url);
+  if (!t) return undefined;
+  held.delete(url);
+  heldTris -= t.tris;
+  return t;
+}
+
+/** A new pin, eye or geoid moves every mesh, so nothing placed before can be drawn. */
+export function resetLod2(placeKey: string): void {
+  held.clear();
+  heldTris = 0;
+  lod2Store.setState((st) => ({ tiles: new Map(), placeKey, version: st.version + 1, buildMs: 0 }));
+}
+
+const view = (tile: Lod2Placed): Lod2View => ({ ...tile, rings: tile.hulls.map(suppressRing) });
+
 export function addLod2Tile(tile: Lod2Placed): void {
+  unhold(tile.url);
   lod2Store.setState((st) => {
     const tiles = new Map(st.tiles);
-    tiles.set(tile.url, { ...tile, rings: tile.hulls.map(suppressRing) });
+    tiles.set(tile.url, view(tile));
     return { tiles, version: st.version + 1, buildMs: st.buildMs + tile.ms };
   });
 }
 
-/** Drops every tile the finished request did not keep. */
-export function finishLod2(urls: readonly string[], tris: number, missing: number, error: string | null): void {
+/** A tile placed for a superseded request of the same pin and eye; kept for when a later request names it. */
+export function holdLod2Tile(tile: Lod2Placed): void {
+  if (!lod2Store.getState().tiles.has(tile.url)) hold(view(tile));
+}
+
+/** Draws exactly the tiles the finished request kept, holding the rest; false when one it counted on was evicted meanwhile. */
+export function finishLod2(urls: readonly string[], tris: number, missing: number, error: string | null): boolean {
+  let complete = true;
   lod2Store.setState((st) => {
     const keep = new Set(urls);
-    const tiles = new Map([...st.tiles].filter(([u]) => keep.has(u)));
+    const tiles = new Map<string, Lod2View>();
+    for (const u of urls) {
+      const t = st.tiles.get(u) ?? unhold(u);
+      if (t) tiles.set(u, t);
+      else complete = false;
+    }
+    for (const [u, t] of st.tiles) if (!keep.has(u)) hold(t);
     const buildMs = [...tiles.values()].reduce((a, t) => a + t.ms, 0);
     return { tiles, version: st.version + 1, busy: false, tris, missing, buildMs, error };
   });
+  return complete;
 }
 
 /** The regions whose tiles are drawn now, for their attribution. */

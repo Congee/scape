@@ -6,7 +6,7 @@ import type { MaskRect } from '@core/geo/shadowMask';
 import { adoptPrismSlots } from '@core/geo/prismOcclude';
 import type { Lod2Source } from '@core/lod2/regions';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
-import { addLod2Tile, finishLod2, lod2Store } from './lod2';
+import { addLod2Tile, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
 
 /** Placed tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
@@ -72,6 +72,8 @@ let modelsSync: ModelsSync | null = null;
 /** Id of the LoD2 request whose responses the store still wants. */
 let lod2Id = 0;
 let lod2Key = '';
+/** First LoD2 request for the current pin and eye; a superseded one since then placed its tiles for them too. */
+let lod2PlaceId = 0;
 let lastLod2: Parameters<typeof requestLod2> | null = null;
 let geoidSync: GeoidSync | null = null;
 
@@ -104,8 +106,16 @@ function ensureWorker(): Worker {
     if (res.kind === BuildingsKind.Height || res.kind === BuildingsKind.Rows || res.kind === BuildingsKind.Ids || res.kind === BuildingsKind.Ground) return; // its waiter already timed out
     if (res.id === lod2Id) {
       if (res.kind === BuildingsKind.Lod2Tile) addLod2Tile(res.tile);
-      else if (res.kind === BuildingsKind.Lod2Done) finishLod2(res.urls, res.tris, res.missing, res.error);
-      else if (res.kind === BuildingsKind.Error) lod2Store.setState((st) => ({ busy: false, version: st.version + 1, error: res.error }));
+      else if (res.kind === BuildingsKind.Lod2Done) {
+        if (!finishLod2(res.urls, res.tris, res.missing, res.error) && lastLod2) {
+          lod2Key = '';
+          requestLod2(...lastLod2);
+        }
+      } else if (res.kind === BuildingsKind.Error) lod2Store.setState((st) => ({ busy: false, version: st.version + 1, error: res.error }));
+      return;
+    }
+    if (res.kind === BuildingsKind.Lod2Tile && res.id >= lod2PlaceId) {
+      holdLod2Tile(res.tile);
       return;
     }
     if (res.id !== tilesId) return;
@@ -175,9 +185,12 @@ export function requestLod2(pin: LngLat, eyeM: number, azFromDeg: number, azSpan
   lod2Key = key;
   lod2Id = ++seq;
   const st = lod2Store.getState();
-  if (st.placeKey !== placeKey) lod2Store.setState({ tiles: new Map(), placeKey, version: st.version + 1, buildMs: 0 });
+  if (st.placeKey !== placeKey) {
+    resetLod2(placeKey);
+    lod2PlaceId = lod2Id;
+  }
   lod2Store.setState({ busy: true, error: null });
-  const req: Lod2Request = { kind: BuildingsKind.Lod2, id: lod2Id, pin, eyeM, azFromDeg, azSpanDeg, rangeM, pxPerRad, have: [...lod2Store.getState().tiles.keys()] };
+  const req: Lod2Request = { kind: BuildingsKind.Lod2, id: lod2Id, pin, eyeM, azFromDeg, azSpanDeg, rangeM, pxPerRad, have: lod2HeldUrls() };
   ensureWorker().postMessage(req);
 }
 
