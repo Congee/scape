@@ -102,9 +102,26 @@ export interface TideExtreme {
 }
 
 const SCAN_MS = 10 * 60_000;
+/** NOAA omits a high and low closer together than this (its undocumented rule, fitted to a year of Gulf stations). */
+const MIN_PAIR_MS = 2 * HOUR_MS;
+const PAIR_MARGIN_MS = 3 * MIN_PAIR_MS;
 
-/** Highs and lows with `fromMs <= time < toMs`, from sign changes of the rate refined by bisection. */
+/** Highs and lows with `fromMs <= time < toMs`, from sign changes of the rate refined by bisection, less NOAA's short pairs. */
 export function tideExtremes(st: TideStation, fromMs: number, toMs: number): TideExtreme[] {
+  const all = turningPoints(st, fromMs - PAIR_MARGIN_MS, toMs + PAIR_MARGIN_MS);
+  const out: TideExtreme[] = [];
+  for (let i = 0; i < all.length; i++) {
+    // Scan forward and drop the first of any overlapping short pairs, as NOAA does.
+    if (i + 1 < all.length && all[i + 1].timeMs - all[i].timeMs < MIN_PAIR_MS) {
+      i++;
+      continue;
+    }
+    if (all[i].timeMs >= fromMs && all[i].timeMs < toMs) out.push(all[i]);
+  }
+  return out;
+}
+
+function turningPoints(st: TideStation, fromMs: number, toMs: number): TideExtreme[] {
   const out: TideExtreme[] = [];
   let t0 = fromMs;
   let r0 = tideRate(st, t0);
@@ -120,7 +137,7 @@ export function tideExtremes(st: TideStation, fromMs: number, toMs: number): Tid
         else hi = mid;
       }
       const timeMs = Math.round((lo + hi) / 2);
-      if (timeMs >= fromMs && timeMs < toMs) out.push({ timeMs, heightM: tideHeight(st, timeMs), high: r0 > 0 });
+      out.push({ timeMs, heightM: tideHeight(st, timeMs), high: r0 > 0 });
     }
     t0 = t1;
     r0 = r1;
