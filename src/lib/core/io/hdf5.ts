@@ -205,7 +205,7 @@ function decodeValues(b: Uint8Array, t: H5Type, count: number): H5Array {
   const ctor = arrayCtor(t);
   const out = new ctor(count);
   if (!t.bigEndian && b.byteOffset % t.size === 0) {
-    out.set(new ctor(b.buffer, b.byteOffset, count) as never);
+    out.set(new ctor(b.buffer as ArrayBuffer, b.byteOffset, count) as never);
     return out;
   }
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
@@ -565,7 +565,7 @@ function place(out: Uint8Array, data: Uint8Array, shape: number[], chunk: number
   const rank = shape.length;
   const run = Math.min(chunk[rank - 1], shape[rank - 1] - off[rank - 1]) * es;
   if (run <= 0) return;
-  const idx = new Array<number>(rank - 1).fill(0);
+  const idx: number[] = Array.from({ length: rank - 1 }, () => 0);
   for (;;) {
     let ok = true;
     let dst = 0;
