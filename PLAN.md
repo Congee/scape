@@ -102,7 +102,9 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
   terrain), Moon simulator (T)
 
 Explicitly out of scope: accounts/sync server, AR camera overlay (no reliable web compass),
-Google Street View / photorealistic tiles (paid, non-relightable).
+Google Street View / photorealistic tiles (paid, non-relightable); a bring-your-own-key
+Google 3D Tiles viewfinder backdrop is ultra-low priority (2026-09-24). Apple 3D / Look Around:
+MapKit JS offers only its own Look Around view, no camera or FOV control, no mesh access.
 
 ## 3. Architecture
 
