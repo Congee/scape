@@ -48,7 +48,23 @@ for a better basket, but need licence decisions; not fetched.
 z6 beyond 32 km changes predictions by ≤ 0.01 mag. Night count (vs 8): 4 nights ≤ 0.17 mag (local pixel up to 0.71, cloud/moon
 gaps), 16 nights ≤ 0.07 mag.
 
+## Fewer far nights (z6 beyond 32 km), 2026-09-25
+
+Same 8 nights and tiles; the far field reads k of them spread newest to oldest (`gibsFarNights`: 2 → nights 0, 7; 3 → 0, 4, 7;
+4 → 0, 2, 5, 7), the near field all 8. `gibs_windows.py --far-nights k`. Change vs 8 far nights, current params:
+
+| far nights | max Δ mag (SQM / basket) | rms Δ | Bortle flips | SQM rms, hits | tiles per cold point, mean (range) | MB mean (max) |
+|---|---|---|---|---|---|---|
+| 8 (baseline) | – | – | – | 0.56, 12/23 | 86 (48–120) | 2.50 (3.44) |
+| 4 | 0.000 / 0.001 | 0.000 | 0 | 0.56, 12/23 | 52 (32–72) | 1.56 (2.34) |
+| 3 | 0.001 / 0.001 | 0.000 | 0 | 0.56, 12/23 | 44 (26–60) | 1.30 (1.99) |
+| 2 | 0.001 / 0.001 | 0.000 | 0 | 0.56, 12/23 | 36 (20–50) | 1.04 (1.66) |
+
+Tiles and MB are SQM sites; the basket is similar (77 → 32 tiles). Far pixels do move (2 nights: window radiance +3–7 %), but
+at λ 19 km light beyond 32 km weighs too little to show. The refit barely moves (2 nights: k 2.07e-5, λ 98; 3: λ 119, rms 0.55
+both); basket scores unchanged. Adopted: 2 far nights, −59 % tiles and bytes per cold point; `SKYGLOW_PARAMS` kept.
+
 ## Verdict
 
-GIBS keeps the model as accurate as before: keep `SKYGLOW_PARAMS`, fetch 8 nights of z8 near + z6 far (~2.5 MB/site).
+GIBS keeps the model as accurate as before: keep `SKYGLOW_PARAMS`, fetch 8 nights of z8 near + 2 of z6 far (~1 MB/site).
 The saturation gain overfits (better rms, worse basket); not adopted.

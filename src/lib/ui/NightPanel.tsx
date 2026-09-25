@@ -227,7 +227,7 @@ function SkyGroup({ obs, skyline, aim, night, time, tz, hour12, heights }: { obs
         </b>
       </div>
       {curve.length > 1 && worst <= MOON_DARK_DMAG && <MoonChart curve={curve} time={time} tz={tz} hour12={hour12} />}
-      <p className="muted hint">{SKY_TOOLTIP} Zenith from NASA GIBS VIIRS nightly radiance (median of 8 nights), or an imported VIIRS Black Marble (VNP46A4) year where present, through a Walker-law kernel calibrated to 23 SQM sites; domes follow DarkHours (MIT).</p>
+      <p className="muted hint">{SKY_TOOLTIP} Zenith from NASA GIBS VIIRS nightly radiance (median of 8 nights near, 2 beyond 32 km), or an imported VIIRS Black Marble (VNP46A4) year where present, through a Walker-law kernel calibrated to 23 SQM sites; domes follow DarkHours (MIT).</p>
     </Group>
   );
 }

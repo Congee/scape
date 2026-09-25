@@ -28,6 +28,7 @@ export type GibsResponse =
       /** Tiles and bytes this request downloaded; the rest came from the cache. */
       fetchedTiles: number;
       fetchedBytes: number;
+      /** Tile-nights read, cached or not. */
       tiles: number;
     }
   | { id: number; outcome: typeof GibsOutcome.Offline }

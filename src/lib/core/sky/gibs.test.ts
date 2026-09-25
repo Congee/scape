@@ -4,14 +4,18 @@ import { decodeIndexedPng } from '@core/terrain/png';
 import { encodeIndexedPng } from '@core/terrain/pngFixture';
 import { cdm2ToMag, magToCdm2, NATURAL_SKY_MAG } from './brightness';
 import {
+  GIBS_FAR_NIGHTS,
   GIBS_FAR_ZOOM,
   GIBS_NEAR_KM,
   GIBS_NEAR_ZOOM,
+  GIBS_NIGHTS,
   GIBS_RADIANCE,
   GIBS_SAT_COUNT,
   GIBS_SATURATED,
   GIBS_TILE_PX,
+  gibsFarNights,
   gibsNights,
+  gibsNightTiles,
   gibsPlan,
   gibsTileKey,
   isStale,
@@ -73,14 +77,14 @@ const roundHalfEven = (x: number) => {
   return r - x === 0.5 && r % 2 !== 0 ? r - 1 : r;
 };
 
-/** Literal per-pixel port of gibs_windows.py's stack, sort and median. */
-function pyMedian(p: LngLat, win: { row0: number; col0: number; rows: number; cols: number }, nights: GibsNight[]): Uint16Array {
+/** Literal per-pixel port of gibs_windows.py's stack, sort and median; far pixels stack only the far nights. */
+function pyMedian(p: LngLat, win: { row0: number; col0: number; rows: number; cols: number }, nights: GibsNight[], far: number[]): Uint16Array {
   const out = new Uint16Array(win.rows * win.cols);
   for (let r = 0; r < win.rows; r++)
     for (let c = 0; c < win.cols; c++) {
       const { z, y, x } = pyPixel(p, win.row0 + r, win.col0 + c);
       const key = gibsTileKey({ z, row: Math.floor(y / 256), col: Math.floor(x / 256) });
-      const stack = nights.map((n) => {
+      const stack = nights.filter((_, i) => z === GIBS_NEAR_ZOOM || far.includes(i)).map((n) => {
         const v = n.get(key)?.[(y % 256) * 256 + (x % 256)] ?? 0;
         return v === 0 ? 255 : v;
       });
@@ -135,6 +139,10 @@ describe('gibsPlan', () => {
   });
 });
 
+const isNear = (k: string) => k.startsWith(`${GIBS_NEAR_ZOOM}/`);
+/** Mean of the bins' midpoints, in counts. */
+const count = (...i: number[]) => Math.round(i.reduce((a, j) => a + GIBS_RADIANCE[j], 0) / i.length / 0.01);
+
 describe('medianWindow', () => {
   const plan = gibsPlan(CHERRY, windowAround(CHERRY, 5));
   const at = (nights: GibsNight[]) => medianWindow(plan, nights).data[0];
@@ -155,7 +163,23 @@ describe('medianWindow', () => {
     const nights = synthNights(p.tiles, 8, 7);
     const got = medianWindow(p, nights);
     expect(got).toMatchObject({ scale: 0.01, satCount: GIBS_SAT_COUNT });
-    expect(Array.from(got.data)).toEqual(Array.from(pyMedian(CHERRY, p.win, nights)));
+    expect(Array.from(got.data)).toEqual(Array.from(pyMedian(CHERRY, p.win, nights, gibsFarNights())));
+    expect(Array.from(medianWindow(p, nights, [0, 1, 2, 3, 4, 5, 6, 7]).data)).toEqual(Array.from(pyMedian(CHERRY, p.win, nights, [0, 1, 2, 3, 4, 5, 6, 7])));
+  });
+
+  it('reads far pixels from the far nights only, near pixels from all', () => {
+    const p = gibsPlan(CHERRY, windowAround(CHERRY, 40));
+    // Near tiles read 1…8 by night; far tiles read 2 except far nights 0 and 7, which read 1 and 8.
+    const night = (i: number, farV: number | null) => new Map([...flat(p.tiles, i + 1)].map(([k, v]) => [k, isNear(k) ? v : farV === null ? null : v!.fill(farV)]));
+    const nights = Array.from({ length: 8 }, (_, i) => night(i, i === 0 ? 1 : i === 7 ? 8 : 2));
+    // A pixel on the point's row, km east.
+    const px = (w: { data: Uint16Array }, km: number) => w.data[p.dy2.indexOf(Math.min(...p.dy2)) * p.win.cols + p.dx2.findIndex((d) => Math.abs(Math.sqrt(d) - km) < 0.4)];
+    const got = medianWindow(p, nights, [0, 7]);
+    expect(px(got, 5)).toBe(count(4, 5));
+    expect(px(got, 38)).toBe(count(1, 8));
+    // A far night without data leaves the other.
+    nights[7] = night(7, null);
+    expect(px(medianWindow(p, nights, [0, 7]), 38)).toBe(count(1));
   });
 
   it('decodes paletted tiles into the same median', async () => {
@@ -181,6 +205,26 @@ describe('calibration equivalence', () => {
 });
 
 describe('GIBS nights', () => {
+  it('spreads the far nights from the newest to the oldest', () => {
+    expect(gibsFarNights(8, 2)).toEqual([0, 7]);
+    expect(gibsFarNights(8, 3)).toEqual([0, 4, 7]);
+    expect(gibsFarNights(8, 4)).toEqual([0, 2, 5, 7]);
+    expect(gibsFarNights(8, 8)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(gibsFarNights(3, 4)).toEqual([0, 1, 2]);
+    expect(gibsFarNights(8, 1)).toEqual([0]);
+    expect(gibsFarNights().length).toBe(GIBS_FAR_NIGHTS);
+  });
+
+  it('fetches near tiles every night and far tiles on the far nights', () => {
+    const plan = gibsPlan(CHERRY);
+    const per = gibsNightTiles(plan, GIBS_NIGHTS);
+    const near = plan.tiles.filter((t) => t.z === GIBS_NEAR_ZOOM);
+    const far = gibsFarNights();
+    expect(per).toHaveLength(GIBS_NIGHTS);
+    for (const [i, ts] of per.entries()) expect(ts).toEqual(far.includes(i) ? plan.tiles : near);
+    expect(per.flat().length).toBe(GIBS_NIGHTS * near.length + GIBS_FAR_NIGHTS * (plan.tiles.length - near.length));
+  });
+
   it('steps back 8 days from the newest night', () => {
     expect(gibsNights('2026-09-20')).toEqual(['2026-09-20', '2026-09-12', '2026-09-04', '2026-08-27', '2026-08-19', '2026-08-11', '2026-08-03', '2026-07-26']);
   });

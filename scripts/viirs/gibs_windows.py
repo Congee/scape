@@ -1,6 +1,6 @@
 """Builds calibrate.ts --windows input from GIBS VNP46A2 daily tiles: per-pixel median of nights, resampled to the 15" grid.
 
-uv run --with numpy --with pillow scripts/viirs/gibs_windows.py --out <dir> --cache <dir> [--nights 8] [--far-zoom 6 --near-km 32] [--basket]
+uv run --with numpy --with pillow scripts/viirs/gibs_windows.py --out <dir> --cache <dir> [--nights 8] [--far-zoom 6 --near-km 32 [--far-nights 2]] [--basket]
 Writes <site>.u16 + <site>.json per SQM site and cost.json (tiles and bytes per night per site).
 """
 
@@ -114,7 +114,12 @@ def decode(body: bytes | None) -> np.ndarray:
     return np.asarray(im) if im.mode == "P" else np.zeros((256, 256), np.uint8)
 
 
-def site_window(s: dict, dates: list[str], cache: str, lut: np.ndarray, sat: int, far_zoom: int | None, near_km: float) -> tuple[dict, np.ndarray, dict]:
+def far_nights(n: int, k: int) -> list[int]:
+    """gibs.ts gibsFarNights: k of n night indices spread from newest to oldest."""
+    return list(range(n)) if k >= n else [0] if k <= 1 else [math.floor(i * (n - 1) / (k - 1) + 0.5) for i in range(k)]
+
+
+def site_window(s: dict, dates: list[str], cache: str, lut: np.ndarray, sat: int, far_zoom: int | None, near_km: float, far_k: int) -> tuple[dict, np.ndarray, dict]:
     row0, col0, rows, cols = window(s["lat"], s["lng"], REACH_KM)
     lat = 90 - (row0 + np.arange(rows) + 0.5) / PX_PER_DEG
     lng = (col0 + np.arange(cols) + 0.5) / PX_PER_DEG - 180
@@ -133,7 +138,8 @@ def site_window(s: dict, dates: list[str], cache: str, lut: np.ndarray, sat: int
         ty, tx = y // 256, x // 256
         need = sorted({(int(a), int(b)) for a in np.unique(ty) for b in np.unique(tx)})
         need = [t for t in need if m[np.ix_(ty == t[0], tx == t[1])].any()]
-        for i, d in enumerate(dates):
+        for i in far_nights(len(dates), far_k) if z == far_zoom else range(len(dates)):
+            d = dates[i]
             with ThreadPoolExecutor(POLITE) as ex:
                 bodies = list(ex.map(lambda t: fetch(cache, d, z, *t), need))
             cost.setdefault(z, []).append([len(need), sum(len(b or b"") for b in bodies)])
@@ -167,6 +173,7 @@ def main() -> None:
     ap.add_argument("--step", type=int, default=8, help="days between nights")
     ap.add_argument("--far-zoom", type=int)
     ap.add_argument("--near-km", type=float, default=32)
+    ap.add_argument("--far-nights", type=int, default=8, help="nights read beyond --near-km, spread across the window")
     ap.add_argument("--basket", action="store_true", help="DarkHours basket instead of the SQM sites")
     a = ap.parse_args()
     last = date.fromisoformat(a.last)
@@ -176,7 +183,7 @@ def main() -> None:
     lut, sat = palette(a.cache)
     cost = {}
     for s in sites(a.basket):
-        meta, counts, c = site_window(s, dates, a.cache, lut, sat, a.far_zoom, a.near_km)
+        meta, counts, c = site_window(s, dates, a.cache, lut, sat, a.far_zoom, a.near_km, a.far_nights)
         k = key(s["name"])
         counts.tofile(os.path.join(a.out, f"{k}.u16"))
         json.dump(meta, open(os.path.join(a.out, f"{k}.json"), "w"))

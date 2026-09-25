@@ -15,6 +15,8 @@ export const GIBS_FAR_ZOOM = 6;
 /** Pixels this close read the z8 tiles; farther light is smooth enough for z6. */
 export const GIBS_NEAR_KM = 32;
 export const GIBS_NIGHTS = 8;
+/** Of those, the nights the far (z6) field reads; its light is averaged over the kernel, so fewer nights suffice (gibs.md). */
+export const GIBS_FAR_NIGHTS = 2;
 /** Days between the nights, as calibrated. */
 export const GIBS_NIGHT_STEP_DAYS = 8;
 /** The newest night is looked up again after this long. */
@@ -149,6 +151,19 @@ export function gibsPlan(p: LngLat, win: Omit<ViirsWindow, 'data'> = windowAroun
   return { p, win, near, far, dy2, dx2, tiles };
 }
 
+/** k of n night indices, newest first, spread from the newest to the oldest to decorrelate cloud and moon. */
+export function gibsFarNights(n = GIBS_NIGHTS, k = GIBS_FAR_NIGHTS): number[] {
+  if (k >= n) return Array.from({ length: n }, (_, i) => i);
+  if (k <= 1) return [0];
+  return Array.from({ length: k }, (_, i) => Math.floor((i * (n - 1)) / (k - 1) + 0.5));
+}
+
+/** Tiles each of n nights needs: all near tiles, far tiles only on the far nights. */
+export function gibsNightTiles(plan: GibsPlan, n: number, far = gibsFarNights(n)): GibsTile[][] {
+  const near = plan.tiles.filter((t) => t.z === plan.near.z);
+  return Array.from({ length: n }, (_, i) => (far.includes(i) ? plan.tiles : near));
+}
+
 /** A night's decoded tiles by gibsTileKey: palette indices, or null where the night has no tile. */
 export type GibsNight = ReadonlyMap<string, Uint8Array | null>;
 
@@ -163,8 +178,8 @@ export interface GibsWindow extends ViirsWindow {
   satCount: number;
 }
 
-/** Per-pixel median of the nights' radiance bins (no data left out), in GIBS_SCALE counts. */
-export function medianWindow(plan: GibsPlan, nights: readonly GibsNight[]): GibsWindow {
+/** Per-pixel median of the nights' radiance bins (no data left out), in GIBS_SCALE counts; far pixels read only the far nights. */
+export function medianWindow(plan: GibsPlan, nights: readonly GibsNight[], farNights = gibsFarNights(nights.length)): GibsWindow {
   const { win, near, far, dy2, dx2 } = plan;
   const grid = (a: ZoomAxes) =>
     nights.map((n) => {
@@ -176,17 +191,19 @@ export function medianWindow(plan: GibsPlan, nights: readonly GibsNight[]): Gibs
   const farGrid = grid(far);
   const data = new Uint16Array(win.rows * win.cols);
   const buf = new Uint8Array(nights.length);
+  const all = nights.map((_, i) => i);
   const near2 = GIBS_NEAR_KM * GIBS_NEAR_KM;
   for (let r = 0; r < win.rows; r++)
     for (let c = 0; c < win.cols; c++) {
       const isNear = dy2[r] + dx2[c] <= near2;
       const a = isNear ? near : far;
       const g = isNear ? nearGrid : farGrid;
+      const use = isNear ? all : farNights;
       const slot = a.rowSlot[r] * a.tileCols.length + a.colSlot[c];
       const off = a.rowOff[r] * GIBS_TILE_PX + a.colOff[c];
       let n = 0;
-      for (let i = 0; i < nights.length; i++) {
-        const t = g[i][slot];
+      for (let i = 0; i < use.length; i++) {
+        const t = g[use[i]][slot];
         const v = t ? t[off] : GIBS_NODATA;
         // No data sorts last, as 255.
         const x = v === GIBS_NODATA ? 255 : v;

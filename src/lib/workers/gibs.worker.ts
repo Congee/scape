@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { GIBS_NEAR_ZOOM, GIBS_TILE_PX, gibsNights, gibsPlan, gibsTileKey, mercX, mercY, medianWindow, type GibsNight, type GibsTile } from '@core/sky/gibs';
+import { GIBS_NEAR_ZOOM, GIBS_TILE_PX, gibsNights, gibsNightTiles, gibsPlan, gibsTileKey, mercX, mercY, medianWindow, type GibsNight, type GibsTile } from '@core/sky/gibs';
 import { decodeIndexedPng } from '@core/terrain/png';
 import { clearGibs, GibsOfflineError, gibsTile, newestNight } from '@data/gibs';
 import { GibsOutcome, type GibsClearRequest, type GibsRequest, type GibsResponse } from './gibs.protocol';
@@ -41,7 +41,8 @@ async function handle(req: GibsRequest): Promise<GibsResponse> {
   const nights = dates.map(() => new Map<string, Uint8Array | null>());
   let fetchedTiles = 0;
   let fetchedBytes = 0;
-  const jobs = dates.flatMap((date, i) => plan.tiles.map((t) => ({ date, i, t })));
+  const perNight = gibsNightTiles(plan, dates.length);
+  const jobs = dates.flatMap((date, i) => perNight[i].map((t) => ({ date, i, t })));
   await pool(jobs, POLITE, async ({ date, i, t }) => {
     const key = `${date}/${gibsTileKey(t)}`;
     let index = mem.get(key);
@@ -59,7 +60,7 @@ async function handle(req: GibsRequest): Promise<GibsResponse> {
   });
   const out = medianWindow(plan, nights as GibsNight[]);
   const withData = dates.filter((_, i) => [...nights[i].values()].some((t) => t !== null));
-  return { id, outcome: GibsOutcome.Ready, win: out, nights: withData, fetchedTiles, fetchedBytes, tiles: plan.tiles.length };
+  return { id, outcome: GibsOutcome.Ready, win: out, nights: withData, fetchedTiles, fetchedBytes, tiles: jobs.length };
 }
 
 const inflight = new Set<Promise<unknown>>();
