@@ -2175,6 +2175,16 @@ label.file-pick input[type='file'] {
 .glow-list .link { padding: 2px 0; }
 .glow-score { text-align: right; font-variant-numeric: tabular-nums; }
 .glow-why { grid-column: 1 / -1; font-size: 12px; }
+.glow-sea {
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.wx-glow > summary { cursor: pointer; }
+.wx-glow > summary h3 { display: inline-block; }
 
 .wx-windy {
   display: inline-block;

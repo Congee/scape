@@ -1259,3 +1259,4 @@ visible errors are design choices, each waiting on a decision (recommendation in
 20. **Hiding the Sun hides its glow too** — kept as shipped (2026-09-23), same `uSun.w > 0.0` branch.
 21. **Alpenglow forecast source — Open-Meteo, not Windy** (2026-09-25). Open-Meteo approved, CC BY 4.0
     credit shown; Windy's API declined. No other new data source.
+    Placement Weather tab, low-Sun limit shared with golden hour, sea of clouds a bonus badge (user, 2026-09-25).

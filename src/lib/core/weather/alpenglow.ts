@@ -16,6 +16,8 @@ export const CANVAS_PCT = [20, 70] as const;
 export const LOW_CONFIDENCE_DAY = 3;
 /** Losses below this do not earn a reason of their own. */
 const REASON_MIN_PCT = 20;
+/** Low cloud at a summit above the low band from this cover on reads as a sea of clouds. */
+export const SEA_MIN_PCT = 50;
 
 export const CloudLayer = { Low: 'low', Mid: 'mid' } as const;
 export type CloudLayer = (typeof CloudLayer)[keyof typeof CloudLayer];
@@ -59,6 +61,14 @@ export interface GlowScore {
   reason: string;
 }
 
+const fogAt = (p: PointSeries, ms: number) =>
+  fogSigns({ code: hourValue(p, HourlyVar.Code, ms), visibilityM: valueAt(p, HourlyVar.Visibility, ms), tempC: NaN, dewC: NaN, lowCloud: NaN }).cls === FogClass.Fog;
+
+/** Low cloud below a summit above the low band: left out of the score, but worth a badge. */
+export function seaOfClouds(x: Pick<GlowInput, 'groundM' | 'ms' | 'point'>): boolean {
+  return x.groundM >= LOW_TOP_M && !fogAt(x.point, x.ms) && valueAt(x.point, HourlyVar.CloudLow, x.ms) >= SEA_MIN_PCT;
+}
+
 /** Chance of alpenglow: low or mid cloud on the sunlight path blocks it, low cloud or fog at the point hides it. */
 export function scoreGlow(x: GlowInput): GlowScore {
   const none = { score: null, reason: 'no forecast for this time' };
@@ -73,7 +83,7 @@ export function scoreGlow(x: GlowInput): GlowScore {
     if (c > path) [path, pathLayer, pathKm] = [c, layer, GLOW_KM[i]];
   }
 
-  const fog = fogSigns({ code: hourValue(x.point, HourlyVar.Code, x.ms), visibilityM: valueAt(x.point, HourlyVar.Visibility, x.ms), tempC: NaN, dewC: NaN, lowCloud: NaN }).cls === FogClass.Fog;
+  const fog = fogAt(x.point, x.ms);
   const hideLayer = layerAt(x.groundM);
   let hide = 0;
   if (fog) hide = 100;

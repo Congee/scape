@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { makeObserver } from '@core/astro/bodies';
 import { moonView, type MoonView } from '@core/astro/moonSim';
 import { degrees } from '@core/format';
@@ -7,7 +6,6 @@ import { useLightProbe } from '@state/lightProbe';
 import { useSettings } from '@state/settings';
 import { usePinSiteHeightM } from '@state/terrain';
 import { usePlanTime, useWorld } from '@state/world';
-import { AlpenglowForecast } from './Alpenglow';
 
 const wrap360 = (d: number) => ((d % 360) + 360) % 360;
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg, 2)}`;
@@ -84,7 +82,6 @@ export function LightPointTools() {
   const tz = useWorld((s) => s.tz);
   const pin2 = useWorld((s) => s.pin2);
   const hour12 = useSettings((s) => s.hour12);
-  const [glow, setGlow] = useState(false);
   const l = p.light;
   const at = (ms: number | null) => (ms !== null ? formatTime(ms, tz, hour12) : '—');
   return (
@@ -118,12 +115,6 @@ export function LightPointTools() {
       </div>
       {p.error && <p className="error">{p.error}</p>}
       <p className="muted hint">When the sun's upper limb clears and leaves the point's own skyline, from the terrain model. Buildings are left out.</p>
-      <div className="tool-row">
-        <button disabled={!p.point} onClick={() => setGlow(!glow)} aria-expanded={glow && !!p.point} data-glow-toggle>
-          Alpenglow forecast
-        </button>
-      </div>
-      {glow && p.point && <AlpenglowForecast />}
     </>
   );
 }

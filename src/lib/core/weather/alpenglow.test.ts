@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { distanceM, bearingDeg } from '@core/geo/geodesy';
-import { binBearing, GLOW_KM, glowPoints, layerAt, pathOffset, scoreGlow, type GlowInput } from './alpenglow';
+import { binBearing, GLOW_KM, glowPoints, layerAt, pathOffset, scoreGlow, SEA_MIN_PCT, seaOfClouds, type GlowInput } from './alpenglow';
 import { forecastBody } from './fixture';
 import { CLOUD_VARS, HourlyVar, parseForecast, type PointSeries } from './openMeteo';
 
@@ -99,5 +99,27 @@ describe('scoreGlow', () => {
 
   it('treats a model without visibility as fog-blind, not missing', () => {
     expect(scoreGlow(input({ [HourlyVar.Visibility]: null })).score).toBe(85);
+  });
+});
+
+describe('seaOfClouds', () => {
+  const sea = (cells: Cells, groundM: number) => seaOfClouds(input(cells, undefined, { groundM }));
+
+  it('badges low cloud below a summit above 2 km, which the score leaves out', () => {
+    const low = { [HourlyVar.CloudLow]: 80 };
+    expect(sea(low, 3000)).toBe(true);
+    expect(scoreGlow(input(low, undefined, { groundM: 3000 })).score).toBe(85);
+    expect(sea({ [HourlyVar.CloudLow]: SEA_MIN_PCT }, 2000)).toBe(true);
+  });
+
+  it('needs the point above the low band and enough cover', () => {
+    expect(sea({ [HourlyVar.CloudLow]: 80 }, 1999)).toBe(false);
+    expect(sea({ [HourlyVar.CloudLow]: SEA_MIN_PCT - 1 }, 3000)).toBe(false);
+    expect(sea({}, 3000)).toBe(false);
+  });
+
+  it('is not a sea when the summit itself is in fog, or the forecast has a gap', () => {
+    expect(sea({ [HourlyVar.CloudLow]: 80, [HourlyVar.Code]: 45 }, 3000)).toBe(false);
+    expect(sea({ [HourlyVar.CloudLow]: null }, 3000)).toBe(false);
   });
 });
