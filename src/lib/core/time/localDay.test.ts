@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addLocalDays, dayBounds, localMidnight, offsetLabel, tzOffsetMs, withLocalTime } from './localDay';
+import { addLocalDays, dayBounds, localMidnight, noonToNoon, offsetLabel, tzOffsetMs, withLocalTime } from './localDay';
 
 describe('localDay', () => {
   it('computes New York offset in summer and winter', () => {
@@ -30,5 +30,15 @@ describe('localDay', () => {
   it('sets wall-clock seconds', () => {
     const t = withLocalTime(new Date('2026-09-11T18:30:00Z'), 6 * 3600 + 33 * 60, 'America/New_York');
     expect(t.toISOString()).toBe('2026-09-11T10:33:00.000Z');
+  });
+
+  it('keeps the night containing the time across midnight', () => {
+    const tz = 'America/New_York';
+    const evening = noonToNoon(new Date('2026-07-02T03:30:00Z'), tz);
+    const small = noonToNoon(new Date('2026-07-02T04:30:00Z'), tz);
+    expect(new Date(evening.startMs).toISOString()).toBe('2026-07-01T16:00:00.000Z');
+    expect(evening.endMs).toBe(Date.parse('2026-07-02T16:00:00Z'));
+    expect(small).toEqual(evening);
+    expect(noonToNoon(new Date('2026-07-02T16:00:00Z'), tz).startMs).toBe(evening.endMs);
   });
 });

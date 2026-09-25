@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampTime, HOUR_MS, keyStep, MINUTE_MS, timeAtX, xAtTime } from './scrub';
+import { clampTime, HOUR_MS, keyStep, MINUTE_MS, timeAtX, TouchGesture, touchGesture, xAtTime } from './scrub';
 
 const START = Date.UTC(2026, 5, 21);
 const END = START + 24 * HOUR_MS;
@@ -66,5 +66,23 @@ describe('keyStep', () => {
     expect(keyStep('ArrowRight', false, 30 * MINUTE_MS, MINUTE_MS)).toBe(30 * MINUTE_MS);
     expect(keyStep('ArrowUp', false)).toBe(0);
     expect(keyStep('Enter', true)).toBe(0);
+  });
+});
+
+describe('touchGesture', () => {
+  it('stays pending, a tap, under the slop', () => {
+    expect(touchGesture(0, 0)).toBe(TouchGesture.Pending);
+    expect(touchGesture(5, -5)).toBe(TouchGesture.Pending);
+  });
+
+  it('scrubs once it moves sideways past the slop', () => {
+    expect(touchGesture(6, 2)).toBe(TouchGesture.Scrub);
+    expect(touchGesture(-9, 8)).toBe(TouchGesture.Scrub);
+  });
+
+  it('scrolls when it moves mostly vertically', () => {
+    expect(touchGesture(2, 6)).toBe(TouchGesture.Scroll);
+    expect(touchGesture(7, -7)).toBe(TouchGesture.Scroll);
+    expect(touchGesture(3, 1, 2)).toBe(TouchGesture.Scrub);
   });
 });

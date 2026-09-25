@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test: the DateBar shows one clock, and dragging or arrow keys on the Timeline tide curve and cloud strip, the Tools tide curve and the Night moon chart move the clock and the cursor, desktop and phone.
+# Smoke test: the DateBar shows one clock, and dragging or arrow keys on the Timeline tide curve and cloud strip, the Tools tide curve and the Night moon chart move the clock and the cursor, desktop and phone; on touch a vertical swipe leaves the time.
 # Usage: scripts/smoke/timescrub.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port and a background browser with remote debugging on the CDP port; the cloud strip needs Open-Meteo.
 set -uo pipefail
@@ -136,8 +136,18 @@ night() { # Night moon chart, desktop: needs a moonlit night toward the aim
   tab Night
   js '(() => { document.querySelectorAll(".night details").forEach((d) => (d.open = true)); return "ok"; })()' >/dev/null
   if wait_for 'document.querySelector(".night .moon-chart svg")' 20; then
-    # Stay before midnight: past it the panel moves on to the next night.
     scrub desktop ".night .moon-chart svg" "night moon" 5 10 25
+    # Past midnight the chart keeps the same night.
+    local s0 s1 x
+    s0=$(js 'document.querySelector(".night .moon-chart svg").getAttribute("aria-label") + document.querySelector(".night .moon-chart polyline")?.getAttribute("points")')
+    press ".night .moon-chart svg" 40
+    DRAG_AT=$(at 40)
+    drag_to 90
+    s1=$(js 'document.querySelector(".night .moon-chart svg").getAttribute("aria-label") + document.querySelector(".night .moon-chart polyline")?.getAttribute("points")')
+    x=$(now_x ".night .moon-chart svg")
+    release
+    check "desktop night moon: drag past midnight keeps the night" "$([ "$s0" = "$s1" ] && [ "$x" -ge "$(at 85)" ] && echo 1 || echo 0)" "$(hm), cursor x $x"
+    ab screenshot "$OUT/desktop-night-moon-after-midnight.png" >/dev/null
   else
     check "desktop night moon: chart shown" 1 "no moon chart that night (skipped)"
   fi
@@ -146,6 +156,10 @@ night() { # Night moon chart, desktop: needs a moonlit night toward the aim
 pass desktop 1400 900
 night
 pass phone 390 844
+TOUCH=$(DAY=$DAY bun "$(dirname "$0")/timescrub-touch.ts" "$CDP" "$PORT" phone "$OUT" 2>&1)
+TOUCH_RC=$?
+while IFS= read -r row; do ROWS+=("$row"); done < <(grep '^| ' <<<"$TOUCH")
+if [ "$TOUCH_RC" != 0 ]; then FAILS=$((FAILS + 1)); grep -q '| FAIL |' <<<"$TOUCH" || ROWS+=("| phone touch | FAIL | ${TOUCH//$'\n'/ } |"); fi
 
 js '(() => { window.__scape.world.getState().setNow(); return "ok"; })()' >/dev/null 2>&1
 ab set viewport 1400 900 >/dev/null 2>&1

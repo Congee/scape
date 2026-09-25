@@ -12,7 +12,7 @@ import { cropFactor, effectiveOptics, equivalentFocalMm } from '@core/optics/fov
 import { dirFromAzAlt } from '@core/optics/projection';
 import { npfShutterS, pixelPitchUm, ruleOfN, trailAngleDeg, trailLengthPx } from '@core/optics/startrails';
 import { formatDateShort, formatTime } from '@core/time/format';
-import { addLocalDays, withLocalTime } from '@core/time/localDay';
+import { noonToNoon } from '@core/time/localDay';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { useDayData } from '@state/dayData';
 import { sensorById, useGear } from '@state/gear';
@@ -31,7 +31,6 @@ import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 
 const DAY_MS = 86_400_000;
 const R2D = 180 / Math.PI;
-const NOON_S = 12 * 3600;
 
 const duration = (ms: number) => {
   const m = Math.round(ms / 60_000);
@@ -64,8 +63,7 @@ interface Tonight {
 // The panel re-renders on every clock tick; the searches only depend on the night, not the instant.
 let nightCache: Tonight | null = null;
 function tonightFor(time: number, tz: string, pin: LngLat, groundM: number | null, eyeM: number, goldenAltitude: number): Tonight {
-  const startMs = withLocalTime(new Date(time), NOON_S, tz).getTime();
-  const endMs = withLocalTime(addLocalDays(new Date(time), 1, tz), NOON_S, tz).getTime();
+  const { startMs, endMs } = noonToNoon(new Date(time), tz);
   const g = groundM === null || Number.isNaN(groundM) ? null : Math.round(groundM);
   const key = [startMs, pin.lat.toFixed(4), pin.lng.toFixed(4), g, eyeM, goldenAltitude].join('|');
   if (!nightCache || nightCache.key !== key) {

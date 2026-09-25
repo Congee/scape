@@ -1,6 +1,6 @@
-import type { KeyboardEvent, PointerEvent } from 'react';
+import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import { worldStore } from '@state/world';
-import { clampTime, HOUR_MS, keyStep, MINUTE_MS, timeAtX, xAtTime } from './scrub';
+import { clampTime, HOUR_MS, keyStep, MINUTE_MS, timeAtX, TouchGesture, touchGesture, xAtTime } from './scrub';
 
 interface ScrubOptions {
   startMs: number;
@@ -12,32 +12,60 @@ interface ScrubOptions {
   fine?: number;
 }
 
+const setTime = (t: number) => worldStore.getState().setTime(t);
+
 /** Chart x in viewBox units, so padding and aspect ratio need no bookkeeping. */
 function viewX(svg: SVGSVGElement, clientX: number, clientY: number): number {
   const m = svg.getScreenCTM();
   return m ? new DOMPoint(clientX, clientY).matrixTransform(m.inverse()).x : 0;
 }
 
-/** SVG props that make a time-axis chart scrub the clock: press or drag sets the time at x, arrows step it. An element with `data-t` snaps a press to its time. */
+/** SVG props that make a time-axis chart scrub the clock: press or drag sets the time at x, arrows step it. An element with `data-t` snaps a press to its time. A touch sets the time only on a tap or a sideways drag, so a vertical scroll never does. */
 export function useTimeScrub({ startMs, endMs, w, step = HOUR_MS, fine = 10 * MINUTE_MS }: ScrubOptions) {
   const at = (e: PointerEvent<SVGSVGElement>) => timeAtX(viewX(e.currentTarget, e.clientX, e.clientY), w, startMs, endMs);
+  const snapAt = (e: PointerEvent<SVGSVGElement>) => {
+    const snap = (e.target as Element).closest('[data-t]')?.getAttribute('data-t');
+    return snap ? Number(snap) : at(e);
+  };
+  const touch = useRef<{ id: number; x: number; y: number; gesture: TouchGesture } | null>(null);
   return {
     tabIndex: 0,
     'data-scrub': '',
     onPointerDown(e: PointerEvent<SVGSVGElement>) {
       if (e.button !== 0) return;
+      if (e.pointerType === 'touch') {
+        touch.current = { id: e.pointerId, x: e.clientX, y: e.clientY, gesture: TouchGesture.Pending };
+        return;
+      }
       // No preventDefault: the native press focuses the chart for the arrow keys without a focus ring.
       e.currentTarget.setPointerCapture(e.pointerId);
-      const snap = (e.target as Element).closest('[data-t]')?.getAttribute('data-t');
-      worldStore.getState().setTime(snap ? Number(snap) : at(e));
+      setTime(snapAt(e));
     },
     onPointerMove(e: PointerEvent<SVGSVGElement>) {
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) worldStore.getState().setTime(at(e));
+      const t = touch.current;
+      if (t && t.id === e.pointerId) {
+        if (t.gesture === TouchGesture.Pending) {
+          t.gesture = touchGesture(e.clientX - t.x, e.clientY - t.y);
+          if (t.gesture === TouchGesture.Scrub) e.currentTarget.setPointerCapture(e.pointerId);
+        }
+        if (t.gesture === TouchGesture.Scrub) setTime(at(e));
+        return;
+      }
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) setTime(at(e));
+    },
+    onPointerUp(e: PointerEvent<SVGSVGElement>) {
+      const t = touch.current;
+      if (!t || t.id !== e.pointerId) return;
+      touch.current = null;
+      if (touchGesture(e.clientX - t.x, e.clientY - t.y) === TouchGesture.Pending && t.gesture === TouchGesture.Pending) setTime(snapAt(e));
+    },
+    onPointerCancel(e: PointerEvent<SVGSVGElement>) {
+      if (touch.current?.id === e.pointerId) touch.current = null;
     },
     onKeyDown(e: KeyboardEvent<SVGSVGElement>) {
       const d = keyStep(e.key, e.shiftKey, step, fine);
       if (!d) return;
-      worldStore.getState().setTime(clampTime(worldStore.getState().time + d, startMs, endMs));
+      setTime(clampTime(worldStore.getState().time + d, startMs, endMs));
       e.preventDefault();
     }
   };

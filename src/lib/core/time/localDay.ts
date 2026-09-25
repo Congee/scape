@@ -101,6 +101,14 @@ export function withLocalTime(instant: Date, secondsSinceMidnight: number, tz: s
   return new Date(start.getTime() + secondsSinceMidnight * 1000);
 }
 
+/** The local noon-to-noon night containing `instant`. */
+export function noonToNoon(instant: Date, tz: string): { startMs: number; endMs: number } {
+  const NOON_S = 12 * 3600;
+  let start = withLocalTime(instant, NOON_S, tz);
+  if (start.getTime() > instant.getTime()) start = withLocalTime(addLocalDays(instant, -1, tz), NOON_S, tz);
+  return { startMs: start.getTime(), endMs: addLocalDays(start, 1, tz).getTime() };
+}
+
 /** Set the local calendar date, keeping the wall-clock time. `iso` is "YYYY-MM-DD". */
 export function withLocalDate(instant: Date, iso: string, tz: string): Date {
   const [y, m, d] = iso.split('-').map(Number);

@@ -22,3 +22,24 @@ export function keyStep(key: string, shift: boolean, step = HOUR_MS, fine = 10 *
   const d = shift ? fine : step;
   return key === 'ArrowRight' ? d : key === 'ArrowLeft' ? -d : 0;
 }
+
+/** CSS px a finger must move sideways before a touch scrubs. */
+export const TOUCH_SLOP_PX = 6;
+
+export const TouchGesture = {
+  /** Still under the slop: a release here is a tap. */
+  Pending: 'pending',
+  Scrub: 'scrub',
+  /** Moved vertically first: the page scrolls, the time stays. */
+  Scroll: 'scroll'
+} as const;
+export type TouchGesture = (typeof TouchGesture)[keyof typeof TouchGesture];
+
+/** What a touch that has moved (dx, dy) px since it went down is doing. */
+export function touchGesture(dx: number, dy: number, slop = TOUCH_SLOP_PX): TouchGesture {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax >= slop && ax > ay) return TouchGesture.Scrub;
+  if (ay >= slop) return TouchGesture.Scroll;
+  return TouchGesture.Pending;
+}
