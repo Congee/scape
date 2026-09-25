@@ -49,6 +49,16 @@ export interface Settings {
   showLightPollution: boolean;
   /** Send camera, target and map locations to Open-Meteo for forecasts. */
   weather: boolean;
+  /** Night and twilight shading with the sunrise/sunset line. */
+  showDayNight: boolean;
+  dayNightOpacity: number;
+  /** Hypsometric tint, slope bands and aspect wheel from the DEM. */
+  showElevation: boolean;
+  elevationOpacity: number;
+  showSlope: boolean;
+  slopeOpacity: number;
+  showAspect: boolean;
+  aspectOpacity: number;
   /** Milky Way core window rules. */
   mwSunMaxAlt: number;
   mwGcMinAlt: number;
@@ -88,6 +98,14 @@ export const DEFAULT_SETTINGS: Settings = {
   terrain3d: false,
   showLightPollution: false,
   weather: true,
+  showDayNight: false,
+  dayNightOpacity: 0.6,
+  showElevation: false,
+  elevationOpacity: 0.6,
+  showSlope: false,
+  slopeOpacity: 0.7,
+  showAspect: false,
+  aspectOpacity: 0.6,
   mwSunMaxAlt: -18,
   mwGcMinAlt: 10,
   mwMoonRule: MoonRule.Down,

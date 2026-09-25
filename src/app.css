@@ -150,6 +150,99 @@ select {
   left: 10px;
 }
 
+.map-legend {
+  position: absolute;
+  z-index: 4;
+  left: 10px;
+  bottom: 34px;
+  display: grid;
+  gap: 6px;
+  max-width: min(360px, calc(100% - 20px));
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  color: var(--fg);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.legend-chip i {
+  width: 10px;
+  height: 10px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+
+.legend-line {
+  width: 14px;
+  height: 2px;
+}
+
+.legend-elev {
+  display: grid;
+  width: min(280px, calc(100vw - 40px));
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
+  align-items: start;
+}
+
+.legend-bar {
+  height: 8px;
+  border-radius: 2px;
+}
+
+.legend-ticks {
+  position: relative;
+  grid-column: 1;
+  height: 13px;
+}
+
+.legend-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.legend-ticks span:last-child {
+  transform: translateX(-100%);
+}
+
+.legend-elev .muted {
+  grid-row: 1;
+  grid-column: 2;
+  line-height: 8px;
+}
+
+.legend-wheel {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+
+.legend-wheel b {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: #000;
+}
+
 .chart-wrap {
   grid-area: chart;
   min-height: 0;

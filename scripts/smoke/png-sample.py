@@ -47,3 +47,12 @@ elif cmd == 'spread':  # scale x0 y0 x1 y1 → standard deviation of brightness 
     v = [lum(img, x0 + (x1 - x0) * i / 40, y0 + (y1 - y0) * j / 40) for i in range(41) for j in range(41)]
     m = sum(v) / len(v)
     print(f'{math.sqrt(sum((q - m) ** 2 for q in v) / len(v)):.1f}')
+elif cmd == 'seam':  # scale axis(x|y) edge lo hi → step across the edge line over the median step of nearby lines
+    axis, e, lo, hi = a[1], float(a[2]) * s, int(float(a[3]) * s), int(float(a[4]) * s)
+    at = (lambda u, v: lum(img, u, v)) if axis == 'x' else (lambda u, v: lum(img, v, u))
+    step = lambda u: sum(abs(at(u, v) - at(u - 1, v)) for v in range(lo, hi)) / (hi - lo)
+    c = round(e)
+    edge = max(step(u) for u in range(c - 1, c + 2))
+    near = sorted(step(c + d) for d in list(range(-24, -3)) + list(range(4, 25)))
+    ref = near[len(near) // 2]
+    print(f'{edge / max(ref, 0.5):.2f} {edge:.1f} {ref:.1f}')

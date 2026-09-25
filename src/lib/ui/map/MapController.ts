@@ -53,6 +53,7 @@ import { CloudOverlay } from './cloudOverlay';
 import { paintHeat } from './heat';
 import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
+import { MapLayers } from './mapLayers';
 import { MapMenu } from './mapMenu';
 import { ModelDrawer } from './ModelDrawer';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
@@ -304,7 +305,9 @@ export class MapController {
       worldStore.getState().setView({ center: { lng: c.lng, lat: c.lat }, zoom: this.map.getZoom() });
     });
 
+    const layers = new MapLayers(this.map, HILL_SRC, (id) => this.ensureDem(id));
     this.unsubs.push(
+      () => layers.dispose(),
       () => clearTimeout(this.shadowTimer),
       () => this.drawer.dispose(),
       () => this.clouds.dispose(),

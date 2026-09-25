@@ -6,6 +6,7 @@ import { useMapStatus } from '@state/mapStatus';
 import { useOffline } from '@state/offline';
 import { settingsStore, useSettings, type Settings } from '@state/settings';
 import { OrbitPivot, useUi } from '@state/ui';
+import { DayNightToggle, TerrainTintToggles } from './MapLayerToggles';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 const LIGHT_LABEL: Record<LightMode, string> = { [LightMode.Auto]: 'Sun by day, moon by night', [LightMode.Sun]: 'Sun only', [LightMode.Moon]: 'Moon only' };
@@ -128,6 +129,7 @@ export function LayersPanel() {
       </div>
       <Toggle k="showGc" label="Galactic Centre" />
       <Toggle k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
+      <DayNightToggle />
 
       <h3>Buildings</h3>
       <Toggle k="showBuildings" label="3D buildings (Overture, in place of the basemap's own)" />
@@ -147,6 +149,7 @@ export function LayersPanel() {
       <h3>Terrain</h3>
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
       <Toggle k="showHillshade" label="Hillshade" />
+      <TerrainTintToggles />
       <Toggle k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)" />
       <label className="toggle">
         <span>Orbit</span>

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { MapController } from './MapController';
+import { MapLegend } from './MapLegend';
 
 export function MapView() {
   const ref = useRef<HTMLDivElement>(null);
@@ -7,5 +8,10 @@ export function MapView() {
     const controller = new MapController(ref.current!);
     return () => controller.dispose();
   }, []);
-  return <div ref={ref} className="map" />;
+  return (
+    <>
+      <div ref={ref} className="map" />
+      <MapLegend />
+    </>
+  );
 }
