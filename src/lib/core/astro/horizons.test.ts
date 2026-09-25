@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { makeObserver, siteHeightM, SkyBody } from './bodies';
 import { dayEvents, EventKind } from './dayEvents';
 import { position } from './positions';
-import { airDensity } from './refraction';
+import { horizontalFast, skySample } from './fastHorizon';
+import { airDensity, riseApparentDeg } from './refraction';
 import { applyStar, horizontalOf, starFrame } from './skyFrame';
 import { eqjVector } from './stars';
 import { bearingDeg, normalizeBearing } from '@core/geo/geodesy';
@@ -88,6 +89,18 @@ describe('rise/set on a 3000 m plateau vs JPL Horizons', () => {
     const ev = dayEvents(obs, t - 6 * 3600e3, t + 6 * 3600e3, { heightAboveGroundM: 1.6 }).find((e) => e.body === SkyBody.Sun && e.kind === kind);
     expect(ev).toBeDefined();
     expect(Math.abs(ev!.time - t)).toBeLessThan(2000);
+  });
+
+  // The map rays, finder and workers share one threshold; it must be where the viewfinder shows the Sun at rise/set.
+  it.each([EventKind.Rise, EventKind.Set])('puts the viewfinder Sun on the shared threshold at %s', (kind) => {
+    const eye = makeObserver({ lat: 46, lng: 7.75 }, 3000);
+    const t = Date.parse('2026-06-21T12:00:00Z');
+    const ev = dayEvents(eye, t - 12 * 3600e3, t + 12 * 3600e3, { heightAboveGroundM: 0 }).find((e) => e.body === SkyBody.Sun && e.kind === kind)!;
+    const alt = position(SkyBody.Sun, new Date(ev.time), eye).altitude;
+    expect(Math.abs(alt - riseApparentDeg(airDensity(3000)))).toBeLessThan(0.005);
+    expect(Math.abs(alt - riseApparentDeg(1))).toBeGreaterThan(0.025);
+    const fast = horizontalFast(skySample(SkyBody.Sun, ev.time, eye), 46, 7.75, airDensity(3000)).altitude;
+    expect(Math.abs(fast - alt)).toBeLessThan(1e-6);
   });
 
   it('finds rise/set below sea level', () => {

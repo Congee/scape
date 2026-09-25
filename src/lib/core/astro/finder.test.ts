@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { localMidnight } from '@core/time/localDay';
 import { makeObserver } from './bodies';
-import { altitudeBands, azDistanceDeg, describePass, findPasses, inAzWindow, mergePasses, passesFilters, SkyFilter, type FinderQuery } from './finder';
+import { altitudeBands, azDistanceDeg, describePass, findPasses, inAzWindow, mergePasses, passesFilters, SkyFilter, skyRange, type FinderQuery } from './finder';
 import { position } from './positions';
+import { airDensity, riseApparentDeg } from './refraction';
 
 const nyc = makeObserver({ lat: 40.7463, lng: -74.1553 });
 const zermatt = makeObserver({ lat: 46.0207, lng: 7.7491 });
@@ -31,6 +32,15 @@ const inside = (q: FinderQuery, obs: ReturnType<typeof makeObserver>, ms: number
   const p = position(q.body, new Date(ms), obs);
   return inAzWindow(p.azimuth, q.azFromDeg, q.azToDeg) && p.altitude >= q.altMinDeg && p.altitude <= q.altMaxDeg;
 };
+
+describe('sky filter', () => {
+  it('splits day from night at the eye\'s rise/set threshold', () => {
+    const rho = airDensity(3000);
+    expect(skyRange(SkyFilter.Daylight, rho)[0]).toBe(riseApparentDeg(rho));
+    expect(skyRange(SkyFilter.SunDown, rho)[1]).toBe(riseApparentDeg(rho));
+    expect(riseApparentDeg(1) - riseApparentDeg(rho)).toBeCloseTo(0.032, 3);
+  });
+});
 
 describe('azimuth windows', () => {
   it('wraps through north and treats equal edges as any azimuth', () => {

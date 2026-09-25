@@ -1,6 +1,7 @@
 import { Refraction } from 'astronomy-engine';
 import { describe, expect, it } from 'vitest';
 import { horizontalFast, type SkySample } from '@core/astro/fastHorizon';
+import { airDensity } from '@core/astro/refraction';
 import { bearingDeg, destination, distanceM, elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
 import { cellCentre, cellOf, gridAround } from '@core/geo/grid';
 import type { DemSource, DemTile } from '@core/terrain/dem';
@@ -59,7 +60,7 @@ describe('shot alignment', () => {
     const angle = elevationAngleDeg(distanceM(P, L), 300 - eye);
     const az = bearingDeg(P, L);
     const sample = sampleFor(P, az, angle + 1, 1000);
-    const h = horizontalFast(sample, P.lat, P.lng);
+    const h = horizontalFast(sample, P.lat, P.lng, airDensity(eye));
     expect(h.azimuth).toBeCloseTo(az, 4);
     expect(h.altitude).toBeCloseTo(angle + 1, 4);
     const samples = [sampleFor(P, az - 1, angle + 1.4, 0), sample, sampleFor(P, az + 1, angle + 0.6, 2000)];

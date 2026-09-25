@@ -4,7 +4,7 @@ import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { localParts } from '@core/time/localDay';
 import { BODY, SkyBody } from './bodies';
 import { moonInfo, position } from './positions';
-import { RISE_APPARENT_DEG } from './refraction';
+import { airDensity, riseApparentDeg } from './refraction';
 
 const D2R = Math.PI / 180;
 const MIN_MS = 60_000;
@@ -27,17 +27,22 @@ export const SkyFilter = {
 } as const;
 export type SkyFilter = (typeof SkyFilter)[keyof typeof SkyFilter];
 
-/** Sun altitude range each filter admits, degrees. */
-export const SKY_RANGES: Record<SkyFilter, readonly [number, number]> = {
+/** Sun altitude ranges that do not depend on the air. */
+const FIXED_RANGES: Record<Exclude<SkyFilter, typeof SkyFilter.Daylight | typeof SkyFilter.SunDown>, readonly [number, number]> = {
   Any: [-90, 90],
-  Daylight: [RISE_APPARENT_DEG, 90],
   GoldenHour: [0, 6],
   BlueHour: [-8, -4],
-  SunDown: [-90, RISE_APPARENT_DEG],
   CivilDark: [-90, -6],
   NauticalDark: [-90, -12],
   AstroDark: [-90, -18]
 };
+
+/** Sun altitude range a filter admits for an eye in air of `density`, degrees. */
+export function skyRange(sky: SkyFilter, density: number): readonly [number, number] {
+  if (sky === SkyFilter.Daylight) return [riseApparentDeg(density), 90];
+  if (sky === SkyFilter.SunDown) return [-90, riseApparentDeg(density)];
+  return FIXED_RANGES[sky];
+}
 
 /** Declination each body can reach; band edges beyond its altitude reach are never searched. */
 const DECLINATION: Record<SkyBody, readonly [number, number]> = { Sun: [-23.5, 23.5], Moon: [-29, 29], Gc: [-29.1, -28.9] };
@@ -306,7 +311,7 @@ export function describePass(q: FinderQuery, obs: Observer, pass: Pass): FinderH
 /** Sky, moon and weekday filters; the sky condition may hold anywhere in the pass. */
 export function passesFilters(h: FinderHit, q: FinderQuery, obs: Observer): boolean {
   if (q.sky !== SkyFilter.Any) {
-    const [lo, hi] = SKY_RANGES[q.sky];
+    const [lo, hi] = skyRange(q.sky, airDensity(obs.height));
     const sunOk = (alt: number) => alt >= lo && alt <= hi;
     if (!sunOk(h.sunAltDeg) && !sunOk(position(SkyBody.Sun, new Date(h.startMs), obs).altitude) && !sunOk(position(SkyBody.Sun, new Date(h.endMs), obs).altitude)) return false;
   }

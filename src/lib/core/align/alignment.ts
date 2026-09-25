@@ -1,4 +1,5 @@
 import { horizontalFast, separationDeg, type SkySample } from '@core/astro/fastHorizon';
+import { airDensity } from '@core/astro/refraction';
 import { bearingDeg, distanceM, elevationAngleDeg, geodesicBetween, normalizeLng, type LngLat } from '@core/geo/geodesy';
 import { cellCentre, cellSizeM, type HeatGrid } from '@core/geo/grid';
 import { elevationAt, type DemSource } from '@core/terrain/dem';
@@ -57,11 +58,12 @@ export function landmarkTopM(src: DemSource, zoom: number, l: Landmark): number 
   return (Number.isNaN(g) ? 0 : g) + l.heightM;
 }
 
-function closest(samples: SkySample[], lat: number, lng: number, azDeg: number, altDeg: number): { sepDeg: number; ms: number } {
+function closest(samples: SkySample[], lat: number, lng: number, eyeM: number, azDeg: number, altDeg: number): { sepDeg: number; ms: number } {
+  const density = airDensity(eyeM);
   let sepDeg = Infinity;
   let ms = samples[0]?.ms ?? 0;
   for (const s of samples) {
-    const h = horizontalFast(s, lat, lng);
+    const h = horizontalFast(s, lat, lng, density);
     const sep = separationDeg(h.azimuth, h.altitude, azDeg, altDeg);
     if (sep < sepDeg) {
       sepDeg = sep;
@@ -80,7 +82,7 @@ export function alignAt(src: DemSource, zoom: number, p: LngLat, samples: SkySam
   const eyeM = g + o.eyeAboveGroundM;
   const brg = bearingDeg(p, landmark);
   const angle = elevationAngleDeg(distM, topM - eyeM);
-  const c = closest(samples, p.lat, p.lng, brg + o.offsetAzDeg, angle + o.offsetAltDeg);
+  const c = closest(samples, p.lat, p.lng, eyeM, brg + o.offsetAzDeg, angle + o.offsetAltDeg);
   const n = clamp(Math.round(distM / (cellM / 2)), 4, 160);
   return { groundM: g, eyeM, distM, bearingDeg: brg, landmarkAngleDeg: angle, sepDeg: c.sepDeg, bestMs: c.ms, blocked: sightlineBlocked(src, zoom, p, landmark, eyeM, angle, distM, cellM, n) };
 }
@@ -103,7 +105,7 @@ export function alignGrid(src: DemSource, zoom: number, grid: HeatGrid, samples:
       if (distM < cellM) continue;
       const eyeM = g + o.eyeAboveGroundM;
       const angle = elevationAngleDeg(distM, topM - eyeM);
-      const c = closest(samples, p.lat, p.lng, bearingDeg(p, landmark) + o.offsetAzDeg, angle + o.offsetAltDeg);
+      const c = closest(samples, p.lat, p.lng, eyeM, bearingDeg(p, landmark) + o.offsetAzDeg, angle + o.offsetAltDeg);
       if (c.sepDeg > o.capDeg) continue;
       const steps = clamp(Math.round(distM / (cellM / 2)), 4, 160);
       if (sightlineBlocked(src, zoom, p, landmark, eyeM, angle, distM, cellM, steps)) continue;

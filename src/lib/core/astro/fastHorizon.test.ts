@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { makeObserver } from './bodies';
 import { horizontalFast, separationDeg, skySample } from './fastHorizon';
 import { position } from './positions';
+import { airDensity } from './refraction';
 
 const ref = makeObserver({ lat: 46.0207, lng: 7.7491 });
 const times = ['2026-09-11T05:30:00Z', '2026-09-11T17:00:00Z', '2026-12-21T12:00:00Z'].map((s) => Date.parse(s));
@@ -18,10 +19,20 @@ describe('fast horizontal coordinates', () => {
         const s = skySample(body, ms, ref);
         for (const p of spots) {
           const exact = position(body, new Date(ms), makeObserver(p));
-          const fast = horizontalFast(s, p.lat, p.lng);
+          const fast = horizontalFast(s, p.lat, p.lng, airDensity(0));
           expect(separationDeg(fast.azimuth, fast.altitude, exact.azimuth, exact.altitude)).toBeLessThan(body === 'Moon' ? 0.02 : 0.003);
         }
       }
+    }
+  });
+
+  it('refracts through the eye\'s air like the full ephemeris at 3000 m', () => {
+    const high = makeObserver({ lat: 46.0207, lng: 7.7491 }, 3000);
+    for (const ms of ['2026-06-21T03:45:00Z', '2026-06-21T19:15:00Z'].map((s) => Date.parse(s))) {
+      const exact = position('Sun', new Date(ms), high);
+      const s = skySample('Sun', ms, high);
+      expect(Math.abs(horizontalFast(s, high.latitude, high.longitude, airDensity(3000)).altitude - exact.altitude)).toBeLessThan(1e-6);
+      expect(horizontalFast(s, high.latitude, high.longitude, 1).altitude - exact.altitude).toBeGreaterThan(0.05);
     }
   });
 

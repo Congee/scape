@@ -2,7 +2,7 @@ import type { Feature, FeatureCollection, LineString, Point, Polygon } from 'geo
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
 import type { HorizontalPos } from '@core/astro/positions';
-import { RISE_APPARENT_DEG } from '@core/astro/refraction';
+import { riseApparentDeg } from '@core/astro/refraction';
 import { shadowLengthM } from '@core/astro/shadow';
 import { destination, geodesicPath, geodesicRay, type LngLat } from '@core/geo/geodesy';
 import { MarkerCategory, type SavedMarker } from '@core/plan';
@@ -76,6 +76,8 @@ export function eventLines(pin: LngLat, events: DayEvent[], lengthM: number, o: 
 }
 
 export interface LiveLineOptions {
+  /** Air at the eye relative to sea level, which `pos` was refracted in. */
+  airDensity: number;
   showShadow: boolean;
   showGc: boolean;
   /** Height of the object casting the shadow at the camera, metres. */
@@ -98,8 +100,9 @@ export function liveLines(
 ): FeatureCollection {
   const features: Feature<LineString, LineProps>[] = [];
   // Bodies count as up until their upper limb is below the horizon.
-  if (pos.Sun.altitude > RISE_APPARENT_DEG) features.push(ray(pin, pos.Sun.azimuth, lengthM, { color: LIVE_COLORS.Sun, body: SkyBody.Sun, kind: LiveLineKind.Live }));
-  if (pos.Moon.altitude > RISE_APPARENT_DEG) features.push(ray(pin, pos.Moon.azimuth, lengthM, { color: eclipsedMoonColor(o.moonUmbra ?? 0), body: SkyBody.Moon, kind: LiveLineKind.Live }));
+  const rise = riseApparentDeg(o.airDensity);
+  if (pos.Sun.altitude > rise) features.push(ray(pin, pos.Sun.azimuth, lengthM, { color: LIVE_COLORS.Sun, body: SkyBody.Sun, kind: LiveLineKind.Live }));
+  if (pos.Moon.altitude > rise) features.push(ray(pin, pos.Moon.azimuth, lengthM, { color: eclipsedMoonColor(o.moonUmbra ?? 0), body: SkyBody.Moon, kind: LiveLineKind.Live }));
   if (o.showGc && pos.Gc.altitude > 0) features.push(ray(pin, pos.Gc.azimuth, lengthM, { color: LIVE_COLORS.Gc, body: SkyBody.Gc, kind: LiveLineKind.Live }));
   if (o.showShadow) {
     const away = pos.Sun.azimuth + 180;

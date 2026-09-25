@@ -1,4 +1,5 @@
 import { horizontalFast, type SkySample } from '@core/astro/fastHorizon';
+import { airDensity } from '@core/astro/refraction';
 import { elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
 import { frameAt } from '@core/geo/pinFrame';
 import { cellCentre, cellOf, type HeatGrid } from '@core/geo/grid';
@@ -80,14 +81,15 @@ export function bodyVisibleGrid(src: DemSource, grid: HeatGrid, sample: SkySampl
       const p = cellCentre(grid, row, col);
       const g = elevationAt(src, p.lng, p.lat, zoomNear);
       if (Number.isNaN(g)) continue;
-      const h = horizontalFast(sample, p.lat, p.lng);
+      const eyeM = g + o.eyeAboveGroundM;
+      const h = horizontalFast(sample, p.lat, p.lng, airDensity(eyeM));
       const margin = h.altitude - o.minAltAboveTerrainDeg;
       const i = row * n + col;
       if (margin < dip) {
         out[i] = 0;
         continue;
       }
-      out[i] = rayBlocked(src, ladder, p, h.azimuth, g + o.eyeAboveGroundM, margin) ? 0 : 1;
+      out[i] = rayBlocked(src, ladder, p, h.azimuth, eyeM, margin) ? 0 : 1;
     }
   }
   return out;

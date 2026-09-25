@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeObserver, SkyBody } from './bodies';
 import { position } from './positions';
-import { airDensity, apparentAltitude, HORIZON_ALT_DEG, refractionDeg, TAPER_END_DEG } from './refraction';
+import { airDensity, apparentAltitude, horizonAltDeg, refractionDeg, riseApparentDeg, TAPER_END_DEG } from './refraction';
 
 describe('apparentAltitude', () => {
   it('leaves altitudes below the taper geometric', () => {
@@ -35,7 +35,7 @@ describe('apparentAltitude', () => {
   });
 
   it('has no step at the rise/set threshold', () => {
-    expect(apparentAltitude(HORIZON_ALT_DEG) - apparentAltitude(HORIZON_ALT_DEG - 1e-4)).toBeLessThan(1e-3);
+    for (const d of [1, airDensity(3000)]) expect(apparentAltitude(horizonAltDeg(d), d) - apparentAltitude(horizonAltDeg(d) - 1e-4, d)).toBeLessThan(1e-3);
   });
 });
 
@@ -45,6 +45,11 @@ describe('airDensity', () => {
     expect(airDensity(0)).toBeCloseTo(1, 6);
     expect(Math.abs(airDensity(3089) - 0.7355)).toBeLessThan(5e-4);
     expect(airDensity(-6)).toBeGreaterThan(1);
+  });
+
+  it('lowers the rise/set threshold in thin air', () => {
+    expect(riseApparentDeg(1)).toBeCloseTo(-0.215, 3);
+    expect(riseApparentDeg(airDensity(3000))).toBeCloseTo(-0.247, 3);
   });
 
   it('stays finite beyond the model range', () => {

@@ -2,8 +2,10 @@ import { Atmosphere } from 'astronomy-engine';
 
 const D2R = Math.PI / 180;
 
-/** Geometric altitude of a body's centre at rise/set under standard refraction. */
-export const HORIZON_ALT_DEG = -0.8333;
+/** Horizon refraction SearchRiseSet assumes in sea-level air. */
+export const REFRACTION_NEAR_HORIZON_DEG = 34 / 60;
+/** Mean semidiameter the standard rise/set altitude assumes. */
+const RISE_SEMIDIAMETER_DEG = 16 / 60;
 
 /** Geometric altitudes where refraction starts to taper and where it reaches zero. */
 export const TAPER_START_DEG = -1.5;
@@ -34,5 +36,12 @@ export function apparentAltitude(geomAltDeg: number, density = 1): number {
   return geomAltDeg + refractionDeg(geomAltDeg, density);
 }
 
-/** Apparent altitude of a body's centre at the standard rise/set. */
-export const RISE_APPARENT_DEG = apparentAltitude(HORIZON_ALT_DEG);
+/** Geometric altitude of a body's centre at the standard rise/set in air of `density`; −50′ at sea level. */
+export function horizonAltDeg(density: number): number {
+  return -(RISE_SEMIDIAMETER_DEG + REFRACTION_NEAR_HORIZON_DEG * density);
+}
+
+/** Apparent altitude of a body's centre at the standard rise/set, seen in air of `density`. */
+export function riseApparentDeg(density: number): number {
+  return apparentAltitude(horizonAltDeg(density), density);
+}

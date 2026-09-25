@@ -27,8 +27,8 @@ export interface FastHorizontal {
   altitude: number;
 }
 
-/** Horizontal coordinates from a sample with a few trig calls instead of a full ephemeris. */
-export function horizontalFast(s: SkySample, latDeg: number, lngDeg: number, refract = true): FastHorizontal {
+/** Horizontal coordinates from a sample with a few trig calls instead of a full ephemeris, refracted in air of `density` (0 geometric). */
+export function horizontalFast(s: SkySample, latDeg: number, lngDeg: number, density: number): FastHorizontal {
   const H = (s.gastH + lngDeg / 15 - s.raH) * 15 * D2R;
   const φ = latDeg * D2R;
   const δ = s.decDeg * D2R;
@@ -37,10 +37,9 @@ export function horizontalFast(s: SkySample, latDeg: number, lngDeg: number, ref
   const sinδ = Math.sin(δ);
   const cosδ = Math.cos(δ);
   const cosH = Math.cos(H);
-  let altitude = Math.asin(Math.max(-1, Math.min(1, sinφ * sinδ + cosφ * cosδ * cosH))) * R2D;
+  const altitude = Math.asin(Math.max(-1, Math.min(1, sinφ * sinδ + cosφ * cosδ * cosH))) * R2D;
   const azimuth = normalizeBearing(Math.atan2(-Math.sin(H) * cosδ, sinδ * cosφ - cosδ * sinφ * cosH) * R2D);
-  if (refract) altitude = apparentAltitude(altitude);
-  return { azimuth, altitude };
+  return { azimuth, altitude: apparentAltitude(altitude, density) };
 }
 
 /** Great-circle separation between two sky directions, degrees. */

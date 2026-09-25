@@ -66,7 +66,7 @@ function relight() {
   if (!point || !horizon) return;
   const w = worldStore.getState();
   const b = dayBounds(new Date(w.time), w.tz);
-  const obs = makeObserver(point);
+  const obs = makeObserver(point, horizon.eyeM);
   const key = `${b.isoDate}|${w.tz}`;
   const prev = lightProbeStore.getState().light;
   if (key === dayKey && prev) {

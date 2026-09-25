@@ -4,6 +4,7 @@ import { degrees } from '@core/format';
 import { formatTime } from '@core/time/format';
 import { useLightProbe } from '@state/lightProbe';
 import { useSettings } from '@state/settings';
+import { usePinSiteHeightM } from '@state/terrain';
 import { usePlanTime, useWorld } from '@state/world';
 
 const wrap360 = (d: number) => ((d % 360) + 360) % 360;
@@ -22,8 +23,8 @@ function phaseName(v: MoonView): string {
 function useMoon(): MoonView {
   const time = usePlanTime();
   const pin = useWorld((s) => s.pin);
-  const pinHeightM = useWorld((s) => s.pinHeightM);
-  return moonView(new Date(time), makeObserver(pin, pinHeightM));
+  const siteM = usePinSiteHeightM();
+  return moonView(new Date(time), makeObserver(pin, siteM));
 }
 
 export function MoonSummary() {

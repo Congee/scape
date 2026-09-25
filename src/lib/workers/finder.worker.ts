@@ -12,7 +12,7 @@ let latestId = 0;
 async function run(req: FinderRequest): Promise<void> {
   const t0 = performance.now();
   const q = req.query;
-  const obs = makeObserver(req.pin, req.heightAboveGroundM);
+  const obs = makeObserver(req.pin, req.eyeM);
   const horizon = req.horizon ?? undefined;
   const span = Math.max(1, q.endMs - q.startMs);
   const hits: FinderHit[] = [];

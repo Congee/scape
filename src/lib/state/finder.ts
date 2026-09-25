@@ -11,7 +11,7 @@ import { FinderResponseKind, type FinderRequest, type FinderResponse } from '@wo
 import { aimFor, compositionStore } from './composition';
 import { gearStore, sensorById } from './gear';
 import { settingsStore } from './settings';
-import { EYE_HEIGHT_M, horizonKeyFor, targetAngleFor, terrainStore } from './terrain';
+import { EYE_HEIGHT_M, horizonKeyFor, pinSiteHeightM, targetAngleFor, terrainStore } from './terrain';
 import { worldStore } from './world';
 
 export interface FinderState {
@@ -117,7 +117,7 @@ export const finderStore = create<FinderState>()(
         const horizon = f.aboveTerrain && hk && t.horizon && t.horizonKey === hk ? t.horizon.profile : null;
         seq++;
         set({ running: true, progress: 0, hits: [], total: 0, elapsedMs: 0, error: null, pin: w.pin });
-        const req: FinderRequest = { id: seq, pin: w.pin, heightAboveGroundM: w.pinHeightM + EYE_HEIGHT_M, query: finderQuery(f, w.tz), horizon };
+        const req: FinderRequest = { id: seq, pin: w.pin, eyeM: pinSiteHeightM(w, t), query: finderQuery(f, w.tz), horizon };
         finderWorker().postMessage(req);
       },
       cancel: () => {

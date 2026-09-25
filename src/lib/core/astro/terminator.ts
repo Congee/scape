@@ -1,11 +1,11 @@
-import { Atmosphere, Body, Equator, EquatorFromVector, GeoVector, Horizon, MakeTime, RotateVector, Rotation_EQJ_EQD, SiderealTime, type Observer } from 'astronomy-engine';
+import { Body, Equator, EquatorFromVector, GeoVector, Horizon, MakeTime, RotateVector, Rotation_EQJ_EQD, SiderealTime, type Observer } from 'astronomy-engine';
 import type { Feature, FeatureCollection, LineString, Polygon } from 'geojson';
 import type { LngLat } from '@core/geo/geodesy';
+import { airDensity, REFRACTION_NEAR_HORIZON_DEG } from './refraction';
 
 const D2R = Math.PI / 180;
 /** astronomy-engine's constants behind SearchRiseSet. */
 const SUN_RADIUS_AU = 695_700 / 149_597_870.69098932;
-const REFRACTION_NEAR_HORIZON_DEG = 34 / 60;
 const EARTH_FLATTENING = 0.996647180302104;
 const EARTH_EQUATORIAL_RADIUS_KM = 6378.1366;
 const MERCATOR_MAX_LAT = 85.051129;
@@ -58,7 +58,7 @@ export function horizonDipDeg(obs: Observer, aglM: number): number {
 
 /** Unrefracted upper-limb altitude at which SearchRiseSet reports sunrise and sunset. */
 export function riseAltitudeDeg(obs: Observer, aglM: number): number {
-  return horizonDipDeg(obs, aglM) - REFRACTION_NEAR_HORIZON_DEG * Atmosphere(obs.height - aglM).density;
+  return horizonDipDeg(obs, aglM) - REFRACTION_NEAR_HORIZON_DEG * airDensity(obs.height - aglM);
 }
 
 /** Geocentric apparent subsolar point, true equator and equinox of date. */

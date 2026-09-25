@@ -5,7 +5,8 @@ import type { HorizonProfile } from '@core/terrain/horizon';
 export interface FinderRequest {
   id: number;
   pin: LngLat;
-  heightAboveGroundM: number;
+  /** Eye above sea level, metres; sets the air the sky is refracted through. */
+  eyeM: number;
   query: FinderQuery;
   /** Terrain skyline the body must clear; null to ignore terrain. */
   horizon: HorizonProfile | null;

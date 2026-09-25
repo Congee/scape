@@ -85,9 +85,9 @@ function Group({ id, summary, children }: { id: string; summary: ReactNode; chil
 
 // The shadow search is a root find; the panel re-renders every clock tick.
 let lightCache: { key: string; ms: number | null } | null = null;
-function lastLightFor(pin: LngLat, pinHeightM: number, time: number, heightM: number): number | null {
-  const key = [Math.floor(time / 60_000), pin.lat.toFixed(4), pin.lng.toFixed(4), pinHeightM, heightM].join('|');
-  if (!lightCache || lightCache.key !== key) lightCache = { key, ms: lastLightMs(makeObserver(pin, pinHeightM), time, heightM) };
+function lastLightFor(pin: LngLat, siteM: number, time: number, heightM: number): number | null {
+  const key = [Math.floor(time / 60_000), pin.lat.toFixed(4), pin.lng.toFixed(4), siteM, heightM].join('|');
+  if (!lightCache || lightCache.key !== key) lightCache = { key, ms: lastLightMs(makeObserver(pin, siteM), time, heightM) };
   return lightCache.ms;
 }
 
@@ -163,7 +163,6 @@ export function ToolsPanel() {
   const time = usePlanTime();
   const tz = useWorld((s) => s.tz);
   const pin = useWorld((s) => s.pin);
-  const pinHeightM = useWorld((s) => s.pinHeightM);
   const siteM = usePinSiteHeightM();
   const units = useSettings((s) => s.units);
   const hour12 = useSettings((s) => s.hour12);
@@ -270,7 +269,7 @@ export function ToolsPanel() {
         : Number.isFinite(hM) && Number.isFinite(dM) ? signed(cloudAngleDeg(hM, dM, 0), 2) : '—';
   const litNow = litHeightM(sun.altitude);
   const lightH = cloudSolve === CloudSolve.Height ? (Number.isFinite(dM) && Number.isFinite(aDeg) ? cloudHeightM(dM, aDeg, 0) : NaN) : hM;
-  const lastLight = Number.isFinite(lightH) && lightH > 0 ? lastLightFor(pin, pinHeightM, time, lightH) : null;
+  const lastLight = Number.isFinite(lightH) && lightH > 0 ? lastLightFor(pin, siteM, time, lightH) : null;
 
   return (
     <div className="frame night tools">
