@@ -188,6 +188,8 @@ export interface PrismPlaced {
   sig: string;
   prism: PrismTile;
   slots: PrismSlots;
+  /** The prisms as GPU surfaces, so the main thread only uploads them. */
+  mesh: SurfaceMesh;
   /** Rows the models and LoD2 hid. */
   hidden: number;
 }

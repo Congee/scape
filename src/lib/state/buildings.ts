@@ -4,6 +4,7 @@ import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import { shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
 import { adoptPrismSlots } from '@core/geo/prismOcclude';
+import { adoptPrismSurfaces } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
@@ -125,6 +126,7 @@ function ensureWorker(): Worker {
       buildingsStore.setState((st) => {
         const tiles = new Map(st.tiles);
         adoptPrismSlots(res.tile.prism, res.tile.slots);
+        adoptPrismSurfaces(res.tile.prism, res.tile.mesh);
         tiles.set(res.tile.tileKey, res.tile);
         return { tiles: evict(tiles, lastPin), version: st.version + 1 };
       });

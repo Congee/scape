@@ -4,6 +4,7 @@ import type { LngLat } from '@core/geo/geodesy';
 import { meshOccluderParts } from '@core/geo/meshOcclude';
 import { prismSlots } from '@core/geo/prismOcclude';
 import { buildPrisms, prismFrameKey } from '@core/geo/prismRaster';
+import { prismSurfaces, surfaceBuffers } from '@core/geo/surfaces';
 import { frameOf, frameToLngLat, longestShadowM, maskFrame, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
 import { lod2CoverOf, type Lod2Cover } from '@core/lod2/cover';
 import { lod2RegionsNear, type Lod2Region, type Lod2Source } from '@core/lod2/regions';
@@ -192,9 +193,11 @@ async function run(req: TilesRequest): Promise<void> {
     const kept = suppressRows({ ...decoded, groundM }, cover.rings.length > 0 ? [...suppress, ...cover.rings] : suppress);
     const prism = buildPrisms(kept, req.pin, req.eyeM);
     const slots = prismSlots(prism, req.rangeM);
-    const tile: PrismPlaced = { tileKey: decoded.tileKey, frame, sig: complete ? sig : `${sig}|partial`, prism, slots, hidden: decoded.count - kept.count };
+    const mesh = prismSurfaces(prism);
+    const tile: PrismPlaced = { tileKey: decoded.tileKey, frame, sig: complete ? sig : `${sig}|partial`, prism, slots, mesh, hidden: decoded.count - kept.count };
     const arrays = [...Object.values(prism), slots.start, slots.i, slots.uMin, slots.uMax].filter((a) => ArrayBuffer.isView(a));
-    scope.postMessage({ kind: BuildingsKind.Tiles, id: req.id, tile } satisfies BuildingsResponse, [...new Set(arrays.map((a) => a.buffer as ArrayBuffer))]);
+    const buffers = [...arrays.map((a) => a.buffer as ArrayBuffer), ...surfaceBuffers(mesh)];
+    scope.postMessage({ kind: BuildingsKind.Tiles, id: req.id, tile } satisfies BuildingsResponse, [...new Set(buffers)]);
     sent++;
   }
   if (latest !== req.id) return;

@@ -93,6 +93,25 @@ export function boxOf(pos: ArrayLike<number>): Float32Array {
   return box;
 }
 
+const built = new WeakMap<PrismTile, SurfaceMesh>();
+
+/** Adopts the mesh the buildings worker built for `tile`. */
+export function adoptPrismSurfaces(tile: PrismTile, mesh: SurfaceMesh): void {
+  built.set(tile, mesh);
+}
+
+/** The adopted mesh of `tile`, else built here once. */
+export function tileSurfaces(tile: PrismTile): SurfaceMesh {
+  let m = built.get(tile);
+  if (!m) built.set(tile, (m = prismSurfaces(tile)));
+  return m;
+}
+
+/** Every typed array of `m`, for a transfer list. */
+export function surfaceBuffers(m: SurfaceMesh): ArrayBuffer[] {
+  return [m.pos, m.surfId, m.bldgId, m.idx, m.plane, m.surf, m.sphere, m.size, m.box].map((a) => a.buffer as ArrayBuffer);
+}
+
 /** One tile's prisms as closed, outward-wound surfaces: a plane per roof face and per wall. */
 export function prismSurfaces(tile: PrismTile): SurfaceMesh {
   const pos: number[] = [];

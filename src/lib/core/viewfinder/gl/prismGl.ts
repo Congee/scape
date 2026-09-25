@@ -1,7 +1,7 @@
 /** The building prisms drawn on the GPU with the viewfinder's pinhole projection. */
 
 import { HAZE_M, MIN_AREA_PX, MIN_PX, NEAR_M, ROOF_SHADE, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
-import { prismSurfaces, type SurfaceMesh } from '@core/geo/surfaces';
+import { tileSurfaces, type SurfaceMesh } from '@core/geo/surfaces';
 import type { Camera, CameraBasis } from '@core/optics/projection';
 import { boxCastsInto, coneDepthRange, type Cascade, type SceneBounds } from './shadowFit';
 
@@ -381,7 +381,7 @@ export class PrismGl {
   private tileMesh(tile: PrismTile): TileMesh {
     const hit = this.tileMeshes.get(tile);
     if (hit) return hit;
-    const mesh = this.upload(prismSurfaces(tile));
+    const mesh = this.upload(tileSurfaces(tile));
     this.tileMeshes.set(tile, mesh);
     return mesh;
   }
@@ -390,30 +390,23 @@ export class PrismGl {
     const hit = this.meshes.get(m);
     if (hit) return hit;
     const gl = this.gl;
-    const nv = m.pos.length / 3;
-    const inter = new Float32Array(nv * 5);
-    for (let j = 0; j < nv; j++) {
-      inter[j * 5] = m.pos[j * 3];
-      inter[j * 5 + 1] = m.pos[j * 3 + 1];
-      inter[j * 5 + 2] = m.pos[j * 3 + 2];
-      inter[j * 5 + 3] = m.surfId[j];
-      inter[j * 5 + 4] = m.bldgId[j];
-    }
     // The element binding belongs to the bound VAO, so bind this mesh's own before touching buffers.
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
-    const vbo = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, inter, gl.STATIC_DRAW);
+    // One buffer per attribute straight from the mesh arrays: no interleave copy on the main thread.
+    for (const [loc, size, data] of [
+      [0, 3, m.pos],
+      [1, 1, m.surfId],
+      [2, 1, m.bldgId]
+    ] as const) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+    }
     const ibo = gl.createBuffer()!;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 20, 0);
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 20, 12);
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16);
     gl.bindVertexArray(null);
 
     const ns = Math.max(1, m.surf.length / 4);

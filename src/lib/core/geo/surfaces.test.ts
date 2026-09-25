@@ -4,7 +4,7 @@ import { PrismGl } from '@core/viewfinder/gl/prismGl';
 import { RoofShape } from '@workers/buildings.protocol';
 import { batchOf, PIN, rect, square, type Box } from './batchFixture';
 import { buildPrisms } from './prismRaster';
-import { prismSurfaces } from './surfaces';
+import { adoptPrismSurfaces, prismSurfaces, surfaceBuffers, tileSurfaces } from './surfaces';
 
 const CAM: Camera = { azimuthDeg: 20, elevationDeg: 2, focalMm: 50, frameWmm: 36, frameHmm: 24 };
 
@@ -22,11 +22,12 @@ const fnv = (bytes: Uint8Array, h: number) => {
   for (const b of bytes) h = Math.imul(h ^ b, 16777619) >>> 0;
   return h;
 };
+const hash = (data: ArrayBufferView) => fnv(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), 2166136261).toString(16);
 
-/** Every buffer and texture a PrismGl uploads, hashed in order, through a WebGL2 stand-in. */
-function uploads(draw: (gl: WebGL2RenderingContext) => void): string[] {
-  const out: string[] = [];
-  const take = (data: ArrayBufferView) => out.push(fnv(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), 2166136261).toString(16));
+/** Every buffer and texture a PrismGl uploads, copied in order, through a WebGL2 stand-in. */
+function uploads(draw: (gl: WebGL2RenderingContext) => void): Uint8Array[] {
+  const out: Uint8Array[] = [];
+  const take = (data: ArrayBufferView) => out.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice());
   const calls: Record<string, (...a: never[]) => unknown> = {
     bufferData: (_t: never, data: never) => take(data as ArrayBufferView),
     texSubImage2D: (...a: never[]) => take(a[8] as ArrayBufferView),
@@ -44,7 +45,30 @@ describe('prismSurfaces', () => {
   // Pinned from PrismGl.mesh() before the surfaces were split out of it.
   it('uploads exactly what PrismGl built before the split', () => {
     const got = uploads((gl) => new PrismGl(gl).bounds(CAM, cameraBasis(CAM), [tile]));
-    expect(got).toEqual(GOLDEN);
+    // Vertex attributes now go up as three buffers; interleaved they must match the old single one.
+    const [pos, surfId, bldgId, ...rest] = got;
+    const nv = surfId.length / 4;
+    const inter = new Float32Array(nv * 5);
+    const [p, s, b] = [pos, surfId, bldgId].map((x) => new Float32Array(x.buffer.slice(0)));
+    for (let j = 0; j < nv; j++) inter.set([p[j * 3], p[j * 3 + 1], p[j * 3 + 2], s[j], b[j]], j * 5);
+    expect([inter, ...rest].map(hash)).toEqual(GOLDEN);
+  });
+
+  it('uploads the same from a mesh the worker built and transferred', () => {
+    const direct = uploads((gl) => new PrismGl(gl).bounds(CAM, cameraBasis(CAM), [tile])).map(hash);
+    const sent = structuredClone({ t: buildPrisms(batchOf(BOXES), PIN, 3), m: prismSurfaces(tile) });
+    adoptPrismSurfaces(sent.t, sent.m);
+    expect(tileSurfaces(sent.t)).toBe(sent.m);
+    expect(uploads((gl) => new PrismGl(gl).bounds(CAM, cameraBasis(CAM), [sent.t])).map(hash)).toEqual(direct);
+  });
+
+  it('transfers every mesh array without a copy', () => {
+    const m = prismSurfaces(tile);
+    const bufs = surfaceBuffers(m);
+    expect(new Set(bufs).size).toBe(9);
+    const got = structuredClone(m, { transfer: bufs });
+    expect(m.pos.length).toBe(0);
+    expect(got.idx.length).toBeGreaterThan(0);
   });
 
   it('keeps one surface row per plane and one sphere per building', () => {
