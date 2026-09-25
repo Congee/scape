@@ -69,7 +69,7 @@ export interface PrismShading {
   lightAzDeg: number;
   /** Far ground colour the haze blends toward, 0..255. */
   hazeRgb: readonly number[];
-  /** How dark the sky is, 0..1; towers stay light so they read against it. */
+  /** How dark the sky is, 0..1; buildings dim with it to the ground's night level. */
   night: number;
   /** Buildings past this ground distance are dropped. */
   rangeM: number;

@@ -3,7 +3,12 @@
 import { HAZE_M, MIN_AREA_PX, MIN_PX, NEAR_M, ROOF_SHADE, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import { tileSurfaces, type SurfaceMesh } from '@core/geo/surfaces';
 import type { Camera, CameraBasis } from '@core/optics/projection';
+import { SKY } from '@core/viewfinder/palette';
 import { boxCastsInto, coneDepthRange, type Cascade, type SceneBounds } from './shadowFit';
+
+const luma = (c: readonly number[]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+/** How much of its day brightness a building loses by night: the ground palette's own night/day ratio. */
+export const NIGHT_DIM = 1 - luma(SKY.groundNearNight) / luma(SKY.groundNearDay);
 
 /** Every per-building and per-surface table is a texture this wide. */
 const TEX_W = 1024;
@@ -107,6 +112,7 @@ const float D2R = 3.141592653589793 / 180.0;
 const float HAZE_M = ${HAZE_M.toFixed(1)};
 const float ROOF_SHADE = ${ROOF_SHADE.toFixed(4)};
 const vec3 BASE = vec3(244.0, 244.0, 246.0);
+const float NIGHT_DIM = ${NIGHT_DIM.toFixed(4)};
 flat in int vSurf;
 uniform highp sampler2D uPlane;
 uniform highp sampler2D uSurf;
@@ -145,7 +151,7 @@ void main() {
   float clear = exp(-su.w / HAZE_M);
   float lit = 0.55 + 0.45 * (0.5 + 0.5 * cos((su.y - uLightAz) * D2R));
   float k = su.x > 0.5 ? (su.z < 1e-4 ? ROOF_SHADE : ROOF_SHADE + su.z * (lit - ROOF_SHADE)) : lit;
-  float dim = k * clear * (1.0 - 0.45 * uNight);
+  float dim = k * clear * (1.0 - NIGHT_DIM * uNight);
   oColor = vec4((BASE * dim + uHazeRgb * (1.0 - clear)) / 255.0, 1.0);
   oPos = vec4(ray * d, 1.0);
   // Alpha marks a model face for the composite's shadow bias.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cameraBasis, type Camera } from '@core/optics/projection';
-import { prismClipMatrix } from './prismGl';
+import { NIGHT_DIM, prismClipMatrix } from './prismGl';
 
 const CAM: Camera = { azimuthDeg: 37, elevationDeg: -4, focalMm: 50, frameWmm: 36, frameHmm: 24 };
 
@@ -87,5 +87,11 @@ describe('face winding', () => {
     expect(facing).toHaveLength(1);
     expect(screenArea(m, facing[0])).toBeGreaterThan(0);
     expect(screenArea(m, facing[0].toReversed())).toBeLessThan(0);
+  });
+});
+
+describe('NIGHT_DIM', () => {
+  it('puts buildings at night on the ground palette level, about a quarter of day', () => {
+    expect(1 - NIGHT_DIM).toBeCloseTo(0.23, 2);
   });
 });
