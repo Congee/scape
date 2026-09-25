@@ -2,11 +2,13 @@ import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
 import { degrees, distance, percent } from '@core/format';
 import { formatTime } from '@core/time/format';
+import type { SightVerdict } from '@core/weather/sightline';
 import { tideDay } from '@data/tides';
 import { useDayData } from '@state/dayData';
 import { settingsStore, useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 import { CloudRow } from './CloudChart';
+import { sightKey, useSightlines, VERDICT_TEXT } from './Sightlines';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
 
 const LABELS: Record<SkyBody, Partial<Record<EventKind, string>>> = {
@@ -62,6 +64,7 @@ export function Timeline() {
   const showGc = useSettings((s) => s.showGc);
   const detail = useSettings((s) => s.timelineDetail);
 
+  const sight = useSightlines().lines;
   const list = events.filter((e) => (detail ? showGc || e.body !== SkyBody.Gc : !isDetail(e)));
   let activeIdx = -1;
   for (let i = 0; i < list.length; i++) if (list[i].time <= time) activeIdx = i;
@@ -79,14 +82,14 @@ export function Timeline() {
       {list.length === 0 && !loading && <p className="muted">No events on this day.</p>}
       <ul>
         {list.map((ev, i) => (
-          <Row key={`${ev.body}-${ev.kind}-${ev.time}`} ev={ev} active={i === activeIdx} tz={tz} hour12={hour12} />
+          <Row key={`${ev.body}-${ev.kind}-${ev.time}`} ev={ev} active={i === activeIdx} tz={tz} hour12={hour12} sight={sight.get(sightKey(ev))?.verdict} />
         ))}
       </ul>
     </div>
   );
 }
 
-function Row({ ev, active, tz, hour12 }: { ev: DayEvent; active: boolean; tz: string; hour12: boolean }) {
+function Row({ ev, active, tz, hour12, sight }: { ev: DayEvent; active: boolean; tz: string; hour12: boolean; sight?: SightVerdict }) {
   return (
     <li className={[isDetail(ev) ? 'detail' : '', active ? 'active' : ''].filter(Boolean).join(' ')}>
       <button onClick={() => worldStore.getState().setTime(ev.time)} title="Set the clock to this event">
@@ -94,9 +97,15 @@ function Row({ ev, active, tz, hour12 }: { ev: DayEvent; active: boolean; tz: st
         <span className="label">{LABELS[ev.body][ev.kind] ?? ev.kind}</span>
         <span className="time">{formatTime(ev.time, tz, hour12)}</span>
         <span className="az">{degrees(ev.azimuth)}</span>
-        {ev.moon && (
+        {(ev.moon || sight) && (
           <span className="extra">
-            {ev.moon.name} · {percent(ev.moon.illumination, ev.moon.illumination < 0.1 ? 2 : 1)}
+            {ev.moon && `${ev.moon.name} · ${percent(ev.moon.illumination, ev.moon.illumination < 0.1 ? 2 : 1)}`}
+            {ev.moon && sight && ' · '}
+            {sight && (
+              <span className={`sight ${sight.toLowerCase()}`} data-sight={sight}>
+                {VERDICT_TEXT[sight]}
+              </span>
+            )}
           </span>
         )}
       </button>

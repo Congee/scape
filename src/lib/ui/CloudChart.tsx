@@ -16,18 +16,18 @@ import { useWorld, worldStore } from '@state/world';
 const HOUR_MS = 3_600_000;
 
 /** Forecasts for `points` over [startMs, endMs) under the picked model; asks once per change, never polls. */
-export function useForecast(points: readonly (LngLat | null)[], startMs: number, endMs: number) {
+export function useForecast(points: readonly (LngLat | null)[], startMs: number, endMs: number, vars: readonly HourlyVar[] = POINT_VARS) {
   const model = useWeather((s) => s.model);
   const [nonce, setNonce] = useState(0);
   const pts = points.map((p) => (p ? [roundCoord(p.lat), roundCoord(p.lng)] : null));
-  const spec = JSON.stringify({ model, startMs, endMs, pts, nonce });
+  const spec = JSON.stringify({ model, startMs, endMs, pts, vars, nonce });
   const [got, setGot] = useState<{ spec: string; results: (ForecastResult | null)[]; now: number } | null>(null);
   useEffect(() => {
-    const s = JSON.parse(spec) as { model: string; startMs: number; endMs: number; pts: ([number, number] | null)[] };
+    const s = JSON.parse(spec) as { model: string; startMs: number; endMs: number; pts: ([number, number] | null)[]; vars: HourlyVar[] };
     if (s.endMs <= s.startMs) return;
     let live = true;
     const ask = s.pts.flatMap((p) => (p ? [{ lat: p[0], lng: p[1] }] : []));
-    void forecastPoints(ask, s.model, POINT_VARS, s.startMs, s.endMs).then((r) => {
+    void forecastPoints(ask, s.model, s.vars, s.startMs, s.endMs).then((r) => {
       let j = 0;
       if (live) setGot({ spec, results: s.pts.map((p) => (p ? r[j++] : null)), now: Date.now() });
     });

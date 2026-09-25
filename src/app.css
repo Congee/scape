@@ -2030,3 +2030,15 @@ label.file-pick input[type='file'] {
   font-size: 12px;
   color: var(--fg-2);
 }
+
+.sight.blocked,
+.verdict.blocked { color: var(--fg); }
+.sight.clear,
+.verdict.clear { color: var(--fg-2); }
+
+.wx-sight details { margin: 6px; }
+.wx-sight summary { cursor: pointer; line-height: 1.5; }
+.wx-dist { margin: 4px 0 4px 16px; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.wx-dist th,
+.wx-dist td { padding: 1px 10px 1px 0; text-align: right; }
+.wx-dist th { color: var(--fg-3); font-weight: normal; }
