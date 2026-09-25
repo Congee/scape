@@ -40,7 +40,8 @@ const tab = await Tab.open(Number(cdp), BASE);
 const ev = <T>(e: string) => tab.eval<T>(e);
 
 let stubbed = 0;
-tab.on('Fetch.requestPaused', (p) => {
+tab.listeners.push((method, p) => {
+  if (method !== 'Fetch.requestPaused') return;
   stubbed++;
   const body = JSON.stringify({ content: LISTED.map((t) => ({ name: `VNP46A4.A${YEAR}001.${t}.002.2025000000000.h5` })) });
   void tab.send('Fetch.fulfillRequest', {

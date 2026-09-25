@@ -197,6 +197,11 @@ export class SkyglowGl {
     this.loaded = { win: { ...win, data: new Uint16Array(0) }, lat0, levels };
   }
 
+  /** The largest window side this GPU can upload. */
+  get maxTexture(): number {
+    return this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number;
+  }
+
   /** The loaded window, without its data; null before the first load. */
   get current(): (Omit<ViirsWindow, 'data'> & { lat0: number }) | null {
     return this.loaded ? { ...this.loaded.win, lat0: this.loaded.lat0 } : null;

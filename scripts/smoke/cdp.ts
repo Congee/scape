@@ -19,7 +19,6 @@ export class Tab {
   private workers = new Map<string, string>();
   private offline = false;
   private logging = false;
-  private listeners = new Map<string, ((params: Record<string, unknown>, sessionId?: string) => void)[]>();
   /** False keeps the tab in the background: Page.bringToFront can raise the window over the user's. */
   private front = false;
   /** URLs the page and its workers requested since `logRequests()`. */
@@ -36,7 +35,7 @@ export class Tab {
     ws.addEventListener('message', (e) => {
       const m = JSON.parse(String(e.data)) as Msg;
       if (m.id != null) this.waiters.get(m.id)?.(m);
-      if (m.method) for (const f of this.listeners.get(m.method) ?? []) f(m.params ?? {}, m.sessionId);
+      if (m.method) for (const l of this.listeners) l(m.method, m.params ?? {}, m.sessionId);
       if (m.method === 'Network.requestWillBeSent' && this.logging) this.requests.push(String((m.params as { request: { url: string } }).request.url));
       if (m.method === 'Target.attachedToTarget') {
         const p = m.params as { sessionId: string; targetInfo?: { url?: string } };
@@ -174,11 +173,6 @@ export class Tab {
   private async emulate(offline: boolean, sessionId?: string) {
     await this.send('Network.enable', {}, sessionId);
     await this.send('Network.emulateNetworkConditions', { offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }, sessionId);
-  }
-
-  /** Calls `f` on every `method` event of the page or its workers, e.g. Fetch.requestPaused. */
-  on(method: string, f: (params: Record<string, unknown>, sessionId?: string) => void) {
-    this.listeners.set(method, [...(this.listeners.get(method) ?? []), f]);
   }
 
   /** Attached worker sessions and their script URLs. */

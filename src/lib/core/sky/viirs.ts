@@ -83,15 +83,20 @@ export interface ViirsWindow {
   data: Uint16Array;
 }
 
-/** Global pixel rows and columns covering `km` around a point; columns may run past ±180° and wrap. */
-export function windowAround(p: LngLat, km: number): Omit<ViirsWindow, 'data'> {
+/** Global pixel rows and columns covering `km` around a point, at most `maxPx` a side; columns may run past ±180° and wrap. */
+export function windowAround(p: LngLat, km: number, maxPx = Infinity): Omit<ViirsWindow, 'data'> {
   const b = growBbox(pointBbox(p), km);
   const row0 = Math.max(0, Math.floor((90 - b.north) * VIIRS_PX_PER_DEG));
   const row1 = Math.min(VIIRS_ROWS, Math.ceil((90 - b.south) * VIIRS_PX_PER_DEG));
   const dLon = Math.min(180, km / (KM_PER_DEG_LON * Math.cos((Math.min(85, Math.abs(p.lat) + km / KM_PER_DEG_LAT) * Math.PI) / 180)));
   const col0 = Math.floor((p.lng - dLon + 180) * VIIRS_PX_PER_DEG);
   const col1 = Math.ceil((p.lng + dLon + 180) * VIIRS_PX_PER_DEG);
-  return { row0, col0, rows: row1 - row0, cols: col1 - col0 };
+  // Near the poles the lon span outgrows GPU textures; far columns matter least.
+  const cols = Math.min(col1 - col0, maxPx);
+  const rows = Math.min(row1 - row0, maxPx);
+  const x = Math.floor((p.lng + 180) * VIIRS_PX_PER_DEG - cols / 2);
+  const y = Math.min(Math.max(0, Math.floor((90 - p.lat) * VIIRS_PX_PER_DEG - rows / 2)), VIIRS_ROWS - rows);
+  return { row0: rows < row1 - row0 ? y : row0, col0: cols < col1 - col0 ? x : col0, rows, cols };
 }
 
 /** Tiles a window touches, with wrapped longitudes folded back into 0–35. */

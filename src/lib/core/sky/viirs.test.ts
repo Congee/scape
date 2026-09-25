@@ -28,6 +28,16 @@ describe('VIIRS tiles', () => {
     expect(w.rows).toBeCloseTo((200 / 110.574) * VIIRS_PX_PER_DEG, -1);
   });
 
+  it('caps high-latitude windows to the GPU texture size, centred on the point', () => {
+    const p = { lat: 78, lng: 15 };
+    expect(windowAround(p, 350).cols).toBeGreaterThan(4096);
+    const w = windowAround(p, 350, 4096);
+    expect(w.cols).toBe(4096);
+    expect(w.rows).toBe(windowAround(p, 350).rows);
+    expect(Math.abs(w.col0 + w.cols / 2 - (p.lng + 180) * VIIRS_PX_PER_DEG)).toBeLessThanOrEqual(1);
+    expect(windowAround({ lat: 52, lng: 4 }, 350, 4096)).toEqual(windowAround({ lat: 52, lng: 4 }, 350));
+  });
+
   it('stores radiance as 0.1 nW counts with fill and negatives dark', () => {
     expect(Array.from(toCounts([65535, 123, 0, 7000], 0.1, 0, 65535))).toEqual([0, 123, 0, 7000]);
     expect(Array.from(toCounts(new Float32Array([-1, 2.34, Number.NaN, 1e9]), 1, 0, null))).toEqual([0, 23, 0, 65535]);

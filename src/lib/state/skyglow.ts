@@ -102,8 +102,8 @@ async function binsAt(p: LngLat, year: number): Promise<GlowBins> {
     loadedYear = null;
   }
   const cur = gpu.current;
-  if (loadedYear !== year || !cur || !inside(windowAround(p, REACH_KM), cur)) {
-    const { win } = await readViirsWindow(year, windowAround(p, REACH_KM + SLACK_KM));
+  if (loadedYear !== year || !cur || !inside(windowAround(p, REACH_KM, gpu.maxTexture), cur)) {
+    const { win } = await readViirsWindow(year, windowAround(p, REACH_KM + SLACK_KM, gpu.maxTexture));
     gpu.load(win, p.lat);
     loadedYear = year;
   }
