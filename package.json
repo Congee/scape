@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
+    "@maplibre/maplibre-gl-style-spec": "26.4.2",
     "@rolldown/plugin-babel": "0.2.4",
     "@tanstack/router-plugin": "1.168.37",
     "@types/babel__core": "7.20.5",

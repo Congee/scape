@@ -1,3 +1,4 @@
+import type { ExpressionSpecification } from 'maplibre-gl';
 import { SLOPE_BANDS_DEG } from '@core/terrain/slope';
 import { TERRAIN_SOURCE_ID, TerrainSourceId } from '@data/terrainTiles';
 
@@ -29,6 +30,8 @@ const BELOW_ZERO_STOPS: [number, string][] =
       ];
 
 export const ELEVATION_STOPS: readonly [number, string][] = [...BELOW_ZERO_STOPS, ...LAND_STOPS];
+
+export const ELEVATION_COLOR = ['interpolate', ['linear'], ['elevation'], ...ELEVATION_STOPS.flat()] as ExpressionSpecification;
 
 /** Legend ticks, metres. */
 export const ELEVATION_TICKS = TERRAIN_SOURCE_ID === TerrainSourceId.Mapterhorn ? [0, 1000, 2000, 3000, 5000] : [-8000, -4000, 0, 2000, 5000];

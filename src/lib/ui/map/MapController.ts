@@ -6,7 +6,6 @@ import {
   NavigationControl,
   ScaleControl,
   type GeoJSONSource,
-  type ExpressionSpecification,
   type ImageSource,
   type MapMouseEvent
 } from 'maplibre-gl';
@@ -51,6 +50,7 @@ import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
 import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { planTime, worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
+import { buildingFilter, buildingPaint } from './buildingStyle';
 import { CloudOverlay } from './cloudOverlay';
 import { paintHeat } from './heat';
 import { latestOnly } from './latest';
@@ -106,9 +106,6 @@ const SHADOW_MAX_LENGTH_M = 5_000;
 /** Relief that can throw a shadow into the view from outside it — an Alpine wall, not Everest. */
 const TALLEST_TERRAIN_M = 3_000;
 const SHADOW_MAX_TERRAIN_M = 40_000;
-const BLD_HEIGHT: ExpressionSpecification = ['coalesce', ['get', 'height'], ['case', ['has', 'num_floors'], ['*', ['get', 'num_floors'], 3], 5]];
-const BLD_BASE: ExpressionSpecification = ['coalesce', ['get', 'min_height'], 0];
-const NOT_UNDERGROUND: ExpressionSpecification = ['!=', ['get', 'is_underground'], true];
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const PIN_COLOR = '#e5322d';
 const PIN2_COLOR = '#8fd18c';
@@ -907,14 +904,7 @@ export class MapController {
     if (on && !this.map.getLayer(BLD_LAYER)) {
       if (!this.map.getSource(BLD_SRC)) this.map.addSource(BLD_SRC, buildingsSource(BLD_MIN_ZOOM));
       const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
-      const dark = isDarkBasemap(currentBasemap());
-      const paint = {
-        'fill-extrusion-color': dark ? '#5a6472' : '#c9ced6',
-        'fill-extrusion-height': BLD_HEIGHT,
-        'fill-extrusion-base': BLD_BASE,
-        'fill-extrusion-opacity': 0.9,
-        'fill-extrusion-vertical-gradient': true
-      } as const;
+      const paint = buildingPaint(isDarkBasemap(currentBasemap()));
       this.map.addLayer(
         {
           id: BLD_LAYER,
@@ -923,13 +913,13 @@ export class MapController {
           'source-layer': 'building',
           minzoom: BLD_MIN_ZOOM,
           // Overture replaces a building that has parts with those parts; drawing both double-draws it.
-          filter: this.buildingFilter(BLD_LAYER),
+          filter: buildingFilter(true, this.hiddenIds),
           paint
         },
         before
       );
       this.map.addLayer(
-        { id: BLD_PART_LAYER, type: 'fill-extrusion', source: BLD_SRC, 'source-layer': 'building_part', minzoom: BLD_MIN_ZOOM, filter: this.buildingFilter(BLD_PART_LAYER), paint },
+        { id: BLD_PART_LAYER, type: 'fill-extrusion', source: BLD_SRC, 'source-layer': 'building_part', minzoom: BLD_MIN_ZOOM, filter: buildingFilter(false, this.hiddenIds), paint },
         before
       );
     } else if (!on) {
@@ -937,12 +927,6 @@ export class MapController {
     }
     this.setBasemapBuildings(!on);
     this.scheduleShadows();
-  }
-
-  /** Overture replaces a building that has parts with those parts; drawing both double-draws it. A model hides what it stands in for. */
-  private buildingFilter(layer: string): ExpressionSpecification {
-    const own: ExpressionSpecification[] = layer === BLD_LAYER ? [['!=', ['get', 'has_parts'], true], NOT_UNDERGROUND] : [NOT_UNDERGROUND];
-    return this.hiddenIds.length ? ['all', ...own, ['!', ['in', ['get', 'id'], ['literal', this.hiddenIds]]]] : ['all', ...own];
   }
 
   /** The worker knows which Overture rows the models suppress; the map hides the same ones. */
@@ -953,7 +937,7 @@ export class MapController {
     if (ids.length === this.hiddenIds.length && ids.every((id, i) => id === this.hiddenIds[i])) return;
     this.hiddenIds = ids;
     if (!this.styleReady) return;
-    for (const id of [BLD_LAYER, BLD_PART_LAYER]) if (this.map.getLayer(id)) this.map.setFilter(id, this.buildingFilter(id));
+    for (const id of [BLD_LAYER, BLD_PART_LAYER]) if (this.map.getLayer(id)) this.map.setFilter(id, buildingFilter(id === BLD_LAYER, this.hiddenIds));
   }
 
   /** The basemap's own extrusions are hidden, not removed: `applyRenderedHeight` still queries them. */

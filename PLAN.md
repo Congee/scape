@@ -161,7 +161,7 @@ search params.
 | 3D viewfinder | MapLibre terrain under the 2D canvas: camera placed at the eye (`calculateCameraOptionsFromCameraLngLatAltRotation`, pitch to 180°, vertical FOV = frame), DEM sweep for skyline, occlusion and sky | Three.js unused |
 | Sky data | HYG v4.1 (CC BY-SA), NASA SVS Deep Star Maps (PD), d3-celestial lines (BSD-3) | built into `public/sky` by `scripts/build-sky.ts`; sources listed in `public/sky/README.md` |
 | Light pollution | NASA GIBS VIIRS Black Marble raster (PD) | Falchi's atlas and the usual tile sets are CC BY-NC; estimated Bortle and mag/arcsec² at camera and target come from our own scattering model on VIIRS radiance (2026-09-24) |
-| Tests | Vitest for core; Playwright later for UI smoke | pure unit tests, no I/O |
+| Tests | Vitest for core; Playwright later for UI smoke | pure unit tests, no I/O; `@maplibre/maplibre-gl-style-spec` (devDependency, pinned to maplibre-gl's copy) evaluates and validates our style expressions (user, 2026-09-25) |
 
 ## 5. UI layout
 

@@ -1,11 +1,11 @@
-import type { ExpressionSpecification, GeoJSONSource, Map as MlMap } from 'maplibre-gl';
+import type { GeoJSONSource, Map as MlMap } from 'maplibre-gl';
 import { shallow } from 'zustand/shallow';
 import { makeObserver } from '@core/astro/bodies';
 import { nightFeatures, nightModel, nightShiftPx, type NightModel } from '@core/astro/terminator';
 import { settingsStore } from '@state/settings';
 import { EYE_HEIGHT_M, pinSiteHeightM, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
-import { ELEVATION_STOPS, NIGHT_COLOR, nightCapAlpha, RISE_LINE_COLOR } from './layerRamps';
+import { ELEVATION_COLOR, NIGHT_COLOR, nightCapAlpha, RISE_LINE_COLOR } from './layerRamps';
 import { SlopeLayer, TerrainShade } from './slopeLayer';
 
 const NIGHT_SRC = 'daynight';
@@ -118,8 +118,7 @@ export class MapLayers {
     const before = () => (m.getLayer(HILLSHADE_LAYER) ? HILLSHADE_LAYER : this.anchor());
     if (!m.getLayer(ELEV_LAYER)) {
       this.ensureDem(this.demSource);
-      const color = ['interpolate', ['linear'], ['elevation'], ...ELEVATION_STOPS.flat()] as ExpressionSpecification;
-      m.addLayer({ id: ELEV_LAYER, type: 'color-relief', source: this.demSource, paint: { 'color-relief-color': color } }, before());
+      m.addLayer({ id: ELEV_LAYER, type: 'color-relief', source: this.demSource, paint: { 'color-relief-color': ELEVATION_COLOR } }, before());
     }
     m.setPaintProperty(ELEV_LAYER, 'color-relief-opacity', elev ? s.elevationOpacity : 0);
     shades.forEach(([layer, , opacity], i) => {
