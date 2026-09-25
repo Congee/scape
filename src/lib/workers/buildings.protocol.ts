@@ -5,7 +5,7 @@ import type { PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done', Geoid: 'Geoid' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done', Geoid: 'Geoid', Stop: 'Stop' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** OSM Simple 3D Buildings roof families the rasteriser draws; Other renders flat at the apex. */
@@ -77,6 +77,12 @@ export interface GeoidSync {
   key: string;
 }
 
+/** Abandons the wedge and LoD2 streams in flight, fetching nothing more for them. No response. */
+export interface StopRequest {
+  kind: typeof BuildingsKind.Stop;
+  id: number;
+}
+
 /** Every Overture row of the building under a point, parts included, with its ground; for seeding a model. */
 export interface RowsAtRequest {
   kind: typeof BuildingsKind.RowsAt;
@@ -113,7 +119,7 @@ export interface Lod2Request {
   have: string[];
 }
 
-export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request | GeoidSync;
+export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request | GeoidSync | StopRequest;
 
 /** One LoD2 content tile placed in the viewfinder's frame. */
 export interface Lod2Placed {

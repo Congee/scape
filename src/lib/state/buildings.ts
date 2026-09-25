@@ -6,7 +6,7 @@ import { shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
 import { adoptPrismSlots } from '@core/geo/prismOcclude';
 import { adoptPrismSurfaces } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
 
 /** Placed tiles kept in the store; beyond this the farthest from the pin are dropped. */
@@ -198,6 +198,17 @@ export function requestLod2(pin: LngLat, eyeM: number, azFromDeg: number, azSpan
   lod2Store.setState({ busy: true, error: null });
   const req: Lod2Request = { kind: BuildingsKind.Lod2, id: lod2Id, pin, eyeM, azFromDeg, azSpanDeg, rangeM, pxPerRad, have: lod2HeldUrls() };
   ensureWorker().postMessage(req);
+}
+
+/** Drops the wedge and LoD2 streams while buildings are hidden; placed tiles stay, and the next request asks for the rest. */
+export function stopBuildings(): void {
+  lastTiles = lastLod2 = null;
+  if (!lastKey && !lod2Key) return;
+  lastKey = lod2Key = '';
+  tilesId = lod2Id = ++seq;
+  if (buildingsStore.getState().busy) buildingsStore.setState({ busy: false });
+  if (lod2Store.getState().busy) lod2Store.setState({ busy: false });
+  worker?.postMessage({ kind: BuildingsKind.Stop, id: tilesId } satisfies StopRequest);
 }
 
 /** Builds the map's ground-shadow mask; the same rect under a sun that moves no edge `SHADOW_DRIFT_PX` at `mPerPx` is ignored. */

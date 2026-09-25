@@ -4,6 +4,7 @@ import { PbfReader } from 'pbf';
 import { decodeBuildings, type DecodedBuildings, type VectorLayerLike } from '@core/geo/buildingTiles';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
 import { localBuildings, readThrough } from './localTiles';
+import { yieldTurn } from './yieldTurn';
 
 export const OVERTURE_BUILDINGS_RELEASE = '2026-08-19.0';
 export const OVERTURE_BUILDINGS_URL = `https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_BUILDINGS_RELEASE}/buildings.pmtiles`;
@@ -39,7 +40,13 @@ export function buildingTileBytes(z: number, x: number, y: number, signal?: Abor
 }
 
 const cache = new Map<string, DecodedBuildings>();
-const inflight = new Map<string, Promise<DecodedBuildings | null>>();
+/** A fetch and the callers still waiting on it; one nobody wants is dropped before it hits the network or aborted on it. */
+interface Inflight {
+  p: Promise<DecodedBuildings | null>;
+  wants: (() => boolean)[];
+  abort: AbortController;
+}
+const inflight = new Map<string, Inflight>();
 const waiting: (() => void)[] = [];
 let active = 0;
 
@@ -63,10 +70,13 @@ function release(): void {
   waiting.shift()?.();
 }
 
-async function load(tile: TileCoord, key: string): Promise<DecodedBuildings | null> {
+async function load(tile: TileCoord, key: string, f: Inflight): Promise<DecodedBuildings | null> {
   await acquire();
   try {
-    const data = await buildingTileBytes(tile.z, tile.x, tile.y);
+    // A Stop queued behind busy work must land before a freed slot fetches.
+    await yieldTurn();
+    if (f.abort.signal.aborted || !f.wants.some((w) => w())) return null;
+    const data = await buildingTileBytes(tile.z, tile.x, tile.y, f.abort.signal);
     if (!data) return null;
     const { layers } = new VectorTile(new PbfReader(new Uint8Array(data)));
     const batch = decodeBuildings(layers.building as VectorLayerLike | undefined, layers.building_part as VectorLayerLike | undefined, tile);
@@ -79,18 +89,32 @@ async function load(tile: TileCoord, key: string): Promise<DecodedBuildings | nu
   }
 }
 
-/** Decoded `building` and `building_part` layers of one tile; null when the tile is empty or the network fails. */
-export function fetchBuildingBatch(tile: TileCoord): Promise<DecodedBuildings | null> {
+/** Decoded `building` and `building_part` layers of one tile; null when the tile is empty, the network fails, or no caller `wanted` it by the time a slot freed. */
+export function fetchBuildingBatch(tile: TileCoord, wanted: () => boolean = () => true): Promise<DecodedBuildings | null> {
   const key = tileKey(tile.z, tile.x, tile.y);
   const hit = cache.get(key);
   if (hit) {
     touch(key, hit);
     return Promise.resolve(hit);
   }
-  let p = inflight.get(key);
-  if (!p) {
-    p = load(tile, key).finally(() => inflight.delete(key));
-    inflight.set(key, p);
+  const f = inflight.get(key);
+  if (f) {
+    f.wants.push(wanted);
+    return f.p;
   }
-  return p;
+  const e: Inflight = { p: Promise.resolve(null), wants: [wanted], abort: new AbortController() };
+  e.p = load(tile, key, e).finally(() => {
+    if (inflight.get(key) === e) inflight.delete(key);
+  });
+  inflight.set(key, e);
+  return e.p;
+}
+
+/** Aborts every fetch no caller still wants; their callers get null. */
+export function abandonBuildingFetches(): void {
+  for (const [key, e] of inflight) {
+    if (e.wants.some((w) => w())) continue;
+    inflight.delete(key);
+    e.abort.abort();
+  }
 }

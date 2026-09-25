@@ -38,7 +38,7 @@ import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
 import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
-import { buildingsStore, requestBuildings, requestLod2 } from '@state/buildings';
+import { buildingsStore, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
 import { lod2HeldStats, lod2Store } from '@state/lod2';
 import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
@@ -338,7 +338,11 @@ export class ViewfinderController {
     const s = settingsStore.getState();
     if (this.w < 40) return;
     const sc = this.scene();
-    if (!s.terrain) return;
+    if (!s.terrain) {
+      // Buildings stand on the terrain, so they are hidden with it.
+      stopBuildings();
+      return;
+    }
     const wantStep = clamp(sc.hfov / Math.max(100, sc.frame.w), 0.02, 0.5);
     const wantSpan = Math.min(360, Math.max(30, sc.hfov * 2 + 10));
     const stepForSpan = Math.max(wantStep, wantSpan / MAX_COLUMNS);
@@ -395,7 +399,10 @@ export class ViewfinderController {
 
   /** Building volumes for the same wedge the terrain sweep covers, so small pans need no new fetch. */
   private askBuildings(win: ViewWindow, sc: Scene) {
-    if (!compositionStore.getState().showBuildings) return;
+    if (!compositionStore.getState().showBuildings) {
+      stopBuildings();
+      return;
+    }
     const pin = worldStore.getState().pin;
     const rangeM = Math.min(win.rangeM, BUILDING_RANGE_M);
     requestBuildings(pin, sc.eyeM, win.azFromDeg, win.azSpanDeg, rangeM);
@@ -1524,8 +1531,7 @@ export class ViewfinderController {
   }
 
   dispose() {
-    this.photo?.image?.close();
-    this.photo = null;
+    stopBuildings();
     this.sceneGl?.dispose();
     for (const u of this.unsubs) u();
     this.ro.disconnect();

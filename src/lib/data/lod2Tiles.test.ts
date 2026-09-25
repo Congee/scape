@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOD2_RETRY_MS } from '@core/lod2/failures';
 import type { Lod2Region } from '@core/lod2/regions';
 import type { WalkContent } from '@core/lod2/tileset';
-import { fetchLod2Tile, walkRegion } from './lod2Tiles';
+import { abandonLod2Fetches, fetchLod2Tile, walkRegion } from './lod2Tiles';
+import { yieldTurn } from './yieldTurn';
 
 const REGION = { id: 'nl', name: 'Test', tileset: '', bbox: [0, 0, 1, 1], licence: '', attribution: '', attributionUrl: '', geoidM: 0 } as unknown as Lod2Region;
 const content = (url: string): WalkContent => ({ url, transform: new Float64Array(16), sphere: { x: 0, y: 0, z: 0, r: 1 }, distM: 0, geometricError: 0 });
@@ -110,5 +111,51 @@ describe('walkRegion', () => {
     now += LOD2_RETRY_MS;
     await walkRegion({ ...REGION, tileset: u }, VIEW);
     expect(calls(u)).toBe(2);
+  });
+});
+
+describe('fetchLod2Tile wanted', () => {
+  /** A fetch that hangs until aborted, then rejects as the browser does. */
+  const hang = () => {
+    fetchMock = vi.fn(
+      (_u: string, init?: RequestInit) =>
+        new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+    );
+    vi.stubGlobal('fetch', fetchMock);
+  };
+
+  it('drops a tile nobody wants before it hits the network, and fetches it when wanted again', async () => {
+    const u = url('unwanted.glb');
+    serve(() => new Response(null, { status: 404 }));
+    expect(await fetchLod2Tile(content(u), REGION, () => false)).toBeNull();
+    expect(calls(u)).toBe(0);
+    expect(await fetchLod2Tile(content(u), REGION)).toBeNull();
+    expect(calls(u)).toBe(1);
+  });
+
+  it('fetches a shared tile once while any caller still wants it', async () => {
+    const u = url('shared.glb');
+    serve(() => new Response(null, { status: 404 }));
+    await Promise.all([fetchLod2Tile(content(u), REGION, () => false), fetchLod2Tile(content(u), REGION, () => true)]);
+    expect(calls(u)).toBe(1);
+  });
+
+  it('aborts a fetch on the wire once nobody wants it, without marking the tile failed', async () => {
+    const u = url('abandoned.glb');
+    hang();
+    let wanted = true;
+    const p = fetchLod2Tile(content(u), REGION, () => wanted);
+    // load yields a turn after taking its slot.
+    await yieldTurn();
+    await yieldTurn();
+    abandonLod2Fetches();
+    expect(calls(u)).toBe(1);
+    wanted = false;
+    abandonLod2Fetches();
+    expect(await p).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+    serve(() => new Response(null, { status: 404 }));
+    expect(await fetchLod2Tile(content(u), REGION)).toBeNull();
+    expect(calls(u)).toBe(1);
   });
 });

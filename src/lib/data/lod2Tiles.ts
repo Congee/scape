@@ -7,6 +7,7 @@ import { walkTileset, type TilesetJson, type WalkContent, type WalkView } from '
 import type { Lod2Region } from '@core/lod2/regions';
 import { gltfUsesDraco, readGlbWorld, type DracoDecoder } from '@core/model/gltf';
 import { readGeoid } from './geoid';
+import { yieldTurn } from './yieldTurn';
 
 const CONCURRENCY = 6;
 /** External tilesets a walk may still name after this many rounds are left out. */
@@ -65,7 +66,13 @@ export async function walkRegion(region: Lod2Region, view: WalkView): Promise<Wa
 }
 
 const cache = new Map<string, Lod2Tile>();
-const inflight = new Map<string, Promise<Lod2Tile | null>>();
+/** A fetch and the callers still waiting on it; one nobody wants is dropped before it hits the network or aborted on it. */
+interface Inflight {
+  p: Promise<Lod2Tile | null>;
+  wants: (() => boolean)[];
+  abort: AbortController;
+}
+const inflight = new Map<string, Inflight>();
 const waiting: (() => void)[] = [];
 let active = 0;
 
@@ -122,19 +129,22 @@ function release(): void {
 }
 
 /** Null when the tile is absent or unreachable; a decode failure rejects. */
-async function load(c: WalkContent, region: Lod2Region): Promise<Lod2Tile | null> {
+async function load(c: WalkContent, region: Lod2Region, f: Inflight): Promise<Lod2Tile | null> {
   const gen = geoidGen;
   await acquire();
   let buf: ArrayBuffer;
   try {
-    const res = await fetch(c.url);
+    // A Stop queued behind busy work must land before a freed slot fetches.
+    await yieldTurn();
+    if (f.abort.signal.aborted || !f.wants.some((w) => w())) return null;
+    const res = await fetch(c.url, { signal: f.abort.signal });
     if (!res.ok) {
       fault(c.url, httpFault(res.status), `HTTP ${res.status}`);
       return null;
     }
     buf = await res.arrayBuffer();
   } catch (err) {
-    fault(c.url, fetchFault(err), err);
+    if (!f.abort.signal.aborted) fault(c.url, fetchFault(err), err);
     return null;
   } finally {
     release();
@@ -179,7 +189,7 @@ function undecodable(url: string, err: unknown): unknown {
 }
 
 /** One content tile in lng/lat/sea level; null when absent or unreachable, a rejection when it does not decode. A known failure costs no fetch. */
-export function fetchLod2Tile(c: WalkContent, region: Lod2Region): Promise<Lod2Tile | null> {
+export function fetchLod2Tile(c: WalkContent, region: Lod2Region, wanted: () => boolean = () => true): Promise<Lod2Tile | null> {
   if (undecoded.has(c.url)) return Promise.reject(undecoded.get(c.url));
   if (faults.blocked(c.url)) return Promise.resolve(null);
   const hit = cache.get(c.url);
@@ -187,13 +197,24 @@ export function fetchLod2Tile(c: WalkContent, region: Lod2Region): Promise<Lod2T
     touch(c.url, hit);
     return Promise.resolve(hit);
   }
-  let p = inflight.get(c.url);
-  if (!p) {
-    const gen = geoidGen;
-    p = load(c, region).finally(() => {
-      if (gen === geoidGen) inflight.delete(c.url);
-    });
-    inflight.set(c.url, p);
+  const f = inflight.get(c.url);
+  if (f) {
+    f.wants.push(wanted);
+    return f.p;
   }
-  return p;
+  const e: Inflight = { p: Promise.resolve(null), wants: [wanted], abort: new AbortController() };
+  e.p = load(c, region, e).finally(() => {
+    if (inflight.get(c.url) === e) inflight.delete(c.url);
+  });
+  inflight.set(c.url, e);
+  return e.p;
+}
+
+/** Aborts every fetch no caller still wants; their callers get null. */
+export function abandonLod2Fetches(): void {
+  for (const [url, e] of inflight) {
+    if (e.wants.some((w) => w())) continue;
+    inflight.delete(url);
+    e.abort.abort();
+  }
 }

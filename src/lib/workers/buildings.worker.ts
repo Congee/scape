@@ -14,8 +14,9 @@ import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStit
 import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
 import { cubicStencilTiles, demRowAt, elevationAtCubic, lowestGroundAt, withDemTiles } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
-import { fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
-import { fetchLod2Tile, setLod2Geoid, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
+import { yieldTurn } from '@data/yieldTurn';
+import { abandonBuildingFetches, fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
+import { abandonLod2Fetches, fetchLod2Tile, setLod2Geoid, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsRequest, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Placed, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
 
@@ -131,23 +132,6 @@ function touchCover(c: Lod2Cover): void {
 }
 
 /** Places the wedge's tiles and any held tile whose models, LoD2 cover or frame changed; a tile still matching is skipped. */
-/** A macrotask turn, so a newer request's message lands before the next tile is placed. */
-function yieldTurn(): Promise<void> {
-  const { port1, port2 } = new MessageChannel();
-  return new Promise((resolve) => {
-    port1.addEventListener(
-      'message',
-      () => {
-        port1.close();
-        resolve();
-      },
-      { once: true }
-    );
-    port1.start();
-    port2.postMessage(null);
-  });
-}
-
 async function run(req: TilesRequest): Promise<void> {
   const frame = prismFrameKey(req.pin, req.eyeM);
   const wedge = tilesForWedge(req.pin, req.azFromDeg, req.azSpanDeg, req.rangeM);
@@ -174,7 +158,8 @@ async function run(req: TilesRequest): Promise<void> {
   let missing = 0;
   let sent = 0;
   // All fetches start now so the data layer's concurrency limiter runs; they are consumed nearest first.
-  const pending = tiles.map(({ t }) => fetchBuildingBatch(t));
+  const wanted = () => latest === req.id;
+  const pending = tiles.map(({ t }) => fetchBuildingBatch(t, wanted));
   for (let n = 0; n < tiles.length; n++) {
     // oxlint-disable-next-line no-await-in-loop -- tiles stream nearest first, one at a time
     await yieldTurn();
@@ -447,9 +432,10 @@ async function lod2Run(req: Lod2Request): Promise<void> {
   }
   list.sort((a, b) => a.c.distM - b.c.distM);
   const started = new Map<number, Promise<Lod2Tile | null>>();
+  const wanted = () => latestLod2 === req.id;
   const start = (i: number) => {
     if (i >= list.length || started.has(i) || (have.has(list[i].c.url) && lod2Tris.has(list[i].c.url))) return;
-    const p = fetchLod2Tile(list[i].c, list[i].region);
+    const p = fetchLod2Tile(list[i].c, list[i].region, wanted);
     // A prefetch left behind by a newer request or the budget is never awaited.
     p.catch(() => undefined);
     started.set(i, p);
@@ -510,6 +496,12 @@ scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
   }
   if (req.kind === BuildingsKind.Geoid) {
     syncGeoid(req);
+    return;
+  }
+  if (req.kind === BuildingsKind.Stop) {
+    latest = latestLod2 = req.id;
+    abandonBuildingFetches();
+    abandonLod2Fetches();
     return;
   }
   if (req.kind === BuildingsKind.HeightAt) {
