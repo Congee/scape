@@ -5,7 +5,7 @@ import { fogReasons } from '@core/weather/fog';
 import { ageText, pct } from '@core/weather/format';
 import { modelInfo } from '@core/weather/models';
 import { ATTRIBUTION, ATTRIBUTION_URL, hourValue, HourlyVar, POINT_VARS, roundCoord, valueAt, type PointSeries } from '@core/weather/openMeteo';
-import { windyUrl } from '@core/weather/windy';
+import { windyMapUrl, windyUrl } from '@core/weather/windy';
 import { forecastPoints, ForecastStatus, type ForecastResult } from '@data/weather';
 import { useDayData } from '@state/dayData';
 import { useSettings } from '@state/settings';
@@ -66,9 +66,10 @@ export function missingText(r: ForecastResult | null): string {
 /** "fetched 12 min ago", plus why a cached copy was kept. */
 export const fetchedText = (r: ForecastResult, now: number) => `fetched ${ageText(now - r.fetchedAt)} ago${r.status === ForecastStatus.Cached ? ` · cached${r.note ? `, ${r.note}` : ''}` : ''}`;
 
-export function WindyLink({ lat, lng, zoom }: { lat: number; lng: number; zoom?: number }) {
+/** Point forecast, or the map view when mapZoom (MapLibre zoom) is given. */
+export function WindyLink({ lat, lng, mapZoom }: { lat: number; lng: number; mapZoom?: number }) {
   return (
-    <a className="wx-windy" href={windyUrl(lat, lng, zoom)} target="_blank" rel="noopener noreferrer">
+    <a className="wx-windy" href={mapZoom === undefined ? windyUrl(lat, lng) : windyMapUrl(lat, lng, mapZoom)} target="_blank" rel="noopener noreferrer">
       More on Windy ↗
     </a>
   );

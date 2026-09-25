@@ -11,8 +11,6 @@ import { useMedia } from './useMedia';
 
 const HOUR_MS = 3_600_000;
 
-/** Windy uses 256 px tiles, MapLibre 512 px, so its zoom runs one higher. */
-const WINDY_ZOOM_OFFSET = 1;
 const PHONE = '(max-width: 900px)';
 
 /** Weather-tab picker for the map cloud layer. */
@@ -45,7 +43,7 @@ export function CloudLayerControls() {
           </>
         )}
       </div>
-      {layer !== CloudLayer.Off && <WindyLink lat={view.center.lat} lng={view.center.lng} zoom={view.zoom + WINDY_ZOOM_OFFSET} />}
+      {layer !== CloudLayer.Off && <WindyLink lat={view.center.lat} lng={view.center.lng} mapZoom={view.zoom} />}
     </section>
   );
 }
