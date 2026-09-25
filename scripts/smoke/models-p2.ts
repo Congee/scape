@@ -199,7 +199,7 @@ check('desktop editor fields not truncated', deskClipped.length === 0, deskClipp
 await tab.viewport(PHONE.w, PHONE.h);
 await home();
 await openModels();
-// Drawing first: its bar resizes the sheet, and so the map.
+// Drawing first: it folds the sheet away, and so resizes the map.
 await click('Draw a building');
 await tab.until(`window.__scape.models.getState().draft !== null`, 5000, 100);
 await settle(500);
@@ -239,6 +239,9 @@ await click('Cancel');
 check('tap snaps to an Overture vertex', !!corner && !!snapped && snapped[0] === corner.at[0] && snapped[1] === corner.at[1], corner ? `tapped 6.4 px off ${corner.at.map((v) => v.toFixed(6)).join(',')}, got ${snapped?.map((v) => v.toFixed(6)).join(',')}` : 'no lone corner in view');
 
 const before = await js<number>('return S.models.getState().models.length;');
+await click('Draw a building');
+await tab.until(`window.__scape.models.getState().draft !== null`, 5000, 100);
+await settle(500);
 const taps = await js<{ x: number; y: number }[]>(`
   map().jumpTo({ center: [${LAWN.lng}, ${LAWN.lat}], zoom: 17, pitch: 0, bearing: 0 });
   await idle();
@@ -248,8 +251,6 @@ const taps = await js<{ x: number; y: number }[]>(`
   const cx = r.left + r.width / 2, cy = (top + bottom) / 2, d = Math.min(70, (bottom - top) / 2);
   return [{ x: cx - d, y: cy - d }, { x: cx + d, y: cy - d }, { x: cx + d, y: cy + d }, { x: cx - d, y: cy + d }];
 `);
-await click('Draw a building');
-await tab.until(`window.__scape.models.getState().draft !== null`, 5000, 100);
 for (const t of taps) await tap(t.x, t.y);
 const draftN = await js<number>('return S.models.getState().draft?.length ?? -1;');
 await tab.shot(`${shots}/phone-draft.png`);

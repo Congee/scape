@@ -13,6 +13,17 @@ const DRAFT_SRC = 'model-draft';
 const SNAP_PX = 12;
 const LONG_PRESS_MS = 600;
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+/** Where the panel is a bottom sheet. */
+const COMPACT = '(max-width: 900px)';
+/** How long a reopened sheet waits for the map to resize before giving up on the pan. */
+const RESIZE_WAIT_MS = 1_000;
+
+/** Bounding-box centre of a lng/lat ring. */
+const ringCentre = (ring: readonly [number, number][]): [number, number] => {
+  const lngs = ring.map((p) => p[0]);
+  const lats = ring.map((p) => p[1]);
+  return [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2];
+};
 
 /** A heading-free frame at the first vertex, for squaring corners. */
 const frameAt = (p: [number, number]): ModelAnchor => ({ lng: p[0], lat: p[1], altRef: AltitudeRef.Ground, altM: 0, headingDeg: 0, scale: 1 });
@@ -25,6 +36,11 @@ export class ModelDrawer {
   private preview: SavedModel | null = null;
   private swallowClick = false;
   private unsubs: (() => void)[] = [];
+  /** The sheet was folded away for the draft, so its end opens it again. */
+  private foldedForDraft = false;
+  /** The ring of the draft that just ended, which the reopened sheet keeps in view. */
+  private endedRing: [number, number][] | null = null;
+  private lastRing: [number, number][] = [];
 
   constructor(
     private map: MaplibreMap,
@@ -38,9 +54,44 @@ export class ModelDrawer {
           this.map.getCanvas().style.cursor = on ? 'crosshair' : '';
           if (on) this.map.doubleClickZoom.disable();
           else this.map.doubleClickZoom.enable();
+          this.foldSheet(on);
         }
-      )
+      ),
+      uiStore.subscribe((st, prev) => prev.panelCollapsed && !st.panelCollapsed && this.keepInView())
     );
+  }
+
+  /** On a phone the map gets the screen while drawing; the tab row stays to reopen the sheet. */
+  private foldSheet(drawing: boolean) {
+    const ui = uiStore.getState();
+    if (drawing) {
+      this.lastRing = [];
+      if (!matchMedia(COMPACT).matches || ui.panelCollapsed) return;
+      this.foldedForDraft = true;
+      ui.setPanelCollapsed(true);
+      return;
+    }
+    this.endedRing = this.lastRing.length ? this.lastRing : null;
+    if (this.foldedForDraft) ui.setPanelCollapsed(false);
+    this.foldedForDraft = false;
+    this.endedRing = null;
+  }
+
+  /** The reopened sheet shrinks the map from below, so centre the draft or the selected model in what is left. */
+  private keepInView() {
+    if (!matchMedia(COMPACT).matches) return;
+    const st = modelsStore.getState();
+    const ring = st.draft?.length ? st.draft : (this.endedRing ?? st.models.find((m) => m.id === st.selectedId)?.footprint);
+    if (!ring?.length) return;
+    const center = ringCentre(ring);
+    // Only what the user was looking at; a model panned away from stays put.
+    if (!this.map.getBounds().contains(center)) return;
+    const pan = () => {
+      clearTimeout(timer);
+      this.map.easeTo({ center, duration: 250 });
+    };
+    const timer = setTimeout(() => this.map.off('resize', pan), RESIZE_WAIT_MS);
+    this.map.once('resize', pan);
   }
 
   /** Extrusions under the labels, the draft over everything. */
@@ -78,6 +129,7 @@ export class ModelDrawer {
     const models = this.preview ? st.models.map((m) => (m.id === this.preview!.id ? this.preview! : m)) : st.models;
     (this.map.getSource(MODELS_SRC) as GeoJSONSource | undefined)?.setData(modelFeatures(models, st.selectedId, st.selectedPartId));
     (this.map.getSource(DRAFT_SRC) as GeoJSONSource | undefined)?.setData(draftFeatures(st.draft));
+    if (st.draft?.length) this.lastRing = st.draft;
     if (!this.dragging) this.syncHandles();
   }
 

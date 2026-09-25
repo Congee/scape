@@ -124,7 +124,7 @@ export function ModelsPanel() {
       {pickError && <p className="error">{pickError}</p>}
       {draft && (
         <div className="model-draft">
-          <p className="muted hint">Tap the map to add corners; tap the first corner to close. Drag a corner to move it, hold it to delete it.</p>
+          <p className="muted hint">Tap the map to add corners; tap the first corner to close. Drag a corner to move it, hold it to delete it. On a phone the sheet folds away while you draw; tap the tab row to bring it back.</p>
           <div className="actions">
             <span className="count">
               {draft.length} corner{draft.length === 1 ? '' : 's'}
