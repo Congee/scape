@@ -23,7 +23,7 @@ const FULL_FRAME_DIAG_MM = Math.hypot(36, 24);
 
 type Box = { x: number; y: number; width: number; height: number };
 type Disc = { az: number; alt: number; x: number; y: number; r: number; hidden: boolean };
-type Fit = { box: { cx: number; cy: number; w: number; h: number; rotDeg: number }; frame: { x: number; y: number; w: number; h: number }; pxPerMm: number; focalMm: number; focal35: number | null; nat: { w: number; h: number }; img: { cx: number; cy: number; w: number; h: number }; opacity: string; vf: { x: number; y: number } };
+type Fit = { box: { cx: number; cy: number; w: number; h: number; rotDeg: number }; frame: { x: number; y: number; w: number; h: number }; pxPerMm: number; focalMm: number; focal35: number; nat: { w: number; h: number }; img: { cx: number; cy: number; w: number; h: number }; opacity: string; vf: { x: number; y: number } };
 
 const rows: string[] = [];
 let failed = 0;
@@ -160,9 +160,9 @@ const pickPhoto = async (path: string) => {
   return tab.until<boolean>(`window.__scape.photo?.box?.w > 0 && document.querySelector('.vf-photo img')?.complete`, 10_000, 100);
 };
 /** The photo's expected box from its Exif lens, worked here rather than by fit.ts. */
-const fitError = (p: Fit, focal35: number | null) => {
+const fitError = (p: Fit, focal35: number) => {
   const aspect = p.nat.h / p.nat.w;
-  const w = focal35 ? (2 * ((FULL_FRAME_DIAG_MM * p.nat.w) / Math.hypot(p.nat.w, p.nat.h) / (2 * focal35))) * p.focalMm * p.pxPerMm : p.frame.w;
+  const w = 2 * ((FULL_FRAME_DIAG_MM * p.nat.w) / Math.hypot(p.nat.w, p.nat.h) / (2 * focal35)) * p.focalMm * p.pxPerMm;
   const cx = p.frame.x + p.frame.w / 2, cy = p.frame.y + p.frame.h / 2;
   const model = Math.max(Math.abs(p.box.w - w), Math.abs(p.box.h - w * aspect), Math.abs(p.box.cx - cx), Math.abs(p.box.cy - cy));
   // Page layout: the img where the box says, rotation 0.
@@ -310,19 +310,22 @@ for (const light of [Light.Day, Light.Night]) {
 }
 check('matrix: body hidden, photo fitted', matrixOk, `${matrix.length} frames`);
 
-// Without Exif the photo spans the frame at any lens.
-const spans: string[] = [];
-let spanOk = true;
+// Without Exif the photo locks to the lens it was picked under, 200 mm here, and scales from there.
+const locks: string[] = [];
+await frameBody('Moon', 200, 'Landscape');
 await pickPhoto(plainPath);
-for (const [f, orient] of [[24, 'Landscape'], [600, 'Landscape'], [600, 'Portrait']] as const) {
+await settle(300);
+const lockHint = await tab.eval<string>(`document.querySelector('.vf-photo-tools .hint')?.textContent ?? ''`);
+let lockOk = lockHint.includes('locked to the lens') && lockHint.includes('200 mm');
+for (const [f, orient] of [[200, 'Landscape'], [24, 'Landscape'], [600, 'Landscape'], [600, 'Portrait']] as const) {
   await frameBody('Moon', f, orient);
-  const p = await js<Fit | null>('return fit();');
-  const e = p && fitError(p, null);
-  const ok = !!p && p.focal35 === null && !!e && e.model < 0.5 && e.dom < 1;
-  spanOk &&= ok;
-  spans.push(`${f} ${orient[0]} ${e?.ratio.toFixed(3)}×`);
+  const p = await js<(Fit & { fromExif: boolean }) | null>('return { ...fit(), fromExif: S.photo.fromExif };');
+  const e = p && fitError(p, PHOTO_FOCAL35);
+  const ok = !!p && p.fromExif === false && Math.abs(p.focal35! - PHOTO_FOCAL35) < 0.01 && !!e && e.model < 0.5 && e.dom < 1;
+  lockOk &&= ok;
+  locks.push(`${f} ${orient[0]} ${e?.ratio.toFixed(3)}×`);
 }
-check('no Exif: photo spans the frame', spanOk, spans.join(', '));
+check('no Exif: photo locked to the lens at pick', lockOk, `${locks.join(', ')}; hint "${lockHint}"`);
 
 // Phone.
 await tab.viewport(PHONE.w, PHONE.h);

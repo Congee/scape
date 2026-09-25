@@ -581,7 +581,7 @@ export class ViewfinderController {
     if (img.getAttribute('src') !== p.url) img.src = p.url;
     Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
     Object.assign(img.style, { left: `${b.cx - f.x - b.w / 2}px`, top: `${b.cy - f.y - b.h / 2}px`, width: `${b.w}px`, height: `${b.h}px`, transform: b.rotDeg ? `rotate(${b.rotDeg}deg)` : '', opacity: String(p.opacity) });
-    if (dev) dev.photo = { box: b, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, focalMm: sc.cam.focalMm, focal35: p.focal35, hfovDeg: p.focal35 ? photoHfovDeg(p.focal35, p.w, p.h) : sc.hfov, opacity: p.opacity };
+    if (dev) dev.photo = { box: b, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, focalMm: sc.cam.focalMm, focal35: p.focal35, fromExif: p.fromExif, hfovDeg: photoHfovDeg(p.focal35, p.w, p.h), opacity: p.opacity };
   }
 
   /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */

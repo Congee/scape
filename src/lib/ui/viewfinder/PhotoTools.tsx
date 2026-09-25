@@ -34,7 +34,7 @@ export function PhotoTools() {
           e.target.value = '';
         }}
       />
-      <button className={p.url ? 'on' : ''} onClick={() => input.current?.click()} title="Lay a photo over the frame, sized by its lens (Exif) or the current one">
+      <button className={p.url ? 'on' : ''} onClick={() => input.current?.click()} title="Lay a photo over the frame, sized by its lens (Exif) or else locked to the current one">
         {p.url ? 'Replace photo' : 'Reference photo…'}
       </button>
       {p.url && (
@@ -61,7 +61,7 @@ export function PhotoTools() {
             </button>
           </span>
           <p className="muted hint">
-            {p.name}: {p.focal35 ? `${p.focal35} mm equivalent (Exif), ${photoHfovDeg(p.focal35, p.w, p.h).toFixed(1)}° wide` : 'no Exif focal length, spans the frame at any lens'}
+            {p.name}: {p.fromExif ? `${p.focal35} mm equivalent (Exif)` : `no Exif focal length, locked to the lens at load (${Math.round(p.focal35)} mm equivalent)`}, {photoHfovDeg(p.focal35, p.w, p.h).toFixed(1)}° wide
             {p.rotDeg ? `, turned ${p.rotDeg.toFixed(1)}°` : ''}
           </p>
         </>

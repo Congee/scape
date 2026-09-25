@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { fitPhoto, photoHfovDeg } from './fit';
+import { fitPhoto, focal35ForHfov, photoHfovDeg } from './fit';
 
 const frame = { x: 10, y: 20, w: 720, h: 480, pxPerMm: 20 };
-const at = (focal35: number | null, over: Partial<{ dx: number; dy: number; rotDeg: number; w: number; h: number }> = {}) => ({ w: 6000, h: 4000, focal35, dx: 0, dy: 0, rotDeg: 0, ...over });
+const at = (focal35: number, over: Partial<{ dx: number; dy: number; rotDeg: number; w: number; h: number }> = {}) => ({ w: 6000, h: 4000, focal35, dx: 0, dy: 0, rotDeg: 0, ...over });
 
 describe('photoHfovDeg', () => {
   it('matches a full-frame lens for a 3:2 photo', () => {
@@ -34,10 +34,15 @@ describe('fitPhoto', () => {
     expect(fitPhoto(frame, 24, at(200)).w).toBeCloseTo(frame.w * 0.12, 6);
   });
 
-  it('spans the frame without Exif, keeping its own aspect', () => {
-    const b = fitPhoto(frame, 600, at(null, { w: 3000, h: 4000 }));
-    expect(b.w).toBe(720);
-    expect(b.h).toBe(960);
+  it('locks a photo without Exif to the lens it was loaded under', () => {
+    // A 3:4 photo loaded at 200 mm on a 36 mm-wide frame, then zoomed to 600 mm.
+    const hfov = (2 * Math.atan(18 / 200) * 180) / Math.PI;
+    const f35 = focal35ForHfov(hfov, 3000, 4000);
+    expect(photoHfovDeg(f35, 3000, 4000)).toBeCloseTo(hfov, 9);
+    expect(fitPhoto(frame, 200, at(f35, { w: 3000, h: 4000 })).w).toBeCloseTo(frame.w, 6);
+    const b = fitPhoto(frame, 600, at(f35, { w: 3000, h: 4000 }));
+    expect(b.w).toBeCloseTo(frame.w * 3, 6);
+    expect(b.h).toBeCloseTo(frame.w * 4, 6);
   });
 
   it('offsets in photo widths, y up, and passes the rotation through', () => {
