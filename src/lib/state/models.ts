@@ -28,10 +28,12 @@ export interface ModelsState {
   picking: boolean;
   /** Why the last pick made no model; cleared by the next pick. */
   pickError: string | null;
-  /** Next map click puts the import being placed on the Overture building under it. */
+  /** Map clicks choose the Overture building the import being placed goes on, until the sheet confirms. */
   importPick: boolean;
-  /** Where that click put it; the sheet reads and clears it. */
+  /** The chosen building's centre; the sheet reads and clears it. */
   importAt: { lng: number; lat: number } | null;
+  /** The chosen building's rings, lng/lat, which the map highlights. */
+  importRings: [number, number][][];
   load(): Promise<void>;
   save(m: SavedModel): Promise<SavedModel>;
   /** Applies `patch`, re-deriving the footprint from the parts or the mesh at the new anchor. */
@@ -102,6 +104,8 @@ const refreshGround = groundRefresher({
 const CHANNEL = 'scape.models';
 const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(CHANNEL);
 
+const NO_IMPORT_PICK = { importPick: false, importAt: null, importRings: [] };
+
 export const modelsStore = create<ModelsState>()(
   subscribeWithSelector((set, get) => ({
     models: [],
@@ -116,6 +120,7 @@ export const modelsStore = create<ModelsState>()(
     pickError: null,
     importPick: false,
     importAt: null,
+    importRings: [],
     load: async () => {
       const prev = new Map(get().models.map((m) => [m.id, m.glb]));
       const models = (await listAll('models')).map((m) => sameGlb(typeof m.groundM === 'number' ? m : { ...m, groundM: NaN }, prev.get(m.id)));
@@ -155,9 +160,9 @@ export const modelsStore = create<ModelsState>()(
     },
     select: (selectedId) => set((s) => (s.selectedId === selectedId ? {} : { selectedId, selectedPartId: s.models.find((m) => m.id === selectedId)?.parts?.[0]?.id ?? null })),
     selectPart: (selectedPartId) => set({ selectedPartId }),
-    setPicking: (picking) => set(picking ? { picking, pickError: null, draft: null, importPick: false } : { picking }),
-    setImportPick: (importPick) => set(importPick ? { importPick, pickError: null, draft: null, picking: false } : { importPick }),
-    setDraft: (draft) => set(draft ? { draft, picking: false } : { draft }),
+    setPicking: (picking) => set(picking ? { picking, pickError: null, draft: null, ...NO_IMPORT_PICK } : { picking }),
+    setImportPick: (importPick) => set(importPick ? { importPick, pickError: null, draft: null, picking: false } : NO_IMPORT_PICK),
+    setDraft: (draft) => set(draft ? { draft, picking: false, ...NO_IMPORT_PICK } : { draft }),
     setRightAngles: (rightAngles) => set({ rightAngles }),
     setAdjusting: (adjusting) => set({ adjusting })
   }))

@@ -11,6 +11,8 @@ import { worldStore } from '@state/world';
 
 const UNITS = Object.values(ModelUnit);
 
+const clearPick = () => modelsStore.getState().setImportPick(false);
+
 const length = (m: number, units: Units) => (units === Units.Imperial ? `${(m * 3.28084).toFixed(1)} ft` : `${m.toFixed(m < 10 ? 2 : 1)} m`);
 
 /** Picks a .glb, a .gltf, or a .gltf with its .bin files, then shows what it holds and where it will stand. */
@@ -47,14 +49,8 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
     // oxlint-disable-next-line react/exhaustive-deps -- placed once per parse, not per render's `place`
   }, [files, opts]);
 
-  useEffect(
-    () => () => {
-      modelsStore.getState().setImportPick(false);
-      modelsStore.setState({ importAt: null });
-    },
-    []
-  );
-  const at = importAt ? { where: importAt, label: 'the picked building' } : { where: centre, label: 'the map centre' };
+  useEffect(() => clearPick, []);
+  const at = importAt ? { where: importAt, label: 'the highlighted building' } : { where: centre, label: importPick ? 'the building you click' : 'the map centre' };
 
   const shown = opts ?? imp?.draft.importOptions ?? null;
   const setOpt = (p: Partial<ImportOptions>) => shown && setOpts({ ...shown, ...p });
@@ -144,18 +140,23 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
           ))}
         </ul>
       )}
+      {importPick && <p className="muted hint">Click a building on the map; click another to change it.</p>}
       <div className="actions">
-        <button onClick={() => imp && void place(imp)} disabled={!imp || busy}>
-          Place
+        <button onClick={() => imp && void place(imp)} disabled={!imp || busy || (importPick && !importAt)}>
+          {importPick ? 'Place on this building' : 'Place'}
         </button>
         {imp && !imp.draft.anchor && (
           <>
-            <button className={importPick ? 'on' : ''} onClick={() => modelsStore.getState().setImportPick(!importPick)} title="Then click an Overture building on the map">
-              {importPick ? 'Click a building…' : 'On a building'}
+            <button
+              className={importPick ? 'on' : ''}
+              onClick={() => (importPick ? clearPick() : modelsStore.getState().setImportPick(true))}
+              title="Then click an Overture building on the map"
+            >
+              On a building
             </button>
             <button
               onClick={() => {
-                modelsStore.setState({ importAt: null });
+                clearPick();
                 setCentre(worldStore.getState().view.center);
               }}
             >

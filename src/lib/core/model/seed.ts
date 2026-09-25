@@ -28,6 +28,17 @@ export function rowsCentre(rows: Pick<SeedRows, 'count' | 'ringStart' | 'lng' | 
   return lng1 >= lng0 ? { lat: (lat0 + lat1) / 2, lng: (lng0 + lng1) / 2 } : null;
 }
 
+/** Each row's footprint ring as lng/lat pairs. */
+export function rowsRings(rows: Pick<SeedRows, 'count' | 'ringStart' | 'lng' | 'lat'>): [number, number][][] {
+  const rings: [number, number][][] = [];
+  for (let i = 0; i < rows.count; i++) {
+    const ring: [number, number][] = [];
+    for (let j = rows.ringStart[i]; j < rows.ringStart[i + 1]; j++) ring.push([rows.lng[j], rows.lat[j]]);
+    rings.push(ring);
+  }
+  return rings;
+}
+
 /** One part per row, in a frame anchored at the rows' bounding-box centre. */
 export function seedModel(rows: SeedRows, name: string, now = Date.now()): SavedModel | null {
   const c = rowsCentre(rows);

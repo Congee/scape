@@ -4,7 +4,7 @@ import { AltitudeRef, convexHull, groundUnknown, inLngLatRing, lngLatToLocal, lo
 import { RoofShape } from '@workers/buildings.protocol';
 import { modelHeightAt } from './heightAt';
 import { partsMesh } from './mesh';
-import { modelApexM, newPart, seedModel, spirePart } from './seed';
+import { modelApexM, newPart, rowsRings, seedModel, spirePart } from './seed';
 
 const ANCHOR: ModelAnchor = { ...PIN, altRef: AltitudeRef.Ground, altM: 0, headingDeg: 0, scale: 1 };
 
@@ -70,6 +70,16 @@ describe('groundUnknown', () => {
     expect(groundUnknown({ anchor: ANCHOR, groundM: NaN })).toBe(true);
     expect(groundUnknown({ anchor: ANCHOR, groundM: 4 })).toBe(false);
     expect(groundUnknown({ anchor: { ...ANCHOR, altRef: AltitudeRef.Absolute }, groundM: NaN })).toBe(false);
+  });
+});
+
+describe('rowsRings', () => {
+  it('gives each row its own lng/lat ring', () => {
+    const rows = batchOf([{ ring: rect(0, 0, 10, 10), heightM: 5 }, { ring: rect(50, 0, 20, 10), heightM: 8 }]);
+    const rings = rowsRings(rows);
+    expect(rings.map((r) => r.length)).toEqual([rows.ringStart[1], rows.ringStart[2] - rows.ringStart[1]]);
+    expect(rings[1][0]).toEqual([rows.lng[rows.ringStart[1]], rows.lat[rows.ringStart[1]]]);
+    expect(rowsRings(batchOf([]))).toEqual([]);
   });
 });
 

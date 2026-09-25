@@ -19,7 +19,7 @@ import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
 import { linesShiftPx } from '@core/drift';
 import { lod2Credits, type Lod2Source } from '@core/lod2/regions';
 import { modelHeightAt } from '@core/model/heightAt';
-import { rowsCentre, seedModel } from '@core/model/seed';
+import { rowsCentre, rowsRings, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { formatLngLat } from '@core/geo/coords';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
@@ -67,6 +67,7 @@ const GEO_SRC = 'geodetic';
 const FOV_SRC = 'fov';
 const MARKERS_SRC = 'markers';
 const REGION_SRC = 'region';
+const IMPORT_SRC = 'import-pick';
 const HEAT_SRC = 'heat';
 const HEAT_LAYER = 'heat';
 // Stand-in until the first grid arrives; an image source needs a URL up front.
@@ -119,6 +120,7 @@ const ORBIT_DEG_PER_S = 6;
 const ORBIT_STEP_DEG = 90;
 const FOV_COLOR = '#5aa9ff';
 const REGION_COLOR = '#5aa9ff';
+const IMPORT_COLOR = '#ffb300';
 const DEFAULT_FOV_RANGE_M = 5_000;
 
 /** Rectangle ring for a draft region; a box crossing the antimeridian runs past +180. */
@@ -163,6 +165,7 @@ export class MapController {
   private basemapKey = '';
   private dragging = false;
   private drawingRegion = false;
+  private importSeq = 0;
   private drawStart: LngLat | null = null;
   private draftBefore: Bbox | null = null;
   private dragging2 = false;
@@ -369,6 +372,7 @@ export class MapController {
       ),
       offlineStore.subscribe((st) => st.archives, () => this.setBasemap(currentBasemap()), { equalityFn: shallow }),
       offlineStore.subscribe((st) => st.draft, () => this.renderRegion()),
+      modelsStore.subscribe((st) => st.importRings, () => this.renderImportPick()),
       offlineStore.subscribe((st) => st.drawing, (on) => this.setDrawingRegion(on)),
       offlineStore.subscribe((st) => st.viewSeq, () => this.draftFromView()),
       settingsStore.subscribe(
@@ -477,12 +481,14 @@ export class MapController {
     ui.setMarkersView(MarkersView.Models);
   }
 
-  /** Hands the import sheet the centre of the Overture building under `p`. */
+  /** Chooses the Overture building under `p` for the import sheet, which confirms it. */
   private importOnBuildingAt(p: LngLat) {
-    modelsStore.getState().setImportPick(false);
+    const seq = ++this.importSeq;
     void buildingRowsAt(p).then((rows) => {
+      // A later click, or the sheet closing, wins over a slow read.
+      if (seq !== this.importSeq || !modelsStore.getState().importPick) return;
       const c = rows && rowsCentre(rows);
-      modelsStore.setState(c ? { importAt: c } : { pickError: 'No Overture building there.' });
+      modelsStore.setState(rows && c ? { importAt: c, importRings: rowsRings(rows), pickError: null } : { pickError: 'No Overture building there.' });
     });
   }
 
@@ -710,6 +716,9 @@ export class MapController {
     this.map.addSource(FOV_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(MARKERS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(REGION_SRC, { type: 'geojson', data: EMPTY });
+    this.map.addSource(IMPORT_SRC, { type: 'geojson', data: EMPTY });
+    this.map.addLayer({ id: 'import-pick-fill', type: 'fill', source: IMPORT_SRC, paint: { 'fill-color': IMPORT_COLOR, 'fill-opacity': 0.35 } });
+    this.map.addLayer({ id: 'import-pick-line', type: 'line', source: IMPORT_SRC, paint: { 'line-color': IMPORT_COLOR, 'line-width': 2.5 } });
     this.map.addLayer({ id: 'region-fill', type: 'fill', source: REGION_SRC, paint: { 'fill-color': REGION_COLOR, 'fill-opacity': 0.12 } });
     this.map.addLayer({
       id: 'region-line',
@@ -1072,6 +1081,7 @@ export class MapController {
     this.renderMarkers();
     this.renderHeat();
     this.renderRegion();
+    this.renderImportPick();
   }
 
   private source(id: string): GeoJSONSource | undefined {
@@ -1144,6 +1154,11 @@ export class MapController {
     const t = terrainStore.getState();
     const fresh = t.profile && t.profileKey === profileKeyFor(w, settingsStore.getState());
     src.setData(geodeticLine(w.pin, w.pin2, fresh ? t.profile!.los.status : 'Unknown'));
+  }
+
+  private renderImportPick() {
+    const rings = modelsStore.getState().importRings;
+    this.source(IMPORT_SRC)?.setData(rings.length ? { type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: rings.map((r) => [r]) } } : EMPTY);
   }
 
   private renderRegion() {

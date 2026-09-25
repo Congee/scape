@@ -86,9 +86,9 @@ const sheet = () =>
     10_000,
     100
   );
-/** Clicks Place and waits for the selected new model. */
-const place = async (before: number) => {
-  await click('Place', '.model-import');
+/** Clicks `label` (none: the sheet places on its own) and waits for the selected new model. */
+const place = async (before: number, label: string | null = 'Place') => {
+  if (label) await click(label, '.model-import');
   return tab.until<Placed>(
     `(() => { const s = window.__scape.models.getState(); if (document.querySelector('.model-import') || s.models.length <= ${before}) return null; const m = s.models.find((m) => m.id === s.selectedId); return m && window.__smoke.placed(m); })()`,
     15_000,
@@ -127,16 +127,29 @@ const statsOk = !!s1?.stats && /Vertices 13\b/.test(s1.stats) && /Triangles 16\b
 check('sheet shows stats before placing', statsOk, s1?.stats ?? s1?.error ?? 'no sheet');
 await click('On a building', '.model-import');
 const at = await js<{ x: number; y: number }>(`const p = map().project([${TOWER.lng}, ${TOWER.lat}]), r = map().getCanvas().getBoundingClientRect(); return { x: r.left + p.x, y: r.top + p.y };`);
+const confirmOff = await tab.eval<boolean>(`[...document.querySelectorAll('.model-import button')].find((b) => b.textContent.trim() === 'Place on this building')?.disabled ?? false`);
 await tap(at.x, at.y);
-const picked = await tab.until<string>(`(() => { const t = document.querySelector('[data-testid="import-stats"]')?.innerText ?? ''; return /picked building/.test(t) && t; })()`, 15_000, 200);
-const tower = await place(n0);
+const picked = await tab.until<string>(`(() => { const t = document.querySelector('[data-testid="import-stats"]')?.innerText ?? ''; return /highlighted building/.test(t) && t; })()`, 15_000, 200);
+// The pick stays on and the building stays lit until confirmed.
+await settle(800);
+const lit = await js<{ rings: number; still: boolean; layer: boolean; drawn: number }>(
+  `const s = S.models.getState(); await idle(); return { rings: s.importRings.length, still: s.importPick, layer: !!map().getLayer('import-pick-fill'), drawn: map().queryRenderedFeatures({ layers: ['import-pick-fill'] }).length };`
+);
+await tab.shot(`${shots}/onbuilding-desktop.png`);
+check(
+  'on a building: highlighted until confirmed',
+  confirmOff && !!picked && lit.rings > 0 && lit.still && lit.layer && lit.drawn > 0,
+  `confirm ${confirmOff ? 'disabled' : 'enabled'} before a click; ${lit.rings} ring(s), pick ${lit.still ? 'on' : 'off'}, ${lit.drawn} highlight feature(s) drawn`
+);
+const tower = await place(n0, 'Place on this building');
+const cleared = await js<number>('return S.models.getState().importRings.length + (S.models.getState().importPick ? 1 : 0);');
 if (tower) ours.add(tower.id);
 const off = tower ? await js<number>(`return geo.distanceM(${JSON.stringify(TOWER)}, byId(${JSON.stringify(tower.id)}).anchor);`) : Infinity;
 await settle(800);
 await tab.shot(`${shots}/placed-desktop.png`);
 check(
   'placed on the picked Overture building',
-  !!picked && !!tower && tower.source === 'Imported' && tower.footprint.length === 4 && off < 60,
+  !!picked && !!tower && cleared === 0 && tower.source === 'Imported' && tower.footprint.length === 4 && off < 60,
   tower ? `${tower.source}, ${tower.footprint.length}-corner footprint, anchor ${off.toFixed(1)} m from 30 Hudson Yards` : 'nothing placed'
 );
 if (!tower) throw new Error('no imported model to test');
@@ -247,10 +260,9 @@ if (dl) {
   await Bun.write(EXPORTED, Buffer.from(dl.b64, 'base64'));
   n0 = await count();
   await upload([EXPORTED]);
-  const s2 = await sheet();
-  check('exported file places where it says', !!s2?.stats && s2.stats.trim().endsWith('where the file says'), s2?.stats ?? s2?.error ?? 'no sheet');
-  back = await place(n0);
+  back = await place(n0, null);
   if (back) ours.add(back.id);
+  check('exported file places where it says, on pick', !!back && back.source === 'Imported', back ? `${back.source}, no Place click` : 'not placed within 15 s');
 }
 const same = !!back && JSON.stringify(back.anchor) === JSON.stringify(src.anchor) && JSON.stringify(back.footprint) === JSON.stringify(src.footprint);
 check(
