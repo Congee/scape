@@ -20,8 +20,9 @@ research with versions and licenses, TPE screenshots).
 3. **One consistent colour language.** Sun = amber/orange, Moon = blue, Milky Way = violet,
    terrain/geodetics = green, alerts = red. Same on map lines, chart curves, timeline icons.
    Rise = lighter shade, set = darker shade (TPE convention).
-4. **Pure geometry, honest boundaries.** Compute astronomy, optics and terrain exactly; never
-   fake weather. Link out to weather/cloud sources instead (PlanIt's boundary).
+4. **Pure geometry, honest boundaries.** Compute astronomy, optics and terrain exactly. Weather
+   is a forecast (Open-Meteo, 2026-09-24): always shown with its model, age and attribution,
+   never drawn into the viewfinder, never shown as clear when data is missing.
 5. **Offline first, no account.** All user data lives in the browser (IndexedDB) with
    export/import. Map, terrain and sky data are downloadable by region and updated when the
    user says so. The app shell itself is a PWA.
