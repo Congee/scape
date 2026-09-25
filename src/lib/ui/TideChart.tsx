@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Units } from '@core/format';
 import { nearestTideStation, tideSite, tideStations, TideKind, type TideDay, type TideStationRef } from '@data/tides';
-import { useWorld, worldStore } from '@state/world';
+import { useWorld } from '@state/world';
+import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 
 /** The pin's tide station, harmonic first, from the lazily fetched tables. */
 export function useNearestTide() {
@@ -41,18 +42,19 @@ export function TideChart({ day, startMs, endMs, time, h = 72 }: { day: TideDay;
   const x = (ms: number) => ((ms - startMs) / (endMs - startMs)) * W;
   const y = (m: number) => h - ((m - lo + pad) / (hi - lo + 2 * pad)) * h;
   const step = curve ? (endMs - startMs) / (curve.length - 1) : 0;
+  const scrub = useTimeScrub({ startMs, endMs, w: W });
   const points = curve ? Array.from(curve, (v, i) => `${x(startMs + i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ') : '';
   return (
-    <svg className="tide-curve" viewBox={`0 0 ${W} ${h}`} role="img" aria-label={curve ? 'Tide height over the day' : 'High and low tides over the day'}>
+    <svg className="tide-curve" viewBox={`0 0 ${W} ${h}`} role="img" aria-label={`${curve ? 'Tide height over the day' : 'High and low tides over the day'}. Drag to set the time; arrow keys step an hour, Shift ten minutes.`} {...scrub}>
       {lo < 0 && <line className="datum" x1={0} x2={W} y1={y(0)} y2={y(0)} />}
       {curve && <polyline points={points} />}
       {extremes.map((e) => (
-        <g key={e.timeMs} onClick={() => worldStore.getState().setTime(e.timeMs)}>
+        <g key={e.timeMs} data-t={e.timeMs}>
           <circle className="hit" cx={x(e.timeMs)} cy={y(e.heightM)} r={10} />
           <circle className={e.high ? 'high' : 'low'} cx={x(e.timeMs)} cy={y(e.heightM)} r={curve ? 3 : 4} />
         </g>
       ))}
-      {time >= startMs && time < endMs && <line className="now" x1={x(time)} x2={x(time)} y1={0} y2={h} />}
+      <ScrubCursor time={time} startMs={startMs} endMs={endMs} w={W} h={h} />
     </svg>
   );
 }

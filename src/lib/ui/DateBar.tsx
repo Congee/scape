@@ -1,36 +1,9 @@
-import { useState } from 'react';
-import { formatTime } from '@core/time/format';
 import { isoDate, localParts, offsetLabel, withLocalTime } from '@core/time/localDay';
-import { useSecondsTick } from '@state/clock';
-import { useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 import { Calendar } from './Calendar';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const ZONES: string[] = Intl.supportedValuesOf('timeZone');
-
-/** The only part of the bar that can change every second; live, it shows seconds only while hovered or focused. */
-function Clock() {
-  const [hot, setHot] = useState(false);
-  useSecondsTick(hot);
-  const time = useWorld((s) => s.time);
-  const tz = useWorld((s) => s.tz);
-  const live = useWorld((s) => s.live);
-  const hour12 = useSettings((s) => s.hour12);
-  return (
-    <span
-      className={`clock${live ? ' live' : ''}`}
-      title={live ? 'Following real time' : 'Simulated time'}
-      tabIndex={0}
-      onMouseEnter={() => setHot(true)}
-      onMouseLeave={() => setHot(false)}
-      onFocus={() => setHot(true)}
-      onBlur={() => setHot(false)}
-    >
-      {formatTime(time, tz, hour12, !live || hot)}
-    </span>
-  );
-}
 
 export function DateBar() {
   const tz = useWorld((s) => s.tz);
@@ -63,15 +36,16 @@ export function DateBar() {
       </button>
       <input
         type="time"
+        className={live ? 'live' : undefined}
         value={hm}
         onChange={(e) => {
           const [h, m] = e.target.value.split(':').map(Number);
           if (Number.isFinite(h) && Number.isFinite(m)) setTime(withLocalTime(new Date(worldStore.getState().time), h * 3600 + m * 60, tz).getTime());
         }}
         aria-label="Time"
+        title={live ? 'Following real time' : 'Simulated time'}
       />
-      <Clock />
-      <button className={live ? 'on' : ''} onClick={setNow} title="Jump to the current time">
+      <button className={live ? 'on' : ''} aria-pressed={live} onClick={setNow} title={live ? 'Following real time' : 'Jump to the current time and follow it'}>
         Now
       </button>
       <select

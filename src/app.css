@@ -408,14 +408,7 @@ button:focus-visible {
   gap: 4px;
 }
 
-.datebar .clock {
-  min-width: 84px;
-  padding: 0 6px;
-  color: var(--fg-2);
-  text-align: center;
-}
-
-.datebar .clock.live {
+.datebar input[type='time'].live {
   color: var(--terrain);
 }
 
@@ -1963,6 +1956,29 @@ label.file-pick input[type='file'] {
   label.file-pick {
     min-height: 36px;
   }
+}
+
+/* Time-axis mini charts: press or drag anywhere scrubs the clock */
+[data-scrub] {
+  cursor: ew-resize;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[data-scrub]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.scrub-cursor .knob {
+  stroke: var(--sun);
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.night .moon-chart .scrub-cursor .knob {
+  stroke: var(--fg-2);
 }
 
 .tide-curve {

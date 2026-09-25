@@ -27,6 +27,7 @@ import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { GlowStatus, useSkyglow, type GlowPoint } from '@state/skyglow';
 import { PanelTab, uiStore } from '@state/ui';
 import type { LngLat } from '@core/geo/geodesy';
+import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 
 const DAY_MS = 86_400_000;
 const R2D = 180 / Math.PI;
@@ -123,12 +124,13 @@ function MoonChart({ curve, time, tz, hour12 }: { curve: MoonSample[]; time: num
   const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * 300;
   const y = (d: number) => 4 + (d / lo) * 48;
   const pts = curve.map((c) => `${x(c.t).toFixed(1)},${y(c.deltaMag).toFixed(1)}`).join(' ');
+  const scrub = useTimeScrub({ startMs: t0, endMs: t1, w: 300 });
   return (
     <figure className="moon-chart">
-      <svg viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Moonlight brightening toward the aim through the night">
+      <svg viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Moonlight brightening toward the aim through the night. Drag to set the time; arrow keys step an hour, Shift ten minutes." {...scrub}>
         <line x1={0} x2={300} y1={y(0)} y2={y(0)} className="axis" />
         <polyline points={pts} className="curve" vectorEffect="non-scaling-stroke" />
-        {time >= t0 && time <= t1 && <line x1={x(time)} x2={x(time)} y1={0} y2={56} className="now" vectorEffect="non-scaling-stroke" />}
+        <ScrubCursor time={time} startMs={t0} endMs={t1} w={300} h={56} />
       </svg>
       <figcaption className="muted">
         <span>{formatTime(t0, tz, hour12)}</span>

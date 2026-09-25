@@ -11,7 +11,8 @@ import { useDayData } from '@state/dayData';
 import { useSettings } from '@state/settings';
 import { PanelTab, uiStore } from '@state/ui';
 import { useWeather } from '@state/weather';
-import { useWorld, worldStore } from '@state/world';
+import { useWorld } from '@state/world';
+import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 
 const HOUR_MS = 3_600_000;
 
@@ -92,20 +93,20 @@ export function CloudChart({ series, startMs, endMs, time, h = 40 }: { series: P
   const hours = Math.round((endMs - startMs) / HOUR_MS);
   const cw = W / hours;
   const bh = (h - 6) / 3;
-  const x = (ms: number) => ((ms - startMs) / (endMs - startMs)) * W;
+  const scrub = useTimeScrub({ startMs, endMs, w: W });
   const cols = Array.from({ length: hours }, (_, i) => {
     const t = startMs + (i + 0.5) * HOUR_MS;
     return { i, t, gap: noDataAt(series, t), fog: fogAt(series, t).length > 0, bands: BANDS.map((v) => valueAt(series, v, t)) };
   });
   return (
-    <svg className="cloud-chart" viewBox={`0 0 ${W} ${h}`} role="img" aria-label="Forecast cloud per hour: high, mid and low; fog marked below">
+    <svg className="cloud-chart" viewBox={`0 0 ${W} ${h}`} role="img" aria-label="Forecast cloud per hour: high, mid and low; fog marked below. Drag to set the time; arrow keys step an hour, Shift ten minutes." {...scrub}>
       <defs>
         <pattern id="wx-gap" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="4" />
         </pattern>
       </defs>
       {cols.map((c) => (
-        <g key={c.t} data-gap={c.gap || undefined} onClick={() => worldStore.getState().setTime(c.t - HOUR_MS / 2)}>
+        <g key={c.t} data-gap={c.gap || undefined}>
           {c.bands.map((v, b) =>
             Number.isNaN(v) ? (
               <rect key={BANDS[b]} className="gap" x={c.i * cw} y={b * bh} width={cw} height={bh} />
@@ -119,7 +120,7 @@ export function CloudChart({ series, startMs, endMs, time, h = 40 }: { series: P
           {c.fog && <rect className="fog" x={c.i * cw} y={h - 4} width={cw} height={4} />}
         </g>
       ))}
-      {time >= startMs && time < endMs && <line className="now" x1={x(time)} x2={x(time)} y1={0} y2={h} />}
+      <ScrubCursor time={time} startMs={startMs} endMs={endMs} w={W} h={h} />
     </svg>
   );
 }

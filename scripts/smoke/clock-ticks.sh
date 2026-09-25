@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test that the live DateBar clock shows minutes, ticks seconds only on hover or focus, and that the panels follow a time change, on desktop and phone.
+# Smoke test that the live DateBar time shows minutes without ticking seconds, and that the panels follow a time change, on desktop and phone.
 # Usage: scripts/smoke/clock-ticks.sh [port] [cdp-port] [screenshot-dir]
 # Needs a server (dev or probe build) on the port and a browser with remote debugging on the CDP port.
 set -uo pipefail
@@ -34,13 +34,12 @@ wait_for() { # js condition, tries of 0.25 s
 go() {
   local i
   for i in 1 2 3; do
-    ab open "$1" >/dev/null 2>&1 && wait_for 'window.__scape && document.querySelector(".datebar .clock")' && return 0
+    ab open "$1" >/dev/null 2>&1 && wait_for 'window.__scape && document.querySelector(".datebar input[type=time]")' && return 0
     sleep 1
   done
   return 1
 }
 
-clock() { js 'document.querySelector(".datebar .clock")?.textContent ?? ""'; }
 hm() { js 'document.querySelector(".datebar input[type=time]")?.value ?? ""'; }
 active() { js 'document.querySelector(".timeline li.active .label")?.textContent + " " + document.querySelector(".timeline li.active .time")?.textContent'; }
 readout() { js 'document.querySelector(".readout")?.textContent ?? "none"'; }
@@ -48,14 +47,6 @@ readout() { js 'document.querySelector(".readout")?.textContent ?? "none"'; }
 set_time() { js "(() => { const w = window.__scape.world.getState(); w.setTz('UTC'); w.setTime(Date.parse('$1')); return 'ok'; })()" >/dev/null; }
 
 colons() { local x=${1//[^:]/}; echo ${#x}; }
-ticks() { # check name: the clock shows seconds and they move
-  local a b
-  sleep 0.3
-  a=$(clock)
-  sleep 2.2
-  b=$(clock)
-  check "$1" "$([ "$(colons "$a")" = 2 ] && [ "$a" != "$b" ] && echo 1 || echo 0)" "$a → $b"
-}
 
 pass() { # viewport label, width, height
   local tag=$1
@@ -63,35 +54,23 @@ pass() { # viewport label, width, height
   go "$BASE/" || { check "$tag load" 0 "no DateBar"; return; }
   js '(() => { window.__scape.world.getState().setNow(); return "ok"; })()' >/dev/null
 
-  # Away from the Timeline and the clock, live time moves only on the minute.
+  # Away from the Timeline, live time moves only on the minute.
   js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Geodetics"); document.activeElement?.blur(); return "ok"; })()' >/dev/null
   ab mouse move 1 1 >/dev/null
   sleep 0.3
   local c0 c1 t0 t1
-  c0=$(clock)
+  c0=$(hm)
   t0=$(js 'window.__scape.world.getState().time')
   sleep 2.2
-  c1=$(clock)
+  c1=$(hm)
   t1=$(js 'window.__scape.world.getState().time')
   check "$tag live clock shows minutes" "$([ "$(colons "$c0")" = 1 ] && echo 1 || echo 0)" "$c0"
   check "$tag no tick within the minute" "$([ "$t0" = "$t1" ] || [ "$c0" != "$c1" ] && echo 1 || echo 0)" "time $([ "$t0" = "$t1" ] && echo held || echo 'rolled over')"
   ab screenshot "$OUT/$tag-live-minutes.png" >/dev/null
 
-  ab hover ".datebar .clock" >/dev/null
-  ticks "$tag hover ticks seconds"
-  ab screenshot "$OUT/$tag-live-hover.png" >/dev/null
-  ab mouse move 1 1 >/dev/null
-  sleep 0.3
-  c0=$(clock)
-  check "$tag unhover back to minutes" "$([ "$(colons "$c0")" = 1 ] && echo 1 || echo 0)" "$c0"
-
-  ab focus ".datebar .clock" >/dev/null
-  ticks "$tag focus ticks seconds"
-  js '(() => { document.activeElement?.blur(); return "ok"; })()' >/dev/null
-
   js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Timeline"); u.setPanelCollapsed(false); return "ok"; })()' >/dev/null
   sleep 0.3
-  c0=$(clock)
+  c0=$(hm)
   check "$tag Timeline tab shows minutes" "$([ "$(colons "$c0")" = 1 ] && echo 1 || echo 0)" "$c0"
   ab screenshot "$OUT/$tag-live-timeline.png" >/dev/null
 
@@ -101,7 +80,7 @@ pass() { # viewport label, width, height
   h1=$(hm)
   a1=$(active)
   r1=$(readout)
-  live1=$(js 'document.querySelector(".datebar .clock")?.classList.contains("live")')
+  live1=$(js 'document.querySelector(".datebar input[type=time]")?.classList.contains("live")')
   check "$tag set time: hm" "$([ "$h1" = 06:30 ] && echo 1 || echo 0)" "$h1"
   check "$tag set time: not live" "$([ "$live1" = false ] && echo 1 || echo 0)" "live=$live1"
   ab screenshot "$OUT/$tag-0630.png" >/dev/null

@@ -86,7 +86,11 @@ site() { # tag, camera, expected kind, viewport tag, [expected station name], [m
     local want=1; [ "$3" = subordinate ] && want=0
     check "$4 $1: tide row, $3" "$([ "$kind" = "$3" ] && [ "$marks" -ge "${6:-3}" ] && [ "$marks" -le 5 ] && [ "$lines" = "$want" ] && echo 1 || echo 0)" "$label $time · $extra · $marks marks, $lines curve"
     local t0; t0=$(js 'window.__scape.world.getState().time')
-    js '(() => { document.querySelector(".timeline .tide-row circle.hit").dispatchEvent(new MouseEvent("click", { bubbles: true })); return "ok"; })()' >/dev/null
+    # Press by coordinates: marks scrub on pointerdown, and the dot covers the hit ring.
+    local xy; xy=$(js '(() => { const c = document.querySelector(".timeline .tide-row circle.hit"); c.scrollIntoView({ block: "center" }); const r = c.getBoundingClientRect(); return `${Math.round(r.left + r.width / 2)} ${Math.round(r.top + r.height / 2)}`; })()')
+    ab mouse move ${xy% *} ${xy#* } >/dev/null
+    ab mouse down >/dev/null
+    ab mouse up >/dev/null
     sleep 0.2
     local t1; t1=$(js 'window.__scape.world.getState().time')
     check "$4 $1: a high/low mark sets the clock" "$([ "$t0" != "$t1" ] && echo 1 || echo 0)" "$(date -u -r $((t1 / 1000)) +%H:%MZ)"
