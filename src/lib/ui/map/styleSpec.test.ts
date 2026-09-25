@@ -2,7 +2,7 @@ import { Color, createPropertyExpression, featureFilter, latest, validateStyleMi
 import { describe, expect, it } from 'vitest';
 import { BLD_BASE, BLD_HEIGHT, buildingFilter, buildingPaint } from './buildingStyle';
 import { ELEVATION_COLOR, ELEVATION_STOPS } from './layerRamps';
-import { modelLayers } from './modelOverlay';
+import { modelLayers, MODELS_CASING_LAYER, MODELS_FILL_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER, OUTLINE_CASING, OUTLINE_COLOR } from './modelOverlay';
 
 const spec = (layerType: string, prop: string) => (latest as unknown as Record<string, Record<string, StylePropertySpecification>>)[`paint_${layerType}`][prop];
 
@@ -78,8 +78,10 @@ describe('building filter', () => {
 });
 
 describe('model overlay', () => {
-  type Styled = { type: string; filter?: unknown; paint?: Record<string, unknown> };
-  const [selectedFill, selectedLine, otherFill] = modelLayers('models') as Styled[];
+  type Styled = { id: string; type: string; filter?: unknown; paint?: Record<string, unknown> };
+  const layers = modelLayers('models') as Styled[];
+  const layer = (id: string) => layers.find((l) => l.id === id)!;
+  const [selectedFill, casing, selectedLine, otherFill] = [MODELS_FILL_LAYER, MODELS_CASING_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER].map(layer);
   const paint = (layer: Styled, prop: string, p: Record<string, unknown>) => evaluate(layer.type, prop, layer.paint?.[prop], p);
 
   it('splits the selected model from the others', () => {
@@ -95,6 +97,15 @@ describe('model overlay', () => {
     expect(paint(selectedFill, 'fill-extrusion-color', p)).not.toEqual(paint(selectedFill, 'fill-extrusion-color', { ...p, current: false }));
     expect(paint(selectedLine, 'line-width', { current: true })).toBe(2.5);
     expect(paint(selectedLine, 'line-width', { current: false })).toBe(1.5);
+  });
+
+  it('draws the selected outline white over a wider dark casing', () => {
+    expect(passes(casing.filter, { selected: true })).toBe(true);
+    expect(passes(casing.filter, { selected: false })).toBe(false);
+    expect(paint(selectedLine, 'line-color', {})).toEqual(Color.parse(OUTLINE_COLOR));
+    expect(paint(casing, 'line-color', {})).toEqual(Color.parse(OUTLINE_CASING));
+    expect(paint(casing, 'line-width', { current: true })).toBe(4.5);
+    expect(paint(casing, 'line-width', { current: false })).toBe(3.5);
   });
 });
 
