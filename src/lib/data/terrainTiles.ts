@@ -193,9 +193,11 @@ export class DemCache implements DemSource {
       this.absent.add(k);
     }
     // Recurses through load, so an ancestor is fetched once however many descendants want it.
-    const parent = c.z > 0 ? await this.load({ z: c.z - 1, x: c.x >> 1, y: c.y >> 1 }) : null;
+    const up = { z: c.z - 1, x: c.x >> 1, y: c.y >> 1 };
+    const parent = c.z > 0 ? await this.load(up) : null;
     if (!parent) {
-      this.set(c, null);
+      // Only a settled absence is cached; after a transient parent failure the next request retries.
+      if (c.z === 0 || this.tiles.has(tileKey(up.z, up.x, up.y))) this.set(c, null);
       return null;
     }
     const tile = overzoomTile(parent, c);
