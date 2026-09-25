@@ -7,6 +7,10 @@ import { CoordFormat } from '@core/geo/coords';
 import { CocRule } from '@core/optics/fov';
 import { BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, PmFlavor, type Basemap } from '@data/basemaps';
 
+/** What a plain map click sets. Values are persisted in settings. */
+export const ClickMode = { Camera: 'camera', Target: 'target', Off: 'off' } as const;
+export type ClickMode = (typeof ClickMode)[keyof typeof ClickMode];
+
 export interface Settings {
   units: Units;
   hour12: boolean;
@@ -33,7 +37,7 @@ export interface Settings {
   lightSource: LightMode;
   /** Show transits, golden hour, terrain and Galactic Centre rows in the timeline. */
   timelineDetail: boolean;
-  clickMovesPin: boolean;
+  clickMode: ClickMode;
   /** Fetch elevation data at all (Terrain Tiles). */
   terrain: boolean;
   /** Sweep the terrain horizon: chart curve and terrain rise/set. */
@@ -74,7 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showSunShadows: true,
   lightSource: LightMode.Auto,
   timelineDetail: false,
-  clickMovesPin: true,
+  clickMode: ClickMode.Camera,
   terrain: true,
   terrainHorizon: true,
   horizonRangeKm: 100,
@@ -85,6 +89,28 @@ export const DEFAULT_SETTINGS: Settings = {
   mwGcMinAlt: 10,
   mwMoonRule: MoonRule.Down,
   mwMoonMaxIllum: 0.25
+};
+
+export const SETTINGS_VERSION = 1;
+
+/** Version 0 stored `clickMovesPin`, where false meant a plain click did nothing. */
+export function migrateSettings(state: unknown, version: number): Settings {
+  const s = (state ?? {}) as Partial<Settings> & { clickMovesPin?: boolean };
+  if (version >= SETTINGS_VERSION) return s as Settings;
+  const { clickMovesPin, ...rest } = s;
+  return { ...rest, clickMode: clickMovesPin === false ? ClickMode.Off : ClickMode.Camera } as Settings;
+}
+
+/** Exported so a test can check the store is wired to the migration, which storage-less Node hides. */
+export const SETTINGS_PERSIST = {
+  name: 'scape.settings',
+  version: SETTINGS_VERSION,
+  migrate: migrateSettings,
+  // Local-file basemaps only live for the session; their bytes are not persisted.
+  partialize: ({ update: _u, addBasemap: _a, removeBasemap: _r, ...rest }: SettingsState): Settings => ({
+    ...rest,
+    customBasemaps: rest.customBasemaps.filter((b) => !b.local)
+  })
 };
 
 export const settingsStore = create<SettingsState>()(
@@ -101,14 +127,7 @@ export const settingsStore = create<SettingsState>()(
             basemapId: s.basemapId === id ? DEFAULT_BASEMAP_ID : s.basemapId
           }))
       }),
-      {
-        name: 'scape.settings',
-        // Local-file basemaps only live for the session; their bytes are not persisted.
-        partialize: ({ update: _u, addBasemap: _a, removeBasemap: _r, ...rest }) => ({
-          ...rest,
-          customBasemaps: rest.customBasemaps.filter((b) => !b.local)
-        })
-      }
+      SETTINGS_PERSIST
     )
   )
 );

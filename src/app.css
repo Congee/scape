@@ -1018,6 +1018,79 @@ label.file input {
   }
 }
 
+/* Map click-mode picker, drawn like MapLibre's own buttons */
+.click-mode button {
+  display: grid;
+  place-items: center;
+  color: #333;
+}
+
+.click-mode button[aria-pressed='true'] {
+  color: #1a73e8;
+  background: rgb(26 115 232 / 0.12);
+}
+
+/* Opens sideways: a phone's map can be too short for a column under the other controls. */
+.click-mode.open {
+  display: flex;
+}
+
+.maplibregl-ctrl-group.click-mode.open button + button {
+  border-top: 0;
+  border-left: 1px solid #ddd;
+}
+
+/* Right-click / long-press menu */
+.map-menu {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  max-width: calc(100% - 8px);
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.45);
+}
+
+.map-menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.map-menu button:hover,
+.map-menu button:focus-visible {
+  background: var(--bg-3);
+  outline: none;
+}
+
+.map-menu button:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.map-menu .detail {
+  color: var(--fg-3);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .map-menu button {
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
 /* Markers */
 .marker-list li {
   display: grid;

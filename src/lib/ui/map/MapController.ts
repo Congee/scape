@@ -20,6 +20,7 @@ import { lod2Credits, type Lod2Source } from '@core/lod2/regions';
 import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
+import { formatLngLat } from '@core/geo/coords';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
 import { frameOf, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, SHADOW_RGB, type MaskRect } from '@core/geo/shadowMask';
@@ -43,12 +44,15 @@ import { mapStatusStore } from '@state/mapStatus';
 import { markersStore } from '@state/markers';
 import { modelsStore } from '@state/models';
 import { currentBasemap, offlineStore } from '@state/offline';
-import { settingsStore } from '@state/settings';
+import { ClickMode, settingsStore } from '@state/settings';
 import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
 import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { paintHeat } from './heat';
+import { ClickModeControl } from './ClickModeControl';
+import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
+import { MapMenu } from './mapMenu';
 import { ModelDrawer } from './ModelDrawer';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 import { installTrackpadWheel } from './wheelZoom';
@@ -163,6 +167,9 @@ export class MapController {
   private live: { src: GeoJSONSource; data: GeoJSON.FeatureCollection } | null = null;
   private painted: { src: ImageSource; mask: ShadowMaskField } | null = null;
   private drawer: ModelDrawer;
+  private menu: MapMenu;
+  /** Fingers on the map; the browser's own long-press contextmenu is left to `LongPress`. */
+  private touches = 0;
   /** Overture feature ids a visible model stands in for. */
   private hiddenIds: string[] = [];
   /** Body behind the mask on screen; the smoke test reads it. */
@@ -183,10 +190,13 @@ export class MapController {
       center: [w.view.center.lng, w.view.center.lat],
       zoom: w.view.zoom,
       maxPitch: MAX_PITCH,
+      // Box zoom takes every shift-press, which would swallow Shift-click.
+      boxZoom: false,
       attributionControl: { compact: true }
     });
     this.map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
     this.map.addControl(new GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'top-right');
+    this.map.addControl(new ClickModeControl(), 'top-right');
     this.scale = new ScaleControl({ unit: s.units });
     this.map.addControl(this.scale, 'bottom-left');
     this.unsubs.push(installTrackpadWheel(this.map));
@@ -218,14 +228,18 @@ export class MapController {
       const models = modelsStore.getState();
       if (models.picking) return this.modelBuildingAt(p);
       if (models.importPick) return this.importOnBuildingAt(p);
-      const ms = markersStore.getState();
-      if (ms.placing || e.originalEvent.altKey) {
-        ms.setPlacing(false);
-        void ms.save(p).then((m) => ms.select(m.id));
-        uiStore.getState().setPanelTab(PanelTab.Markers);
-      } else if (e.originalEvent.shiftKey) this.setTargetFromMap(p);
-      else if (settingsStore.getState().clickMovesPin) worldStore.getState().setPin(p);
+      if (markersStore.getState().placing || e.originalEvent.altKey) return this.addMarkerAt(p);
+      if (e.originalEvent.shiftKey) return this.setTargetFromMap(p);
+      const mode = settingsStore.getState().clickMode;
+      if (mode === ClickMode.Camera) worldStore.getState().setPin(p);
+      else if (mode === ClickMode.Target) this.setTargetFromMap(p);
     });
+    this.menu = new MapMenu(this.map.getContainer(), this.map.getCanvasContainer());
+    this.map.on('contextmenu', (e: MapMouseEvent) => {
+      if (!this.touches && !this.drawingRegion) this.openMenu(e.point);
+    });
+    this.map.on('movestart', () => this.menu.close());
+    this.installLongPress();
     this.map.on('mousedown', (e: MapMouseEvent) => {
       if (!this.drawingRegion) return;
       this.drawStart = { lng: e.lngLat.lng, lat: e.lngLat.lat };
@@ -502,6 +516,70 @@ export class MapController {
     }
     if (!this.probe) this.probe = this.makeMarker({ at: p, color: PROBE_COLOR, scale: 0.7 }, (q, final) => final && lightProbeStore.getState().setPoint(q), () => {});
     else this.probe.setLngLat([p.lng, p.lat]);
+  }
+
+  private addMarkerAt(p: LngLat) {
+    const ms = markersStore.getState();
+    ms.setPlacing(false);
+    void ms.save(p).then((m) => ms.select(m.id));
+    uiStore.getState().setPanelTab(PanelTab.Markers);
+  }
+
+  /** `at` is in map container pixels. */
+  private openMenu(at: Pt) {
+    const ll = this.map.unproject([at.x, at.y]);
+    const p = { lng: ll.lng, lat: ll.lat };
+    const coords = formatLngLat(p, settingsStore.getState().coordFormat);
+    this.menu.open(at, [
+      { label: 'Camera here', run: () => worldStore.getState().setPin(p) },
+      { label: 'Target here', run: () => this.setTargetFromMap(p) },
+      { label: 'Add marker', run: () => this.addMarkerAt(p) },
+      { label: 'Copy coordinates', detail: coords, run: () => void navigator.clipboard.writeText(coords).catch((err) => console.warn('[scape] copy failed:', err)) }
+    ]);
+  }
+
+  /** Touch stand-in for the right-click menu; its timer only runs while one finger is down. */
+  private installLongPress() {
+    const el = this.map.getCanvasContainer();
+    const lp = new LongPress();
+    let timer: ReturnType<typeof setTimeout> | 0 = 0;
+    const disarm = () => {
+      clearTimeout(timer);
+      timer = 0;
+    };
+    const points = (e: TouchEvent) => {
+      const r = el.getBoundingClientRect();
+      return [...e.touches].map((t) => ({ x: t.clientX - r.left, y: t.clientY - r.top }));
+    };
+    const start = (e: TouchEvent) => {
+      this.touches = e.touches.length;
+      disarm();
+      if (this.drawingRegion || !lp.down(points(e))) return;
+      timer = setTimeout(() => {
+        timer = 0;
+        const at = lp.elapse();
+        if (at) this.openMenu(at);
+      }, LONG_PRESS_MS);
+    };
+    const move = (e: TouchEvent) => {
+      if (lp.move(points(e))) disarm();
+    };
+    const end = (e: TouchEvent) => {
+      this.touches = e.touches.length;
+      disarm();
+      // The lift after a long-press must not also tap the map or the menu now under the finger.
+      if (lp.up(e.touches.length) && e.cancelable) e.preventDefault();
+    };
+    el.addEventListener('touchstart', start, { passive: true });
+    el.addEventListener('touchmove', move, { passive: true });
+    el.addEventListener('touchend', end, { passive: false });
+    el.addEventListener('touchcancel', end, { passive: false });
+    this.unsubs.push(disarm, () => {
+      el.removeEventListener('touchstart', start);
+      el.removeEventListener('touchmove', move);
+      el.removeEventListener('touchend', end);
+      el.removeEventListener('touchcancel', end);
+    });
   }
 
   /** A target placed through the map also picks up the height of the building under it. */
@@ -1114,6 +1192,7 @@ export class MapController {
 
   dispose() {
     for (const u of this.unsubs) u();
+    this.menu.close();
     this.pin.remove();
     this.pin2?.remove();
     this.candidate?.remove();

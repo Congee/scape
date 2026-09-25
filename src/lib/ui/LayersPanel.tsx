@@ -128,7 +128,6 @@ export function LayersPanel() {
       </div>
       <Toggle k="showGc" label="Galactic Centre" />
       <Toggle k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
-      <Toggle k="clickMovesPin" label="Clicking the map moves the camera" />
 
       <h3>Buildings</h3>
       <Toggle k="showBuildings" label="3D buildings (Overture, in place of the basemap's own)" />
