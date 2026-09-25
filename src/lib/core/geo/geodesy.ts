@@ -1,5 +1,5 @@
 /**
- * WGS84 geodesy: Karney's geodesic inverse and direct (after GeographicLib, MIT), exact to ~15 nm and
+ * WGS84 geodesy: Karney's geodesic inverse and direct (after GeographicLib, MIT; notice in README.md), exact to ~15 nm and
  * 1e-12° on the ellipsoid. Vertical geometry stays spherical with refraction; see `curvatureDropM`.
  */
 
