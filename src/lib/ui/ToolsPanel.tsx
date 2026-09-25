@@ -154,8 +154,8 @@ function TidesGroup() {
           </table>
           <p className="muted hint">
             {site.kind === TideKind.Harmonic
-              ? 'Heights above MLLW from NOAA CO-OPS harmonic constants.'
-              : "Highs and lows above MLLW from NOAA CO-OPS offsets on the reference station's harmonic prediction; no curve between them."}
+              ? `Heights above MLLW from NOAA CO-OPS harmonic constants, at the nearest harmonic station within ${distance(NEAREST_STATION_MAX_M, units)}, even if a subordinate one is closer.`
+              : `Highs and lows above MLLW from NOAA CO-OPS offsets on the reference station's harmonic prediction; no curve between them. Used because no harmonic station is within ${distance(NEAREST_STATION_MAX_M, units)}.`}
           </p>
         </>
       )}

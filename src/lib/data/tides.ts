@@ -1,4 +1,5 @@
-import { parseStation, tideCurve, tideExtremes, type TideExtreme, type TideStation, type TideStationRow } from '@core/tides/predict';
+import type { LngLat } from '@core/geo/geodesy';
+import { NEAREST_STATION_MAX_M, nearestStation, parseStation, tideCurve, tideExtremes, type TideExtreme, type TideStation, type TideStationRow } from '@core/tides/predict';
 import { parseSubordinate, subordinateExtremes, type SubordinateRow, type SubordinateStation } from '@core/tides/subordinate';
 
 export const TideKind = { Harmonic: 'Harmonic', Subordinate: 'Subordinate' } as const;
@@ -33,6 +34,11 @@ export function tideStations(): Promise<TideStationRef[]> {
       throw err;
     });
   return pending;
+}
+
+/** The nearest harmonic station within `maxM`, else the nearest subordinate one: a harmonic prediction gives the whole curve. */
+export function nearestTideStation(stations: readonly TideStationRef[], p: LngLat, maxM = NEAREST_STATION_MAX_M): { station: TideStationRef; distM: number } | null {
+  return nearestStation(stations.filter((s) => s.kind === TideKind.Harmonic), p, maxM) ?? nearestStation(stations.filter((s) => s.kind === TideKind.Subordinate), p, maxM);
 }
 
 const parsed = new WeakMap<TideStationRow, TideStation>();

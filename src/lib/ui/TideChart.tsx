@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Units } from '@core/format';
-import { nearestStation } from '@core/tides/predict';
-import { tideSite, tideStations, TideKind, type TideDay, type TideStationRef } from '@data/tides';
+import { nearestTideStation, tideSite, tideStations, TideKind, type TideDay, type TideStationRef } from '@data/tides';
 import { useWorld, worldStore } from '@state/world';
 
-/** The pin's nearest tide station of either kind, from the lazily fetched tables. */
+/** The pin's tide station, harmonic first, from the lazily fetched tables. */
 export function useNearestTide() {
   const pin = useWorld((s) => s.pin);
   const [stations, setStations] = useState<TideStationRef[] | null>(null);
@@ -18,7 +17,7 @@ export function useNearestTide() {
     setFailed(false);
     tideStations().then(setStations, () => setFailed(true));
   };
-  const hit = stations ? nearestStation(stations, pin) : null;
+  const hit = stations ? nearestTideStation(stations, pin) : null;
   return { loaded: stations !== null, failed, retry, distM: hit?.distM ?? 0, site: hit ? tideSite(hit.station) : null };
 }
 
