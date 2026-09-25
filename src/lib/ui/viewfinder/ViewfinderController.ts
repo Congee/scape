@@ -23,6 +23,7 @@ import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
+import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayGl';
 import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
@@ -134,7 +135,7 @@ interface BodyLabel {
 }
 
 interface StarGroup {
-  style: string;
+  rgba: [number, number, number, number];
   idx: number[];
 }
 
@@ -174,6 +175,10 @@ export class ViewfinderController {
   private prismRev = 0;
   private meshOccCache: { key: string; occ: MeshOccluder | null } | null = null;
   private anyOccCache: { key: string; occ: Occluder | null } | null = null;
+  /** Sky marks for the picture pass, rebuilt each frame. */
+  private readonly marks = new OverlayBatch();
+  /** Dev: marks with the exact CPU answer, 6 numbers each, while `__scape.markProbe` is set. */
+  private probe: number[] | null = null;
   /** What the overlay hid this frame, for `__scape.overlay`. */
   private seen: { bodies: Record<string, { az: number; alt: number; x: number; y: number; r: number; hidden: boolean }>; markers: Record<string, boolean>; pathLabels: { body: SkyBody; text: string; x: number; y: number; w: number; h: number; skipped: boolean }[] } = { bodies: {}, markers: {}, pathLabels: [] };
   /** Placed models, rebuilt when the camera location or any model changes. */
@@ -629,6 +634,10 @@ export class ViewfinderController {
     return this.occ.occludes(ca * Math.sin(azDeg * D2R), ca * Math.cos(azDeg * D2R), Math.sin(altDeg * D2R), distM);
   }
 
+  private behindEnu(v: Float64Array): boolean {
+    return !!this.occ && this.occ.occludes(v[0], v[1], v[2], Infinity);
+  }
+
   /** Sky, terrain, buildings and shadows on the GPU, into the canvas that sits under this one. */
   private drawSceneGl(sc: Scene, gl: SceneGl) {
     const { frame } = sc;
@@ -666,7 +675,8 @@ export class ViewfinderController {
         shadowGain: shadowOn && sc.light ? smooth(0, 1.5, sc.light.altitudeDeg) : 0,
         moonlight: sc.light?.body === SkyBody.Moon ? sc.moonLight : 0,
         sunDisc: comp.showSun ? this.bodyDisc(sc, SkyBody.Sun) : null,
-        moonDisc: comp.showMoon ? this.bodyDisc(sc, SkyBody.Moon) : null
+        moonDisc: comp.showMoon ? this.bodyDisc(sc, SkyBody.Moon) : null,
+        overlay: { batch: this.marks, dpr: this.dpr }
       },
       vx,
       vy,
@@ -747,7 +757,8 @@ export class ViewfinderController {
    * Frame position of a local direction. Low directions take the exact path; the rest, refracted,
    * project straight through the camera basis, which is what makes 9k stars cheap.
    */
-  private placeEnu(sc: Scene, e: number, n: number, u: number, slack: number): Placed | null {
+  /** `buildings` false leaves them to the picture pass, which tests each drawn pixel instead. */
+  private placeEnu(sc: Scene, e: number, n: number, u: number, slack: number, buildings = true): Placed | null {
     const len = Math.hypot(e, n, u);
     const uz = u / len;
     if (uz < -0.05) return null;
@@ -778,7 +789,7 @@ export class ViewfinderController {
       if (Number.isNaN(az)) az = Math.atan2(e, n) / D2R;
       hidden = this.hiddenBySkyline(sc, az, alt);
     }
-    if (!hidden && this.occ) hidden = this.occ.occludes(e, n, u, Infinity);
+    if (!hidden && buildings && this.occ) hidden = this.occ.occludes(e, n, u, Infinity);
     return { x: p.x, y: p.y, altDeg: alt, hidden };
   }
 
@@ -796,7 +807,7 @@ export class ViewfinderController {
       const key = `${r >> 4},${g >> 4},${b >> 4},${alpha}`;
       let grp = map.get(key);
       if (!grp) {
-        grp = { style: `rgba(${(r >> 4) * 16 + 8},${(g >> 4) * 16 + 8},${(b >> 4) * 16 + 8},${alpha})`, idx: [] };
+        grp = { rgba: [((r >> 4) * 16 + 8) / 255, ((g >> 4) * 16 + 8) / 255, ((b >> 4) * 16 + 8) / 255, alpha], idx: [] };
         map.set(key, grp);
       }
       grp.idx.push(i);
@@ -817,24 +828,25 @@ export class ViewfinderController {
     const limit = this.magLimit(sc);
     const out = new Float64Array(3);
     const labels: { x: number; y: number; name: string }[] = [];
-    ctx.globalAlpha = sc.night;
+    const rgba: [number, number, number, number] = [0, 0, 0, 0];
     for (const g of groups) {
-      ctx.fillStyle = g.style;
+      rgba[0] = g.rgba[0];
+      rgba[1] = g.rgba[1];
+      rgba[2] = g.rgba[2];
+      rgba[3] = g.rgba[3] * sc.night;
       for (const i of g.idx) {
         if (cat.mag[i] > limit) break;
         applyStar(M, cat.x[i], cat.y[i], cat.z[i], out);
-        const p = this.placeEnu(sc, out[0], out[1], out[2], 4);
+        const p = this.placeEnu(sc, out[0], out[1], out[2], 4, false);
         if (!p || p.hidden) continue;
         const r = starRadiusPx(cat.mag[i]);
-        if (r < 1.1) ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
-        else {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        if (names && (cat.mag[i] <= 1.6 || i === polaris) && cat.names.has(i)) labels.push({ x: p.x, y: p.y, name: cat.names.get(i)! });
+        if (r < 1.1) this.marks.box(p.x, p.y, r, rgba);
+        else this.marks.disc(p.x, p.y, r, rgba);
+        this.probe?.push(0, p.x, p.y, r, this.behindEnu(out) ? 1 : 0, 0);
+        if (names && (cat.mag[i] <= 1.6 || i === polaris) && cat.names.has(i) && !this.behindEnu(out)) labels.push({ x: p.x, y: p.y, name: cat.names.get(i)! });
       }
     }
+    ctx.globalAlpha = sc.night;
     ctx.fillStyle = 'rgba(230,237,243,0.8)';
     ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'left';
@@ -848,20 +860,16 @@ export class ViewfinderController {
     const a = new Float64Array(3);
     const b = new Float64Array(3);
     const seg = pc.segments;
-    ctx.globalAlpha = sc.night;
-    ctx.strokeStyle = 'rgba(160,150,230,0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
+    const rgba = [160 / 255, 150 / 255, 230 / 255, 0.5 * sc.night] as const;
     for (let s = 0; s < seg.length; s += 6) {
       applyStar(M, seg[s], seg[s + 1], seg[s + 2], a);
       applyStar(M, seg[s + 3], seg[s + 4], seg[s + 5], b);
-      const p = this.placeEnu(sc, a[0], a[1], a[2], 600);
-      const q = this.placeEnu(sc, b[0], b[1], b[2], 600);
+      const p = this.placeEnu(sc, a[0], a[1], a[2], 600, false);
+      const q = this.placeEnu(sc, b[0], b[1], b[2], 600, false);
       if (!p || !q || p.hidden || q.hidden) continue;
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(q.x, q.y);
+      this.marks.segment(p.x, p.y, q.x, q.y, 1, 0, 0, rgba);
     }
-    ctx.stroke();
+    ctx.globalAlpha = sc.night;
     if (sc.hfov > 20) {
       ctx.fillStyle = 'rgba(180,170,240,0.7)';
       ctx.font = 'italic 11px system-ui, sans-serif';
@@ -902,7 +910,6 @@ export class ViewfinderController {
 
   /** Trails of the brighter stars over the chosen span, starting at the simulated time. */
   private drawTrails(sc: Scene, cat: StarCatalog) {
-    const { ctx } = this;
     const c = compositionStore.getState();
     const steps = clamp(Math.round(c.trailMinutes / 3), 6, 40);
     const dtMs = (c.trailMinutes * 60_000) / steps;
@@ -910,28 +917,30 @@ export class ViewfinderController {
     for (let k = 0; k <= steps; k++) mats.push(starFrame(new Date(sc.time.getTime() + k * dtMs), sc.obs, mats[0]?.beta));
     const limit = Math.min(4.5, this.magLimit(sc));
     const out = new Float64Array(3);
-    ctx.lineCap = 'round';
-    ctx.globalAlpha = 0.55 * sc.night;
+    const run: number[] = [];
+    const rgba: [number, number, number, number] = [0, 0, 0, 0.55 * sc.night];
+    // One run of joined segments, round only at its two ends so the joins do not blend twice.
+    const flush = (width: number) => {
+      const last = run.length / 2 - 1;
+      for (let k = 0; k < last; k++) {
+        const flags = (k === 0 ? OverlayFlag.RoundStart : 0) | (k === last - 1 ? OverlayFlag.RoundEnd : 0);
+        this.marks.segment(run[2 * k], run[2 * k + 1], run[2 * k + 2], run[2 * k + 3], width, flags, 0, rgba);
+      }
+      run.length = 0;
+    };
     for (let i = 0; i < cat.n && cat.mag[i] <= limit; i++) {
-      ctx.strokeStyle = `rgb(${cat.rgb[i * 3]},${cat.rgb[i * 3 + 1]},${cat.rgb[i * 3 + 2]})`;
-      ctx.lineWidth = Math.max(0.7, starRadiusPx(cat.mag[i]) * 0.9);
-      ctx.beginPath();
-      let started = false;
+      rgba[0] = cat.rgb[i * 3] / 255;
+      rgba[1] = cat.rgb[i * 3 + 1] / 255;
+      rgba[2] = cat.rgb[i * 3 + 2] / 255;
+      const width = Math.max(0.7, starRadiusPx(cat.mag[i]) * 0.9);
       for (const m of mats) {
         applyStar(m, cat.x[i], cat.y[i], cat.z[i], out);
-        const p = this.placeEnu(sc, out[0], out[1], out[2], 40);
-        if (!p || p.hidden) {
-          started = false;
-          continue;
-        }
-        if (started) ctx.lineTo(p.x, p.y);
-        else ctx.moveTo(p.x, p.y);
-        started = true;
+        const p = this.placeEnu(sc, out[0], out[1], out[2], 40, false);
+        if (p && !p.hidden) run.push(p.x, p.y);
+        else if (run.length > 0) flush(width);
       }
-      ctx.stroke();
+      if (run.length > 0) flush(width);
     }
-    ctx.lineCap = 'butt';
-    ctx.globalAlpha = 1;
   }
 
   private drawRadiants(sc: Scene, M: StarFrame) {
@@ -995,9 +1004,9 @@ export class ViewfinderController {
     const azs = curve.azimuth[body];
     const world = worldStore.getState();
     const hour12 = settingsStore.getState().hour12;
-    ctx.lineWidth = 1.5;
+    const line = hexRgba(color, 0.9);
     let prev: { x: number; y: number } | null = null;
-    let prevHidden = false;
+    let prevSky = false;
     // The picture draws these under the overlay; ghosted ones behind geometry still show.
     const discs: Disc[] = [SkyBody.Sun, SkyBody.Moon].flatMap((b) => this.seen.bodies[b] ?? []);
     ctx.font = '10px system-ui, sans-serif';
@@ -1006,31 +1015,31 @@ export class ViewfinderController {
     // Occlusion does not depend on the aim, so a drag reuses it until the path or occluders change.
     let memo = this.pathHidden.get(body);
     if (!memo || memo.occ !== this.occ || memo.view !== sc.view || memo.curve !== curve) this.pathHidden.set(body, (memo = { occ: this.occ, view: sc.view, curve, h: new Int8Array(curve.n) }));
+    const h = memo.h;
     for (let i = 0; i < curve.n; i++) {
       const p = pxs[i];
       const inside = ins[i];
-      // Only a drawn neighbouring segment or label reads this point's occlusion.
-      const hidden = (inside || !!ins[i - 1] || !!ins[i + 1]) && (memo.h[i] !== 0 ? memo.h[i] > 0 : (memo.h[i] = (!!sc.view && (() => {
-        const col = columnAt(sc.view!, azs[i]);
-        return col >= 0 && alts[i] < sc.view!.skylineDeg[col];
-      })()) || this.behindBuilding(azs[i], alts[i], Infinity) ? 1 : -1) > 0);
+      const col = sc.view ? columnAt(sc.view, azs[i]) : -1;
+      const sky = col >= 0 && alts[i] < sc.view!.skylineDeg[col];
+      // Segments are clipped per pixel in the picture pass; the skyline is only known here.
       if (p && prev && (inside || this.inFrame(sc, prev, 40))) {
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = hidden || prevHidden ? 0.35 : 0.9;
-        ctx.setLineDash(hidden || prevHidden ? [3, 4] : []);
-        ctx.beginPath();
-        ctx.moveTo(prev.x, prev.y);
-        ctx.lineTo(p.x, p.y);
-        ctx.stroke();
+        this.marks.segment(prev.x, prev.y, p.x, p.y, 1.5, sky || prevSky ? OverlayFlag.Hidden : 0, 0.35, line);
+        if (this.probe) {
+          const a = this.behindBuilding(azs[i - 1], alts[i - 1], Infinity);
+          const b = this.behindBuilding(azs[i], alts[i], Infinity);
+          this.probe.push(1, prev.x, prev.y, p.x, p.y, sky || prevSky ? 2 : a && b ? 1 : a || b ? 3 : 0);
+        }
       }
       const t = curve.startMs + i * curve.stepMs;
       if (inside && p && new Date(t).getUTCMinutes() === 0 && t % 3_600_000 === (curve.startMs % 3_600_000 + (i * curve.stepMs)) % 3_600_000) {
+        const hidden = sky || (h[i] !== 0 ? h[i] > 0 : (h[i] = this.behindBuilding(azs[i], alts[i], Infinity) ? 1 : -1) > 0);
         const label = formatTime(t, world.tz, hour12).replace(':00', '');
         ctx.globalAlpha = hidden ? 0.5 : 0.95;
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
         ctx.fill();
+        this.probe?.push(2, p.x, p.y, 0, 0, 0);
         const box = { x: p.x + 4, y: p.y - 13, w: ctx.measureText(label).width, h: 10 };
         // Margin is the halo's half stroke.
         const skipped = labelHitsDiscs(box, discs, 1.5);
@@ -1042,10 +1051,9 @@ export class ViewfinderController {
         }
       }
       prev = p;
-      prevHidden = hidden;
+      prevSky = sky;
     }
     ctx.globalAlpha = 1;
-    ctx.setLineDash([]);
   }
 
   /** Primary and secondary bows as colour bands; dashed and dim where terrain or a building is in front. */
@@ -1391,7 +1399,8 @@ export class ViewfinderController {
     const c = compositionStore.getState();
     this.occ = this.occluder(sc);
     this.seen = { bodies: {}, markers: {}, pathLabels: [] };
-    this.drawSceneGl(sc, this.sceneGl);
+    this.marks.clear();
+    this.probe = import.meta.env.DEV && (window as unknown as { __scape?: { markProbe?: boolean } }).__scape?.markProbe ? [] : null;
     this.drawSky(sc);
 
     const date = new Date(worldStore.getState().time);
@@ -1429,12 +1438,15 @@ export class ViewfinderController {
       }
     }
     ctx.restore();
+    // After the marks are placed: the picture pass draws them.
+    this.drawSceneGl(sc, this.sceneGl);
 
     this.drawBodyLabels(sc, labels);
     this.drawMarkers(sc);
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       if (dev) dev.overlay = { ...this.seen, at: Date.now() };
+      if (dev) dev.marks = { count: this.marks.count, probe: this.probe };
     }
     this.drawModelOutline(sc);
     this.drawTarget(sc);
