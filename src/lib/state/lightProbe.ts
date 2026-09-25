@@ -46,9 +46,9 @@ export const lightProbeStore = create<LightProbeState>()((set) => ({
 
 export const useLightProbe = lightProbeStore;
 
-/** Eye height over the point's own ground, the sky first light is judged against. */
-export function lightPointObserver(point: LngLat, horizon: Pick<HorizonResult, 'groundM'>): Observer {
-  return makeObserver(point, siteHeightM(horizon.groundM, EYE_HEIGHT_M));
+/** Eye height over the point's own ground, the sky first light and alpenglow are judged against. */
+export function lightPointObserver(point: LngLat, horizon: Pick<HorizonResult, 'groundM'>, aboveGroundM = EYE_HEIGHT_M): Observer {
+  return makeObserver(point, siteHeightM(horizon.groundM, aboveGroundM));
 }
 
 function sweep(point: LngLat) {

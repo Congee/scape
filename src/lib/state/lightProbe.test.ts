@@ -10,6 +10,7 @@ describe('lightPointObserver', () => {
     const p = { lat: 46.5475, lng: 7.9625 };
     expect(lightPointObserver(p, { groundM: 3000 }).height).toBe(3000 + EYE_HEIGHT_M);
     expect(lightPointObserver(p, { groundM: Number.NaN }).height).toBe(EYE_HEIGHT_M);
+    expect(lightPointObserver(p, { groundM: 3000 }, 31.6).height).toBe(3031.6);
   });
 });
 

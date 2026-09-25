@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { makeObserver, siteHeightM } from '@core/astro/bodies';
 import type { LngLat } from '@core/geo/geodesy';
 import { glowDay, GlowKind, type GlowDay, type GlowWindow } from '@core/astro/alpenglow';
 import { formatDateShort, formatTime } from '@core/time/format';
@@ -11,8 +10,10 @@ import { modelInfo } from '@core/weather/models';
 import { forecastWindow } from '@core/weather/openMeteo';
 import { glowForecast, GlowStatus, type GlowForecast } from '@data/alpenglow';
 import type { GlowEntry } from '@data/weather';
+import { GlowAt, glowPointFor, sweepPointHorizon } from '@state/glowPoint';
+import { lightPointObserver } from '@state/lightProbe';
 import { useSettings } from '@state/settings';
-import { EYE_HEIGHT_M, horizonKeyFor, useTerrain } from '@state/terrain';
+import { useTerrain } from '@state/terrain';
 import { useWeather } from '@state/weather';
 import { useWorld, worldStore } from '@state/world';
 import type { HorizonResult } from '@workers/terrain.protocol';
@@ -20,6 +21,7 @@ import { Credit } from './CloudChart';
 
 const DAYS = 7;
 const NAME: Record<GlowKind, string> = { Sunrise: 'Sunrise', Sunset: 'Sunset' };
+const AT_TEXT: Record<GlowAt, string> = { Target: 'at the target', Pin: 'at the camera' };
 const angleGap = (a: number, b: number) => Math.abs(((a - b + 540) % 360) - 180);
 
 interface Row {
@@ -53,35 +55,57 @@ interface Loaded {
   now: number;
 }
 
-/** Weather-tab section for the camera pin; the forecast is fetched only once it is opened. */
+/** Weather-tab section for the target, else the camera pin; the forecast is fetched only once it is opened. */
 export function AlpenglowSection() {
   const [open, setOpen] = useState(false);
+  const at = useWorld((s) => (s.pin2 ? GlowAt.Target : GlowAt.Pin));
   return (
-    <details className="wx-card wx-glow" data-card="alpenglow" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+    <details className="wx-card wx-glow" data-card="alpenglow" data-glow-at={at} open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary data-glow-toggle>
-        <h3>Alpenglow</h3>
+        <h3>
+          Alpenglow<span className="muted"> · {AT_TEXT[at]}</span>
+        </h3>
       </summary>
-      {open && <PinAlpenglow />}
+      {open && <PointAlpenglow />}
     </details>
   );
 }
 
-function PinAlpenglow() {
+/** The target's skyline, swept only while the section is open; the pin's comes from the terrain store. */
+function useSweptHorizon(point: LngLat | null, key: string, aboveGroundM: number, rangeKm: number): HorizonResult | Error | null {
+  const [got, setGot] = useState<{ key: string; r: HorizonResult | Error } | null>(null);
+  useEffect(() => {
+    if (!point || !key) return;
+    return sweepPointHorizon(point, aboveGroundM, rangeKm * 1000, (r) => setGot({ key, r }));
+  }, [point, key, aboveGroundM, rangeKm]);
+  return got?.key === key ? got.r : null;
+}
+
+function PointAlpenglow() {
   const pin = useWorld((s) => s.pin);
   const pinHeightM = useWorld((s) => s.pinHeightM);
-  const horizon = useTerrain((s) => s.horizon);
-  const horizonKey = useTerrain((s) => s.horizonKey);
+  const pin2 = useWorld((s) => s.pin2);
+  const pinHorizon = useTerrain((s) => s.horizon);
+  const pinHorizonKey = useTerrain((s) => s.horizonKey);
   const terrain = useSettings((s) => s.terrain);
   const terrainHorizon = useSettings((s) => s.terrainHorizon);
   const horizonRangeKm = useSettings((s) => s.horizonRangeKm);
-  const hk = horizonKeyFor({ pin, pinHeightM, pin2: null, pin2HeightM: 0 }, { terrain, terrainHorizon, horizonRangeKm });
-  if (!hk)
+  const g = glowPointFor({ pin, pinHeightM, pin2 }, { terrain, terrainHorizon, horizonRangeKm });
+  const swept = useSweptHorizon(g.at === GlowAt.Target ? g.point : null, g.horizonKey, g.aboveGroundM, horizonRangeKm);
+  if (!g.horizonKey)
     return (
       <p className="wx-missing" data-glow="noterrain">
         Needs the skyline: switch on elevation data and the terrain horizon in <Link to="/settings">Settings</Link>.
       </p>
     );
-  return <AlpenglowForecast point={pin} horizon={horizon && horizonKey === hk ? horizon : null} aboveGroundM={pinHeightM + EYE_HEIGHT_M} />;
+  if (swept instanceof Error)
+    return (
+      <p className="error" data-glow="noskyline">
+        Target skyline failed: {swept.message}
+      </p>
+    );
+  const horizon = g.at === GlowAt.Target ? swept : pinHorizon && pinHorizonKey === g.horizonKey ? pinHorizon : null;
+  return <AlpenglowForecast point={g.point} horizon={horizon} aboveGroundM={g.aboveGroundM} />;
 }
 
 /** Up to a week of sunrise and sunset glow at a point, against its skyline. */
@@ -100,7 +124,7 @@ function AlpenglowForecast({ point, horizon, aboveGroundM }: { point: LngLat; ho
     if (!horizon || !on) return;
     let live = true;
     const now = Date.now();
-    const obs = makeObserver(point, siteHeightM(horizon.groundM, aboveGroundM));
+    const obs = lightPointObserver(point, horizon, aboveGroundM);
     const days = Array.from({ length: DAYS }, (_, i) => {
       const b = dayBounds(addLocalDays(new Date(now), i, tz), tz);
       return glowDay(obs, horizon.profile, b.start.getTime(), b.end.getTime(), lowDeg);

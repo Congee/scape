@@ -1,4 +1,4 @@
-// Alpenglow smoke: Weather › Alpenglow for the camera pin, Open-Meteo stubbed through CDP Fetch (plus one live request), desktop and phone.
+// Alpenglow smoke: Weather › Alpenglow for the target, else the camera pin, Open-Meteo stubbed through CDP Fetch (plus one live request), desktop and phone.
 // Usage: bun scripts/smoke/alpenglow.ts <cdp> <dev-port> <screenshot-dir>
 /* oxlint-disable no-await-in-loop -- checks run one at a time against one page */
 import { mkdirSync } from 'node:fs';
@@ -11,6 +11,8 @@ const BASE = `http://localhost:${port}`;
 const POINT = { lat: 51.9225, lng: 4.4792 };
 // Jungfrau's south-east ridge, near 3500 m: above the low band.
 const SUMMIT = { lat: 46.5475, lng: 7.9625 };
+// Mönch, the target moved.
+const SUMMIT2 = { lat: 46.5585, lng: 7.9975 };
 const MAX_REQUESTS = 20;
 mkdirSync(out, { recursive: true });
 
@@ -53,13 +55,20 @@ const spansDays = (h: Hit) => {
   return (Date.parse(u.searchParams.get('end_date') ?? '') - Date.parse(u.searchParams.get('start_date') ?? '')) / 86_400_000;
 };
 const glowHits = (since: number) => stub.forecasts(since).filter((h) => spansDays(h) >= 3);
+// First location of a request, rounded as sent.
+const firstAt = (h: Hit) => {
+  const u = new URL(h.url).searchParams;
+  return `${Number(u.get('latitude')?.split(',')[0]).toFixed(2)},${Number(u.get('longitude')?.split(',')[0]).toFixed(2)}`;
+};
+const sent = (p: { lat: number; lng: number }) => `${(Math.round(p.lat * 100) / 100).toFixed(2)},${(Math.round(p.lng * 100) / 100).toFixed(2)}`;
+const glowAt = () => js<{ at: string; label: string }>(`(() => { const d = document.querySelector('details[data-card=alpenglow]'); return { at: d?.dataset.glowAt ?? '', label: d?.querySelector('summary')?.textContent ?? '' }; })()`);
 const stats = () => js<{ fetches: number; cacheHits: number }>('({ ...window.__scape.glowStats })');
 
 /** Loads the app with the camera at `at`, the Weather tab open, and the pin's skyline swept. */
 async function atPin(at = POINT) {
   await tab.navigate(`${BASE}/`);
   await until('window.__scape && document.querySelector(".tabs button")', 30_000);
-  await js(`(() => { const s = window.__scape; s.world.getState().setPin(${JSON.stringify(at)}); const u = s.ui.getState(); u.setPanelTab('Weather'); u.setPanelCollapsed(false); return 1; })()`);
+  await js(`(() => { const s = window.__scape; s.world.getState().setPin(${JSON.stringify(at)}); s.world.getState().setPin2(null); const u = s.ui.getState(); u.setPanelTab('Weather'); u.setPanelCollapsed(false); return 1; })()`);
   await until(`(() => { const t = window.__scape.terrain.getState(); return t.horizon?.refined && t.horizonKey.startsWith('${at.lat.toFixed(4)},${at.lng.toFixed(4)}|'); })()`, 120_000);
   await until('document.querySelector("details[data-card=alpenglow] > summary[data-glow-toggle]")');
 }
@@ -180,6 +189,41 @@ async function run(vp: 'desktop' | 'phone') {
   check(`${vp}: sea of clouds badge on a summit, score unchanged`, plain === 0 && sea.ground > 2000 && sea.n > 0 && sea.score === '100' && sea.why.startsWith('sea of clouds'), `${Math.round(sea.ground)} m · ${sea.n} badges · ${sea.score} · ${sea.why} · lowland ${plain}`);
   await js('document.querySelector("[data-glow-sea]")?.scrollIntoView()');
   await tab.shot(`${out}/${vp}-sea.png`);
+
+  // Target set: the forecast follows it, on its own skyline and cache key; cleared, it falls back to the pin.
+  await fresh();
+  await js(`(() => { window.__scape.weather.getState().setModel('best_match'); return 1; })()`);
+  const pinLabel = await glowAt();
+  await open();
+  const pinSea = await js<number>(`document.querySelectorAll('[data-glow-sea]').length`);
+  check(`${vp}: no target, section says the camera`, pinLabel.at === 'Pin' && /Alpenglow · at the camera/.test(pinLabel.label) && pinSea === 0, `${pinLabel.at} · ${pinLabel.label} · ${pinSea} badges`);
+  await js(`(() => { document.querySelector('details[data-card=alpenglow] summary').click(); return 1; })()`);
+  const g0 = glowHits(since).length;
+  await js(`(() => { window.__scape.world.getState().setPin2(${JSON.stringify(SUMMIT)}); return 1; })()`);
+  await Bun.sleep(1500);
+  const closedHits = glowHits(since).length - g0;
+  const tLabel = await glowAt();
+  const tSt = await open();
+  const tHits = glowHits(since).slice(g0);
+  const tSea = await js<number>(`document.querySelectorAll('[data-glow-sea]').length`);
+  check(`${vp}: target set, forecast follows it`, closedHits === 0 && tLabel.at === 'Target' && /Alpenglow · at the target/.test(tLabel.label) && tSt === 'Ok' && tHits.length === 1 && firstAt(tHits[0]) === sent(SUMMIT) && tSea > 0, `closed +${closedHits} · ${tLabel.label} · ${tSt} · ${tHits.map(firstAt).join(' ')} · ${tSea} badges`);
+  await tab.shot(`${out}/${vp}-target.png`);
+
+  const g1 = glowHits(since).length;
+  await js(`(() => { window.__scape.world.getState().setPin2(${JSON.stringify(SUMMIT2)}); return 1; })()`);
+  const mSt = await open();
+  const mHits = glowHits(since).slice(g1);
+  check(`${vp}: target moved, new point fetched`, mSt === 'Ok' && (await glowAt()).at === 'Target' && mHits.length === 1 && firstAt(mHits[0]) === sent(SUMMIT2), `${mSt} · ${mHits.map(firstAt).join(' ')}`);
+
+  await js(`(() => { document.querySelector('details[data-card=alpenglow] summary').click(); return 1; })()`);
+  const g2 = glowHits(since).length;
+  const c0 = await stats();
+  await js(`(() => { window.__scape.world.getState().setPin2(null); return 1; })()`);
+  const cLabel = await glowAt();
+  const cSt = await open();
+  const cSea = await js<number>(`document.querySelectorAll('[data-glow-sea]').length`);
+  check(`${vp}: target cleared, back to the pin from its cache`, cLabel.at === 'Pin' && /at the camera/.test(cLabel.label) && cSt === 'Ok' && glowHits(since).length === g2 && (await stats()).cacheHits === c0.cacheHits + 1 && cSea === 0, `${cLabel.label} · ${cSt} · +${glowHits(since).length - g2} requests · hits ${c0.cacheHits} → ${(await stats()).cacheHits} · ${cSea} badges`);
+  await tab.shot(`${out}/${vp}-target-cleared.png`);
 
   // Tools › Light at a point no longer carries the forecast.
   await js(`(() => { const s = window.__scape; s.ui.getState().setPanelTab('Tools'); s.lightProbe.getState().setPoint(${JSON.stringify(SUMMIT)}); return 1; })()`);
