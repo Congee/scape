@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import type { LngLat } from '@core/geo/geodesy';
 import { formatDateTime, formatTime } from '@core/time/format';
@@ -15,17 +16,17 @@ import { Sightlines } from './Sightlines';
 import { Credit, fetchedText, WindyLink, fogAt, missingText, noDataAt, useForecast } from './CloudChart';
 
 /** Latest run start of a single-domain model; blends report none. */
-function useModelRun(model: WeatherModel): { ms: number | null; now: number } | undefined {
+function useModelRun(model: WeatherModel, on: boolean): { ms: number | null; now: number } | undefined {
   const metaId = modelInfo(model).metaId;
   const [run, setRun] = useState<{ id: string; ms: number | null; now: number } | null>(null);
   useEffect(() => {
-    if (!metaId) return;
+    if (!metaId || !on) return;
     let live = true;
     void modelRun(metaId).then((ms) => live && setRun({ id: metaId, ms, now: Date.now() }));
     return () => {
       live = false;
     };
-  }, [metaId]);
+  }, [metaId, on]);
   if (!metaId) return undefined;
   return run?.id === metaId ? run : { ms: null, now: 0 };
 }
@@ -40,8 +41,17 @@ export function WeatherPanel() {
   const dayEnd = useDayData((s) => s.dayEnd);
   const model = useWeather((s) => s.model);
   const info = modelInfo(model);
-  const run = useModelRun(model);
+  const on = useSettings((s) => s.weather);
+  const run = useModelRun(model, on);
   const { loading, results, retry, now } = useForecast([pin, pin2], dayStart, dayEnd);
+  if (!on)
+    return (
+      <div className="weather">
+        <p className="wx-missing" data-wx="off">
+          Forecasts are off for privacy: no location is sent to Open-Meteo. <Link to="/settings">Turn them on in Settings</Link>.
+        </p>
+      </div>
+    );
 
   return (
     <div className="weather">

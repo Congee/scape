@@ -47,6 +47,8 @@ export interface Settings {
   terrain3d: boolean;
   /** NASA VIIRS night-lights raster as a light-pollution proxy. */
   showLightPollution: boolean;
+  /** Send camera, target and map locations to Open-Meteo for forecasts. */
+  weather: boolean;
   /** Milky Way core window rules. */
   mwSunMaxAlt: number;
   mwGcMinAlt: number;
@@ -85,6 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showHillshade: false,
   terrain3d: false,
   showLightPollution: false,
+  weather: true,
   mwSunMaxAlt: -18,
   mwGcMinAlt: 10,
   mwMoonRule: MoonRule.Down,

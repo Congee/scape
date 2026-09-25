@@ -5,6 +5,7 @@ import { CloudLayer, gapColor, layerColor, layerValue } from '@core/weather/laye
 import { modelInfo } from '@core/weather/models';
 import { CLOUD_VARS, type PointSeries } from '@core/weather/openMeteo';
 import { forecastPoints } from '@data/weather';
+import { settingsStore } from '@state/settings';
 import { weatherStore } from '@state/weather';
 import { worldStore } from '@state/world';
 
@@ -37,10 +38,11 @@ export class CloudOverlay {
       () => clearTimeout(this.timer),
       weatherStore.subscribe((s) => [s.layer, s.model] as const, () => this.fetch(), { equalityFn: shallow }),
       weatherStore.subscribe((s) => s.opacity, () => this.applyOpacity()),
+      settingsStore.subscribe((s) => s.weather, () => this.fetch()),
       worldStore.subscribe(
         (s) => Math.round(s.time / HOUR_MS),
         () => {
-          if (weatherStore.getState().layer === CloudLayer.Off) return;
+          if (!this.on()) return;
           if (this.dayOf(worldStore.getState().time) === this.dataKey.split('|')[1]) this.paint();
           else this.fetch();
         }
@@ -75,16 +77,21 @@ export class CloudOverlay {
     return String(Math.floor(ms / DAY_MS) * DAY_MS);
   }
 
+  /** A layer is picked and forecasts are allowed to send locations. */
+  private on() {
+    return weatherStore.getState().layer !== CloudLayer.Off && settingsStore.getState().weather;
+  }
+
   private schedule() {
     clearTimeout(this.timer);
-    if (weatherStore.getState().layer === CloudLayer.Off) return;
+    if (!this.on()) return;
     this.timer = setTimeout(() => this.fetch(), SETTLE_MS);
   }
 
   private fetch() {
     clearTimeout(this.timer);
-    const { layer, model } = weatherStore.getState();
-    if (layer === CloudLayer.Off) {
+    const { model } = weatherStore.getState();
+    if (!this.on()) {
       this.hide();
       return;
     }
@@ -117,7 +124,7 @@ export class CloudOverlay {
   private paint() {
     const src = this.map.getSource(SRC) as ImageSource | undefined;
     const { layer } = weatherStore.getState();
-    if (!src || !this.lattice || layer === CloudLayer.Off) return;
+    if (!src || !this.lattice || !this.on()) return;
     const hour = Math.round(worldStore.getState().time / HOUR_MS) * HOUR_MS;
     const key = `${this.dataKey}|${layer}|${hour}`;
     if (key === this.painted) return;

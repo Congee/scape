@@ -1945,6 +1945,23 @@ label.file-pick input[type='file'] {
   margin: 4px 0 0;
 }
 
+.viirs-need .chip {
+  margin: 0 4px 2px 0;
+}
+
+.viirs-need .viirs-have {
+  color: var(--terrain);
+}
+
+.viirs-need .viirs-missing {
+  color: var(--sun);
+}
+
+.viirs-need .viirs-ocean {
+  color: var(--fg-3);
+  text-decoration: line-through;
+}
+
 /* Weather */
 .timeline .dot.cloud { background: var(--cloud); }
 

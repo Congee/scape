@@ -18,13 +18,14 @@ const HOUR_MS = 3_600_000;
 /** Forecasts for `points` over [startMs, endMs) under the picked model; asks once per change, never polls. */
 export function useForecast(points: readonly (LngLat | null)[], startMs: number, endMs: number, vars: readonly HourlyVar[] = POINT_VARS) {
   const model = useWeather((s) => s.model);
+  const on = useSettings((s) => s.weather);
   const [nonce, setNonce] = useState(0);
   const pts = points.map((p) => (p ? [roundCoord(p.lat), roundCoord(p.lng)] : null));
-  const spec = JSON.stringify({ model, startMs, endMs, pts, vars, nonce });
+  const spec = JSON.stringify({ model, startMs, endMs, pts, vars, nonce, on });
   const [got, setGot] = useState<{ spec: string; results: (ForecastResult | null)[]; now: number } | null>(null);
   useEffect(() => {
-    const s = JSON.parse(spec) as { model: string; startMs: number; endMs: number; pts: ([number, number] | null)[]; vars: HourlyVar[] };
-    if (s.endMs <= s.startMs) return;
+    const s = JSON.parse(spec) as { model: string; startMs: number; endMs: number; pts: ([number, number] | null)[]; vars: HourlyVar[]; on: boolean };
+    if (s.endMs <= s.startMs || !s.on) return;
     let live = true;
     const ask = s.pts.flatMap((p) => (p ? [{ lat: p[0], lng: p[1] }] : []));
     void forecastPoints(ask, s.model, s.vars, s.startMs, s.endMs).then((r) => {
@@ -37,7 +38,7 @@ export function useForecast(points: readonly (LngLat | null)[], startMs: number,
   }, [spec]);
   const fresh = got?.spec === spec;
   // Ages are as of the last answer; no timer ticks them.
-  return { model, loading: !fresh, results: fresh ? got.results : null, now: got?.now ?? 0, retry: () => setNonce((n) => n + 1) };
+  return { model, off: !on, loading: on && !fresh, results: fresh ? got.results : null, now: got?.now ?? 0, retry: () => setNonce((n) => n + 1) };
 }
 
 /** True when no variable has a value at `ms`: past the model's horizon or before its archive. */
@@ -131,8 +132,19 @@ export function CloudRow() {
   const hour12 = useSettings((s) => s.hour12);
   const dayStart = useDayData((s) => s.dayStart);
   const dayEnd = useDayData((s) => s.dayEnd);
-  const { model, loading, results, now } = useForecast([pin], dayStart, dayEnd);
+  const { model, off, loading, results, now } = useForecast([pin], dayStart, dayEnd);
   if (dayEnd <= dayStart) return null;
+  if (off)
+    return (
+      <div className="cloud-row" data-off="">
+        <button onClick={() => uiStore.getState().setPanelTab(PanelTab.Weather)} title="Forecasts are off in Settings">
+          <span className="dot cloud" aria-hidden="true" />
+          <span className="label">Cloud forecast</span>
+          <span className="az" />
+          <span className="extra">off for privacy</span>
+        </button>
+      </div>
+    );
   const r = results?.[0] ?? null;
   const s = r?.series ?? null;
   const missing = loading ? '' : missingText(r);

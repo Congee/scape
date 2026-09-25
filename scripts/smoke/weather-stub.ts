@@ -64,7 +64,9 @@ export class OpenMeteoStub {
   constructor(private tab: Tab) {}
 
   async install() {
-    this.tab.on('Fetch.requestPaused', (p) => void this.paused(p as { requestId: string; request: { url: string } }).catch((e: unknown) => console.error('stub:', e)));
+    this.tab.listeners.push((m, p) => {
+      if (m === 'Fetch.requestPaused') void this.paused(p as { requestId: string; request: { url: string } }).catch((e: unknown) => console.error('stub:', e));
+    });
     await this.tab.send('Fetch.enable', { patterns: [{ urlPattern: '*api.open-meteo.com*', requestStage: 'Request' }] });
   }
 

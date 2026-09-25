@@ -47,7 +47,7 @@ async function fresh(url: string) {
   stub.mode = StubMode.Fail;
   await tab.navigate(url);
   // Clears rather than deletes: a delete waits on every open connection, other tabs included.
-  await js(`new Promise((r) => { localStorage.removeItem('scape.weatherBudget'); localStorage.removeItem('scape.weather'); const q = indexedDB.open('scape-weather'); q.onupgradeneeded = () => q.transaction.abort(); q.onerror = () => r(1); q.onsuccess = () => { const db = q.result, names = [...db.objectStoreNames]; if (!names.length) return (db.close(), r(1)); const t = db.transaction(names, 'readwrite'); for (const n of names) t.objectStore(n).clear(); t.oncomplete = t.onerror = () => (db.close(), r(1)); }; })`);
+  await js(`new Promise((r) => { window.__scape?.settings.getState().update({ weather: true }); localStorage.removeItem('scape.weatherBudget'); localStorage.removeItem('scape.weather'); const q = indexedDB.open('scape-weather'); q.onupgradeneeded = () => q.transaction.abort(); q.onerror = () => r(1); q.onsuccess = () => { const db = q.result, names = [...db.objectStoreNames]; if (!names.length) return (db.close(), r(1)); const t = db.transaction(names, 'readwrite'); for (const n of names) t.objectStore(n).clear(); t.oncomplete = t.onerror = () => (db.close(), r(1)); }; })`);
   stub.mode = mode;
   await tab.navigate(url);
   await until('window.__scape && window.__scapeMap && document.querySelector(".tabs button")', 30_000);
@@ -225,6 +225,33 @@ async function run(vp: 'desktop' | 'phone') {
   const hits = stub.forecasts(since);
   const stats = await js<{ refused: number; errors: number; weight: number }>('window.__scape.weatherStats');
   check(`${vp}: requests within budget`, hits.length <= MAX_REQUESTS && stats.refused === 0 && stats.weight < 600, `${hits.length} forecast requests, ${hits.reduce((a, h) => a + h.locations, 0)} points, weight ${stats.weight.toFixed(1)}, refused ${stats.refused}`);
+
+  // Privacy off: no location leaves, every forecast says why.
+  await js(`(() => { window.__scape.weather.getState().setLayer('Low'); return 1; })()`);
+  await until(`window.__scape.weather.getState().cloudInfo?.at > ${Date.now()}`);
+  await js(`(() => { window.__scape.settings.getState().update({ weather: false }); return 1; })()`);
+  const p0 = stub.hits.length;
+  const pf0 = await js<number>('window.__scape.cloudStats.fetches');
+  await setPin(PARIS);
+  await js(`(() => { const m = window.__scapeMap, c = m.getCenter(); m.jumpTo({ center: [c.lng + 1, c.lat] }); return 1; })()`);
+  await tabTo('Weather');
+  await until('document.querySelector(\'[data-wx="off"]\')', 5000);
+  const offWx = await text('[data-wx="off"]');
+  if (!(await js<boolean>('!!document.querySelector(".cloud-row")'))) await tabTo('Timeline');
+  await until('document.querySelector(".cloud-row[data-off]")', 5000);
+  const offRow = await text('.cloud-row .extra');
+  await Bun.sleep(1500);
+  const pf1 = await js<number>('window.__scape.cloudStats.fetches');
+  const vis = await js(`window.__scapeMap.getLayoutProperty('weather-cloud', 'visibility')`);
+  check(`${vp}: privacy off sends nothing, rows say so`, /off for privacy/i.test(offWx) && offRow === 'off for privacy' && stub.hits.length === p0 && pf1 === pf0 && vis === 'none', `${offRow} · ${offWx.slice(0, 40)} · ${stub.hits.length - p0} requests, ${pf1 - pf0} layer fetches, layer ${vis}`);
+  await tab.shot(`${out}/${vp}-privacy.png`);
+  await tab.navigate(`${BASE}/settings`);
+  await until('document.querySelector(\'input[aria-label="Fetch weather forecasts"]\')', 30_000);
+  const box = await js<boolean>('document.querySelector(\'input[aria-label="Fetch weather forecasts"]\').checked');
+  await js('document.querySelector(\'input[aria-label="Fetch weather forecasts"]\').click()');
+  const back = await until('window.__scape.settings.getState().weather === true', 5000);
+  check(`${vp}: Settings toggle persists and turns forecasts back on`, !box && !!back, `checked ${box} → store ${back}`);
+  await js(`(() => { window.__scape.weather.getState().setLayer('Off'); return 1; })()`);
 }
 
 await run('desktop');

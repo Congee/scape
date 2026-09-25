@@ -169,6 +169,9 @@ export class MapController {
   private painted: { src: ImageSource; mask: ShadowMaskField } | null = null;
   private drawer: ModelDrawer;
   private clouds: CloudOverlay;
+  private menu: MapMenu;
+  /** Fingers on the map; the browser's own long-press contextmenu is left to `LongPress`. */
+  private touches = 0;
   /** Overture feature ids a visible model stands in for. */
   private hiddenIds: string[] = [];
   /** Body behind the mask on screen; the smoke test reads it. */

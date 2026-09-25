@@ -60,6 +60,14 @@ function SettingsPage() {
         </label>
         <p className="muted">Powers the elevation badge, the sightline profile and the terrain horizon. Water reads as depth in the data; sightlines treat it as sea level.</p>
       </section>
+      <section>
+        <h2>Weather</h2>
+        <label className="field">
+          <span>Fetch forecasts (Open-Meteo)</span>
+          <input type="checkbox" checked={s.weather} onChange={(e) => update({ weather: e.target.checked })} aria-label="Fetch weather forecasts" />
+        </label>
+        <p className="muted">Sends the camera, target and map-view locations to Open-Meteo. Off, no weather is fetched and the forecasts read "off for privacy".</p>
+      </section>
       <GearSettings />
       <section>
         <h2>Reset</h2>
