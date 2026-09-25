@@ -99,7 +99,7 @@ eclipse_checks() { # label
   ab screenshot "$OUT/eclipse-$1.png" >/dev/null
 }
 
-# Counts of sun-coloured, dark, moon-white and glare-bright device pixels within 12 css px of the picture centre.
+# Counts of sun-coloured, dark, moon-white, glare-bright and copper device pixels within 12 css px of the picture centre.
 centre_px() { # png, css x, css y, css width
   uv run -q --with pillow python3 - "$@" <<'PY'
 import sys
@@ -112,11 +112,13 @@ sun = sum(1 for p in px if p[0] > 240 and p[1] > 225 and 150 < p[2] < 225)
 dark = sum(1 for p in px if max(p) < 90)
 white = sum(1 for p in px if min(p) > 170 and p[2] - p[0] < 50)
 # At 24 mm the disc is a few pixels under the glare, so "bright" stands in for the sun colour.
-print(sun, dark, white, sum(1 for p in px if min(p) > 215))
+# An eclipsed moon is copper, not white.
+red = sum(1 for p in px if p[0] > 25 and p[0] > 1.6 * p[2] and p[0] > p[1])
+print(sun, dark, white, sum(1 for p in px if min(p) > 215), red)
 PY
 }
 
-vf_shot() { # camera, instant, focal, orientation, az, alt, png → "sun dark white bright" pixel counts
+vf_shot() { # camera, instant, focal, orientation, az, alt, png → "sun dark white bright red" pixel counts
   go "$BASE/viewfinder?camera=$1&t=$2&f=$3$([ "$4" = P ] && echo '&o=p')"
   sleep 1.5
   js "(() => { window.__scape.composition.getState().aim($5, $6); return 'ok'; })()" >/dev/null
@@ -173,14 +175,15 @@ eclipse_checks desktop
 # Viewfinder: day is the Reykjavik totality, night the New Delhi lunar eclipse.
 for f in 24 200 600 2400; do
   for o in L P; do
-    read -r sun dark white bright < <(vf_shot "$REYKJAVIK" "$CTRL_T" "$f" "$o" "$CTRL_AZ" "$CTRL_ALT" "$OUT/vf-$f-$o-before.png")
+    read -r sun dark white bright red < <(vf_shot "$REYKJAVIK" "$CTRL_T" "$f" "$o" "$CTRL_AZ" "$CTRL_ALT" "$OUT/vf-$f-$o-before.png")
     check "viewfinder ${f} mm $o before C1: sun disc at centre" "$([ $((sun + bright)) -gt 0 ] && echo 1 || echo 0)" "sun $sun, bright $bright px"
     label_clash_check "viewfinder ${f} mm $o before C1"
-    read -r sun dark white bright < <(vf_shot "$REYKJAVIK" "$TOTAL_T" "$f" "$o" "$TOTAL_AZ" "$TOTAL_ALT" "$OUT/vf-$f-$o-total.png")
+    read -r sun dark white bright red < <(vf_shot "$REYKJAVIK" "$TOTAL_T" "$f" "$o" "$TOTAL_AZ" "$TOTAL_ALT" "$OUT/vf-$f-$o-total.png")
     check "viewfinder ${f} mm $o totality (C2–C3): moon covers the sun" "$([ "$sun" = 0 ] && [ "$dark" -gt 0 ] && echo 1 || echo 0)" "sun $sun, dark $dark px"
     label_clash_check "viewfinder ${f} mm $o totality"
-    read -r sun dark white bright < <(vf_shot "$DELHI" "$LUNAR_T" "$f" "$o" "$LUNAR_AZ" "$LUNAR_ALT" "$OUT/vf-$f-$o-night.png")
-    check "viewfinder ${f} mm $o night, lunar maximum: moon disc at centre" "$([ "$white" -gt 0 ] && echo 1 || echo 0)" "white $white px"
+    read -r sun dark white bright red < <(vf_shot "$DELHI" "$LUNAR_T" "$f" "$o" "$LUNAR_AZ" "$LUNAR_ALT" "$OUT/vf-$f-$o-night.png")
+    # At 24 mm the 2 px disc sits under the aim mark, so only "not white" is checkable.
+    check "viewfinder ${f} mm $o night, lunar maximum: copper moon disc at centre" "$({ [ "$red" -gt 0 ] || [ "$f" = 24 ]; } && [ "$white" -le 1 ] && echo 1 || echo 0)" "red $red, white $white px"
     label_clash_check "viewfinder ${f} mm $o night"
   done
 done
@@ -190,7 +193,7 @@ moon_label_case desktop P "$OUT/label-P"
 ab set viewport 390 844 >/dev/null
 tide_checks phone
 eclipse_checks phone
-read -r sun dark white bright < <(vf_shot "$REYKJAVIK" "$TOTAL_T" 200 P "$TOTAL_AZ" "$TOTAL_ALT" "$OUT/vf-phone-total.png")
+read -r sun dark white bright red < <(vf_shot "$REYKJAVIK" "$TOTAL_T" 200 P "$TOTAL_AZ" "$TOTAL_ALT" "$OUT/vf-phone-total.png")
 check "phone 390×844 viewfinder 200 mm P totality" "$([ "$sun" = 0 ] && [ "$dark" -gt 0 ] && echo 1 || echo 0)" "sun $sun, dark $dark px"
 moon_label_case "phone 390×844" P "$OUT/label-phone"
 ab set viewport 1400 900 >/dev/null
