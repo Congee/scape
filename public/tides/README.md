@@ -1,6 +1,6 @@
 # Bundled tide stations
 
-- `stations.json`: harmonic constituents (amplitude, GMT phase) and MSL−MLLW offset for every NOAA CO-OPS
+- `stations.json`: harmonic constituents (all 120 CO-OPS publishes, 1 mm and up; amplitude, GMT phase) and MSL−MLLW offset for every NOAA CO-OPS
   harmonic (type R) tide prediction station, from the CO-OPS metadata API
   (https://api.tidesandcurrents.noaa.gov/mdapi/prod/). NOAA data is a US government work in the public domain.
   Built by `scripts/build-tides.ts`; loaded lazily by the Tools and Timeline tabs.
