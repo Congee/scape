@@ -32,6 +32,8 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
         if (!live) return;
         setImp(r);
         setError(null);
+        // A file Scape placed says where it stands, so there is nothing to choose.
+        if (r.draft.anchor && opts === null) void place(r);
       },
       (e: unknown) => {
         if (!live) return;
@@ -42,6 +44,7 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
     return () => {
       live = false;
     };
+    // oxlint-disable-next-line react/exhaustive-deps -- placed once per parse, not per render's `place`
   }, [files, opts]);
 
   useEffect(
@@ -58,11 +61,11 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
   const fromFile = !!imp?.draft.anchor && opts === null;
   const imported = imp?.draft.source === ModelSource.Imported;
 
-  const place = async () => {
-    if (!imp) return;
+  const place = async (r: ModelImport) => {
+    const asIs = !!r.draft.anchor && opts === null;
     setBusy(true);
     try {
-      const anchor = imp.draft.anchor ?? {
+      const anchor = r.draft.anchor ?? {
         ...at.where,
         altRef: AltitudeRef.Ground,
         altM: 0,
@@ -70,7 +73,7 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
         scale: 1
       };
       // The file's own footprint as written, so a round trip keeps it byte for byte.
-      const m: SavedModel = fromFile ? { ...imp.draft, anchor } : placeDraft(imp, anchor);
+      const m: SavedModel = asIs ? { ...r.draft, anchor } : placeDraft(r, anchor);
       const groundM = await groundUnder(m.footprint.map(([lng, lat]) => ({ lng, lat }))).catch(() => null);
       await modelsStore.getState().importDraft({ ...m, groundM: groundM ?? NaN });
       onClose();
@@ -142,7 +145,7 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
         </ul>
       )}
       <div className="actions">
-        <button onClick={() => void place()} disabled={!imp || busy}>
+        <button onClick={() => imp && void place(imp)} disabled={!imp || busy}>
           Place
         </button>
         {imp && !imp.draft.anchor && (
