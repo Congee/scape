@@ -33,14 +33,14 @@ export interface MoonSky {
  * Sky brightness toward (skyAltDeg) at separation ρ from a moon at moonAltDeg. The dark sky is the site's zenith
  * value carried to that altitude with K&S eq. 2; a moon below the horizon adds nothing.
  */
-export function moonlitSky(zenithMag: number, skyAltDeg: number, moonAltDeg: number, rhoDeg: number, illumination: number, k = KS_EXTINCTION): MoonSky {
+export function moonlitSky(zenithMag: number, skyAltDeg: number, moonAltDeg: number, rhoDeg: number, illumination: number, eclipse = 1, k = KS_EXTINCTION): MoonSky {
   const z = 90 - Math.max(0, Math.min(90, skyAltDeg));
   const x = ksAirmass(z);
   const dark = magToNl(zenithMag) * 10 ** (-0.4 * k * (x - 1)) * x;
   let moon = 0;
   if (moonAltDeg > 0 && illumination > 0) {
     const xm = ksAirmass(90 - Math.min(90, moonAltDeg));
-    moon = ksScatter(Math.max(rhoDeg, 0.5)) * ksMoonIlluminance(phaseAngleDeg(illumination)) * 10 ** (-0.4 * k * xm) * (1 - 10 ** (-0.4 * k * x));
+    moon = ksScatter(Math.max(rhoDeg, 0.5)) * ksMoonIlluminance(phaseAngleDeg(illumination)) * eclipse * 10 ** (-0.4 * k * xm) * (1 - 10 ** (-0.4 * k * x));
   }
   const mag = nlToMag(dark + moon);
   return { mag, deltaMag: mag - nlToMag(dark) };

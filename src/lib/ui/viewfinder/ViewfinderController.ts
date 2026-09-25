@@ -5,7 +5,7 @@ import type { PreparedConstellations } from '@core/astro/constellations';
 import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
 import { apply, applyStar, enuToEqj, eqjToEnu, horizontalOf, poleEnu, refractEnu, starFrame, type StarFrame } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
-import { lunarEclipseLight, shadowView } from '@core/astro/eclipse';
+import { lunarEclipseLight, lunarShadowCoverage, shadowView } from '@core/astro/eclipse';
 import { lightAt, type Light } from '@core/astro/lightSource';
 import { moonView } from '@core/astro/moonSim';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
@@ -744,7 +744,7 @@ export class ViewfinderController {
     const q = sh && this.toPx(sc, (Math.atan2(sh.axis[0], sh.axis[1]) * 180) / Math.PI, (Math.asin(sh.axis[2]) * 180) / Math.PI);
     const px = (rad: number) => discRadiusMm(sc.cam, (rad * 180) / Math.PI) * sc.frame.pxPerMm;
     const shadow = sh && q ? { x: r.left + q.x, y: r.top + q.y, umbraPx: px(sh.umbra), penumbraPx: px(sh.penumbra) } : null;
-    return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), shadow, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
+    return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), umbra: lunarShadowCoverage(sc.time).umbra, shadow, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
   }
 
   private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {

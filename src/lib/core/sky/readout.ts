@@ -45,6 +45,8 @@ export interface MoonAt {
   altDeg: number;
   azDeg: number;
   illumination: number;
+  /** What a lunar eclipse leaves of the moon's light, 0..1. */
+  eclipse?: number;
 }
 
 /** K&S moonlit sky toward one direction, sampled across [startMs, endMs] inclusive. */
@@ -56,7 +58,7 @@ export function moonCurve(zenithMag: number, aimAzDeg: number, aimAltDeg: number
     const t = Math.min(endMs, startMs + i * stepMs);
     const m = moonAt(t);
     const rho = separationDeg(aimAzDeg, aimAltDeg, m.azDeg, m.altDeg);
-    const s = moonlitSky(zenithMag, aimAltDeg, m.altDeg, rho, m.illumination);
+    const s = moonlitSky(zenithMag, aimAltDeg, m.altDeg, rho, m.illumination, m.eclipse);
     out.push({ t, mag: s.mag, deltaMag: s.deltaMag, moonAltDeg: m.altDeg });
   }
   return out;

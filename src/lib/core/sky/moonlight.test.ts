@@ -26,6 +26,11 @@ describe('Krisciunas & Schaefer moonlight', () => {
     expect(moonlitSky(18.5, 90, 60, 30, 1).deltaMag).toBeGreaterThan(full.deltaMag);
   });
 
+  it('leaves a totally eclipsed full moon a near-dark sky', () => {
+    expect(moonlitSky(21.7, 90, 60, 30, 1, 2e-4).deltaMag).toBeGreaterThan(-0.05);
+    expect(moonlitSky(21.7, 90, 60, 30, 1, 0.5).deltaMag).toBeGreaterThan(moonlitSky(21.7, 90, 60, 30, 1).deltaMag);
+  });
+
   it('is brighter near the moon than 90° away', () => {
     expect(moonlitSky(21.7, 40, 40, 5, 1).mag).toBeLessThan(moonlitSky(21.7, 40, 40, 90, 1).mag);
   });

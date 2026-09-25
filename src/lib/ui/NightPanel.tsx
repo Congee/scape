@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { makeObserver, siteHeightM, SkyBody } from '@core/astro/bodies';
 import { dayEvents, EventKind, type DayEvent } from '@core/astro/dayEvents';
+import { lunarEclipseLight } from '@core/astro/eclipse';
 import { activeShowers, radiantHorizontal, upcomingPeaks, type ShowerStatus } from '@core/astro/meteors';
 import { milkyWayStatus, MoonRule } from '@core/astro/milkyWay';
 import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type PanelNight } from '@core/astro/night';
@@ -103,7 +104,7 @@ function moonCurveFor(obs: ReturnType<typeof makeObserver>, zenithMag: number, a
     const curve = moonCurve(zenithMag, azDeg, altDeg, startMs, endMs, MOON_STEP_MS, (t) => {
       const d = new Date(t);
       const m = position(SkyBody.Moon, d, obs);
-      return { altDeg: m.altitude, azDeg: m.azimuth, illumination: moonInfo(d).illumination };
+      return { altDeg: m.altitude, azDeg: m.azimuth, illumination: moonInfo(d).illumination, eclipse: lunarEclipseLight(d) };
     });
     moonCache = { key, curve };
   }

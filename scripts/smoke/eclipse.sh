@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase arrays are read through namerefs.
 # shellcheck disable=SC2034
-# Smoke test for the viewfinder eclipse look: the 2025-09-07 lunar eclipse phases from New Delhi and the 2026-08-12 solar eclipse.
+# Smoke test for the viewfinder eclipse look: the 2025-09-07 lunar eclipse phases from New Delhi (clear before and after) and the 2026-08-12 solar eclipse.
 # Usage: scripts/smoke/eclipse.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port, a browser with remote debugging on the CDP port, and uv (for pixel sampling).
 set -uo pipefail
@@ -50,10 +50,15 @@ DELHI="28.6,77.2"
 MADRID="40.4,-3.683"
 REYKJAVIK="64.15,-21.85"
 # Lunar phases: instant, refracted moon azimuth and altitude, disc-averaged light range.
+BEFORE=("2025-09-07T14:55:00Z" 113.613 23.747 1 1)
 P1=("2025-09-07T15:40:00Z" 121.079 32.426 0.98 1.01)
+PEN=("2025-09-07T16:20:00Z" 129.212 39.572 0.6 0.75)
 U1=("2025-09-07T16:50:00Z" 136.573 44.403 0.12 0.26)
+# Midway U1–U2: half the disc in the umbra.
+HALF=("2025-09-07T16:59:00Z" 139.033 45.736 0.07 0.12)
 MAX=("2025-09-07T18:11:43Z" 163.757 53.645 0.00005 0.001)
 U3=("2025-09-07T19:25:00Z" 194.373 54.265 0.06 0.15)
+AFTER=("2025-09-07T21:30:00Z" 233.982 39.205 1 1)
 # Solar: Madrid partial before maximum, Reykjavik mid-totality; refracted sun position.
 PARTIAL=("2026-08-12T18:10:00Z" 279.857 11.424)
 TOTAL=("2026-08-12T17:48:38Z" 252.789 24.512)
@@ -69,8 +74,8 @@ shoot() { # camera, instant, focal, orientation, az, alt, png
   ab screenshot "$7" >/dev/null
 }
 
-# Moon disc: "light cx cy r nx ny" in css px, with (nx, ny) the unit step toward the shadow axis (0 0 without one).
-MOON='(() => { const m = window.__scape.moonDisc; if (!m) return "none"; const s = m.shadow; let nx = 0, ny = 0; if (s) { const h = Math.hypot(s.x - m.x, s.y - m.y) || 1; nx = (s.x - m.x) / h; ny = (s.y - m.y) / h; } return `${m.eclipseLight} ${m.x} ${m.y} ${m.radiusPx} ${nx} ${ny}`; })()'
+# Moon disc: "light cx cy r nx ny umbra" in css px, with (nx, ny) the unit step toward the shadow axis (0 0 without one).
+MOON='(() => { const m = window.__scape.moonDisc; if (!m) return "none"; const s = m.shadow; let nx = 0, ny = 0; if (s) { const h = Math.hypot(s.x - m.x, s.y - m.y) || 1; nx = (s.x - m.x) / h; ny = (s.y - m.y) / h; } return `${m.eclipseLight} ${m.x} ${m.y} ${m.radiusPx} ${nx} ${ny} ${m.umbra}`; })()'
 
 # Mean "r g b" of device pixels within a css radius of each css point.
 patches() { # png, css radius, x1 y1 [x2 y2 ...]
@@ -133,10 +138,10 @@ lunar_case() { # label, phase array name, focal, orientation
   local f=$3 o=$4 png
   png="$OUT/lunar-$2-$3-$4$([ "$1" = phone ] && echo -phone).png"
   shoot "$DELHI" "${ph[0]}" "$f" "$o" "${ph[1]}" "${ph[2]}" "$png"
-  local geo light cx cy r nx ny
+  local geo light cx cy r nx ny umbra
   geo=$(js "$MOON")
   if [ "$geo" = none ]; then check "$1 lunar $2 ${f} mm $o: moon disc" 0 "no disc"; return; fi
-  read -r light cx cy r nx ny <<<"$geo"
+  read -r light cx cy r nx ny umbra <<<"$geo"
   check "$1 lunar $2 ${f} mm $o: eclipse light" "$(in_range "$light" "${ph[3]}" "${ph[4]}")" "$light"
   local pr; pr=$(awk -v r="$r" 'BEGIN { print (r > 6 ? r * 0.2 : r * 0.4) }')
   local near far
@@ -147,7 +152,19 @@ lunar_case() { # label, phase array name, focal, orientation
   local r0 g0 b0 r1 g1 b1 r2 g2 b2
   read -r r0 g0 b0 r1 g1 b1 r2 g2 b2 <<<"$c"
   case $2 in
-  P1) check "$1 lunar P1 ${f} mm $o: bright neutral disc" "$([ "$g0" -gt 120 ] && [ $((r0 - b0)) -lt 60 ] && echo 1 || echo 0)" "rgb $r0 $g0 $b0" ;;
+  BEFORE | P1 | AFTER)
+    [ "$2" = BEFORE ] && CLEAR_SUM=$((r0 + g0 + b0))
+    check "$1 lunar $2 ${f} mm $o: bright neutral disc" "$([ "$g0" -gt 120 ] && [ $((r0 - b0)) -lt 60 ] && echo 1 || echo 0)" "rgb $r0 $g0 $b0"
+    ;;
+  PEN) check "$1 lunar PEN ${f} mm $o: slightly dimmed, still neutral" "$([ "$g0" -gt 100 ] && [ $((r0 - b0)) -lt 60 ] && [ $((r0 + g0 + b0)) -lt "${CLEAR_SUM:-999}" ] && echo 1 || echo 0)" "rgb $r0 $g0 $b0, clear sum ${CLEAR_SUM:-?}" ;;
+  HALF)
+    check "$1 lunar HALF ${f} mm $o: half the disc in the umbra" "$(in_range "$umbra" 0.4 0.6)" "$umbra"
+    if [ "$f" -ge 200 ]; then
+      check "$1 lunar HALF ${f} mm $o: umbral half red and dark, other half bright" "$([ "$r1" -gt "$g1" ] && [ "$r1" -gt "$b1" ] && [ $((2 * (r1 + g1 + b1))) -lt $((r2 + g2 + b2)) ] && [ "$g2" -gt 100 ] && echo 1 || echo 0)" "umbral $r1 $g1 $b1, lit $r2 $g2 $b2"
+    else
+      check "$1 lunar HALF ${f} mm $o: disc visible" "$([ $((r0 + g0 + b0)) -gt 90 ] && echo 1 || echo 0)" "rgb $r0 $g0 $b0"
+    fi
+    ;;
   MAX)
     local n white all; read -r n white all < <(copper "$png" "$cx" "$cy" "$r")
     if [ "$f" -ge 200 ]; then
@@ -185,7 +202,7 @@ solar_case() { # label, kind, camera, phase array name, focal, orientation
 ab set viewport 1400 900 >/dev/null
 for f in 24 200 600 2400; do
   for o in L P; do
-    for ph in P1 U1 MAX U3; do lunar_case desktop "$ph" "$f" "$o"; done
+    for ph in BEFORE P1 PEN U1 HALF MAX U3 AFTER; do lunar_case desktop "$ph" "$f" "$o"; done
     solar_case desktop partial "$MADRID" PARTIAL "$f" "$o"
     solar_case desktop total "$REYKJAVIK" TOTAL "$f" "$o"
   done
@@ -194,6 +211,8 @@ done
 ab set viewport 390 844 >/dev/null
 lunar_case phone MAX 200 P
 lunar_case phone U1 600 P
+lunar_case phone BEFORE 600 P
+lunar_case phone HALF 600 P
 solar_case phone total "$REYKJAVIK" TOTAL 200 P
 ab set viewport 1400 900 >/dev/null
 

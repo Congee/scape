@@ -250,6 +250,21 @@ export function shadowLight(rho: number, ru: number, rp: number): { sun: number;
   return { sun, glow: UMBRA_AXIS_LIGHT * Math.exp(UMBRA_RISE * x * x) * (1 - sun) };
 }
 
+/** Fraction of a disc of radius `a` inside a circle of radius `b`, centres `d` apart. */
+function discInside(a: number, b: number, d: number): number {
+  if (d >= a + b) return 0;
+  if (d <= b - a) return 1;
+  if (d <= a - b) return (b * b) / (a * a);
+  const lens = a * a * Math.acos((d * d + a * a - b * b) / (2 * d * a)) + b * b * Math.acos((d * d + b * b - a * a) / (2 * d * b)) - 0.5 * Math.sqrt((-d + a + b) * (d + a - b) * (d - a + b) * (d + a + b));
+  return lens / (Math.PI * a * a);
+}
+
+/** Fractions of the moon's disc inside Earth's penumbra (umbra included) and umbra, geocentric. */
+export function lunarShadowCoverage(date: Date): { penumbra: number; umbra: number } {
+  const { g, rp, ru, sM } = earthShadow(new AstroTime(date));
+  return { penumbra: discInside(sM, rp, g), umbra: discInside(sM, ru, g) };
+}
+
 const DISC_SAMPLES = 24;
 
 /** Moonlight left by a lunar eclipse, averaged over the disc: 1 outside the penumbra. */

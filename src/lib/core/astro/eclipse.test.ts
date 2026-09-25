@@ -4,7 +4,7 @@ import type { HorizonProfile } from '@core/terrain/horizon';
 import besselianFile from '../../../../public/eclipses/besselian.json';
 import { parseBesselian } from './besselian';
 import { makeObserver } from './bodies';
-import { ContactKind, lunarCircumstances, lunarEclipseLight, shadowLight, SolarSource, solarCircumstances, type EclipseContact } from './eclipse';
+import { ContactKind, lunarCircumstances, lunarEclipseLight, lunarShadowCoverage, shadowLight, SolarSource, solarCircumstances, type EclipseContact } from './eclipse';
 
 const dms = (d: number, m: number) => Math.sign(d) * (Math.abs(d) + m / 60);
 // Both sides share the geometry; what is left is astronomy-engine's ephemeris against NASA's.
@@ -192,6 +192,32 @@ describe('lunar eclipse light', () => {
     expect(max).toBeLessThan(10 ** (-8 / 2.5));
     expect(at('17:00:00')).toBeGreaterThan(max);
     expect(at('21:00:00')).toBe(1);
+  });
+});
+
+const coverageAt = (ms: number) => lunarShadowCoverage(new Date(ms));
+
+describe('lunarShadowCoverage against NASA contacts', () => {
+  const MIN = 60_000;
+  it.each(LUNAR.slice(0, 2))('%s', (day, times) => {
+    const [p1, u1, u2, max, u3, u4, p4] = times.split(' ').map((t) => utc(`${day}T${t}`));
+    expect(coverageAt(p1 - MIN).penumbra).toBe(0);
+    expect(coverageAt(p1 + MIN).penumbra).toBeGreaterThan(0);
+    expect(coverageAt(u1 - MIN).umbra).toBe(0);
+    expect(coverageAt(u1 + MIN).umbra).toBeGreaterThan(0);
+    expect(coverageAt(u2 - MIN).umbra).toBeLessThan(1);
+    expect(coverageAt(u2 + MIN).umbra).toBe(1);
+    expect(coverageAt(max).umbra).toBe(1);
+    expect(coverageAt(u3 - MIN).umbra).toBe(1);
+    expect(coverageAt(u3 + MIN).umbra).toBeLessThan(1);
+    expect(coverageAt(u4 - MIN).umbra).toBeGreaterThan(0);
+    expect(coverageAt(u4 + MIN).umbra).toBe(0);
+    expect(coverageAt(p4 - MIN).penumbra).toBeGreaterThan(0);
+    expect(coverageAt(p4 + MIN).penumbra).toBe(0);
+    // Umbral ingress runs U1 to U2, so about half the disc is in by its midpoint.
+    const half = coverageAt((u1 + u2) / 2).umbra;
+    expect(half).toBeGreaterThan(0.4);
+    expect(half).toBeLessThan(0.6);
   });
 });
 
