@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frameOf, frameToLngLat, longestShadowM, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
+import { frameOf, frameToLngLat, longestShadowM, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
 
 const merc = (lat: number) => 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
 
@@ -38,6 +38,14 @@ describe('maskPixels', () => {
     const px = maskPixels(Uint8Array.from([0, 255]), 2, 1);
     expect(Array.from(px.slice(0, 3))).toEqual([...SHADOW_RGB]);
     expect(Array.from(px.slice(4, 7))).toEqual([...SHADOW_RGB]);
+  });
+
+  it('paints moon shade neutral grey, darker than sun shade', () => {
+    const px = maskPixels(Uint8Array.from([255]), 1, 1, MOON_SHADOW_RGB);
+    const [r, g, b] = px;
+    expect(r).toBe(g);
+    expect(g).toBe(b);
+    expect(r).toBeLessThan(Math.min(...SHADOW_RGB));
   });
 });
 

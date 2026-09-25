@@ -148,7 +148,7 @@ export function LayersPanel() {
             ))}
           </select>
         </label>
-        <p className="muted hint">Shadows follow the timeline time; buildings cast them once their layer is on. Shade cast by the moon is drawn a deeper blue.</p>
+        <p className="muted hint">Shadows follow the timeline time; buildings cast them once their layer is on. Shade cast by the moon is drawn a darker neutral grey.</p>
       </SettingLayer>
       <SettingLayer k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
       <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />

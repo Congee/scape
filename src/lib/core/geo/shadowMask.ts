@@ -17,8 +17,8 @@ export const MASK_MIN_CELL_M = 2;
 export const MASK_SNAP_CELLS = 16;
 /** Dark desaturated blue-grey; pure black at low opacity reads as grime over a light basemap. */
 export const SHADOW_RGB = [26, 36, 54] as const;
-/** Moon shadows keep the blue of the moon's colour language, deeper. */
-export const MOON_SHADOW_RGB = [8, 16, 52] as const;
+/** Moonlight is reflected sunlight, so its shade is a neutral grey, darker than the sun's. */
+export const MOON_SHADOW_RGB = [17, 17, 17] as const;
 
 /**
  * Local frame for a mask: a Mercator plane scaled to ground metres at `centre`. Cells stay square
