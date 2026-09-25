@@ -2,7 +2,7 @@ import { Body, Equator, Horizon, SearchAltitude, SearchRiseSet } from 'astronomy
 import { describe, expect, it } from 'vitest';
 import { makeObserver, SkyBody } from './bodies';
 import { dayEvents, EventKind, type DayEvent } from './dayEvents';
-import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, type NightWindow } from './night';
+import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type NightWindow } from './night';
 
 const hoboken = makeObserver({ lat: 40.747952, lng: -74.023685 });
 // Local noon to noon, EDT (UTC-4).
@@ -103,5 +103,36 @@ describe('nextMoonEvent', () => {
 
   it('is null past the last crossing', () => {
     expect(nextMoonEvent(events, end)).toBeNull();
+  });
+});
+
+describe('panelNight', () => {
+  const tz = 'America/New_York';
+  const H = 3_600_000;
+  const sun = (kind: EventKind, time: number): DayEvent => ({ body: SkyBody.Sun, kind, time, azimuth: 0, altitude: 0 });
+  // Each noon (EDT) → noon window: astro dusk 19:40, astro dawn 05:10, sunrise 06:40 local.
+  const fake = (rise: boolean) => (startMs: number) => [
+    sun(EventKind.AstroDusk, startMs + 7.67 * H),
+    sun(EventKind.AstroDawn, startMs + 17.17 * H),
+    ...(rise ? [sun(EventKind.Rise, startMs + 18.67 * H)] : [])
+  ];
+  const tonight = Date.UTC(2026, 9, 26, 16);
+  const tomorrow = Date.UTC(2026, 9, 27, 16);
+  const at = (iso: string, rise = true) => panelNight(new Date(iso), tz, fake(rise)).startMs;
+
+  it('shows the night running at 11 PM and 2 AM', () => {
+    expect(at('2026-10-27T03:00:00Z')).toBe(tonight);
+    expect(at('2026-10-27T06:00:00Z')).toBe(tonight);
+  });
+
+  it('moves on to the coming night after sunrise: 7 AM and 9 AM', () => {
+    expect(at('2026-10-27T11:00:00Z')).toBe(tomorrow);
+    expect(at('2026-10-27T13:00:00Z')).toBe(tomorrow);
+    expect(panelNight(new Date('2026-10-27T13:00:00Z'), tz, fake(true)).events[0].time).toBe(tomorrow + 7.67 * H);
+  });
+
+  it('falls back to dawn without a sunrise', () => {
+    expect(at('2026-10-27T10:00:00Z', false)).toBe(tomorrow);
+    expect(at('2026-10-27T08:00:00Z', false)).toBe(tonight);
   });
 });

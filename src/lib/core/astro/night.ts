@@ -1,4 +1,5 @@
 import { SkyBody } from './bodies';
+import { noonToNoon } from '@core/time/localDay';
 import { EventKind, type DayEvent } from './dayEvents';
 
 export const NightKind = {
@@ -54,6 +55,20 @@ export function nightWindow(events: DayEvent[], nowMs: number): NightWindow {
   // No twilight crossings: the sun's highest point says which side of darkness the day sits on.
   const transit = events.find((e) => e.body === SkyBody.Sun && e.kind === EventKind.Transit);
   return { startMs: 0, endMs: 0, kind: transit && transit.altitude < -18 ? NightKind.AllDark : NightKind.None };
+}
+
+export interface PanelNight extends TimeWindow {
+  events: DayEvent[];
+}
+
+/** The noon-to-noon night the panel shows at `instant`: the one containing it, or the next once its sunrise (else its dawn) has passed. */
+export function panelNight(instant: Date, tz: string, eventsFor: (startMs: number, endMs: number) => DayEvent[]): PanelNight {
+  const w = noonToNoon(instant, tz);
+  const events = eventsFor(w.startMs, w.endMs);
+  const endMs = sunEvents(events, EventKind.Rise)[0]?.time ?? nightWindow(events, instant.getTime()).endMs;
+  if (!endMs || instant.getTime() < endMs) return { ...w, events };
+  const next = noonToNoon(new Date(w.endMs), tz);
+  return { ...next, events: eventsFor(next.startMs, next.endMs) };
 }
 
 /** Longest stretch of `night` with the moon below the horizon, or null when there is none. */

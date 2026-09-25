@@ -3,7 +3,7 @@ import { makeObserver, siteHeightM, SkyBody } from '@core/astro/bodies';
 import { dayEvents, EventKind, type DayEvent } from '@core/astro/dayEvents';
 import { activeShowers, radiantHorizontal, upcomingPeaks, type ShowerStatus } from '@core/astro/meteors';
 import { milkyWayStatus, MoonRule } from '@core/astro/milkyWay';
-import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind } from '@core/astro/night';
+import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type PanelNight } from '@core/astro/night';
 import { polarisAid } from '@core/astro/polaris';
 import { moonInfo, position } from '@core/astro/positions';
 import { apply, enuToEqj } from '@core/astro/skyFrame';
@@ -12,7 +12,6 @@ import { cropFactor, effectiveOptics, equivalentFocalMm } from '@core/optics/fov
 import { dirFromAzAlt } from '@core/optics/projection';
 import { npfShutterS, pixelPitchUm, ruleOfN, trailAngleDeg, trailLengthPx } from '@core/optics/startrails';
 import { formatDateShort, formatTime } from '@core/time/format';
-import { noonToNoon } from '@core/time/localDay';
 import { aimFor, compositionStore, useComposition } from '@state/composition';
 import { useDayData } from '@state/dayData';
 import { sensorById, useGear } from '@state/gear';
@@ -53,23 +52,20 @@ function showersFor(time: number) {
   return showerCache;
 }
 
-interface Tonight {
-  key: string;
-  startMs: number;
-  endMs: number;
-  events: DayEvent[];
-}
-
-// The panel re-renders on every clock tick; the searches only depend on the night, not the instant.
-let nightCache: Tonight | null = null;
-function tonightFor(time: number, tz: string, pin: LngLat, groundM: number | null, eyeM: number, goldenAltitude: number): Tonight {
-  const { startMs, endMs } = noonToNoon(new Date(time), tz);
+// The panel re-renders on every clock tick; the searches only depend on the night, not the instant. Two slots: a morning looks at two nights.
+const nightCache = new Map<string, DayEvent[]>();
+function tonightFor(time: number, tz: string, pin: LngLat, groundM: number | null, eyeM: number, goldenAltitude: number): PanelNight {
   const g = groundM === null || Number.isNaN(groundM) ? null : Math.round(groundM);
-  const key = [startMs, pin.lat.toFixed(4), pin.lng.toFixed(4), g, eyeM, goldenAltitude].join('|');
-  if (!nightCache || nightCache.key !== key) {
-    nightCache = { key, startMs, endMs, events: dayEvents(makeObserver(pin, siteHeightM(g, eyeM)), startMs, endMs, { goldenAltitude, heightAboveGroundM: eyeM }) };
-  }
-  return nightCache;
+  return panelNight(new Date(time), tz, (startMs, endMs) => {
+    const key = [startMs, pin.lat.toFixed(4), pin.lng.toFixed(4), g, eyeM, goldenAltitude].join('|');
+    let events = nightCache.get(key);
+    if (!events) {
+      events = dayEvents(makeObserver(pin, siteHeightM(g, eyeM)), startMs, endMs, { goldenAltitude, heightAboveGroundM: eyeM });
+      if (nightCache.size >= 2) nightCache.delete(nightCache.keys().next().value!);
+      nightCache.set(key, events);
+    }
+    return events;
+  });
 }
 
 // Which groups are open survives tab switches but not a reload.
