@@ -1,7 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { glowDay, GlowKind, type GlowDay, type GlowWindow } from '@core/astro/alpenglow';
-import { makeObserver, siteHeightM } from '@core/astro/bodies';
 import { formatDateShort, formatTime } from '@core/time/format';
 import { addLocalDays, dayBounds } from '@core/time/localDay';
 import { binBearing, GLOW_KM, LOW_CONFIDENCE_DAY, pathOffset, scoreGlow, type GlowScore } from '@core/weather/alpenglow';
@@ -10,7 +9,7 @@ import { modelInfo } from '@core/weather/models';
 import { forecastWindow } from '@core/weather/openMeteo';
 import { glowForecast, GlowStatus, type GlowForecast } from '@data/alpenglow';
 import type { GlowEntry } from '@data/weather';
-import { useLightProbe } from '@state/lightProbe';
+import { lightPointObserver, useLightProbe } from '@state/lightProbe';
 import { useSettings } from '@state/settings';
 import { EYE_HEIGHT_M } from '@state/terrain';
 import { useWeather } from '@state/weather';
@@ -68,7 +67,7 @@ export function AlpenglowForecast() {
     if (!point || !horizon || !on) return;
     let live = true;
     const now = Date.now();
-    const obs = makeObserver(point, siteHeightM(horizon.groundM, EYE_HEIGHT_M));
+    const obs = lightPointObserver(point, horizon);
     const days = Array.from({ length: DAYS }, (_, i) => {
       const b = dayBounds(addLocalDays(new Date(now), i, tz), tz);
       return glowDay(obs, horizon.profile, b.start.getTime(), b.end.getTime(), lowDeg);

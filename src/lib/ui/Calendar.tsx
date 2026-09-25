@@ -8,7 +8,7 @@ import { formatTime } from '@core/time/format';
 import { besselianElements } from '@data/besselian';
 import { isoDate, localMidnight, localParts } from '@core/time/localDay';
 import { settingsStore, useSettings } from '@state/settings';
-import { horizonKeyFor, useTerrain } from '@state/terrain';
+import { horizonKeyFor, usePinSiteHeightM, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
 
 const DAY_MS = 86_400_000;
@@ -56,6 +56,7 @@ function EclipseDetail({ mark, lat, lng }: { mark: CalendarMark; lat: number; ln
   const horizon = useTerrain((s) => s.horizon);
   const horizonKey = useTerrain((s) => s.horizonKey);
   const fresh = horizon && horizonKey === horizonKeyFor(worldStore.getState(), settingsStore.getState()) ? horizon : null;
+  const siteM = usePinSiteHeightM();
 
   const solar = mark.kind === CalendarMarkKind.SolarEclipse;
   const [elements, setElements] = useState<BesselianElements[] | undefined>();
@@ -63,7 +64,7 @@ function EclipseDetail({ mark, lat, lng }: { mark: CalendarMark; lat: number; ln
     // Until the elements arrive, or if they fail, contacts come from the ephemeris.
     if (solar) besselianElements().then(setElements, (err: unknown) => console.warn('eclipse elements', err));
   }, [solar]);
-  const obs = makeObserver({ lat, lng }, fresh?.eyeM ?? 0);
+  const obs = makeObserver({ lat, lng }, fresh?.eyeM ?? siteM);
   const from = mark.timeMs - DAY_MS / 2;
   const c = solar ? solarCircumstances(obs, from, fresh?.profile, elements) : lunarCircumstances(obs, from, fresh?.profile);
   const title = `${ECLIPSE_LABEL[c.kind]} ${solar ? 'solar' : 'lunar'} eclipse`;
@@ -142,19 +143,20 @@ export function Calendar() {
   // The camera location only matters to a few hundred metres for eclipse visibility.
   const lat = Math.round(pin.lat * 1000) / 1000;
   const lng = Math.round(pin.lng * 1000) / 1000;
+  const siteM = Math.round(usePinSiteHeightM() / 100) * 100;
 
   const byDay = useMemo(() => {
     if (!open) return new Map<string, CalendarMark[]>();
     const from = localMidnight(year, month, 1, tz).getTime() - 7 * DAY_MS;
     const to = localMidnight(year, month + 1, 1, tz).getTime() + 7 * DAY_MS;
     const map = new Map<string, CalendarMark[]>();
-    for (const m of calendarMarks(makeObserver({ lat, lng }), from, to, tz, { hour12 })) {
+    for (const m of calendarMarks(makeObserver({ lat, lng }, siteM), from, to, tz, { hour12 })) {
       const list = map.get(m.day);
       if (list) list.push(m);
       else map.set(m.day, [m]);
     }
     return map;
-  }, [open, year, month, lat, lng, tz, hour12]);
+  }, [open, year, month, lat, lng, siteM, tz, hour12]);
 
   const eclipses = [...byDay.values()].flat().filter((m) => (m.kind === CalendarMarkKind.SolarEclipse || m.kind === CalendarMarkKind.LunarEclipse) && m.day.startsWith(ym));
   const today = isoDate(localParts(new Date(), tz));

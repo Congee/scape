@@ -2,10 +2,8 @@ import type { Observer } from 'astronomy-engine';
 import type { HorizonProfile } from '@core/terrain/horizon';
 import { SkyBody } from './bodies';
 import { dayCurve } from './dayCurve';
-import { EventKind } from './dayEvents';
-import { sunLitAt } from './lightSource';
+import { sunLitSpans } from './lightSource';
 import { position } from './positions';
-import { terrainRiseSet } from './terrainEvents';
 
 export const GlowKind = { Sunrise: 'Sunrise', Sunset: 'Sunset' } as const;
 export type GlowKind = (typeof GlowKind)[keyof typeof GlowKind];
@@ -44,17 +42,7 @@ export function glowDay(obs: Observer, horizon: HorizonProfile, startMs: number,
   const curve = dayCurve(obs, startMs, endMs);
   const alt = curve.altitude[SkyBody.Sun];
 
-  const lit: Span[] = [];
-  let since = sunLitAt(obs, horizon, startMs) ? startMs : null;
-  for (const e of terrainRiseSet(obs, curve, horizon, endMs)) {
-    if (e.body !== SkyBody.Sun) continue;
-    if (e.kind === EventKind.TerrainRise) since = e.time;
-    else if (since !== null) {
-      lit.push([since, e.time]);
-      since = null;
-    }
-  }
-  if (since !== null) lit.push([since, endMs]);
+  const lit = sunLitSpans(obs, curve, horizon, endMs).spans;
 
   const lowAt = (ms: number) => position(SkyBody.Sun, new Date(ms), obs).altitude <= lowDeg;
   const low: Span[] = [];

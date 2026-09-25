@@ -1,5 +1,6 @@
+import type { Observer } from 'astronomy-engine';
 import { create } from 'zustand';
-import { makeObserver } from '@core/astro/bodies';
+import { makeObserver, siteHeightM } from '@core/astro/bodies';
 import { dayCurve } from '@core/astro/dayCurve';
 import { firstLastLight, sunLitAt, type FirstLastLight } from '@core/astro/lightSource';
 import type { LngLat } from '@core/geo/geodesy';
@@ -44,6 +45,11 @@ export const lightProbeStore = create<LightProbeState>()((set) => ({
 
 export const useLightProbe = lightProbeStore;
 
+/** Eye height over the point's own ground, so first light and alpenglow see the same sky. */
+export function lightPointObserver(point: LngLat, horizon: Pick<HorizonResult, 'groundM'>): Observer {
+  return makeObserver(point, siteHeightM(horizon.groundM, EYE_HEIGHT_M));
+}
+
 function sweep(point: LngLat) {
   if (!worker) {
     worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' });
@@ -66,7 +72,7 @@ function relight() {
   if (!point || !horizon) return;
   const w = worldStore.getState();
   const b = dayBounds(new Date(w.time), w.tz);
-  const obs = makeObserver(point, horizon.eyeM);
+  const obs = lightPointObserver(point, horizon);
   const key = `${b.isoDate}|${w.tz}`;
   const prev = lightProbeStore.getState().light;
   if (key === dayKey && prev) {

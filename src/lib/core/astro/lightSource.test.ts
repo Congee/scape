@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { HorizonProfile } from '@core/terrain/horizon';
 import { dayBounds } from '@core/time/localDay';
+import { glowDay } from './alpenglow';
 import { makeObserver, SkyBody } from './bodies';
 import { dayCurve } from './dayCurve';
 import { dayEvents, EventKind } from './dayEvents';
+import { depressionForHeightDeg } from './earthShadow';
 import { firstLastLight, lightAt, LightMode, pickLight, sunLitAt } from './lightSource';
 
 const profile = (f: (az: number) => number): HorizonProfile => ({
@@ -69,6 +71,37 @@ describe('firstLastLight', () => {
     expect(l.first).toBeNull();
     expect(l.last).toBeNull();
     expect(l.litMs).toBe(0);
+  });
+});
+
+describe('first light on a summit', () => {
+  // Jungfrau at 3000 m, 2026-06-21: the skyline sits at the sea-level horizon's dip.
+  const point = { lat: 46.5475, lng: 7.9625 };
+  const high = makeObserver(point, 3000);
+  const low = makeObserver(point);
+  const dip = profile(() => -depressionForHeightDeg(3000));
+  const flat = profile(() => 0);
+  const day = dayBounds(new Date(Date.UTC(2026, 5, 21, 11)), 'Europe/Zurich');
+  const start = day.start.getTime();
+  const end = day.end.getTime();
+  const light = (obs: typeof high, h: HorizonProfile) => firstLastLight(obs, dayCurve(obs, start, end), h, end, start);
+
+  it('comes earlier and goes later than at sea level', () => {
+    const up = light(high, dip);
+    const sea = light(low, flat);
+    expect(sea.first! - up.first!).toBeGreaterThan(5 * 60_000);
+    expect(up.last! - sea.last!).toBeGreaterThan(5 * 60_000);
+  });
+
+  it('sees the sun lower through thin air against the same skyline', () => {
+    expect(light(high, flat).first!).toBeGreaterThan(light(low, flat).first! + 10_000);
+  });
+
+  it('agrees with the alpenglow windows', () => {
+    const l = light(high, dip);
+    const g = glowDay(high, dip, start, end, 6);
+    expect(g.sunrise!.startMs).toBe(l.first);
+    expect(g.sunset!.endMs).toBe(l.last);
   });
 });
 

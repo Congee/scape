@@ -3,7 +3,7 @@ import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { SkyBody } from './bodies';
 import { lunarEclipseLight } from './eclipse';
 import type { DayCurve } from './dayCurve';
-import { EventKind } from './dayEvents';
+import { EventKind, type DayEvent } from './dayEvents';
 import { position } from './positions';
 import { SEMIDIAMETER_DEG, terrainRiseSet } from './terrainEvents';
 
@@ -43,26 +43,30 @@ export function sunLitAt(obs: Observer, horizon: HorizonProfile, ms: number): bo
   return p.altitude + SEMIDIAMETER_DEG.Sun - horizonAngleAt(horizon, p.azimuth) >= 0;
 }
 
-/** First and last direct sun at a point over one day, against that point's own skyline. */
-export function firstLastLight(obs: Observer, curve: DayCurve, horizon: HorizonProfile, endMs: number, nowMs: number): FirstLastLight {
-  const litAt = (ms: number) => sunLitAt(obs, horizon, ms);
+/** Stretches of direct sun from `curve.startMs` to `endMs` against the point's skyline, with the sun's skyline crossings. */
+export function sunLitSpans(obs: Observer, curve: DayCurve, horizon: HorizonProfile, endMs: number): { spans: [number, number][]; events: DayEvent[] } {
   const events = terrainRiseSet(obs, curve, horizon, endMs).filter((e) => e.body === SkyBody.Sun);
-  const startLit = litAt(curve.startMs);
-  let litMs = 0;
-  let since = startLit ? curve.startMs : null;
+  const spans: [number, number][] = [];
+  let since = sunLitAt(obs, horizon, curve.startMs) ? curve.startMs : null;
   for (const e of events) {
     if (e.kind === EventKind.TerrainRise) since = e.time;
     else if (since !== null) {
-      litMs += e.time - since;
+      spans.push([since, e.time]);
       since = null;
     }
   }
-  if (since !== null) litMs += endMs - since;
+  if (since !== null) spans.push([since, endMs]);
+  return { spans, events };
+}
+
+/** First and last direct sun at a point over one day, against that point's own skyline. */
+export function firstLastLight(obs: Observer, curve: DayCurve, horizon: HorizonProfile, endMs: number, nowMs: number): FirstLastLight {
+  const { spans, events } = sunLitSpans(obs, curve, horizon, endMs);
   return {
     first: events.find((e) => e.kind === EventKind.TerrainRise)?.time ?? null,
     last: events.findLast((e) => e.kind === EventKind.TerrainSet)?.time ?? null,
-    litMs,
-    litNow: litAt(nowMs)
+    litMs: spans.reduce((sum, [a, b]) => sum + b - a, 0),
+    litNow: sunLitAt(obs, horizon, nowMs)
   };
 }
 
