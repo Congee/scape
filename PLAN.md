@@ -1247,3 +1247,5 @@ visible errors are design choices, each waiting on a decision (recommendation in
     longer focal. Zooming in raises the f-number; zooming back never opens it. Gear persist v4
     re-derives the long value from the lens name for v0–v3 blobs.
 20. **Hiding the Sun hides its glow too** — kept as shipped (2026-09-23), same `uSun.w > 0.0` branch.
+21. **Alpenglow forecast source — Open-Meteo, not Windy** (2026-09-25). Open-Meteo approved, CC BY 4.0
+    credit shown; Windy's API declined. No other new data source.
