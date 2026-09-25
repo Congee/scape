@@ -1531,6 +1531,8 @@ export class ViewfinderController {
   }
 
   dispose() {
+    this.photo?.image?.close();
+    this.photo = null;
     stopBuildings();
     this.sceneGl?.dispose();
     for (const u of this.unsubs) u();
