@@ -6,7 +6,7 @@ import { hullFootprint, partsFootprint, type ModelMesh, type ModelPart, type Sav
 import { DEFAULT_IMPORT, GltfError, parseGlb, validateMesh, type ImportOptions, type ValidMesh } from './gltf';
 import { modelApexM } from './seed';
 
-/** Walls, roof faces, and a floor under any part that stands clear of the ground. */
+/** Walls, roof faces and a floor under every part: a closed solid. */
 export function partsMesh(parts: readonly ModelPart[]): ModelMesh {
   const pos: number[] = [];
   const tri = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number) => {
@@ -78,7 +78,7 @@ export function partsMesh(parts: readonly ModelPart[]): ModelMesh {
       }
       face(fe, fn, fu, true);
     }
-    if (b > 0) face(roof.ringE, roof.ringN, roof.ringE.map(() => b), false);
+    face(roof.ringE, roof.ringN, roof.ringE.map(() => b), false);
   }
   return { pos: Float32Array.from(pos), idx: Uint32Array.from({ length: pos.length / 3 }, (_, i) => i), box: boxOf(pos) };
 }

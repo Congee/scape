@@ -20,10 +20,43 @@ function volume(pos: Float32Array): number {
   return v / 6;
 }
 
+/** Directed edges with no reverse twin; zero for a closed, consistently wound mesh. */
+function openEdges(pos: Float32Array): number {
+  const key = (i: number) => `${pos[i].toFixed(4)},${pos[i + 1].toFixed(4)},${pos[i + 2].toFixed(4)}`;
+  const edges = new Map<string, number>();
+  for (let t = 0; t < pos.length; t += 9) {
+    for (const [a, b] of [[t, t + 3], [t + 3, t + 6], [t + 6, t]]) {
+      const back = `${key(b)}|${key(a)}`;
+      const n = edges.get(back) ?? 0;
+      if (n > 0) edges.set(back, n - 1);
+      else edges.set(`${key(a)}|${key(b)}`, (edges.get(`${key(a)}|${key(b)}`) ?? 0) + 1);
+    }
+  }
+  return [...edges.values()].reduce((s, n) => s + n, 0);
+}
+
+/** Plan area of the faces pointing down. */
+function downFacing(pos: Float32Array): number {
+  let a = 0;
+  for (let t = 0; t < pos.length; t += 9) {
+    const z = (pos[t + 3] - pos[t]) * (pos[t + 7] - pos[t + 1]) - (pos[t + 4] - pos[t + 1]) * (pos[t + 6] - pos[t]);
+    if (z < 0) a -= z / 2;
+  }
+  return a;
+}
+
 describe('partsMesh', () => {
   it('closes a block with outward faces, either ring winding', () => {
     expect(volume(partsMesh([block()]).pos)).toBeCloseTo(40 * 20 * 30, 1);
     expect(volume(partsMesh([block({ ring: rect(0, 0, 40, 20).toReversed() })]).pos)).toBeCloseTo(40 * 20 * 30, 1);
+  });
+
+  it('closes every part on the ground with a floor', () => {
+    for (const roof of [RoofShape.Flat, RoofShape.Gabled, RoofShape.Hipped, RoofShape.Pyramidal]) {
+      const m = partsMesh([block({ roof, roofHeightM: roof === RoofShape.Flat ? 0 : 8 })]);
+      expect(openEdges(m.pos), `roof ${roof}`).toBe(0);
+      expect(downFacing(m.pos)).toBeCloseTo(40 * 20, 1);
+    }
   });
 
   it('puts a floor under a raised part', () => {

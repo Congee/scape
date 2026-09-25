@@ -237,6 +237,8 @@ describe('importModelFile', () => {
     expect(imp.draft.source).toBe(ModelSource.Drawn);
     expect(imp.draft.glb).toBeUndefined();
     expect(imp.draft.parts).toEqual(m.parts);
+    expect(imp.warnings).toEqual([]);
+    expect(imp.stats.triangles).toBe(partsMesh(PARTS).idx.length / 3);
     expect(JSON.stringify(imp.draft.anchor)).toBe(JSON.stringify(m.anchor));
     expect(JSON.stringify(imp.draft.footprint)).toBe(JSON.stringify(m.footprint));
     expect(imp.stats.heightM).toBeCloseTo(50.125, 3);
