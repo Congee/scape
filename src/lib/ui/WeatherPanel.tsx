@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import type { LngLat } from '@core/geo/geodesy';
 import { formatDateTime, formatTime } from '@core/time/format';
-import { FOG_TEXT } from '@core/weather/fog';
+import { FOG_CLASS_TEXT, FOG_TEXT, FogClass } from '@core/weather/fog';
 import { ageText, pct, rainText, tempText, visText, windText } from '@core/weather/format';
 import { MODELS, modelInfo, type WeatherModel } from '@core/weather/models';
 import { hourValue, HourlyVar, lacks, valueAt, type PointSeries } from '@core/weather/openMeteo';
@@ -121,9 +121,9 @@ function Values({ s, time, units }: { s: PointSeries; time: number; units: Param
       <b className="v" data-v="cloud">
         {pct(v(HourlyVar.Cloud))} <span className="muted">· low {pct(v(HourlyVar.CloudLow))} · mid {pct(v(HourlyVar.CloudMid))} · high {pct(v(HourlyVar.CloudHigh))}</span>
       </b>
-      <span className="k">Fog</span>
-      <b className="v" data-v="fog">
-        {fog.length ? `possible: ${fog.map((r) => FOG_TEXT[r]).join(', ')}` : Number.isNaN(code) && Number.isNaN(v(HourlyVar.Visibility)) ? 'n/a' : 'no signs'}
+      <span className="k">Fog, mist</span>
+      <b className="v" data-v="fog" data-fog={fog.cls}>
+        {fog.cls !== FogClass.None ? `${FOG_CLASS_TEXT[fog.cls]} possible: ${fog.reasons.map((r) => FOG_TEXT[r]).join(', ')}` : Number.isNaN(code) && Number.isNaN(v(HourlyVar.Visibility)) ? 'n/a' : 'no signs'}
       </b>
       <span className="k">Visibility</span>
       <b className="v">{visText(v(HourlyVar.Visibility), units)}</b>

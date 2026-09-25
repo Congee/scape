@@ -19,4 +19,21 @@ and sunset −90 to +60 min (32 447 station-hours). Fit on even days, checked on
 - Against dense fog only (FG or < 1 km) both rules over-warn (precision 18%); vis < 1 km alone scores CSI 0.33 there.
 - SFO scores ~0.05: the model puts marine stratus over the airport cell, but the airport rarely reports fog.
 
+## Mist and fog split (fog.ts now)
+
+Fog: code 45/48 or visibility < 1 km. Mist: visibility 1–5 km, or the spread sign without fog-level visibility.
+Each class is scored against its own METAR class (fog: FG or < 1 km; mist: BR or the rest of "fog or mist"). Odd days:
+
+| class, how                                      | POD | precision | CSI   |
+| ----------------------------------------------- | --- | --------- | ----- |
+| Fog, visibility served                          | 83% | 33%       | 0.310 |
+| Mist, visibility served                         | 34% | 45%       | 0.238 |
+| Fog, no visibility, spread sign → Mist          | 79% | 34%       | 0.310 |
+| Mist, no visibility, spread sign → Mist         | 28% | 43%       | 0.207 |
+| Fog, no visibility, spread sign → Fog           | 90% | 19%       | 0.188 |
+
+- Without visibility the spread sign belongs to Mist: as Fog it halves fog precision and leaves Mist empty.
+  The no-visibility rows blank best_match visibility, whose code 45/48 may itself lean on it; ECMWF's codes may score lower.
+- The union (fog or mist) is unchanged: CSI 0.448. Mist is the weaker class.
+
 Rerun: `bun scripts/weather/fogcal.ts fetch <dir> && bun scripts/weather/fogcal.ts score <dir>` (about 36 requests, 3 s apart).

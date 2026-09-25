@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Body, Observer, SearchRiseSet } from 'astronomy-engine';
-import { fogReasons } from '../../src/lib/core/weather/fog';
+import { FOG_CLASS_TEXT, FogClass, fogSigns } from '../../src/lib/core/weather/fog';
 
 const START = '2025-09-01';
 const END = '2026-08-31';
@@ -201,8 +201,9 @@ const targets = [
   { name: Target.Fog, want: (x: Row) => x.fog }
 ];
 const OLD: Rule = { code: true, vis: 1000, spread: 1, low: 50, wind: Infinity };
-const now = (x: Row) =>
-  fogReasons({ code: x.code, visibilityM: x.vis, tempC: x.spread, dewC: 0, lowCloud: x.low }).length > 0;
+const classOf = (x: Row, blind?: FogClass, noVis = false) =>
+  fogSigns({ code: x.code, visibilityM: noVis ? NaN : x.vis, tempC: x.spread, dewC: 0, lowCloud: x.low }, blind).cls;
+const now = (x: Row) => classOf(x) !== FogClass.None;
 
 const only = (r: Partial<Rule>): Rule => ({ code: false, vis: 0, spread: 0, low: 0, wind: Infinity, ...r });
 
@@ -280,3 +281,18 @@ for (const t of targets) {
     }).join('\n')
   );
 }
+
+// Mist and fog scored as separate classes: METAR fog is FG or < 1 km, mist is BR the rest.
+const truthClass = (x: Row) => (x.fog ? FogClass.Fog : x.fogMist ? FogClass.Mist : FogClass.None);
+console.log('\n== classes: fog.ts Mist and Fog, each against its own METAR class ==');
+for (const [label, set] of [
+  ['all days', rows],
+  ['test days', rows.filter((x) => !x.even)]
+] as const)
+  for (const [how, blind, noVis] of [
+    ['served visibility', undefined, false],
+    ['no visibility, spread → Mist', FogClass.Mist, true],
+    ['no visibility, spread → Fog', FogClass.Fog, true]
+  ] as const)
+    for (const c of [FogClass.Mist, FogClass.Fog])
+      console.log(line(`${FOG_CLASS_TEXT[c]}, ${how}, ${label}`, score(set, (x) => classOf(x, blind, noVis) === c, (x) => truthClass(x) === c)));

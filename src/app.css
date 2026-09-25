@@ -2128,6 +2128,7 @@ label.file-pick input[type='file'] {
 .cloud-chart .sky { fill: var(--sky-clear); }
 .cloud-chart .cloud { fill: var(--cloud); }
 .cloud-chart .fog { fill: var(--fog); }
+.cloud-chart .mist { fill: var(--fog); opacity: 0.4; }
 .cloud-chart .gap { fill: url(#wx-gap); }
 .cloud-chart pattern line { stroke: var(--fg-3); stroke-width: 1.5; }
 .cloud-chart .now { stroke: var(--sun); }

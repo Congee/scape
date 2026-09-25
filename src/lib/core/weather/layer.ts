@@ -1,3 +1,4 @@
+import { FOG_VISIBILITY_M, MIST_VISIBILITY_M } from './fog';
 import type { Rgba } from './grid';
 import { hourValue, HourlyVar, type PointSeries } from './openMeteo';
 
@@ -21,11 +22,10 @@ const COVER: Partial<Record<CloudLayer, HourlyVar>> = {
   High: HourlyVar.CloudHigh
 };
 
-/** Visibility at or above this reads as no haze. */
-export const CLEAR_VIS_M = 10_000;
-const FOG_VIS_M = 1000;
+/** Top of the mist band on the Fog layer's 0..1 scale; fog is 1. */
+export const MIST_MAX = 0.5;
 
-/** Cover 0..100 for cloud layers; for Fog, 0 (clear air) to 1 (fog reported or visibility < 1 km). NaN when unknown. */
+/** Cover 0..100 for cloud layers; for Fog, 0 clear, (0, MIST_MAX] mist thickening to 1 km, 1 fog. NaN when unknown. */
 export function layerValue(layer: CloudLayer, s: PointSeries | null, ms: number): number {
   if (!s) return NaN;
   const v = COVER[layer];
@@ -34,7 +34,8 @@ export function layerValue(layer: CloudLayer, s: PointSeries | null, ms: number)
   if (code === 45 || code === 48) return 1;
   const vis = hourValue(s, HourlyVar.Visibility, ms);
   if (Number.isNaN(vis)) return NaN;
-  return Math.min(1, Math.max(0, (CLEAR_VIS_M - vis) / (CLEAR_VIS_M - FOG_VIS_M)));
+  if (vis < FOG_VISIBILITY_M) return 1;
+  return (MIST_MAX * Math.max(0, MIST_VISIBILITY_M - vis)) / (MIST_VISIBILITY_M - FOG_VISIBILITY_M);
 }
 
 // Mid slate reads on both light and dark basemaps; white vanishes on light ones.
@@ -43,7 +44,7 @@ const FOG: Rgba = [232, 197, 71, 0.85];
 const GAP: readonly [number, number, number] = [200, 60, 90];
 
 export function layerColor(layer: CloudLayer, v: number): Rgba {
-  if (layer === CloudLayer.Fog) return v < 0.02 ? [0, 0, 0, 0] : [FOG[0], FOG[1], FOG[2], FOG[3] * (0.2 + 0.8 * v)];
+  if (layer === CloudLayer.Fog) return v <= 0 ? [0, 0, 0, 0] : [FOG[0], FOG[1], FOG[2], v >= 1 ? FOG[3] : FOG[3] * (0.2 + v / MIST_MAX / 4)];
   return [CLOUD[0], CLOUD[1], CLOUD[2], (CLOUD[3] * Math.min(100, Math.max(0, v))) / 100];
 }
 
@@ -52,12 +53,12 @@ export function gapColor(x: number, y: number): Rgba {
   return [GAP[0], GAP[1], GAP[2], (x + y) % 8 < 2 ? 0.6 : 0.18];
 }
 
-/** CSS gradient stops for the legend. */
+/** CSS gradient stops for the legend; Fog shows the mist ramp, then a solid fog step. */
 export function legendGradient(layer: CloudLayer): string {
   const c = (v: number) => {
     const [r, g, b, a] = layerColor(layer, v);
     return `rgba(${r},${g},${b},${a.toFixed(2)})`;
   };
-  const max = layer === CloudLayer.Fog ? 1 : 100;
-  return `linear-gradient(to right, ${[0, 0.25, 0.5, 0.75, 1].map((t) => c(t * max)).join(', ')})`;
+  if (layer === CloudLayer.Fog) return `linear-gradient(to right, ${c(0)} 0%, ${c(0.01)} 5%, ${c(MIST_MAX)} 65%, ${c(1)} 65%, ${c(1)} 100%)`;
+  return `linear-gradient(to right, ${[0, 25, 50, 75, 100].map(c).join(', ')})`;
 }

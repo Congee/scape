@@ -3,7 +3,7 @@
 // With a profile and lock it also measures idle renderer CPU with the map layer on, holding the lock per measurement.
 /* oxlint-disable no-await-in-loop -- checks run one at a time against one page */
 import { mkdirSync, rmdirSync } from 'node:fs';
-import { FOG_TEXT } from '../../src/lib/core/weather/fog';
+import { FOG_TEXT, FOG_VISIBILITY_M, MIST_VISIBILITY_M } from '../../src/lib/core/weather/fog';
 import { windyUrl } from '../../src/lib/core/weather/windy';
 import { Tab } from './cdp';
 import { OpenMeteoStub, StubMode } from './weather-stub';
@@ -116,12 +116,20 @@ async function run(vp: 'desktop' | 'phone') {
   check(`${vp}: Windy links for camera and target (not followed)`, links.length === 2 && links.every((l, i) => l.href === want[i] && l.target === '_blank' && l.rel === 'noopener noreferrer'), links.map((l) => l.href).join(' , '));
   await tab.shot(`${out}/${vp}-now.png`);
 
-  // The fixture's pre-dawn hours carry fog code and 600 m visibility.
+  // The fixture's pre-dawn hours carry fog code and 600 m visibility, then 3 km mist until 08Z.
   await fresh(url.replace(DAY, DAY.replace('T17', 'T03')));
   await cardReady('camera');
   const fog = await text('[data-card="camera"] [data-v="fog"]');
-  check(`${vp}: fog row names the tuned signs`, fog === `possible: ${FOG_TEXT.Code}, ${FOG_TEXT.Visibility}`, fog);
+  check(`${vp}: 03Z fog row reads Fog with its signs`, fog === `Fog possible: ${FOG_TEXT.Code}, ${FOG_TEXT.FogVisibility}`, fog);
   await tab.shot(`${out}/${vp}-fog.png`);
+  await js(`(() => { window.__scape.world.getState().setTime(Date.parse('2026-09-26T06:30Z')); return 1; })()`);
+  await until(`document.querySelector('[data-card="camera"] [data-v="fog"]')?.dataset.fog === 'Mist'`, 5000);
+  const mist = await text('[data-card="camera"] [data-v="fog"]');
+  check(`${vp}: 06:30Z fog row reads Mist`, mist === `Mist possible: ${FOG_TEXT.MistVisibility}`, mist);
+  await tab.shot(`${out}/${vp}-mist.png`);
+  await js(`(() => { window.__scape.world.getState().setTime(Date.parse('2026-09-26T09:00Z')); return 1; })()`);
+  await until(`document.querySelector('[data-card="camera"] [data-v="fog"]')?.dataset.fog === 'None'`, 5000);
+  check(`${vp}: 09Z fog row reads no signs`, (await text('[data-card="camera"] [data-v="fog"]')) === 'no signs', await text('[data-card="camera"] [data-v="fog"]'));
   await fresh(url);
   await cardReady('camera');
 
@@ -146,6 +154,12 @@ async function run(vp: 'desktop' | 'phone') {
   const r1 = await text('.cloud-row .extra');
   const x1 = await js(`document.querySelector('.cloud-row line.now')?.getAttribute('x1') ?? ''`);
   check(`${vp}: Timeline cloud row follows scrubbing`, r1 !== r0 && x1 !== x0 && /low \d+%/.test(r1), `${r0} → ${r1}`);
+  // ECMWF serves no visibility, so mist needs best_match.
+  await js(`(() => { window.__scape.weather.getState().setModel('best_match'); return 1; })()`);
+  await until(`/mist signs/.test(document.querySelector('.cloud-row .extra')?.textContent ?? '')`, 10_000);
+  const r2 = await text('.cloud-row .extra');
+  const bars = await js<{ fog: number; mist: number }>(`({ fog: document.querySelectorAll('.cloud-row .cloud-chart rect.fog').length, mist: document.querySelectorAll('.cloud-row .cloud-chart rect.mist').length })`);
+  check(`${vp}: Timeline row spans fog then mist`, /fog signs .+–.+ · mist signs .+–.+ · Best match/.test(r2) && bars.fog === 6 && bars.mist === 2, `${r2} · bars fog ${bars.fog} mist ${bars.mist}`);
   await tab.shot(`${out}/${vp}-timeline.png`);
   await js(`(() => { window.__scape.world.getState().setTime(Date.parse('${DAY}')); return 1; })()`);
   await tabTo('Weather');
@@ -164,12 +178,25 @@ async function run(vp: 'desktop' | 'phone') {
     const p0 = await js<number>('window.__scape.cloudStats.paints');
     await js(`(() => { window.__scape.weather.getState().setLayer('${layer}'); return 1; })()`);
     const painted = await until(`window.__scape.cloudStats.paints > ${p0} && window.__scape.weather.getState().cloudInfo`);
+    // The phone legend starts folded; open it as a user would.
+    await js(`(() => { document.querySelector('button.cloud-legend.folded')?.click(); return 1; })()`);
+    await until(`document.querySelector('.cloud-legend[data-layer="${layer}"] [data-info]')`, 5000);
     const legend = await text(`.cloud-legend[data-layer="${layer}"]`);
     const vis = await js(`window.__scapeMap.getLayoutProperty('weather-cloud', 'visibility')`);
     check(`${vp}: map layer ${layer}`, !!painted && vis === 'visible' && /km cells/.test(legend) && /Open-Meteo/.test(legend), legend);
     await Bun.sleep(500);
     await tab.shot(`${out}/${vp}-layer-${layer.toLowerCase()}.png`);
   }
+  const fogLegend = await text('.cloud-legend[data-layer="Fog"] .scale');
+  check(`${vp}: Fog layer legend names mist and fog`, fogLegend.includes(`Mist ${FOG_VISIBILITY_M / 1000}–${MIST_VISIBILITY_M / 1000} km`) && fogLegend.includes(`Fog < ${FOG_VISIBILITY_M / 1000} km`), fogLegend);
+  for (const [at, name] of [['03:00', 'fog'], ['06:30', 'mist']] as const) {
+    const p0 = await js<number>('window.__scape.cloudStats.paints');
+    await js(`(() => { window.__scape.world.getState().setTime(Date.parse('2026-09-26T${at}Z')); return 1; })()`);
+    await until(`window.__scape.cloudStats.paints > ${p0}`);
+    await Bun.sleep(500);
+    await tab.shot(`${out}/${vp}-layer-fog-${name}.png`);
+  }
+  await js(`(() => { window.__scape.world.getState().setTime(Date.parse('${DAY}')); return 1; })()`);
   // ecmwf_ifs025 reports no visibility: the fog layer is all gap, hatched.
   await js(`(() => { window.__scape.weather.getState().setModel('ecmwf_ifs025'); return 1; })()`);
   await until(`window.__scape.weather.getState().cloudInfo?.at > ${Date.now()}`);

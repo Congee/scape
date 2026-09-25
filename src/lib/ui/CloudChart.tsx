@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { LngLat } from '@core/geo/geodesy';
 import { formatTime } from '@core/time/format';
-import { fogReasons } from '@core/weather/fog';
+import { FogClass, fogSigns } from '@core/weather/fog';
 import { ageText, pct } from '@core/weather/format';
 import { modelInfo } from '@core/weather/models';
 import { ATTRIBUTION, ATTRIBUTION_URL, hourValue, HourlyVar, POINT_VARS, roundCoord, valueAt, type PointSeries } from '@core/weather/openMeteo';
@@ -46,7 +46,7 @@ export function useForecast(points: readonly (LngLat | null)[], startMs: number,
 export const noDataAt = (s: PointSeries, ms: number) => POINT_VARS.every((v) => Number.isNaN(valueAt(s, v, ms)));
 
 export function fogAt(s: PointSeries, ms: number) {
-  return fogReasons({
+  return fogSigns({
     code: hourValue(s, HourlyVar.Code, ms),
     visibilityM: valueAt(s, HourlyVar.Visibility, ms),
     tempC: valueAt(s, HourlyVar.Temp, ms),
@@ -89,7 +89,7 @@ export function Credit({ children }: { children?: ReactNode }) {
 const W = 300;
 const BANDS = [HourlyVar.CloudHigh, HourlyVar.CloudMid, HourlyVar.CloudLow] as const;
 
-/** The day's cloud per hour: high, mid and low stacked top to bottom, fog flagged under them, gaps hatched. */
+/** The day's cloud per hour: high, mid and low stacked top to bottom, fog and mist flagged under them, gaps hatched. */
 export function CloudChart({ series, startMs, endMs, time, h = 40 }: { series: PointSeries; startMs: number; endMs: number; time: number; h?: number }) {
   const hours = Math.round((endMs - startMs) / HOUR_MS);
   const cw = W / hours;
@@ -97,10 +97,10 @@ export function CloudChart({ series, startMs, endMs, time, h = 40 }: { series: P
   const scrub = useTimeScrub({ startMs, endMs, w: W });
   const cols = Array.from({ length: hours }, (_, i) => {
     const t = startMs + (i + 0.5) * HOUR_MS;
-    return { i, t, gap: noDataAt(series, t), fog: fogAt(series, t).length > 0, bands: BANDS.map((v) => valueAt(series, v, t)) };
+    return { i, t, gap: noDataAt(series, t), fog: fogAt(series, t).cls, bands: BANDS.map((v) => valueAt(series, v, t)) };
   });
   return (
-    <svg className="cloud-chart" viewBox={`0 0 ${W} ${h}`} role="img" aria-label="Forecast cloud per hour: high, mid and low; fog marked below. Drag to set the time; arrow keys step an hour, Shift ten minutes." {...scrub}>
+    <svg className="cloud-chart" viewBox={`0 0 ${W} ${h}`} role="img" aria-label="Forecast cloud per hour: high, mid and low; fog and mist marked below. Drag to set the time; arrow keys step an hour, Shift ten minutes." {...scrub}>
       <defs>
         <pattern id="wx-gap" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="4" />
@@ -118,7 +118,7 @@ export function CloudChart({ series, startMs, endMs, time, h = 40 }: { series: P
               </g>
             )
           )}
-          {c.fog && <rect className="fog" x={c.i * cw} y={h - 4} width={cw} height={4} />}
+          {c.fog !== FogClass.None && <rect className={c.fog === FogClass.Fog ? 'fog' : 'mist'} x={c.i * cw} y={h - 4} width={cw} height={4} />}
         </g>
       ))}
       <ScrubCursor time={time} startMs={startMs} endMs={endMs} w={W} h={h} />
@@ -151,14 +151,16 @@ export function CloudRow() {
   const s = r?.series ?? null;
   const missing = loading ? '' : missingText(r);
   const empty = s ? noDataAt(s, time) : true;
-  let fogFrom = -1;
-  let fogTo = -1;
+  const spans = { [FogClass.Fog]: [-1, -1], [FogClass.Mist]: [-1, -1] };
   if (s)
-    for (let t = dayStart; t < dayEnd; t += HOUR_MS)
-      if (fogAt(s, t + HOUR_MS / 2).length) {
-        if (fogFrom < 0) fogFrom = t;
-        fogTo = t + HOUR_MS;
-      }
+    for (let t = dayStart; t < dayEnd; t += HOUR_MS) {
+      const cls = fogAt(s, t + HOUR_MS / 2).cls;
+      if (cls === FogClass.None) continue;
+      const sp = spans[cls];
+      if (sp[0] < 0) sp[0] = t;
+      sp[1] = t + HOUR_MS;
+    }
+  const spanText = (cls: typeof FogClass.Fog | typeof FogClass.Mist, name: string) => (spans[cls][0] >= 0 ? `${name} signs ${formatTime(spans[cls][0], tz, hour12)}–${formatTime(spans[cls][1], tz, hour12)}` : '');
   return (
     <div className="cloud-row">
       <button onClick={() => uiStore.getState().setPanelTab(PanelTab.Weather)} title="Open the Weather tab">
@@ -171,7 +173,8 @@ export function CloudRow() {
             : missing ||
               [
                 empty ? 'no forecast for this hour' : `low ${pct(valueAt(s!, HourlyVar.CloudLow, time))} · mid ${pct(valueAt(s!, HourlyVar.CloudMid, time))} · high ${pct(valueAt(s!, HourlyVar.CloudHigh, time))}`,
-                fogFrom >= 0 ? `fog signs ${formatTime(fogFrom, tz, hour12)}–${formatTime(fogTo, tz, hour12)}` : '',
+                spanText(FogClass.Fog, 'fog'),
+                spanText(FogClass.Mist, 'mist'),
                 modelInfo(model).label
               ]
                 .filter(Boolean)

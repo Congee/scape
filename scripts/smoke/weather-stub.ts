@@ -34,7 +34,7 @@ export function fixtureValue(v: HourlyVar, hour: number, lat: number, lng: numbe
       return Math.round(Math.min(100, 90 * west + 30 * wave + 20));
     case 'visibility':
       if (model === 'ecmwf_ifs025') return null;
-      return hour % 24 < 6 ? 600 : 24000;
+      return hour % 24 < 6 ? 600 : hour % 24 < 8 ? 3000 : 24000;
     case 'weather_code':
       return hour % 24 < 6 ? 45 : 3;
     case 'precipitation':

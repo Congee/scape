@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bilinear, cellPoints, lattice, latticeCorners, latticeStep, MAX_CELLS, paintLattice } from './grid';
-import { CloudLayer, gapColor, layerColor, layerValue } from './layer';
+import { CloudLayer, gapColor, layerColor, layerValue, legendGradient, MIST_MAX } from './layer';
 import { HourlyVar, type PointSeries } from './openMeteo';
 
 const rotterdam = { west: 4.2, south: 51.8, east: 4.8, north: 52.05 };
@@ -73,11 +73,31 @@ describe('layerValue', () => {
     expect(layerValue(CloudLayer.Low, s({ cloud_cover_low: 40 }), 0)).toBe(40);
     expect(layerValue(CloudLayer.High, s({ cloud_cover_low: 40 }), 0)).toBeNaN();
   });
-  it('grades visibility and flags fog codes', () => {
+  it('bands visibility into mist and fog, and flags fog codes', () => {
     expect(layerValue(CloudLayer.Fog, s({ weather_code: 45, visibility: 20000 }), 0)).toBe(1);
     expect(layerValue(CloudLayer.Fog, s({ weather_code: 3, visibility: 20000 }), 0)).toBe(0);
-    expect(layerValue(CloudLayer.Fog, s({ visibility: 5500 }), 0)).toBeCloseTo(0.5, 5);
+    expect(layerValue(CloudLayer.Fog, s({ visibility: 5000 }), 0)).toBe(0);
+    expect(layerValue(CloudLayer.Fog, s({ visibility: 3000 }), 0)).toBeCloseTo(MIST_MAX / 2, 5);
+    expect(layerValue(CloudLayer.Fog, s({ visibility: 1000 }), 0)).toBe(MIST_MAX);
+    expect(layerValue(CloudLayer.Fog, s({ visibility: 999 }), 0)).toBe(1);
     expect(layerValue(CloudLayer.Fog, s({ weather_code: 3 }), 0)).toBeNaN();
     expect(layerValue(CloudLayer.Fog, null, 0)).toBeNaN();
+  });
+});
+
+const alpha = (v: number) => layerColor(CloudLayer.Fog, v)[3];
+
+describe('layerColor Fog', () => {
+  it('leaves clear air transparent, shades mist lightly and fog at full strength', () => {
+    expect(alpha(0)).toBe(0);
+    expect(alpha(0.01)).toBeGreaterThan(0);
+    expect(alpha(MIST_MAX / 2)).toBeLessThan(alpha(MIST_MAX));
+    expect(alpha(MIST_MAX)).toBeLessThan(alpha(1) / 2);
+    expect(alpha(1)).toBe(0.85);
+  });
+  it('shows the mist ramp and a solid fog step in the legend', () => {
+    const g = legendGradient(CloudLayer.Fog);
+    expect(g).toContain('rgba(0,0,0,0.00) 0%');
+    expect(g).toContain('rgba(232,197,71,0.85) 65%');
   });
 });

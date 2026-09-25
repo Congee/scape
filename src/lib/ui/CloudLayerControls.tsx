@@ -1,5 +1,6 @@
 import { formatTime } from '@core/time/format';
 import { ageText } from '@core/weather/format';
+import { FOG_VISIBILITY_M, MIST_VISIBILITY_M } from '@core/weather/fog';
 import { CloudLayer, LAYER_TEXT, legendGradient } from '@core/weather/layer';
 import { modelInfo } from '@core/weather/models';
 import { useSettings } from '@state/settings';
@@ -83,9 +84,9 @@ export function CloudLegend() {
         )}
       </div>
       <div className="scale">
-        <span>{layer === CloudLayer.Fog ? 'clear' : '0%'}</span>
+        <span>{layer === CloudLayer.Fog ? `Mist ${FOG_VISIBILITY_M / 1000}–${MIST_VISIBILITY_M / 1000} km` : '0%'}</span>
         <i style={{ backgroundImage: legendGradient(layer) }} />
-        <span>{layer === CloudLayer.Fog ? 'fog' : '100%'}</span>
+        <span>{layer === CloudLayer.Fog ? `Fog < ${FOG_VISIBILITY_M / 1000} km` : '100%'}</span>
         <i className="gap" />
         <span>no data</span>
       </div>
