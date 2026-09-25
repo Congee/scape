@@ -104,7 +104,8 @@ const drawn = async (focal: number, orient: string) => {
 const viewfinder = async (t: string, f: number) => {
   await tab.navigate(`${BASE}/viewfinder?camera=${HOBOKEN}&target=${TOWER.lat},${TOWER.lng}&f=${f}&t=${t}`);
   await tab.until('!!window.__scape?.prism?.cam && window.__scape.models.getState().loaded', 60_000);
-  await js("S.world.getState().setPinHeight(0); S.composition.getState().update({ showPaths: false }); return true;");
+  // The collapse persists, and a landscape-phone viewport in any earlier run sets it.
+  await js("S.world.getState().setPinHeight(0); S.composition.getState().update({ showPaths: false }); S.ui.getState().setPanelCollapsed(false); return true;");
 };
 /** Frames the body at a focal and orientation; returns its overlay disc once drawn. */
 const frameBody = async (body: string, f: number, orient: string, dAlt = 0) => {

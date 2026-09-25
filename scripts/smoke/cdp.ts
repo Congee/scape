@@ -45,10 +45,11 @@ export class Tab {
     });
   }
 
-  /** The tab already on `origin`, or a new background tab, which opens no window. */
+  /** The tab already on `origin`, else a blank one, else a new background tab, which opens no window. */
   static async open(cdp: number, origin: string, { front = false } = {}): Promise<Tab> {
     const list = (await (await fetch(`http://localhost:${cdp}/json/list`)).json()) as { id: string; type: string; url: string }[];
-    let id = list.find((t) => t.type === 'page' && t.url.startsWith(origin))?.id;
+    // Headless shows its first tab; a background one stays hidden, where img.decode() never settles.
+    let id = (list.find((t) => t.type === 'page' && t.url.startsWith(origin)) ?? list.find((t) => t.type === 'page' && t.url === 'about:blank'))?.id;
     if (!id) {
       const b = await Tab.connect(((await (await fetch(`http://localhost:${cdp}/json/version`)).json()) as { webSocketDebuggerUrl: string }).webSocketDebuggerUrl, '');
       id = String((await b.send('Target.createTarget', { url: 'about:blank', background: true })).targetId);
