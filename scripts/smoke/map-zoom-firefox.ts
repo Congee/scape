@@ -78,6 +78,7 @@ try {
     const waiting: Wheel[] = [];
     let drained: (() => void) | null = null;
     let failed: unknown = null;
+    let carry = 0;
     const send = (w: Wheel) => {
       const s = performance.now();
       inflight++;
@@ -104,7 +105,11 @@ try {
     for (const e of events) {
       const wait = t0 + e.dt - performance.now();
       if (wait > 0) await Bun.sleep(wait);
-      const w = { dy: e.dy, ctrl: e.ctrl };
+      // BiDi wheel deltas must be integers; carry the remainder so the total zoom is kept.
+      const dy = Math.round(e.dy + carry);
+      carry += e.dy - dy;
+      if (!dy) continue;
+      const w = { dy, ctrl: e.ctrl };
       const last = waiting.at(-1);
       if (inflight < depth) send(w);
       else if (last?.ctrl === w.ctrl) last.dy += w.dy;
