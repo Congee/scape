@@ -36,18 +36,19 @@ here = os.path.dirname(os.path.abspath(__file__))
 
 
 def palette(cache: str) -> tuple[np.ndarray, int]:
-    """Palette index → bin midpoint (NaN for no data) and the saturated index."""
+    """gibs.ts's palette index → radiance table and saturated index, checked against the colormap's display bins."""
+    src = "import { GIBS_RADIANCE, GIBS_SATURATED } from './src/lib/core/sky/gibs'; console.log(JSON.stringify([Array.from(GIBS_RADIANCE), GIBS_SATURATED]));"
+    lut, sat = json.loads(subprocess.run(["bun", "-e", src], cwd=os.path.join(here, "../.."), check=True, capture_output=True, text=True).stdout)
+    lut = np.array(lut, np.float64)
     p = os.path.join(cache, "palette.xml")
     if not os.path.exists(p):
         urllib.request.urlretrieve(PALETTE, p)
-    lut = np.full(256, np.nan, np.float64)
-    sat = -1
-    for lo, hi, ref in re.findall(r'sourceValue="\[([\d.]+),([\d.]+)\)" value="[^"]*" ref="(\d+)"', open(p).read()):
-        lo, hi, i = float(lo), float(hi), int(ref)
-        if hi > 1e5:
-            lut[i], sat = lo, i
-        else:
-            lut[i] = (lo + hi) / 2
+    # `value`, not `sourceValue`: the latter has the ref 91 typo [9.8,100).
+    bins = {int(r): (float(lo), float(hi)) for lo, hi, r in re.findall(r' value="\[([\d.]+),([\d.]+)\)" ref="(\d+)"', open(p).read())}
+    want = {i: lo if i == sat else (lo + hi) / 2 for i, (lo, hi) in bins.items()}
+    bad = [i for i in range(1, 256) if not math.isclose(lut[i], want.get(i, 0), abs_tol=1e-9)]
+    if len(bins) != sat or bad:
+        raise RuntimeError(f"colormap disagrees with gibs.ts at refs {bad}")
     return lut, sat
 
 

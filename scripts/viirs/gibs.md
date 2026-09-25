@@ -1,24 +1,28 @@
 # GIBS runtime tiles vs the zenith model (2026-09-25)
 
 Layer `VIIRS_SNPP_GapFilled_BRDF_Corrected_DayNightBand_Radiance`, epsg3857 z8 paletted PNG, per-pixel median of N nights
-(newest 2026-09-20), bin midpoints, index 180 = saturated at 38.2 nW. `gibs_windows.py` builds them; `calibrate.ts --windows` scores.
+(newest 2026-09-20), bin midpoints, index 180 = saturated at 38.2 nW. Ref 91's `sourceValue` reads `[9.8,100)`, a typo for
+`[9.8,10)` (its `value`, and the 0.1–0.2 steps around it); both decoders use gibs.ts's table. `gibs_windows.py` builds them; `calibrate.ts --windows` scores.
 Basket: 25 sites from DarkHours `tests/test_darksky_known_sites.py` (MIT), points only, in `basket.ts`.
 
 Note: the current `SKYGLOW_PARAMS` (k 2.528e-5, λ 19) were already fitted on GIBS (epsg4326, 3-night median), not VNP46A4;
 `calibrate.ts` on those old windows reproduces them (rms 0.54, Bortle 11/23).
 
-## 23 SQM sites (8 nights, z8)
+## 23 SQM sites (8 nights, z8 ≤ 32 km, z6 beyond)
 
 | method | k, λ | rms mag | Bortle hits |
 |---|---|---|---|
 | A kernel, current params | 2.528e-5, 19 | 0.56 | 12/23 |
-| A kernel, refit | 2.04e-5, 119 | 0.55 | 10/23 |
-| A + saturated gain (fit 2.36) | 1.54e-5, 35 | 0.51 | 9/23 |
+| A kernel, refit | 2.08e-5, 98 | 0.55 | 10/23 |
+| A + saturated gain (fit 2.36) | 1.57e-5, 31 | 0.51 | 9/23 |
 | B DarkHours local 21.7 − 2.5·log10(L+0.6) | – | 0.92 | 8/23 |
-| D hybrid min(A, B) | – | 0.88 | 7/23 |
+| D hybrid min(A, B) | – | 0.87 | 7/23 |
 
 Residuals (current fit, mag): Mong Kok +2.06, Potsdam −1.21, Vienna −0.47, the rest within ±0.4; pristine sites +0.2…+0.4.
 B misreads suburbs by −1.5…−1.9 (Braunau, Grieskirchen, Freistadt, Potsdam): its own pixel ignores dark surroundings.
+
+The ref 91 fix touches ≤ 0.09 % of window pixels and moves current-params predictions by ≤ 0.06 mag (Pasching; basket
+≤ 0.04, Torrey), mean 0.006; rms, Bortle and basket scores are unchanged, the refits move by a few % (λ 108 → 98).
 
 ## DarkHours basket (class labels, not measurements)
 
