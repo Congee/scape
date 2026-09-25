@@ -7,7 +7,8 @@ import { Tab } from './cdp';
 const [cdp = '9427', port = '5427', profile = '', secsArg = '30', only = ''] = process.argv.slice(2);
 const SECS = Number(secsArg);
 const BASE = `http://localhost:${port}`;
-const SETTLE_MS = 20_000;
+// V8's post-load memory reducer runs GCs for ~45 s; the budget is for the steady state after it.
+const SETTLE_MS = 45_000;
 // Budget: renderer and GPU process each ≤ 2 % of a core, no GL-drawing rAF callbacks.
 const CPU_MAX = 2;
 // The live clock may redraw when the sky has visibly drifted: ≥ 0.5 px, about every 3.7 s at 35 mm.
