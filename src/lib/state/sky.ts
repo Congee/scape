@@ -42,7 +42,7 @@ async function loadTexture(path: string): Promise<SkyTexture> {
   }
 }
 
-export const skyStore = create<SkyState>()((set) => ({
+export const skyStore = create<SkyState>()((set, get) => ({
   stars: null,
   constellations: null,
   milkyWay: null,
@@ -59,7 +59,10 @@ export const skyStore = create<SkyState>()((set) => ({
       .catch(fail);
     const lines = fetchOk('constellations.json')
       .then((r) => r.json() as Promise<ConstellationSet>)
-      .then((c) => set({ constellations: prepareConstellations(c) }))
+      .then(async (c) => {
+        await stars;
+        set({ constellations: prepareConstellations(c, get().stars) });
+      })
       .catch(fail);
     const mw = loadTexture('milkyway.jpg')
       .then((milkyWay) => set({ milkyWay }))

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { prepareConstellations } from './constellations';
+import { prepareConstellations, snapToStar } from './constellations';
 import { encodeStarCatalog, eqjVector, parseStarCatalog, starColor, starRadiusPx } from './stars';
 
 describe('star catalogue', () => {
@@ -48,5 +48,22 @@ describe('constellations', () => {
     expect(p.names).toEqual(['Orion']);
     expect(p.segments.length).toBe(3 * 6);
     expect(Math.hypot(p.centres[0], p.centres[1], p.centres[2])).toBeCloseTo(1, 5);
+  });
+
+  it('snaps vertices to the brightest catalogue star near them, so lines follow proper motion', () => {
+    // Arcturus at epoch 2025, 61″ from its J2000 line vertex; a faint star sits nearer the vertex.
+    const cat = parseStarCatalog(
+      encodeStarCatalog([
+        { raDeg: 213.9146, decDeg: 19.1685, mag: -0.05, ci: 1.23 },
+        { raDeg: 213.92, decDeg: 19.183, mag: 6.3, ci: 0.5 },
+        { raDeg: 10, decDeg: 10, mag: 1, ci: 0.5 }
+      ])
+    );
+    const set = { Boo: { name: 'Boötes', at: [215, 30] as [number, number], lines: [[[213.92, 19.18], [11, 10]] as [number, number][]] } };
+    const p = prepareConstellations(set, cat);
+    expect([...p.segments.subarray(0, 3)]).toEqual([cat.x[0], cat.y[0], cat.z[0]]);
+    expect([...p.segments.subarray(3, 6)]).toEqual([...new Float32Array(eqjVector(11, 10))]);
+    expect(snapToStar(eqjVector(213.92, 19.18), cat)).toEqual([cat.x[0], cat.y[0], cat.z[0]]);
+    expect(prepareConstellations(set).segments[0]).toBeCloseTo(eqjVector(213.92, 19.18)[0], 6);
   });
 });
