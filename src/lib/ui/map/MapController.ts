@@ -57,7 +57,7 @@ import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
 import { MapLayers } from './mapLayers';
 import { MapMenu } from './mapMenu';
-import { ModelDrawer, MODELS_LINE_LAYER } from './ModelDrawer';
+import { ModelDrawer, MODELS_FILL_LAYER } from './ModelDrawer';
 import { installMotionLod } from './motionLod';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 import { installTrackpadWheel } from './wheelZoom';
@@ -876,8 +876,8 @@ export class MapController {
     const on = settingsStore.getState().showSunShadows;
     if (on && !this.map.getLayer(SHADOW_LAYER)) {
       if (!this.map.getSource(SHADOW_SRC)) this.map.addSource(SHADOW_SRC, { type: 'image', url: BLANK_PNG, coordinates: [[-1, 1], [1, 1], [1, -1], [-1, -1]] });
-      // Under the model outlines and the extrusions, whichever went up first.
-      const before = [MODELS_LINE_LAYER, BLD_LAYER].find((id) => this.map.getLayer(id)) ?? this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
+      // Under the models and the extrusions, whichever went up first.
+      const before = [MODELS_FILL_LAYER, BLD_LAYER].find((id) => this.map.getLayer(id)) ?? this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
       this.map.addLayer(
         {
           id: SHADOW_LAYER,
