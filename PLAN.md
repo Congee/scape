@@ -532,16 +532,21 @@ visible errors are design choices, each waiting on a decision (recommendation in
 - Fixed 2026-09-24 (astrofix): refraction tapers to zero by −3° (≤24″ vs Horizons below the
   horizon, was ≤39′); stars and the Milky Way are refracted; catalogue stars carry aberration and
   proper motion to 2025 (<1″ vs astropy, was 15–20″); rise/set use sampled ground plus eye height
-  (0.1 s at 3000 m, was 44 s); Tokyo fallback 37.0 m. Open: viewfinder refraction assumes sea-level
-  air (~9′ at 3000 m) [scale by air density like rise/set]; constellation lines stay J2000 (≤18″)
-  [snap endpoints to catalogue stars, low priority].
+  (0.1 s at 3000 m, was 44 s); Tokyo fallback 37.0 m. Near the −1.775° taper the apparent Sun is
+  3.5′ off Horizons.
+- Fixed 2026-09-24 (astro2): viewfinder, star and Milky Way refraction scale by air density at the
+  eye (ERFA within 0.2 % above 10°); constellation vertices snap to the brightest catalogue star
+  within 120″ (were 13″ median, 95″ max off). Still sea-level density: last light, moon view, map
+  light, finder/align workers, fastHorizon, `RISE_APPARENT_DEG`.
 - Horizon sweep reads summits low, 12–53 m at 10 km, up to 205 m at 50 km (≤0.30°), so the Sun
   clears ridges early and sets late (`horizon.ts`, zoom ceiling in `terrain.worker.ts`). Max-per-cell
   or a finer coarsening floor, both cost speed. [After the terrain-drag work.]
 - Safari/iOS (AWS terrain) reads ground up to 197 m low (1.1° at 10 km). Software WebP decode (new
   path or dependency) or accept.
-- `Math.max(ground, 0)` puts the eye up to 7 m high in Dutch polders; the terrain mesh clamps too.
-  [A ground source that allows real negative heights in mesh and eye, touching the terrain worker.]
+- Fixed 2026-09-24 (astro2): Mapterhorn ground below sea level reaches eye and mesh (Zuidplaspolder
+  eye −4.53 m, was 1.60 m); AWS Terrarium negatives are seabed and clamp to 0, so on Safari polders
+  and the Dead Sea read 0 [accept]. Mapterhorn flattens hydro water to −1.5 m, so the Hudson sits
+  1.5 m below sea level [accept now, water mask later].
 
 **Known code glitches (2026-09-24).**
 
