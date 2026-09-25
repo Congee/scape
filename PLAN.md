@@ -543,7 +543,6 @@ visible errors are design choices, each waiting on a decision (recommendation in
   eye (ERFA within 0.2 % above 10°); constellation vertices snap to the brightest catalogue star
   within 120″ (were 13″ median, 95″ max off). Still sea-level density: last light, moon view, map
   light, finder/align workers, fastHorizon, `RISE_APPARENT_DEG`.
-- Viewfinder `sweepView` (z14) still reads summits low; apply the hzsweep refinement.
 - Safari/iOS (AWS terrain) reads ground up to 197 m low (1.1° at 10 km). Software WebP decode (new
   path or dependency) or accept.
 - Fixed 2026-09-24 (astro2): Mapterhorn ground below sea level reaches eye and mesh (Zuidplaspolder
