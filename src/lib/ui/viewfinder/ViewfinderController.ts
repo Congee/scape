@@ -741,7 +741,8 @@ export class ViewfinderController {
     const y = disc[1] + a[1] - b[1];
     const z = disc[2] + a[2] - b[2];
     const k = 1 / Math.hypot(x, y, z);
-    return { axis: [x * k, y * k, z * k], umbra: v.umbra, penumbra: v.penumbra };
+    // The eye adapts to the dimmed disc: its level compresses to the 8th root, detail keeps the cube root.
+    return { axis: [x * k, y * k, z * k], umbra: v.umbra, penumbra: v.penumbra, gain: Math.max(lunarEclipseLight(sc.time), 1e-6) ** (1 / 8 - 1 / 3) };
   }
 
   /** Where the moon disc lands, for the smoke checks. */
@@ -751,7 +752,12 @@ export class ViewfinderController {
     const mv = moonView(sc.time, sc.obs);
     const r = this.canvas.getBoundingClientRect();
     const radiusPx = discRadiusMm(sc.cam, mv.semidiameterDeg) * sc.frame.pxPerMm;
-    return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
+    const d = cameraBasis({ azimuthDeg: pos.azimuth, elevationDeg: pos.altitude }).forward;
+    const sh = this.earthShadow(sc, [d.x, d.y, d.z]);
+    const q = sh && this.toPx(sc, (Math.atan2(sh.axis[0], sh.axis[1]) * 180) / Math.PI, (Math.asin(sh.axis[2]) * 180) / Math.PI);
+    const px = (rad: number) => discRadiusMm(sc.cam, (rad * 180) / Math.PI) * sc.frame.pxPerMm;
+    const shadow = sh && q ? { x: r.left + q.x, y: r.top + q.y, umbraPx: px(sh.umbra), penumbraPx: px(sh.penumbra) } : null;
+    return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), shadow, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
   }
 
   private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {

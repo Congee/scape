@@ -41,7 +41,7 @@ export interface MoonShading {
   earthshine: number;
   map: SceneGlTexture | null;
   /** Earth's shadow during a lunar eclipse, axis in ENU; null otherwise. */
-  shadow: { axis: readonly [number, number, number]; umbra: number; penumbra: number } | null;
+  shadow: { axis: readonly [number, number, number]; umbra: number; penumbra: number; gain: number } | null;
 }
 
 export interface SceneGlInput {
@@ -178,9 +178,9 @@ uniform vec3 uMoonBody2;
 uniform vec3 uMoonSun;
 uniform float uMoonShine;
 uniform int uHasMoonMap;
-/** Earth's shadow: axis direction, and umbral/penumbral radii in radians; y <= 0 means no eclipse. */
+/** Earth's shadow: axis direction; umbral/penumbral radii in radians (y <= 0 means no eclipse) and the eye's gain. */
 uniform vec3 uShadowAxis;
-uniform vec2 uShadowR;
+uniform vec3 uShadowR;
 uniform sampler2D uMoonMap;
 
 ${SHADOW_GLSL}
@@ -289,7 +289,7 @@ vec3 moonPixel(vec3 v, float sinSemi, vec3 sky) {
     float l = min(el.x + el.y, 1.0);
     // Copper at the umbra's rim, deep red at its axis; the eye's cube-root response keeps totality visible.
     vec3 glow = mix(vec3(0.95, 0.2, 0.07), vec3(1.0, 0.48, 0.22), el.z);
-    float p = pow(l, 1.0 / 3.0);
+    float p = min(pow(l, 1.0 / 3.0) * uShadowR.z, pow(l, 1.0 / 8.0));
     lit = lit * (el.x + el.y * glow) / max(l, 1e-9) * p + sky * (1.0 - p);
   }
   return mix(dark, lit, sstep(-0.01, 0.03, mu0));
@@ -608,7 +608,7 @@ export class SceneGl {
     }
     const sh = m?.shadow;
     if (sh) gl.uniform3f(u.uShadowAxis, sh.axis[0], sh.axis[1], sh.axis[2]);
-    gl.uniform2f(u.uShadowR, sh?.umbra ?? 0, sh?.penumbra ?? 0);
+    gl.uniform3f(u.uShadowR, sh?.umbra ?? 0, sh?.penumbra ?? 0, sh?.gain ?? 1);
     const moonMap = m?.map ? this.uploadMoonMap(m.map) : null;
     gl.uniform1i(u.uHasMoonMap, moonMap ? 1 : 0);
     this.bind(6, u.uMoonMap, moonMap ?? this.dummy2d);
