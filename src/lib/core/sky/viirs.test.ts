@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { growBbox, laadsListingUrl, parseViirsName, pointBbox, tileName, tileOf, tilesForBbox, tilesForWindow, toCounts, VIIRS_PX_PER_DEG, windowAround } from './viirs';
+import { growBbox, laadsListingUrl, parseViirsName, pointBbox, tileName, tileOf, tilesForBbox, tilesForWindow, tilesNear, toCounts, VIIRS_PX_PER_DEG, windowAround } from './viirs';
 
 describe('VIIRS tiles', () => {
   it('names the 10° tile holding a point', () => {
@@ -31,5 +31,11 @@ describe('VIIRS tiles', () => {
   it('stores radiance as 0.1 nW counts with fill and negatives dark', () => {
     expect(Array.from(toCounts([65535, 123, 0, 7000], 0.1, 0, 65535))).toEqual([0, 123, 0, 7000]);
     expect(Array.from(toCounts(new Float32Array([-1, 2.34, Number.NaN, 1e9]), 1, 0, null))).toEqual([0, 23, 0, 65535]);
+  });
+
+  it('lists the tiles regions and points need, margin included', () => {
+    expect(tilesNear([{ lat: 51.92, lng: 4.48 }], [])).toEqual(['h17v03', 'h17v04', 'h18v03', 'h18v04']);
+    expect(tilesNear([], [{ west: 4, south: 51.5, east: 5, north: 52 }])).toEqual(['h17v03', 'h17v04', 'h18v03', 'h18v04']);
+    expect(tilesNear([], [])).toEqual([]);
   });
 });

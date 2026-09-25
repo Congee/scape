@@ -19,6 +19,13 @@ import { sensorById, useGear } from '@state/gear';
 import { settingsStore, useSettings } from '@state/settings';
 import { EYE_HEIGHT_M, horizonKeyFor, pinSiteHeightM, targetAngleFor, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
+import { NATURAL_SKY_MAG } from '@core/sky/brightness';
+import { darkHoursUrl } from '@core/sky/darkhours';
+import { domeText, glowTowardText, MOON_DARK_DMAG, moonCurve, SKY_TOOLTIP, skyReadout, type MoonSample } from '@core/sky/readout';
+import { glowToward, SKYGLOW_PARAMS, skyglowFrom } from '@core/sky/skyglow';
+import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
+import { GlowStatus, useSkyglow, type GlowPoint } from '@state/skyglow';
+import { PanelTab, uiStore } from '@state/ui';
 import type { LngLat } from '@core/geo/geodesy';
 
 const DAY_MS = 86_400_000;
@@ -92,12 +99,141 @@ function aimDeclination(time: number, obs: ReturnType<typeof makeObserver>, azDe
   return Math.asin(Math.max(-1, Math.min(1, out[2]))) * R2D;
 }
 
+const MOON_STEP_MS = 30 * 60_000;
+
+// K&S sampling costs ~25 moon positions; the panel re-renders every clock tick.
+let moonCache: { key: string; curve: MoonSample[] } | null = null;
+function moonCurveFor(obs: ReturnType<typeof makeObserver>, zenithMag: number, azDeg: number, altDeg: number, startMs: number, endMs: number): MoonSample[] {
+  const key = [obs.latitude, obs.longitude, zenithMag.toFixed(2), azDeg.toFixed(0), altDeg.toFixed(0), startMs, endMs].join('|');
+  if (!moonCache || moonCache.key !== key) {
+    const curve = moonCurve(zenithMag, azDeg, altDeg, startMs, endMs, MOON_STEP_MS, (t) => {
+      const d = new Date(t);
+      const m = position(SkyBody.Moon, d, obs);
+      return { altDeg: m.altitude, azDeg: m.azimuth, illumination: moonInfo(d).illumination };
+    });
+    moonCache = { key, curve };
+  }
+  return moonCache.curve;
+}
+
+function MoonChart({ curve, time, tz, hour12 }: { curve: MoonSample[]; time: number; tz: string; hour12: boolean }) {
+  const t0 = curve[0].t;
+  const t1 = curve.at(-1)!.t;
+  const lo = Math.min(-1, ...curve.map((c) => c.deltaMag));
+  const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * 300;
+  const y = (d: number) => 4 + (d / lo) * 48;
+  const pts = curve.map((c) => `${x(c.t).toFixed(1)},${y(c.deltaMag).toFixed(1)}`).join(' ');
+  return (
+    <figure className="moon-chart">
+      <svg viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Moonlight brightening toward the aim through the night">
+        <line x1={0} x2={300} y1={y(0)} y2={y(0)} className="axis" />
+        <polyline points={pts} className="curve" vectorEffect="non-scaling-stroke" />
+        {time >= t0 && time <= t1 && <line x1={x(time)} x2={x(time)} y1={0} y2={56} className="now" vectorEffect="non-scaling-stroke" />}
+      </svg>
+      <figcaption className="muted">
+        <span>{formatTime(t0, tz, hour12)}</span>
+        <span>0 to {lo.toFixed(1)} mag</span>
+        <span>{formatTime(t1, tz, hour12)}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+function PointSky({ label, p, g, heightM, skyline, time, tz }: { label: string; p: LngLat; g: GlowPoint; heightM: number; skyline?: (az: number) => number; time: number; tz: string }) {
+  const link = (
+    <a className="darkhours" href={darkHoursUrl(p, new Date(time), tz)} target="_blank" rel="noopener noreferrer" title="DarkHours: nightly dark-sky forecast for this spot">
+      More on DarkHours ↗
+    </a>
+  );
+  if (g.status === GlowStatus.NoData)
+    return (
+      <>
+        <span className="k">{label}</span>
+        <b className="v sky-missing" data-sky={label}>
+          <button className="link" onClick={() => uiStore.getState().setPanelTab(PanelTab.Offline)} title="Import VNP46A4 tiles in the Offline tab">
+            download VIIRS for this region
+          </button>
+          {g.missing.length > 0 && <span className="muted"> · {g.missing.join(', ')}</span>} · {link}
+        </b>
+      </>
+    );
+  if (g.status === GlowStatus.Error)
+    return (
+      <>
+        <span className="k">{label}</span>
+        <b className="v sky-error" data-sky={label}>
+          Sky model failed: {g.error}
+        </b>
+      </>
+    );
+  if (g.status !== GlowStatus.Ready || !g.bins || g.year === null) return null;
+  const sky = skyglowFrom(g.bins, heightM, SKYGLOW_PARAMS, skyline);
+  return (
+    <>
+      <span className="k">{label}</span>
+      <b className="v sky-readout" data-sky={label} title={SKY_TOOLTIP}>
+        {skyReadout(sky, g.year)} · {link}
+        {sky.domes.length > 0 && <span className="muted domes"> · {sky.domes.map(domeText).join('; ')}</span>}
+        {g.missing.length > 0 && <span className="muted"> · without {g.missing.join(', ')}, reads too dark</span>}
+      </b>
+    </>
+  );
+}
+
+function SkyGroup({ obs, skyline, aim, night, time, tz, hour12, heights }: { obs: ReturnType<typeof makeObserver>; skyline?: HorizonProfile; aim: { azimuthDeg: number; elevationDeg: number }; night: { startMs: number; endMs: number }; time: number; tz: string; hour12: boolean; heights: { camera: number; target: number } }) {
+  const camera = useSkyglow((s) => s.camera);
+  const target = useSkyglow((s) => s.target);
+  const pin = useWorld((s) => s.pin);
+  const pin2 = useWorld((s) => s.pin2);
+  const sl = skyline ? (az: number) => horizonAngleAt(skyline, az) : undefined;
+  const camSky = camera.status === GlowStatus.Ready && camera.bins ? skyglowFrom(camera.bins, heights.camera, SKYGLOW_PARAMS, sl) : null;
+  const toward = camSky && pin2 ? glowToward(camSky, aim.azimuthDeg, aim.elevationDeg, sl) : null;
+  const zenithMag = camSky?.mag ?? NATURAL_SKY_MAG;
+  const curve = night.endMs > night.startMs ? moonCurveFor(obs, zenithMag, aim.azimuthDeg, aim.elevationDeg, night.startMs, night.endMs) : [];
+  const worst = curve.reduce((m, c) => Math.min(m, c.deltaMag), 0);
+  const now = curve.length ? curve.reduce((a, c) => (Math.abs(c.t - time) < Math.abs(a.t - time) ? c : a)) : null;
+  const summary =
+    camera.status === GlowStatus.Ready && camSky
+      ? `Sky ≈ ${camSky.mag.toFixed(1)} mag/arcsec² · Bortle ≈ ${camSky.bortle.label}`
+      : camera.status === GlowStatus.NoData
+        ? 'Sky brightness · download VIIRS for this region'
+        : camera.status === GlowStatus.Error
+          ? 'Sky brightness · model failed'
+          : 'Sky brightness';
+  return (
+    <Group id="sky" summary={summary}>
+      <div className="kv">
+        <PointSky label="Camera" p={pin} g={camera} heightM={heights.camera} skyline={sl} time={time} tz={tz} />
+        {pin2 && <PointSky label="Target" p={pin2} g={target} heightM={heights.target} time={time} tz={tz} />}
+        {toward && (
+          <>
+            <span className="k">Toward aim</span>
+            <b className="v sky-toward">{glowTowardText(toward, aim.azimuthDeg)}</b>
+          </>
+        )}
+        <span className="k">Moonlight</span>
+        <b className="v sky-moon" data-worst={worst.toFixed(2)}>
+          {curve.length === 0
+            ? 'no dark hours tonight'
+            : worst > MOON_DARK_DMAG
+              ? 'adds nothing toward the aim tonight'
+              : `up to ${worst.toFixed(1)} mag toward the aim${now && now.deltaMag < MOON_DARK_DMAG ? ` · now ${now.deltaMag.toFixed(1)}` : ''}`}
+          <span className="muted"> · Krisciunas &amp; Schaefer 1991</span>
+        </b>
+      </div>
+      {curve.length > 1 && worst <= MOON_DARK_DMAG && <MoonChart curve={curve} time={time} tz={tz} hour12={hour12} />}
+      <p className="muted hint">{SKY_TOOLTIP} Zenith from NASA VIIRS Black Marble (VNP46A4) through a Walker-law kernel calibrated to 23 SQM sites; domes follow DarkHours (MIT).</p>
+    </Group>
+  );
+}
+
 export function NightPanel() {
   const time = useWorld((s) => s.time);
   const tz = useWorld((s) => s.tz);
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const pinHeightM = useWorld((s) => s.pinHeightM);
+  const pin2HeightM = useWorld((s) => s.pin2HeightM);
   const s = useSettings();
   const windows = useDayData((d) => d.milkyWay);
   const c = useComposition();
@@ -205,6 +341,17 @@ export function NightPanel() {
           </b>
         </div>
       </Group>
+
+      <SkyGroup
+        obs={obs}
+        skyline={skyline}
+        aim={aim}
+        night={night.kind === NightKind.AllDark ? tonight : night}
+        time={time}
+        tz={tz}
+        hour12={s.hour12}
+        heights={{ camera: pinSiteHeightM({ pinHeightM }, { pinGroundM }), target: siteHeightM(pin2GroundM, pin2HeightM + EYE_HEIGHT_M) }}
+      />
 
       <Group
         id="milkyway"

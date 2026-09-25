@@ -116,3 +116,11 @@ export function toCounts(raw: ArrayLike<number>, scale: number, offset: number, 
   }
   return out;
 }
+
+/** Tile names the model needs for these points and region boxes, each with the model margin; sorted, unique. */
+export function tilesNear(points: LngLat[], boxes: Bbox[], km = VIIRS_MARGIN_KM): string[] {
+  const out = new Set<string>();
+  for (const p of points) for (const t of tilesForWindow(windowAround(p, km))) out.add(tileName(t));
+  for (const b of boxes) for (const t of tilesForBbox(growBbox(b, km))) out.add(tileName(t));
+  return [...out].toSorted();
+}

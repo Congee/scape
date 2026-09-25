@@ -1469,6 +1469,46 @@ label.file input {
   border-bottom: 1px solid var(--line);
 }
 
+.night .sky-readout .darkhours,
+.night .sky-missing .darkhours {
+  white-space: nowrap;
+}
+
+.night .sky-error {
+  color: var(--danger);
+}
+
+.night .moon-chart {
+  margin: 0 6px 6px;
+}
+
+.night .moon-chart svg {
+  display: block;
+  width: 100%;
+  height: 56px;
+}
+
+.night .moon-chart .axis {
+  stroke: var(--line);
+}
+
+.night .moon-chart .curve {
+  fill: none;
+  stroke: var(--moon);
+  stroke-width: 1.5;
+}
+
+.night .moon-chart .now {
+  stroke: var(--fg-3);
+  stroke-dasharray: 2 2;
+}
+
+.night .moon-chart figcaption {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
 .night details h3 {
   margin: 10px 6px 4px;
   font-size: 12px;
@@ -1900,4 +1940,21 @@ label.file-pick input[type='file'] {
 
 .cal-eclipse p {
   margin: 4px 0 0;
+}
+
+.viirs-need .chip {
+  margin: 0 4px 2px 0;
+}
+
+.viirs-need .viirs-have {
+  color: var(--terrain);
+}
+
+.viirs-need .viirs-missing {
+  color: var(--sun);
+}
+
+.viirs-need .viirs-ocean {
+  color: var(--fg-3);
+  text-decoration: line-through;
 }

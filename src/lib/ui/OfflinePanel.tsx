@@ -11,6 +11,9 @@ import { PROTOMAPS_BUILD } from '@data/protomaps';
 import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
 import { defaultBasemapSourceUrl, GEOID_DOWNLOAD_URL, JobState, offlineStore, useOffline, warmStyleAssets, type DownloadJob } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
+import { EARTHDATA_SIGNUP, laadsYearUrl, tilesNear, VIIRS_FIRST_YEAR, VIIRS_MARGIN_KM } from '@core/sky/viirs';
+import { offerYear } from '@state/skyglow';
+import { useWorld } from '@state/world';
 import { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 
 const BASEMAP_ZOOMS = [10, 11, 12, 13, 14, 15];
@@ -379,8 +382,120 @@ export function OfflinePanel() {
         Import a .pmtiles file
       </label>
 
+      <ViirsSection />
+
       <GeoidSection />
     </div>
+  );
+}
+
+const TileState = { Have: 'have', Missing: 'missing', Ocean: 'ocean' } as const;
+type TileState = (typeof TileState)[keyof typeof TileState];
+
+function ViirsSection() {
+  const viirs = useOffline((s) => s.viirs);
+  const archives = useOffline((s) => s.archives);
+  const pin = useWorld((s) => s.pin);
+  const pin2 = useWorld((s) => s.pin2);
+  const [year, setYear] = useState<number | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const o = offlineStore.getState();
+  const y = year ?? offerYear(viirs);
+  const listed = viirs.listings[y];
+  const have = new Set(viirs.tiles.filter((t) => t.year === y).map((t) => t.tile));
+  const need = tilesNear(pin2 ? [pin, pin2] : [pin], archives.map((a) => a.bbox));
+  const stateOf = (t: string): TileState => (have.has(t) ? TileState.Have : listed && !listed.includes(t) ? TileState.Ocean : TileState.Missing);
+  const years = [...new Set(viirs.tiles.map((t) => t.year))].toSorted((a, b) => b - a);
+
+  const run = async (label: string, f: () => Promise<unknown>) => {
+    setError(null);
+    setBusy(label);
+    try {
+      await f();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importFiles = (input: HTMLInputElement) => {
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    if (files.length === 0) return;
+    void run('Importing…', async () => {
+      for (const [i, f] of files.entries()) {
+        setBusy(`Importing ${i + 1}/${files.length}…`);
+        // oxlint-disable-next-line no-await-in-loop -- one 11 MB tile decoded at a time
+        await o.importViirs(f);
+      }
+    });
+  };
+
+  return (
+    <>
+      <h3>Night lights (VIIRS)</h3>
+      <p className="muted hint">
+        Sky brightness and Bortle come from NASA Black Marble VNP46A4 annual tiles. LAADS lists them openly but serves the files only to a signed-in{' '}
+        <a href={EARTHDATA_SIGNUP} target="_blank" rel="noopener noreferrer">
+          Earthdata account
+        </a>{' '}
+        (free). Download the tiles below from the{' '}
+        <a href={laadsYearUrl(y)} target="_blank" rel="noopener noreferrer" data-viirs="laads">
+          LAADS {y} folder
+        </a>{' '}
+        and import the .h5 files.
+      </p>
+      <div className="kv">
+        <span className="k">Year</span>
+        <b className="v">
+          <input type="number" min={VIIRS_FIRST_YEAR} max={new Date().getUTCFullYear()} step={1} value={y} onChange={(e) => setYear(Number(e.target.value) || null)} aria-label="VIIRS composite year" />
+          <button className="link" disabled={busy !== null} onClick={() => void run('Checking LAADS…', () => o.fetchViirsListing(y))} title="Fetch the year's tile list from LAADS">
+            {listed ? 'Recheck LAADS' : 'Check LAADS'}
+          </button>
+        </b>
+        <span className="k">Needed</span>
+        <b className="v viirs-need" data-need={need.join(' ')}>
+          {need.length === 0
+            ? '—'
+            : need.map((t) => (
+                <span key={t} className={`chip viirs-${stateOf(t)}`} data-tile={t} title={stateOf(t) === TileState.Ocean ? 'Not published: no land lights' : stateOf(t) === TileState.Have ? 'Imported' : 'Not imported'}>
+                  {t}
+                </span>
+              ))}
+          <span className="muted"> · camera, target and saved regions + {VIIRS_MARGIN_KM} km</span>
+        </b>
+      </div>
+      {years.length > 0 ? (
+        <ul className="list" data-viirs="imported">
+          {years.map((yr) => {
+            const ts = viirs.tiles.filter((t) => t.year === yr);
+            return (
+              <li key={yr}>
+                <span className="detail">
+                  VNP46A4 {yr} · {ts.length} tile{ts.length === 1 ? '' : 's'} · {bytes(ts.reduce((n, t) => n + t.bytes, 0))}
+                </span>
+                <div className="actions">
+                  <button className="link" onClick={() => window.confirm(`Remove the ${yr} VIIRS tiles?`) && void run('Removing…', () => o.removeViirs(yr))}>
+                    Remove
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="muted hint" data-viirs="none">
+          No VIIRS tiles imported
+        </p>
+      )}
+      <label className="file">
+        <input type="file" accept=".h5" multiple disabled={busy !== null} aria-label="Import VNP46A4 tiles" onChange={(e) => importFiles(e.currentTarget)} />
+        {busy ?? 'Import VNP46A4 .h5 tiles'}
+      </label>
+      {error && <p className="error">{error}</p>}
+    </>
   );
 }
 
