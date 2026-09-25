@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { makeObserver } from '@core/astro/bodies';
 import { calendarMarks, CalendarMarkKind, ECLIPSE_LABEL, type CalendarMark } from '@core/astro/calendar';
+import type { BesselianElements } from '@core/astro/besselian';
 import { lunarCircumstances, solarCircumstances, type EclipseContact } from '@core/astro/eclipse';
 import { compass, degrees } from '@core/format';
 import { formatTime } from '@core/time/format';
+import { besselianElements } from '@data/besselian';
 import { isoDate, localMidnight, localParts } from '@core/time/localDay';
 import { settingsStore, useSettings } from '@state/settings';
 import { horizonKeyFor, useTerrain } from '@state/terrain';
@@ -56,9 +58,14 @@ function EclipseDetail({ mark, lat, lng }: { mark: CalendarMark; lat: number; ln
   const fresh = horizon && horizonKey === horizonKeyFor(worldStore.getState(), settingsStore.getState()) ? horizon : null;
 
   const solar = mark.kind === CalendarMarkKind.SolarEclipse;
+  const [elements, setElements] = useState<BesselianElements[] | undefined>();
+  useEffect(() => {
+    // Until the elements arrive, or if they fail, contacts come from the ephemeris.
+    if (solar) besselianElements().then(setElements, (err: unknown) => console.warn('eclipse elements', err));
+  }, [solar]);
   const obs = makeObserver({ lat, lng }, fresh?.eyeM ?? 0);
   const from = mark.timeMs - DAY_MS / 2;
-  const c = solar ? solarCircumstances(obs, from, fresh?.profile) : lunarCircumstances(obs, from, fresh?.profile);
+  const c = solar ? solarCircumstances(obs, from, fresh?.profile, elements) : lunarCircumstances(obs, from, fresh?.profile);
   const title = `${ECLIPSE_LABEL[c.kind]} ${solar ? 'solar' : 'lunar'} eclipse`;
   const stats =
     'magnitude' in c

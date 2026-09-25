@@ -1,8 +1,10 @@
 import { EclipseKind } from 'astronomy-engine';
 import { describe, expect, it } from 'vitest';
 import type { HorizonProfile } from '@core/terrain/horizon';
+import besselianFile from '../../../../public/eclipses/besselian.json';
+import { parseBesselian } from './besselian';
 import { makeObserver } from './bodies';
-import { ContactKind, lunarCircumstances, lunarEclipseLight, shadowLight, solarCircumstances, type EclipseContact } from './eclipse';
+import { ContactKind, lunarCircumstances, lunarEclipseLight, shadowLight, SolarSource, solarCircumstances, type EclipseContact } from './eclipse';
 
 const dms = (d: number, m: number) => Math.sign(d) * (Math.abs(d) + m / 60);
 // Both sides share the geometry; what is left is astronomy-engine's ephemeris against NASA's.
@@ -21,7 +23,7 @@ function expectContacts(got: EclipseContact[], want: Expected[]) {
   });
 }
 
-describe('solarCircumstances', () => {
+describe('solarCircumstances from the ephemeris', () => {
   it('matches NASA GSFC (Espenak, JSEX) for Reykjavik, 2026-08-12 total', () => {
     const obs = makeObserver({ lat: dms(64, 9), lng: dms(-21, 51) }, 28);
     const c = solarCircumstances(obs, utc('2026-08-11T00:00:00'));
@@ -86,24 +88,51 @@ const JSEX: [string, number, number, number, EclipseKind, number, string, string
   ['2026-08-12', 38.7223, -9.1393, 50, EclipseKind.Partial, 0.9494, '17:39:13.8', null, '18:36:03.2', null, '19:29:03.0'],
   ['2027-08-02', 36.5271, -6.2886, 10, EclipseKind.Total, 1.0718, '07:40:38.0', '08:45:17.4', '08:46:43.8', '08:48:10.9', '09:59:27.2'],
   ['2027-08-02', 25.6872, 32.6396, 89, EclipseKind.Total, 1.079, '08:40:07.2', '10:01:57.9', '10:05:08.1', '10:08:17.9', '11:26:25.2'],
-  ['2027-08-02', 51.5074, -0.1278, 20, EclipseKind.Partial, 0.5178, '08:03:30.1', null, '09:00:01.8', null, '09:59:22.4']
+  ['2027-08-02', 51.5074, -0.1278, 20, EclipseKind.Partial, 0.5178, '08:03:30.1', null, '09:00:01.8', null, '09:59:22.4'],
+  ['2026-08-12', dms(64, 9), dms(-21, 51), 28, EclipseKind.Total, 1.0382, '16:47:09.7', '17:48:16.4', '17:48:42.7', '17:49:08.9', '18:47:33.4'],
+  ['2026-08-12', dms(40, 24), dms(-3, 41), 667, EclipseKind.Partial, 0.9987, '17:36:42.3', null, '18:32:19.4', null, null],
+  ['2024-04-08', dms(32, 46), dms(-96, 47), 168, EclipseKind.Total, 1.0558, '17:23:12.2', '18:40:36.6', '18:42:32.6', '18:44:28.6', '20:02:35.4']
 ];
 
-describe('solarCircumstances against NASA JSEX', () => {
-  it.each(JSEX)('%s at %f, %f (%i m)', (day, lat, lng, h, kind, mag, ...times) => {
-    const c = solarCircumstances(makeObserver({ lat, lng }, h), utc(`${day}T00:00:00`) - 86_400_000);
-    expect(c.kind).toBe(kind);
-    expect(Math.abs(c.magnitude - mag)).toBeLessThanOrEqual(0.001);
-    const kinds = [ContactKind.C1, ContactKind.C2, ContactKind.Max, ContactKind.C3, ContactKind.C4];
-    kinds.forEach((k, i) => {
-      const got = c.contacts.find((x) => x.kind === k);
-      const want = times[i];
-      if (want === null) {
-        if (k === ContactKind.C2 || k === ContactKind.C3) expect(got).toBeUndefined();
-        return;
-      }
-      expect(Math.abs(got!.timeMs - utc(`${day}T${want}`))).toBeLessThanOrEqual(TOL_MS);
-    });
+const ELEMENTS = parseBesselian(besselianFile);
+
+function expectJsex(elements: typeof ELEMENTS | undefined, tolMs: number, tolMag: number, [day, lat, lng, h, kind, mag, ...times]: (typeof JSEX)[number]) {
+  const c = solarCircumstances(makeObserver({ lat, lng }, h), utc(`${day}T00:00:00`) - 86_400_000, undefined, elements);
+  expect(c.source).toBe(elements ? SolarSource.Besselian : SolarSource.Ephemeris);
+  expect(c.kind).toBe(kind);
+  expect(Math.abs(c.magnitude - mag)).toBeLessThanOrEqual(tolMag);
+  const kinds = [ContactKind.C1, ContactKind.C2, ContactKind.Max, ContactKind.C3, ContactKind.C4];
+  kinds.forEach((k, i) => {
+    const got = c.contacts.find((x) => x.kind === k);
+    const want = times[i];
+    if (want === null) {
+      if (k === ContactKind.C2 || k === ContactKind.C3) expect(got).toBeUndefined();
+      return;
+    }
+    expect(Math.abs(got!.timeMs - utc(`${day}T${want}`))).toBeLessThanOrEqual(tolMs);
+  });
+}
+
+describe('solarCircumstances from the ephemeris against NASA JSEX', () => {
+  it.each(JSEX)('%s at %f, %f (%i m)', (...row) => expectJsex(undefined, TOL_MS, 0.001, row));
+});
+
+describe('solarCircumstances from NASA Besselian elements against NASA JSEX', () => {
+  // References are quoted to 0.1 s; the worst today is 0.10 s.
+  it.each(JSEX)('%s at %f, %f (%i m)', (...row) => expectJsex(ELEMENTS, 500, 0.0005, row));
+
+  it('bundles every eclipse of 2000–2100 in order', () => {
+    expect(ELEMENTS).toHaveLength(228);
+    const years = ELEMENTS.map((e) => new Date(Date.UTC(2000, 0, 1, 12) + e.t0Tt * 86_400_000).getUTCFullYear());
+    expect(years[0]).toBe(2000);
+    expect(years.at(-1)).toBe(2100);
+    ELEMENTS.slice(1).forEach((e, i) => expect(e.t0Tt).toBeGreaterThan(ELEMENTS[i].t0Tt + 25));
+  });
+
+  it('falls back to the ephemeris past 2100', () => {
+    const c = solarCircumstances(makeObserver({ lat: 0, lng: 0 }), utc('2101-01-01T00:00:00'), undefined, ELEMENTS);
+    expect(c.source).toBe(SolarSource.Ephemeris);
+    expect(c.contacts[0].timeMs).toBeGreaterThan(utc('2101-01-01T00:00:00'));
   });
 });
 

@@ -85,9 +85,13 @@ tide_checks() { # label
 eclipse_checks() { # label
   go "$BASE/viewfinder?camera=$MADRID&t=2026-08-12T18:00Z&f=24"
   wait_for 'document.querySelector(".cal-toggle")'
-  js 'document.querySelector(".cal-toggle").click(); "ok"' >/dev/null
+  # Dev-server modules fill the 250-entry resource buffer before the lazy fetch.
+  js 'performance.clearResourceTimings(); performance.setResourceTimingBufferSize(1000); document.querySelector(".cal-toggle").click(); "ok"' >/dev/null
   wait_for 'document.querySelector(".cal-eclipse tr")' 20
-  local head kinds last wide
+  local head kinds last wide bessel
+  wait_for 'performance.getEntriesByType("resource").some((e) => e.name.endsWith("/eclipses/besselian.json") && e.responseStatus === 200)' 20
+  bessel=$(js 'performance.getEntriesByType("resource").find((e) => e.name.endsWith("/eclipses/besselian.json"))?.responseStatus ?? "none"')
+  check "$1 NASA Besselian elements fetched" "$([ "$bessel" = 200 ] && echo 1 || echo 0)" "status $bessel"
   head=$(js 'document.querySelector(".cal-eclipse .cal-eclipse-head")?.textContent ?? "missing"')
   check "$1 Madrid 2026-08-12: partial solar eclipse, magnitude ~0.999" "$([[ $head == 'Partial solar eclipse'*'magnitude 0.99'* ]] && echo 1 || echo 0)" "$head"
   kinds=$(js '[...document.querySelector(".cal-eclipse").querySelectorAll("tr")].map((r) => r.cells[0].textContent).join(" ")')

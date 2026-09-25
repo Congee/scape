@@ -1,5 +1,6 @@
-import { AstroTime, Body, C_AUDAY, EclipseKind, GeoMoon, GeoVector, ObserverVector, Search, SearchLocalSolarEclipse, SearchLunarEclipse, type Observer } from 'astronomy-engine';
+import { AstroTime, Body, C_AUDAY, EclipseKind, GeoMoon, GeoVector, ObserverVector, Search, SearchLocalSolarEclipse, SearchLunarEclipse, type LocalSolarEclipseInfo, type Observer } from 'astronomy-engine';
 import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
+import { besselianHours, besselianLocal, besselianTime, type BesselianElements } from './besselian';
 import { SkyBody } from './bodies';
 import { position } from './positions';
 import { SEMIDIAMETER_DEG } from './terrainEvents';
@@ -32,8 +33,13 @@ export interface EclipseContact {
   visible: boolean;
 }
 
+/** Where solar contacts come from: NASA's Besselian elements (2000–2100), or astronomy-engine's ephemeris elsewhere. */
+export const SolarSource = { Besselian: 'Besselian', Ephemeris: 'Ephemeris' } as const;
+export type SolarSource = (typeof SolarSource)[keyof typeof SolarSource];
+
 export interface SolarCircumstances {
   kind: EclipseKind;
+  source: SolarSource;
   /** NASA convention: fraction of the sun's diameter covered, or the moon/sun size ratio when central. */
   magnitude: number;
   /** Fraction of the sun's area covered at maximum. */
@@ -115,10 +121,38 @@ function searchOrThrow(f: (t: AstroTime) => number, t1: AstroTime, t2: AstroTime
   return t;
 }
 
-/** Local circumstances of the first solar eclipse whose peak falls after `fromMs`, as seen from `obs`. */
-export function solarCircumstances(obs: Observer, fromMs: number, horizon?: HorizonProfile): SolarCircumstances {
-  // astronomy-engine finds the eclipse; contacts are re-solved with NASA's radii to hundredths of a second.
+// Greatest eclipse and a local maximum lie within a few hours of each other.
+const ELEMENTS_WINDOW_H = 4;
+
+function besselianCircumstances(el: BesselianElements, obs: Observer, peak: AstroTime, horizon?: HorizonProfile): SolarCircumstances | null {
+  const deltaTs = (peak.tt - peak.ut) * 86_400;
+  const l = besselianLocal(el, obs, deltaTs);
+  if (!l) return null;
+  const at: MoonShadow = { r: l.m, p: l.L1, k: -l.L2 };
+  const times: [ContactKind, number | null][] = [
+    [ContactKind.C1, l.c1],
+    [ContactKind.C2, l.c2],
+    [ContactKind.Max, l.max],
+    [ContactKind.C3, l.c3],
+    [ContactKind.C4, l.c4]
+  ];
+  const contacts = times.flatMap(([kind, t]) => (t === null ? [] : [contact(SkyBody.Sun, kind, besselianTime(el, t).date.getTime(), obs, horizon)]));
+  const kind = l.c2 === null ? EclipseKind.Partial : l.L2 < 0 ? EclipseKind.Total : EclipseKind.Annular;
+  return { kind, source: SolarSource.Besselian, magnitude: shadowMagnitude(at), obscuration: shadowObscuration(at), contacts };
+}
+
+/**
+ * Local circumstances of the first solar eclipse whose peak falls after `fromMs`, as seen from `obs`.
+ * With NASA's Besselian elements for it in `elements`, contacts come from them; otherwise from the ephemeris.
+ */
+export function solarCircumstances(obs: Observer, fromMs: number, horizon?: HorizonProfile, elements?: readonly BesselianElements[]): SolarCircumstances {
   const e = SearchLocalSolarEclipse(new Date(fromMs), obs);
+  const el = elements?.find((x) => Math.abs(besselianHours(x, e.peak.time)) < ELEMENTS_WINDOW_H);
+  return (el && besselianCircumstances(el, obs, e.peak.time, horizon)) ?? ephemerisCircumstances(obs, e, horizon);
+}
+
+/** Fallback outside the elements: astronomy-engine's ephemeris, contacts re-solved with NASA's radii (seconds off NASA). */
+function ephemerisCircumstances(obs: Observer, e: LocalSolarEclipseInfo, horizon?: HorizonProfile): SolarCircumstances {
   const sh = (t: AstroTime) => moonShadow(t, obs);
   const slope = (t: AstroTime) => sh(t.AddDays(1 / 86_400)).r - sh(t.AddDays(-1 / 86_400)).r;
   const peak = searchOrThrow(slope, near(e.peak.time, -10), near(e.peak.time, 10));
@@ -133,7 +167,7 @@ export function solarCircumstances(obs: Observer, fromMs: number, horizon?: Hori
   times.push([ContactKind.C4, c4]);
   const contacts = times.map(([kind, t]) => contact(SkyBody.Sun, kind, t.date.getTime(), obs, horizon));
   const kind = !central ? EclipseKind.Partial : at.k > 0 ? EclipseKind.Total : EclipseKind.Annular;
-  return { kind, magnitude: shadowMagnitude(at), obscuration: shadowObscuration(at), contacts };
+  return { kind, source: SolarSource.Ephemeris, magnitude: shadowMagnitude(at), obscuration: shadowObscuration(at), contacts };
 }
 
 /** Earth's shadow at the moon, geocentric radians: the moon's distance from the axis, the two shadow radii, the moon's semidiameter. */
