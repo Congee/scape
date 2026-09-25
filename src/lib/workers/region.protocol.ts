@@ -1,5 +1,6 @@
 import type { Bbox } from '@core/geo/bbox';
 import type { GeoidMeta } from '@data/geoid';
+import type { ViirsTileMeta } from '@data/viirs';
 
 export const ArchiveKind = { Basemap: 'basemap', Terrain: 'terrain', Buildings: 'buildings' } as const;
 export type ArchiveKind = (typeof ArchiveKind)[keyof typeof ArchiveKind];
@@ -44,10 +45,10 @@ export interface Estimate {
   build?: string;
 }
 
-export const RegionRequestKind = { Estimate: 'Estimate', Download: 'Download', Import: 'Import', ImportGeoid: 'ImportGeoid', Cancel: 'Cancel' } as const;
+export const RegionRequestKind = { Estimate: 'Estimate', Download: 'Download', Import: 'Import', ImportGeoid: 'ImportGeoid', ImportViirs: 'ImportViirs', Cancel: 'Cancel' } as const;
 export type RegionRequestKind = (typeof RegionRequestKind)[keyof typeof RegionRequestKind];
 
-export const RegionResponseKind = { Estimate: 'Estimate', Progress: 'Progress', Done: 'Done', Geoid: 'Geoid', Error: 'Error' } as const;
+export const RegionResponseKind = { Estimate: 'Estimate', Progress: 'Progress', Done: 'Done', Geoid: 'Geoid', Viirs: 'Viirs', Error: 'Error' } as const;
 export type RegionResponseKind = (typeof RegionResponseKind)[keyof typeof RegionResponseKind];
 
 export type RegionRequest =
@@ -55,6 +56,7 @@ export type RegionRequest =
   | { kind: typeof RegionRequestKind.Download; id: string; spec: RegionSpec }
   | { kind: typeof RegionRequestKind.Import; id: string; file: File; name: string }
   | { kind: typeof RegionRequestKind.ImportGeoid; id: string; file: File }
+  | { kind: typeof RegionRequestKind.ImportViirs; id: string; file: File }
   | { kind: typeof RegionRequestKind.Cancel; id: string };
 
 export type RegionResponse =
@@ -62,4 +64,5 @@ export type RegionResponse =
   | { kind: typeof RegionResponseKind.Progress; id: string; done: number; total: number; bytes: number }
   | { kind: typeof RegionResponseKind.Done; id: string; meta: ArchiveMeta }
   | { kind: typeof RegionResponseKind.Geoid; id: string; meta: GeoidMeta }
+  | { kind: typeof RegionResponseKind.Viirs; id: string; meta: ViirsTileMeta }
   | { kind: typeof RegionResponseKind.Error; id: string; message: string };

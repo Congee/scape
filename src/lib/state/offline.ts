@@ -3,6 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import type { Bbox } from '@core/geo/bbox';
 import { DEFAULT_BASEMAP_ID, offlineBasemaps, styleAssetUrls, type Basemap, type PmFlavor } from '@data/basemaps';
 import { readGeoidMeta, removeGeoid, type GeoidMeta } from '@data/geoid';
+import { fetchViirsListing, listViirs, removeViirs, type ViirsStore, type ViirsTileMeta } from '@data/viirs';
 import { localBuildings, localTerrain } from '@data/localTiles';
 import { announceArchives, listArchives, opfsSupported, readArchiveFile, removeArchive, writeMeta } from '@data/opfs';
 import { registerArchive, unregisterArchive } from '@data/pmtiles';
@@ -61,6 +62,11 @@ export interface OfflineState {
   geoid: GeoidMeta | null;
   importGeoid(file: File): Promise<GeoidMeta>;
   removeGeoid(): Promise<void>;
+  /** Imported VNP46A4 tiles and fetched LAADS listings. */
+  viirs: ViirsStore;
+  importViirs(file: File): Promise<ViirsTileMeta>;
+  fetchViirsListing(year: number): Promise<string[]>;
+  removeViirs(year?: number): Promise<void>;
 }
 
 // --- worker plumbing ----------------------------------------------------
@@ -120,14 +126,15 @@ export const offlineStore = create<OfflineState>()(
       drawing: false,
       viewSeq: 0,
       geoid: null,
+      viirs: { tiles: [], listings: {} },
 
       load: async () => {
         if (!opfsSupported()) return set({ supported: false, loaded: true });
-        const [archives, geoid] = await Promise.all([listArchives(), readGeoidMeta()]);
+        const [archives, geoid, viirs] = await Promise.all([listArchives(), readGeoidMeta(), listViirs()]);
         for (const meta of archives) registerArchive(meta);
         localTerrain.refresh();
         localBuildings.refresh();
-        set({ supported: true, loaded: true, archives, geoid });
+        set({ supported: true, loaded: true, archives, geoid, viirs });
         await get().refreshStorage();
       },
 
@@ -253,6 +260,37 @@ export const offlineStore = create<OfflineState>()(
       removeGeoid: async () => {
         await removeGeoid();
         set({ geoid: null });
+        await get().refreshStorage();
+      },
+
+      importViirs: (file) =>
+        new Promise<ViirsTileMeta>((resolve, reject) => {
+          const id = newId('viirs');
+          handlers.set(id, (res) => {
+            if (res.kind === RegionResponseKind.Viirs) {
+              handlers.delete(id);
+              void listViirs().then((viirs) => {
+                set({ viirs });
+                void get().refreshStorage();
+                resolve(res.meta);
+              });
+            } else if (res.kind === RegionResponseKind.Error) {
+              handlers.delete(id);
+              reject(new Error(res.message));
+            }
+          });
+          post({ kind: RegionRequestKind.ImportViirs, id, file });
+        }),
+
+      fetchViirsListing: async (year) => {
+        const { tiles } = await fetchViirsListing(year);
+        set((s) => ({ viirs: { ...s.viirs, listings: { ...s.viirs.listings, [year]: tiles } } }));
+        return tiles;
+      },
+
+      removeViirs: async (year) => {
+        await removeViirs(year);
+        set({ viirs: await listViirs() });
         await get().refreshStorage();
       }
     };

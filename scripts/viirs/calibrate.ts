@@ -5,11 +5,12 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { bytesSource, openHdf5 } from '../../src/lib/core/io/hdf5';
+import { bytesSource } from '../../src/lib/core/io/hdf5';
 import { cdm2ToMag, magToCdm2, NATURAL_SKY_MAG } from '../../src/lib/core/sky/brightness';
 import { altitudeFactor, KM_PER_DEG_LAT, KM_PER_DEG_LON, kernel, REACH_KM } from '../../src/lib/core/sky/skyglow';
 import { SQM_SITES, type SqmSite } from '../../src/lib/core/sky/skyglow.sites';
-import { parseViirsName, tileName, tilesForWindow, toCounts, VIIRS_COLS, VIIRS_PX_PER_DEG, VIIRS_SCALE, VIIRS_TILE_PX, type ViirsWindow, windowAround } from '../../src/lib/core/sky/viirs';
+import { decodeViirsTile } from '../../src/lib/core/sky/viirsTile';
+import { parseViirsName, tileName, tilesForWindow, VIIRS_COLS, VIIRS_PX_PER_DEG, VIIRS_SCALE, VIIRS_TILE_PX, type ViirsWindow, windowAround } from '../../src/lib/core/sky/viirs';
 
 const [mode, dir] = process.argv.slice(2);
 if (!dir || (mode !== '--h5' && mode !== '--windows')) {
@@ -18,19 +19,12 @@ if (!dir || (mode !== '--h5' && mode !== '--windows')) {
 }
 
 const siteKey = (s: SqmSite) => s.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-const DATA_FIELDS = 'HDFEOS/GRIDS/VIIRS_Grid_DNB_2d/Data Fields/';
 
 async function h5Tiles(): Promise<Map<string, Uint16Array>> {
   const out = new Map<string, Uint16Array>();
-  for (const f of readdirSync(dir)) {
-    const id = parseViirsName(f);
-    if (!id) continue;
-    const h5 = await openHdf5(bytesSource(new Uint8Array(readFileSync(join(dir, f)))));
-    const path = [`${DATA_FIELDS}AllAngle_Composite_Snow_Free`, `${DATA_FIELDS}NearNadir_Composite_Snow_Free`].find((p) => h5.has(p));
-    if (!path) throw new Error(`${f}: no composite radiance`);
-    const ds = h5.dataset(path);
-    const num = (k: string, d: number) => (typeof ds.attrs[k] === 'number' ? (ds.attrs[k] as number) : Array.isArray(ds.attrs[k]) ? Number((ds.attrs[k] as number[])[0]) : d);
-    out.set(tileName(id.tile), toCounts(await ds.read(), num('scale_factor', 1), num('add_offset', num('offset', 0)), num('_FillValue', 65535)));
+  for (const f of readdirSync(dir).filter((n) => parseViirsName(n))) {
+    const t = await decodeViirsTile(bytesSource(new Uint8Array(readFileSync(join(dir, f)))), f);
+    out.set(tileName(t.tile), t.counts);
   }
   return out;
 }
