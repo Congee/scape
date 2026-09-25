@@ -1,24 +1,42 @@
 /**
  * Fits SKYGLOW_PARAMS (k, λ) to the published zenith brightness in skyglow.sites.ts and prints residuals.
  *   bun scripts/viirs/calibrate.ts --h5 <dir of VNP46A4 .h5 tiles>
- *   bun scripts/viirs/calibrate.ts --windows <dir of <site>.u16 + <site>.json 15" count windows>
+ *   bun scripts/viirs/calibrate.ts --windows <dir of <site>.u16 + <site>.json 15" count windows> [--sat] [--basket <dir>]
+ * --sat also fits one gain for saturated pixels (json satCount); --basket scores the fit on basket.ts windows.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bytesSource } from '../../src/lib/core/io/hdf5';
-import { cdm2ToMag, magToCdm2, NATURAL_SKY_MAG } from '../../src/lib/core/sky/brightness';
-import { altitudeFactor, KM_PER_DEG_LAT, KM_PER_DEG_LON, kernel, REACH_KM } from '../../src/lib/core/sky/skyglow';
-import { SQM_SITES, type SqmSite } from '../../src/lib/core/sky/skyglow.sites';
+import { bortleOf, cdm2ToMag, magToCdm2, NATURAL_SKY_MAG } from '../../src/lib/core/sky/brightness';
+import { altitudeFactor, KM_PER_DEG_LAT, KM_PER_DEG_LON, kernel, REACH_KM, SKYGLOW_PARAMS } from '../../src/lib/core/sky/skyglow';
+import { SQM_SITES } from '../../src/lib/core/sky/skyglow.sites';
 import { decodeViirsTile } from '../../src/lib/core/sky/viirsTile';
 import { parseViirsName, tileName, tilesForWindow, VIIRS_COLS, VIIRS_PX_PER_DEG, VIIRS_SCALE, VIIRS_TILE_PX, type ViirsWindow, windowAround } from '../../src/lib/core/sky/viirs';
+import { BASKET } from './basket';
 
-const [mode, dir] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const [mode, dir] = args;
+const fitSat = args.includes('--sat');
+const basketDir = args.includes('--basket') ? args[args.indexOf('--basket') + 1] : null;
 if (!dir || (mode !== '--h5' && mode !== '--windows')) {
-  console.error('usage: bun scripts/viirs/calibrate.ts --h5|--windows <dir>');
+  console.error('usage: bun scripts/viirs/calibrate.ts --h5|--windows <dir> [--sat] [--basket <dir>]');
   process.exit(1);
 }
 
-const siteKey = (s: SqmSite) => s.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+interface Site {
+  name: string;
+  lat: number;
+  lng: number;
+  elevM: number;
+}
+
+/** A window with its own quantum and saturation count (GIBS), or VNP46A4's. */
+interface Win extends ViirsWindow {
+  scale: number;
+  satCount: number;
+}
+
+const siteKey = (s: Site) => s.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 async function h5Tiles(): Promise<Map<string, Uint16Array>> {
   const out = new Map<string, Uint16Array>();
@@ -30,7 +48,7 @@ async function h5Tiles(): Promise<Map<string, Uint16Array>> {
   return out;
 }
 
-function windowFromTiles(tiles: Map<string, Uint16Array>, s: SqmSite): ViirsWindow {
+function windowFromTiles(tiles: Map<string, Uint16Array>, s: Site): Win {
   const w = windowAround(s, REACH_KM);
   const data = new Uint16Array(w.rows * w.cols);
   for (const t of tilesForWindow(w)) if (!tiles.has(tileName(t))) console.warn(`${s.name}: tile ${tileName(t)} missing, treated as dark`);
@@ -42,19 +60,27 @@ function windowFromTiles(tiles: Map<string, Uint16Array>, s: SqmSite): ViirsWind
       if (t) data[r * w.cols + c] = t[(gr % VIIRS_TILE_PX) * VIIRS_TILE_PX + (gc % VIIRS_TILE_PX)];
     }
   }
-  return { ...w, data };
+  return { ...w, data, scale: VIIRS_SCALE, satCount: Infinity };
 }
 
-function windowFromFile(s: SqmSite): ViirsWindow {
-  const meta = JSON.parse(readFileSync(join(dir, `${siteKey(s)}.json`), 'utf8'));
-  const buf = readFileSync(join(dir, `${siteKey(s)}.u16`));
-  return { ...meta, data: new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength / 2) };
+function windowFromFile(d: string, s: Site): Win {
+  const meta = JSON.parse(readFileSync(join(d, `${siteKey(s)}.json`), 'utf8'));
+  const buf = readFileSync(join(d, `${siteKey(s)}.u16`));
+  return { scale: VIIRS_SCALE, satCount: Infinity, ...meta, data: new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength / 2) };
 }
 
 const BIN_KM = 0.05;
-/** Radiance·area histogram by distance, so every λ reuses one pass over the pixels. */
-function radialHistogram(win: ViirsWindow, s: SqmSite): Float64Array {
-  const h = new Float64Array(Math.ceil(REACH_KM / BIN_KM));
+interface Hist {
+  /** Radiance·area by distance bin, unsaturated and saturated pixels apart, so every λ and gain reuses one pass. */
+  lit: Float64Array;
+  sat: Float64Array;
+  /** Radiance of the observer's own pixel, nW/(cm²·sr). */
+  local: number;
+}
+
+function radialHistogram(win: Win, s: Site): Hist {
+  const lit = new Float64Array(Math.ceil(REACH_KM / BIN_KM));
+  const sat = new Float64Array(lit.length);
   const d2r = Math.PI / 180;
   const px = 1 / VIIRS_PX_PER_DEG;
   const kx = KM_PER_DEG_LON * Math.cos(s.lat * d2r);
@@ -68,37 +94,92 @@ function radialHistogram(win: ViirsWindow, s: SqmSite): Float64Array {
       let dLon = (win.col0 + c + 0.5) * px - 180 - s.lng;
       dLon -= 360 * Math.round(dLon / 360);
       const i = Math.floor(Math.hypot(dLon * kx, dy) / BIN_KM);
-      if (i < h.length) h[i] += v * VIIRS_SCALE * area;
+      if (i < lit.length) (v >= win.satCount ? sat : lit)[i] += v * win.scale * area;
     }
   }
-  return h;
+  const r = Math.floor((90 - s.lat) * VIIRS_PX_PER_DEG) - win.row0;
+  const c = Math.floor((s.lng + 180) * VIIRS_PX_PER_DEG) - win.col0;
+  return { lit, sat, local: win.data[r * win.cols + c] * win.scale };
 }
 
+const load = (d: string, tiles: Map<string, Uint16Array> | null, sites: readonly Site[]) => sites.map((s) => radialHistogram(tiles ? windowFromTiles(tiles, s) : windowFromFile(d, s), s));
 const tiles = mode === '--h5' ? await h5Tiles() : null;
-const hist = SQM_SITES.map((s) => radialHistogram(tiles ? windowFromTiles(tiles, s) : windowFromFile(s), s));
+const hist = load(dir, tiles, SQM_SITES);
 const sum = (h: Float64Array, lambda: number) => h.reduce((a, v, i) => a + v * kernel((i + 0.5) * BIN_KM, lambda), 0);
 const natural = magToCdm2(NATURAL_SKY_MAG);
-const predict = (k: number, lambda: number) => SQM_SITES.map((s, i) => cdm2ToMag(natural + k * sum(hist[i], lambda) * altitudeFactor(s.elevM)));
-const cost = (k: number, lambda: number) => predict(k, lambda).reduce((a, m, i) => a + (m - SQM_SITES[i].sqm) ** 2, 0);
 
-function bestK(lambda: number): number {
+interface Fit {
+  k: number;
+  lambda: number;
+  gain: number;
+}
+
+/** Kernel sums per site at one λ, unsaturated and saturated apart. */
+const sumsAt = (hs: Hist[], lambda: number) => hs.map((h) => [sum(h.lit, lambda), sum(h.sat, lambda)] as const);
+const magsFrom = (sums: (readonly [number, number])[], sites: readonly Site[], k: number, gain: number) => sites.map((s, i) => cdm2ToMag(natural + k * (sums[i][0] + gain * sums[i][1]) * altitudeFactor(s.elevM)));
+const predictFor = (hs: Hist[], sites: readonly Site[], f: Fit) => magsFrom(sumsAt(hs, f.lambda), sites, f.k, f.gain);
+const cost = (ms: number[]) => ms.reduce((a, m, i) => a + (m - SQM_SITES[i].sqm) ** 2, 0);
+
+function bestK(sums: (readonly [number, number])[], gain: number): number {
   let lo = -12;
   let hi = 0;
   for (let it = 0; it < 80; it++) {
     const a = lo + (hi - lo) / 3;
     const b = hi - (hi - lo) / 3;
-    if (cost(10 ** a, lambda) < cost(10 ** b, lambda)) hi = b;
+    if (cost(magsFrom(sums, SQM_SITES, 10 ** a, gain)) < cost(magsFrom(sums, SQM_SITES, 10 ** b, gain))) hi = b;
     else lo = a;
   }
   return 10 ** ((lo + hi) / 2);
 }
 
-let best = { k: 0, lambda: 0, c: Infinity };
+let best = { k: 0, lambda: 0, gain: 1, c: Infinity };
 for (let lambda = 10; lambda <= 400; lambda *= 1.1) {
-  const k = bestK(lambda);
-  const c = cost(k, lambda);
-  if (c < best.c) best = { k, lambda, c };
+  const sums = sumsAt(hist, lambda);
+  for (let gain = 1; gain <= (fitSat ? 64 : 1); gain *= 1.1) {
+    const k = bestK(sums, gain);
+    const c = cost(magsFrom(sums, SQM_SITES, k, gain));
+    if (c < best.c) best = { k, lambda, gain, c };
+  }
 }
-const pred = predict(best.k, best.lambda);
-console.log(`k = ${best.k.toPrecision(4)}, lambdaKm = ${best.lambda.toFixed(0)}, rms = ${Math.sqrt(best.c / SQM_SITES.length).toFixed(2)} mag`);
-for (const [i, s] of SQM_SITES.entries()) console.log(`${s.kind.padEnd(9)}${s.name.padEnd(34)}${s.sqm.toFixed(2)}  model ${pred[i].toFixed(2)}  ${(pred[i] - s.sqm >= 0 ? '+' : '') + (pred[i] - s.sqm).toFixed(2)}`);
+
+/** DarkHours radiance_to_sqm: the observer's own pixel, no propagation. */
+const localMag = (h: Hist) => 21.7 - 2.5 * Math.log10(h.local + 0.6);
+/** Class distance with the half class 4.5 spanning 4–5 and 8 standing for 8–9. */
+function classGap(mag: number, cls: number): number {
+  const b = bortleOf(mag).cls;
+  const [lo, hi] = b === 4.5 ? [4, 5] : b === 8 ? [8, 9] : [b, b];
+  return cls < lo ? lo - cls : cls > hi ? cls - hi : 0;
+}
+const fmt = (v: number) => (v >= 0 ? '+' : '') + v.toFixed(2);
+const rms = (xs: number[]) => Math.sqrt(xs.reduce((a, v) => a + v * v, 0) / xs.length);
+const total = (h: Float64Array) => h.reduce((a, v) => a + v, 0);
+
+const pred = predictFor(hist, SQM_SITES, best);
+const curFit = { k: SKYGLOW_PARAMS.k, lambda: SKYGLOW_PARAMS.lambdaKm, gain: 1 };
+const cur = predictFor(hist, SQM_SITES, curFit);
+const loc = hist.map(localMag);
+const hyb = pred.map((m, i) => Math.min(m, loc[i]));
+const hits = (ms: number[]) => `${ms.filter((m, i) => bortleOf(m).cls === bortleOf(SQM_SITES[i].sqm).cls).length}/${SQM_SITES.length}`;
+const resid = (ms: number[]) => ms.map((m, i) => m - SQM_SITES[i].sqm);
+console.log(`k = ${best.k.toPrecision(4)}, lambdaKm = ${best.lambda.toFixed(0)}, satGain = ${best.gain.toFixed(2)}, rms = ${Math.sqrt(best.c / SQM_SITES.length).toFixed(2)} mag, Bortle ${hits(pred)}`);
+console.log(`SKYGLOW_PARAMS as is: rms = ${rms(resid(cur)).toFixed(2)} mag, Bortle ${hits(cur)}`);
+console.log(`local (DarkHours): rms = ${rms(resid(loc)).toFixed(2)} mag, Bortle ${hits(loc)}; hybrid min: rms = ${rms(resid(hyb)).toFixed(2)} mag, Bortle ${hits(hyb)}`);
+for (const [i, s] of SQM_SITES.entries()) {
+  const satShare = total(hist[i].sat) / (total(hist[i].lit) + total(hist[i].sat) || 1);
+  console.log(`${s.kind.padEnd(9)}${s.name.padEnd(34)}${s.sqm.toFixed(2)}  model ${pred[i].toFixed(2)}  ${fmt(pred[i] - s.sqm)}  local ${fmt(loc[i] - s.sqm)}  hybrid ${fmt(hyb[i] - s.sqm)}  satArea ${satShare.toFixed(2)}`);
+}
+
+if (basketDir) {
+  if (!existsSync(basketDir)) throw new Error(`no basket windows in ${basketDir}`);
+  const bh = load(basketDir, null, BASKET);
+  const kern = predictFor(bh, BASKET, best);
+  const local = bh.map(localMag);
+  const asIs = predictFor(bh, BASKET, curFit);
+  const all = { kernel: kern, local, hybrid: kern.map((m, i) => Math.min(m, local[i])), 'SKYGLOW_PARAMS': asIs, 'SKYGLOW_PARAMS hybrid': asIs.map((m, i) => Math.min(m, local[i])) };
+  for (const [name, ms] of Object.entries(all)) {
+    const gaps = ms.map((m, i) => classGap(m, BASKET[i].bortle));
+    console.log(`basket ${name}: exact ${gaps.filter((g) => g === 0).length}/${BASKET.length}, ±1 ${gaps.filter((g) => g <= 1).length}/${BASKET.length}`);
+  }
+  for (const [i, s] of BASKET.entries())
+    console.log(`${s.name.padEnd(28)}B${s.bortle}  kernel ${kern[i].toFixed(2)} B${bortleOf(kern[i]).label.padEnd(4)} local ${local[i].toFixed(2)} B${bortleOf(local[i]).label.padEnd(4)} hybrid B${bortleOf(all.hybrid[i]).label}`);
+}
