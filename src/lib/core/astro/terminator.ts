@@ -1,6 +1,7 @@
 import { Body, Equator, EquatorFromVector, GeoVector, Horizon, MakeTime, RotateVector, Rotation_EQJ_EQD, SiderealTime, type Observer } from 'astronomy-engine';
 import type { Feature, FeatureCollection, LineString, Polygon } from 'geojson';
 import type { LngLat } from '@core/geo/geodesy';
+import { riseSetObserver } from './bodies';
 import { airDensity, REFRACTION_NEAR_HORIZON_DEG } from './refraction';
 
 const D2R = Math.PI / 180;
@@ -56,9 +57,9 @@ export function horizonDipDeg(obs: Observer, aglM: number): number {
   return -(Math.sqrt((2 * (1 - k) * aglM) / radiusM) / (1 - k)) / D2R;
 }
 
-/** Unrefracted upper-limb altitude at which SearchRiseSet reports sunrise and sunset. */
+/** Unrefracted upper-limb altitude at which dayEvents reports sunrise and sunset. */
 export function riseAltitudeDeg(obs: Observer, aglM: number): number {
-  return horizonDipDeg(obs, aglM) - REFRACTION_NEAR_HORIZON_DEG * airDensity(obs.height - aglM);
+  return horizonDipDeg(riseSetObserver(obs, aglM), aglM) - REFRACTION_NEAR_HORIZON_DEG * airDensity(obs.height);
 }
 
 /** Geocentric apparent subsolar point, true equator and equinox of date. */

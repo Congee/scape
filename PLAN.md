@@ -550,6 +550,8 @@ visible errors are design choices, each waiting on a decision (recommendation in
   (−0.247° at 3000 m, was −0.215°); fastHorizon at 3000 m matches the viewfinder to 1e-6° (was 0.1°).
   Follow-up 2026-09-25 (firstlight): first light and alpenglow share one observer and lit-span pass (equal to the ms);
   Calendar eclipse visibility stands on the pin's ground (was sea level).
+  Follow-up 2026-09-25 (plannerrho): planner rise/set and the map night band refract in the eye's air too
+  (threshold 0.045° higher at 2000 m ground + 1000 m eye, was the ground's ρ).
 - Rise/set times come from 0.5° horizon columns, so a jagged near ridge can put the viewfinder's
   Sun/Moon flip up to ~30 s off the listed time (Zermatt 1–6 s). Finer azimuth steps around the
   rise/set azimuths [leave for now].

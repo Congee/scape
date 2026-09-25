@@ -29,3 +29,8 @@ export function siteHeightM(groundM: number | null, aboveGroundM: number): numbe
   const g = groundM === null || Number.isNaN(groundM) ? 0 : Math.max(groundM, -500);
   return g + aboveGroundM;
 }
+
+/** SearchRiseSet refracts in the air at `height − aboveGroundM`; lifting the eye by that much puts it at the eye. */
+export function riseSetObserver(eye: Observer, aboveGroundM: number): Observer {
+  return new Observer(eye.latitude, eye.longitude, eye.height + aboveGroundM);
+}

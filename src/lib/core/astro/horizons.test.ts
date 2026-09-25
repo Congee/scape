@@ -1,9 +1,11 @@
+import { Body, SearchRiseSet } from 'astronomy-engine';
 import { describe, expect, it } from 'vitest';
-import { makeObserver, siteHeightM, SkyBody } from './bodies';
+import { makeObserver, riseSetObserver, siteHeightM, SkyBody } from './bodies';
 import { dayEvents, EventKind } from './dayEvents';
 import { position } from './positions';
 import { horizontalFast, skySample } from './fastHorizon';
-import { airDensity, riseApparentDeg } from './refraction';
+import { airDensity, apparentAltitude, horizonAltDeg, riseApparentDeg } from './refraction';
+import { horizonDipDeg } from './terminator';
 import { applyStar, horizontalOf, starFrame } from './skyFrame';
 import { eqjVector } from './stars';
 import { bearingDeg, normalizeBearing } from '@core/geo/geodesy';
@@ -101,6 +103,19 @@ describe('rise/set on a 3000 m plateau vs JPL Horizons', () => {
     expect(Math.abs(alt - riseApparentDeg(1))).toBeGreaterThan(0.025);
     const fast = horizontalFast(skySample(SkyBody.Sun, ev.time, eye), 46, 7.75, airDensity(3000)).altitude;
     expect(Math.abs(fast - alt)).toBeLessThan(1e-6);
+  });
+
+  // Equinox, so the true semidiameter is the standard 16′.
+  it.each([EventKind.Rise, EventKind.Set])('refracts %s in the eye\'s air, not the ground\'s', (kind) => {
+    const eye = makeObserver({ lat: 46, lng: 7.75 }, siteHeightM(2000, 1000));
+    const t = Date.parse('2026-03-20T12:00:00Z');
+    const ev = dayEvents(eye, t - 12 * 3600e3, t + 12 * 3600e3, { heightAboveGroundM: 1000 }).find((e) => e.body === SkyBody.Sun && e.kind === kind)!;
+    const alt = position(SkyBody.Sun, new Date(ev.time), eye).altitude;
+    const dip = horizonDipDeg(riseSetObserver(eye, 1000), 1000);
+    const flip = apparentAltitude(horizonAltDeg(airDensity(3000)) + dip, airDensity(3000));
+    expect(Math.abs(alt - flip)).toBeLessThan(0.005);
+    const ground = SearchRiseSet(Body.Sun, eye, kind === EventKind.Rise ? 1 : -1, new Date(t - 12 * 3600e3), 1, 1000)!;
+    expect(Math.abs(position(SkyBody.Sun, ground.date, eye).altitude - flip)).toBeGreaterThan(0.03);
   });
 
   it('finds rise/set below sea level', () => {

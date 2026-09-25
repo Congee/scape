@@ -1,5 +1,6 @@
 import { Body, Observer, SearchAltitude, SearchRiseSet } from 'astronomy-engine';
 import { describe, expect, it } from 'vitest';
+import { riseSetObserver } from './bodies';
 import { angleDeg, bandIndex, capRing, NightBand, nightFeatures, nightModel, nightShiftPx } from './terminator';
 
 const EPS = 1 / (512 * 2 ** 12);
@@ -30,10 +31,10 @@ describe('nightModel', () => {
   for (const { name, obs, agl, start } of SITES) {
     it(`meets SearchRiseSet and SearchAltitude at ${name}`, () => {
       const t0 = new Date(start);
-      const rise = SearchRiseSet(Body.Sun, obs, 1, t0, 2, agl)!;
+      const rise = SearchRiseSet(Body.Sun, riseSetObserver(obs, agl), 1, t0, 2, agl)!;
       const r = rise.date.getTime();
       expect(Math.abs(crossing(obs, agl, 0, r - 1_200_000, r + 1_200_000) - r)).toBeLessThan(2000);
-      const set = SearchRiseSet(Body.Sun, obs, -1, t0, 2, agl)!;
+      const set = SearchRiseSet(Body.Sun, riseSetObserver(obs, agl), -1, t0, 2, agl)!;
       const s = set.date.getTime();
       expect(Math.abs(crossing(obs, agl, 0, s - 1_200_000, s + 1_200_000) - s)).toBeLessThan(2000);
       for (const [i, alt] of [[1, -6], [2, -12], [3, -18]]) {

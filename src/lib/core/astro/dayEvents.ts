@@ -6,7 +6,7 @@ import {
   type AstroTime,
   type Observer
 } from 'astronomy-engine';
-import { BODY, SkyBody } from './bodies';
+import { BODY, riseSetObserver, SkyBody } from './bodies';
 import { moonInfo, position, type MoonInfo } from './positions';
 
 export const EventKind = {
@@ -44,7 +44,7 @@ export interface DayEventOptions {
   goldenAltitude?: number;
   /** Sun altitude that bounds the blue hour on the daylight side, degrees; civil dawn/dusk bounds the other. */
   blueAltitude?: number;
-  /** Eye height above local ground, metres; dips the horizon as over a flat plateau, refraction scaled to the ground's air density (astronomy-engine). */
+  /** Eye height above local ground, metres; dips the horizon as over a flat plateau, refraction scaled to the eye's air density. */
   heightAboveGroundM?: number;
 }
 
@@ -63,6 +63,7 @@ export function dayEvents(
   const golden = opts.goldenAltitude ?? 6;
   const blue = opts.blueAltitude ?? -4;
   const agl = opts.heightAboveGroundM ?? 0;
+  const riseObs = riseSetObserver(obs, agl);
   const out: DayEvent[] = [];
 
   const remaining = (from: Date) => (endMs - from.getTime()) / DAY_MS + 1 / 1440;
@@ -88,7 +89,7 @@ export function dayEvents(
   const altitudeSearch = (body: Body, dir: 1 | -1, alt: number) => (from: Date) =>
     SearchAltitude(body, obs, dir, from, remaining(from), alt);
   const riseSet = (body: Body, dir: 1 | -1) => (from: Date) =>
-    SearchRiseSet(body, obs, dir, from, remaining(from), agl);
+    SearchRiseSet(body, riseObs, dir, from, remaining(from), agl);
   const transit = (body: Body) => (from: Date) => {
     const ev = SearchHourAngle(body, obs, 0, from, 1);
     return ev.time.date.getTime() < endMs ? ev.time : null;
