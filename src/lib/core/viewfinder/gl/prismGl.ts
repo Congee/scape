@@ -292,9 +292,11 @@ export class PrismGl {
     let buildings = 0;
     let tileCount = 0;
     let triangles = 0;
+    // A long lens sees a sliver of the city; meshes off the cone would still run every vertex.
+    const seen = (mesh: TileMesh) => mesh.indexCount > 0 && coneDepthRange(mesh.box, 0, basis, cam) !== null;
     for (const tile of tiles) {
       const mesh = this.tileMesh(tile);
-      if (mesh.indexCount === 0) continue;
+      if (!seen(mesh)) continue;
       tileCount++;
       buildings += tile.count;
       this.draw(mesh);
@@ -305,7 +307,7 @@ export class PrismGl {
     let modelTriangles = 0;
     for (const m of models) {
       const mesh = this.upload(m);
-      if (mesh.indexCount === 0) continue;
+      if (!seen(mesh)) continue;
       modelCount++;
       if (mesh.doubleSided) gl.disable(gl.CULL_FACE);
       else gl.enable(gl.CULL_FACE);
