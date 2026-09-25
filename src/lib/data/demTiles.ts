@@ -1,4 +1,5 @@
-import { ancestorTile, overzoomTile, type DemTile } from '@core/terrain/dem';
+import { ancestorTile, DEM_MAX_M, DEM_MIN_M, overzoomTile, type DemTile } from '@core/terrain/dem';
+import { decodePng } from '@core/terrain/png';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
 import { localTerrain } from './localTiles';
 import { decodeTerrainTile, terrainTileUrl, type DecodedDem } from './terrainTiles';
@@ -23,7 +24,11 @@ export interface LoadedDem extends Omit<DecodedDem, 'belowSea'> {
  */
 export async function loadDemTile(c: TileCoord, signal?: AbortSignal): Promise<LoadedDem> {
   const got = await fetchTile(c, signal);
-  if (got) return { ...(await decodeTerrainTile(got.data)), cacheControl: got.cacheControl, expires: got.expires };
+  if (got) {
+    const dem = await decodeTerrainTile(got.data);
+    // A tile with no valid post at all is data we do not have, so it falls back like a 404.
+    if (dem.repaired < dem.size * dem.size) return { ...dem, cacheControl: got.cacheControl, expires: got.expires };
+  }
   const { size, elev, repaired } = await overzoom(c);
   return { size, elev, repaired: repaired ?? 0 };
 }
@@ -49,9 +54,31 @@ export async function fetchTile(c: TileCoord, signal?: AbortSignal): Promise<Fet
 }
 
 /**
+ * Whether any post of an encoded tile is inside the envelope, read raw to skip the repair pass.
+ * `true` where only a full decode could tell, which leaves the verdict to MapLibre's own decode.
+ */
+export async function hasValidPost(data: ArrayBuffer): Promise<boolean> {
+  let png;
+  try {
+    png = await decodePng(new Uint8Array(data));
+  } catch {
+    return true;
+  }
+  const { data: px, channels } = png;
+  if (channels < 3) return true;
+  for (let p = 0; p < px.length; p += channels) {
+    const m = px[p] * 256 + px[p + 1] + px[p + 2] / 256 - 32768;
+    if (m >= DEM_MIN_M && m <= DEM_MAX_M) return true;
+  }
+  return false;
+}
+
+/**
  * Coverage bottoms out at a different zoom in every region, and MapLibre has no overzoom of its
  * own, so a tile past the bottom is resampled from the nearest ancestor that does resolve. A tile
  * absent at every level is absent everywhere — open ocean — and must stay an error, not a flat sea.
+ * An ancestor that fails transiently rejects rather than being skipped, so the tile is re-requested
+ * later instead of settling on a coarser ancestor until reload.
  */
 export async function overzoom(c: TileCoord): Promise<DemTile> {
   for (let z = c.z - 1; z >= Math.max(0, c.z - MAX_OVERZOOM); z--) {
@@ -67,6 +94,7 @@ export async function overzoom(c: TileCoord): Promise<DemTile> {
  * Decoded ancestor, shared by its descendants: a z12 parent has 1024 of them at z17, and each
  * would otherwise refetch and re-decode it. The promise has many waiters, so no caller's abort
  * reaches the fetch, and a failure is dropped from the cache so the next descendant retries.
+ * `null` is a settled absence; a transient failure rejects.
  */
 function ancestor(c: TileCoord): Promise<DemTile | null> {
   const k = tileKey(c.z, c.x, c.y);
@@ -77,9 +105,9 @@ function ancestor(c: TileCoord): Promise<DemTile | null> {
     ancestors.set(k, hit);
     return hit;
   }
-  const p = decodeAncestor(c).catch(() => {
-    ancestors.delete(k);
-    return null;
+  const p = decodeAncestor(c);
+  p.catch(() => {
+    if (ancestors.get(k) === p) ancestors.delete(k);
   });
   ancestors.set(k, p);
   while (ancestors.size > MAX_ANCESTORS) {

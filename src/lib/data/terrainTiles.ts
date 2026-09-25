@@ -218,11 +218,8 @@ export class DemCache implements DemSource {
         data = await res.arrayBuffer();
       }
       const { size, elev, repaired, belowSea } = await decodeTerrainTile(data);
-      // A tile with no valid post at all is data we do not have, so hand it to the missing-tile path.
-      if (repaired >= size * size) {
-        this.set(c, null);
-        return null;
-      }
+      // A tile with no valid post at all is data we do not have, so it falls back like a 404.
+      if (repaired >= size * size) return ABSENT;
       const tile: DemTile = { ...c, size, elev: groundSurface(elev, belowSea), repaired };
       this.set(c, tile);
       return tile;

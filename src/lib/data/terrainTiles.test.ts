@@ -48,6 +48,13 @@ describe('DemCache past coverage', () => {
     expect(fetched.filter((k) => k === '17/2/3')).toHaveLength(1);
   });
 
+  it('falls back to the parent for a tile with no valid post, as for a 404', async () => {
+    answers['17/2/3'] = -32768;
+    answers['16/1/1'] = 7;
+    const t = await new DemCache().load({ z: 17, x: 2, y: 3 });
+    expect(t?.elev.every((v) => v === 7)).toBe(true);
+  });
+
   it('caches a tile absent at every zoom as absent', async () => {
     const c = new DemCache();
     expect(await c.load({ z: 2, x: 1, y: 1 })).toBeNull();
