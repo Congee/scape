@@ -9,6 +9,7 @@ CDP=${2:-9409}
 OUT=${3:-${TMPDIR:-/tmp}/geoid}
 PROFILE=${4:-${TMPDIR:-/tmp}/brave-geoid}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+. "$ROOT/scripts/smoke/brave.sh"
 BASE="http://localhost:$PORT"
 mkdir -p "$OUT"
 
@@ -19,9 +20,7 @@ if ! curl -s -o /dev/null "$BASE/"; then
 fi
 BRAVE=0
 if ! curl -s -o /dev/null "http://localhost:$CDP/json/version"; then
-  mkdir -p "$PROFILE"
-  open -g -j -n -a "Brave Browser" --args --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run \
-    --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling
+  brave_launch "$CDP" "$PROFILE" || exit 1
   BRAVE=1
 fi
 for u in "$BASE/" "http://localhost:$CDP/json/version"; do
@@ -191,5 +190,5 @@ printf '%s\n' "${ROWS[@]}"
 rm -f "$OUT/.frame.png" "$ASC" "$ASC.gz" "$BAD"
 
 [ "$VITE" = 1 ] && lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | xargs -r kill
-[ "$BRAVE" = 1 ] && pgrep -f -- "--user-data-dir=$PROFILE" | xargs -r kill
+[ "$BRAVE" = 1 ] && brave_stop "$PROFILE"
 exit $((FAILS > 0))

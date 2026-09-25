@@ -9,6 +9,7 @@ CDP=${3:-9342}
 SHOTS=${4:-${TMPDIR:-/tmp}/models-p2}
 PROFILE=${5:-${TMPDIR:-/tmp}/brave-models-p2}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+. "$ROOT/scripts/smoke/brave.sh"
 mkdir -p "$SHOTS" "$PROFILE"
 OWN=()
 
@@ -24,9 +25,7 @@ if [ "$PREVIEW" != - ] && ! up "$PREVIEW"; then
 fi
 LAUNCHED=0
 if ! curl -s -o /dev/null "http://localhost:$CDP/json/version"; then
-  # One background Brave that never takes focus; stopped below by its profile path only.
-  open -g -j -n -a "Brave Browser" --args --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run \
-    --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling
+  brave_launch "$CDP" "$PROFILE" || exit 1
   LAUNCHED=1
 fi
 for p in "$PORT" "$([ "$PREVIEW" != - ] && echo "$PREVIEW")" "$CDP"; do
@@ -39,6 +38,6 @@ RC=$?
 
 # Only the servers this run started.
 for p in ${OWN[@]+"${OWN[@]}"}; do lsof -ti "tcp:$p" -sTCP:LISTEN 2>/dev/null | xargs -r kill; done
-[ "$LAUNCHED" = 1 ] && pgrep -f -- "--user-data-dir=$PROFILE" | xargs -r kill
+[ "$LAUNCHED" = 1 ] && brave_stop "$PROFILE"
 echo "screenshots: $SHOTS"
 exit $RC

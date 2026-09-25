@@ -171,7 +171,7 @@ const fitError = (p: Fit, focal35: number | null) => {
 
 await tab.viewport(DESKTOP.w, DESKTOP.h);
 await viewfinder(TIMES.night, 600);
-const renderer = await tab.eval<string>(`(() => { const g = document.createElement('canvas').getContext('webgl2'); const e = g.getExtension('WEBGL_debug_renderer_info'); return g.getParameter(e.UNMASKED_RENDERER_WEBGL); })()`);
+const renderer = await Tab.renderer(Number(cdp));
 check('renderer is ANGLE Metal', /ANGLE Metal/.test(renderer), renderer);
 
 // The Drawn tower, seeded from its Overture rows; suppression keeps the Overture copy out of the occluder.

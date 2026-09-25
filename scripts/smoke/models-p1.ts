@@ -28,6 +28,7 @@ const check = (name: string, ok: boolean, detail: string) => {
 
 const tab = await Tab.open(Number(cdp), BASE);
 await tab.activate();
+await tab.viewport(1280, 800);
 
 // Page-side helpers, re-installed after every load.
 const HELPERS = `(async () => {
@@ -101,7 +102,7 @@ const viewfinder = async (camera: string, t: string, f: number) => {
 // Renderer.
 await tab.navigate(`${BASE}/`);
 await tab.until('!!window.__scape?.models?.getState().loaded', 60_000);
-const renderer = await tab.eval<string>(`(() => { const g = document.createElement('canvas').getContext('webgl2'); const e = g.getExtension('WEBGL_debug_renderer_info'); return g.getParameter(e.UNMASKED_RENDERER_WEBGL); })()`);
+const renderer = await Tab.renderer(Number(cdp));
 check('renderer is ANGLE Metal', /ANGLE Metal/.test(renderer), renderer);
 
 // Seed from the Overture rows under the tower.

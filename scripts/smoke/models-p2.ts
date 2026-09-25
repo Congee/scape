@@ -145,7 +145,7 @@ const seedAt = (at: { lat: number; lng: number }, name: string) =>
 // Renderer.
 await tab.viewport(DESKTOP.w, DESKTOP.h);
 await home();
-const renderer = await tab.eval<string>(`(() => { const g = document.createElement('canvas').getContext('webgl2'); const e = g.getExtension('WEBGL_debug_renderer_info'); return g.getParameter(e.UNMASKED_RENDERER_WEBGL); })()`);
+const renderer = await Tab.renderer(Number(cdp));
 check('renderer is ANGLE Metal', /ANGLE Metal/.test(renderer), renderer);
 await js(`for (const m of S.models.getState().models.filter((m) => m.notes === 'p2-smoke')) await S.models.getState().remove(m.id); return true;`);
 

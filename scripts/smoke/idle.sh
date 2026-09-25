@@ -11,6 +11,7 @@ PROFILE=${4:-${TMPDIR:-/tmp}/brave-$SESSION}
 SECS=${5:-30}
 ONLY=${6:-}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+. "$ROOT/scripts/smoke/brave.sh"
 BASE="http://localhost:$PORT"
 
 VITE=0
@@ -20,9 +21,7 @@ if ! curl -s -o /dev/null "$BASE/"; then
 fi
 BRAVE=0
 if ! curl -s -o /dev/null "http://localhost:$CDP/json/version"; then
-  mkdir -p "$PROFILE"
-  open -g -j -n -a "Brave Browser" --args --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run \
-    --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling
+  brave_launch "$CDP" "$PROFILE" || exit 1
   BRAVE=1
 fi
 for u in "$BASE/" "http://localhost:$CDP/json/version"; do
@@ -35,5 +34,5 @@ bun "$ROOT/scripts/smoke/idle.ts" "$CDP" "$PORT" "$PROFILE" "$SECS" "$ONLY"
 RC=$?
 
 [ "$VITE" = 1 ] && lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | xargs -r kill
-[ "$BRAVE" = 1 ] && pgrep -f -- "--user-data-dir=$PROFILE" | xargs -r kill
+[ "$BRAVE" = 1 ] && brave_stop "$PROFILE"
 exit $RC

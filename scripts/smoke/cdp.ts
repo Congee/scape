@@ -64,6 +64,14 @@ export class Tab {
     return tab;
   }
 
+  /** The browser's GL renderer; pages see Brave's farbled "Brave" in headless. */
+  static async renderer(cdp: number): Promise<string> {
+    const b = await Tab.connect(((await (await fetch(`http://localhost:${cdp}/json/version`)).json()) as { webSocketDebuggerUrl: string }).webSocketDebuggerUrl, '');
+    const info = (await b.send('SystemInfo.getInfo')) as { gpu: { auxAttributes?: { glRenderer?: string } } };
+    b.ws.close();
+    return info.gpu.auxAttributes?.glRenderer ?? '';
+  }
+
   private static connect(url: string, id: string): Promise<Tab> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
