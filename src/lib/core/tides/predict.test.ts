@@ -44,6 +44,19 @@ describe('tideExtremes', () => {
     }
   });
 
+  it('matches Anchorage (shallow-water constituents) and Galveston (short pairs dropped) to a minute and 5 mm', () => {
+    const tight = NOAA_HARMONIC.filter((s) => s.row[0] === '9455920' || s.row[0] === '8771450');
+    expect(tight).toHaveLength(2);
+    for (const { row, hilo } of tight) {
+      const got = tideExtremes(parseStation(row), T0, T1);
+      expect(got.length).toBe(hilo.length / 3);
+      got.forEach((g, i) => {
+        expect(Math.abs(g.timeMs - (T0 + hilo[i * 3] * 60_000))).toBeLessThanOrEqual(60_000);
+        expect(Math.abs(g.heightM - hilo[i * 3 + 1] / 1000)).toBeLessThanOrEqual(0.005);
+      });
+    }
+  });
+
   it('finds a high at every rising-to-falling turn of the curve', () => {
     const st = parseStation(STATIONS[0].row);
     const [a, b] = tideExtremes(st, T0, T0 + 86_400_000);
