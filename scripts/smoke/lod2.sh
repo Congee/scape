@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LoD2 smoke: 3DBAG tiles replace Overture prisms in Rotterdam, in the picture, the occluder, the shadows and the credits; lod2-draco.ts covers Zürich, Tokyo and the Draco decoder's reach.
+# LoD2 smoke: 3DBAG tiles replace Overture prisms in Rotterdam, in the picture, the occluder, the shadows and the credits; lod2-badtile.ts a bad tile in the mask; lod2-draco.ts covers Zürich, Tokyo and the Draco decoder's reach.
 # Usage: scripts/smoke/lod2.sh [port] [cdp-port] [screenshot-dir] [brave-profile] [gpu-timing-lock-dir]
 # Starts what is missing (vite dev, one background Brave) and stops only what it started.
 set -uo pipefail
@@ -156,6 +156,13 @@ DRACO_RC=$?
 mapfile -t DRACO_ROWS <<<"$DRACO"
 ROWS+=("${DRACO_ROWS[@]}")
 [ "$DRACO_RC" = 0 ] || FAILS=$((FAILS + 1))
+
+# 6b. A bad tile in the shadow mask warns once and is not refetched.
+BAD=$(bun "$ROOT/scripts/smoke/lod2-badtile.ts" "$CDP" "$PORT" "$OUT" 2>"$OUT/badtile.err")
+BAD_RC=$?
+mapfile -t BAD_ROWS <<<"$BAD"
+ROWS+=("${BAD_ROWS[@]}")
+[ "$BAD_RC" = 0 ] || FAILS=$((FAILS + 1))
 
 # 7. Frame pacing by day, holding the shared GPU timing lock; a background window must not be throttled.
 FPS_BUDGET_MS=17.5

@@ -23,6 +23,10 @@ export class Tab {
   private front = false;
   /** URLs the page and its workers requested since `logRequests()`. */
   readonly requests: string[] = [];
+  /** Every CDP event, with the worker session it came from. */
+  readonly listeners: ((method: string, params: Record<string, unknown>, sessionId?: string) => void)[] = [];
+  /** Run on each new worker before it starts, e.g. to enable Fetch interception there. */
+  readonly workerSetup: ((sessionId: string) => Promise<unknown>)[] = [];
 
   private constructor(
     private ws: WebSocket,
@@ -31,6 +35,7 @@ export class Tab {
     ws.addEventListener('message', (e) => {
       const m = JSON.parse(String(e.data)) as Msg;
       if (m.id != null) this.waiters.get(m.id)?.(m);
+      if (m.method) for (const l of this.listeners) l(m.method, m.params ?? {}, m.sessionId);
       if (m.method === 'Network.requestWillBeSent' && this.logging) this.requests.push(String((m.params as { request: { url: string } }).request.url));
       if (m.method === 'Target.attachedToTarget') {
         const p = m.params as { sessionId: string; targetInfo?: { url?: string } };
@@ -71,6 +76,7 @@ export class Tab {
     this.workers.set(sessionId, url);
     if (this.offline) await this.emulate(true, sessionId);
     if (this.logging) await this.send('Network.enable', {}, sessionId);
+    for (const f of this.workerSetup) await f(sessionId);
     await this.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
     await this.send('Runtime.runIfWaitingForDebugger', {}, sessionId);
   }
