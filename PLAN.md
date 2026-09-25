@@ -496,9 +496,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Offline buildings (merged): z14 only, "download with the terrain" on by default up to 100 tiles
   (~30 MB dense city; NYC 50 km = 686 tiles / 146 MB); separate Estimate/Download too. Open: should
   one click also fetch the basemap for the region? Yes, up to 100 tiles.
-- Models P1 (merged): a hidden model does not suppress Overture rows; the map's fill-extrusion is
-  not yet hidden under a model (P2 adds `models-fill`); "Model this building" seeds from one z14 tile
-  (P2 spans tiles); `.scape.json` export omits models until P3b.
+- Models P1 (merged): a hidden model does not suppress Overture rows, nor the map's fill-extrusion
+  under it (`models-fill` hides it under a visible one); "Model this building" seeds from every z14
+  tile the building spans; `.scape.json` export omits models until P3b.
 - Tides and eclipses (merged): NOAA harmonic (1251) and subordinate (2242) stations; a closer subordinate station wins; Timeline tide row landed later; lunar eclipse moon tinted by umbra coverage (the map's live Moon line too) (moon-free window and Milky Way status still ignore eclipses);
   eclipses via astronomy-engine (within 30 s of NASA), no Besselian elements.
 - Light extras (moon simulator, auto light source, first/last light, orbit) merged at `aa61568`. Defaults:
@@ -512,8 +512,9 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Models P2 (merged `a45a27d`): selection and outline in accent #5aa9ff; a drawn building starts at
   10 m (nearby Overture median later?); arrow-key nudges only behind the "Arrow keys adjust it"
   checkbox; long-press 600 ms deletes a vertex; "Set target to model top" replaces "Use as target";
-  phone sheet folds away while drawing and reopens with the model in view; the outline
-  ignores occluders; meshes have no bottom face.
+  phone sheet folds away while drawing and reopens with the model in view. Follow-ups (`wip/modelsfu`):
+  meshes are closed (a floor under every part); terrain and buildings in front hide the outline on the
+  map and in the viewfinder, but on the map another model in front does not.
 - Models P4 (photo overlay + model occlusion): photo controls live in the viewfinder chips panel;
   the photo is kept in memory only (IndexedDB per plan?); a photo without EXIF locks to the current
   lens's field of view; nudges step 0.002 photo widths / 0.1°; a body behind a building stays
