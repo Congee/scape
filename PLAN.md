@@ -519,7 +519,8 @@ doing, and the thin dark lines turned out to be real rock gullies.
   checkbox; long-press 600 ms deletes a vertex; "Set target to model top" replaces "Use as target";
   phone sheet folds away while drawing and reopens with the model in view. Follow-ups (`wip/modelsfu`):
   meshes are closed (a floor under every part); terrain and buildings in front hide the outline on the
-  map and in the viewfinder, but on the map another model in front does not.
+  map and in the viewfinder, and on the map other models in front do too (layer order: selected, others,
+  buildings); covered vertex handles dim to 0.2, checked on idle.
 - Models P4 (photo overlay + model occlusion): photo controls live in the viewfinder chips panel;
   the photo is kept in memory only (IndexedDB per plan?); a photo without EXIF locks to the current
   lens's field of view; nudges step 0.002 photo widths / 0.1°; a body behind a building stays
