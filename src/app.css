@@ -16,6 +16,7 @@
   --moon-set: #2a63b8;
   --gc: #b48cff;
   --terrain: #8fd18c;
+  --tide: #3cc6c0;
   --danger: #ff5c5c;
   --rail: 56px;
   --panel: 340px;
@@ -600,7 +601,8 @@ button:focus-visible {
   opacity: 0.6;
 }
 
-.timeline li button {
+.timeline li button,
+.timeline .tide-row button {
   display: grid;
   grid-template-columns: 14px 1fr auto auto;
   grid-template-areas:
@@ -616,7 +618,8 @@ button:focus-visible {
   padding: 5px 6px;
 }
 
-.timeline li button:hover {
+.timeline li button:hover,
+.timeline .tide-row button:hover:enabled {
   background: var(--bg-3);
 }
 
@@ -639,6 +642,7 @@ button:focus-visible {
 .timeline .dot.moon.mid { background: var(--moon); }
 .timeline .dot.moon.set { background: var(--moon-set); }
 .timeline .dot.gc { background: var(--gc); }
+.timeline .dot.tide { background: var(--tide); }
 .timeline .dot.terrain {
   width: 8px;
   height: 8px;
@@ -650,6 +654,23 @@ button:focus-visible {
 .timeline .time { grid-area: time; color: var(--fg-2); }
 .timeline .az { grid-area: az; min-width: 56px; text-align: right; color: var(--fg-2); }
 .timeline .extra { grid-area: extra; color: var(--fg-3); font-size: 12px; }
+
+.timeline .tide-row {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline .tide-row button:disabled {
+  color: inherit;
+  cursor: default;
+}
+
+.timeline .tide-row .tide-curve {
+  margin: 0;
+  padding: 0 6px;
+  box-sizing: border-box;
+}
 
 .timeline .head {
   display: flex;
@@ -1750,6 +1771,11 @@ label.file-pick input[type='file'] {
 .tide-curve .low {
   fill: var(--bg);
   stroke: var(--accent);
+}
+
+.tide-curve .hit {
+  fill: transparent;
+  cursor: pointer;
 }
 
 .cal-eclipse {

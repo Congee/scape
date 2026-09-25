@@ -1,10 +1,12 @@
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
-import { degrees, percent } from '@core/format';
+import { degrees, distance, percent } from '@core/format';
 import { formatTime } from '@core/time/format';
+import { tideDay } from '@data/tides';
 import { useDayData } from '@state/dayData';
 import { settingsStore, useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
+import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
 
 const LABELS: Record<SkyBody, Partial<Record<EventKind, string>>> = {
   Sun: {
@@ -71,6 +73,7 @@ export function Timeline() {
           <span>Details</span>
         </label>
       </div>
+      <TideRow />
       {list.length === 0 && !loading && <p className="muted">No events on this day.</p>}
       <ul>
         {list.map((ev, i) => (
@@ -96,5 +99,33 @@ function Row({ ev, active, tz, hour12 }: { ev: DayEvent; active: boolean; tz: st
         )}
       </button>
     </li>
+  );
+}
+
+/** The day's tide at the pin's nearest station; absent when none is in range. */
+function TideRow() {
+  const { site, distM } = useNearestTide();
+  const time = useWorld((s) => s.time);
+  const tz = useWorld((s) => s.tz);
+  const dayStart = useDayData((s) => s.dayStart);
+  const dayEnd = useDayData((s) => s.dayEnd);
+  const hour12 = useSettings((s) => s.hour12);
+  const units = useSettings((s) => s.units);
+  if (!site || dayEnd <= dayStart) return null;
+  const day = tideDay(site, dayStart, dayEnd);
+  const next = day.extremes.find((e) => e.timeMs > time);
+  return (
+    <div className="tide-row">
+      <button onClick={() => next && worldStore.getState().setTime(next.timeMs)} title="Set the clock to the next high or low" disabled={!next}>
+        <span className="dot tide" aria-hidden="true" />
+        <span className="label">{next ? `Next ${next.high ? 'high' : 'low'} tide` : 'Tide'}</span>
+        {next && <span className="time">{formatTime(next.timeMs, tz, hour12)}</span>}
+        {next && <span className="az">{tideText(next.heightM, units)}</span>}
+        <span className="extra">
+          {site.station.name} · {tideKindText(site.kind)} · {distance(distM, units)} away
+        </span>
+      </button>
+      <TideChart day={day} startMs={dayStart} endMs={dayEnd} time={time} h={40} />
+    </div>
   );
 }
