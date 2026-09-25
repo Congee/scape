@@ -167,13 +167,14 @@ ROWS+=("${BAD_ROWS[@]}")
 FPS_BUDGET_MS=17.5
 # Hidden tabs pace frames by a 16 ms worker timer, so judge the GPU: M1 Max measured 8.1–10.5 ms p95; 12 ms leaves the 60 Hz frame ~4.7 ms for the page.
 FPS_GPU_BUDGET_MS=12
-until mkdir "$LOCK" 2>/dev/null; do sleep 30; done
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 for f in 200 2400; do
+  until mkdir "$LOCK" 2>/dev/null; do sleep 30; done
   ab eval '(() => { window.__scape.settings.getState().update({ terrain: true, showSunShadows: true, lightSource: "Auto" }); window.__scape.composition.getState().update({ showBuildings: true }); return "ok"; })()' >/dev/null
   # lod2-fps loads the scene itself so the hidden-tab rAF shim is in before the app starts.
   FPS_OUT=$(bun "$ROOT/scripts/smoke/lod2-fps.ts" "$CDP" "$PORT" idle,drag 3 --url "$(vf_url "$NL_CAM" "$NL_TGT" "$DAY" "$f" L)" --ready "$READY" 2>"$OUT/fps-$f.err")
   FPS_RC=$?
+  rmdir "$LOCK"
   got=0
   while read -r line; do
     [ -z "$line" ] && continue
@@ -187,7 +188,6 @@ for f in 200 2400; do
   done <<<"$FPS_OUT"
   [ "$FPS_RC" = 0 ] || check "fps $f mm day: measured" 0 "$(grep -m1 -io 'error: .*' "$OUT/fps-$f.err" || echo "lod2-fps exited $FPS_RC")"
 done
-rmdir "$LOCK"
 trap - EXIT
 
 rm -f "$OUT/.frame.png"
