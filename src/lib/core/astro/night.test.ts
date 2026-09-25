@@ -2,6 +2,7 @@ import { Body, Equator, Horizon, SearchAltitude, SearchRiseSet } from 'astronomy
 import { describe, expect, it } from 'vitest';
 import { makeObserver, SkyBody } from './bodies';
 import { dayEvents, EventKind, type DayEvent } from './dayEvents';
+import { lunarShadowCoverage, lunarTotality } from './eclipse';
 import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type NightWindow } from './night';
 
 const hoboken = makeObserver({ lat: 40.747952, lng: -74.023685 });
@@ -66,13 +67,13 @@ describe('moonFreeWindow', () => {
   });
 
   it('is the whole night when the moon never rises', () => {
-    expect(moonFreeWindow(night, [], false)).toEqual({ startMs: night.startMs, endMs: night.endMs });
+    expect(moonFreeWindow(night, [], false)).toEqual({ startMs: night.startMs, endMs: night.endMs, eclipsed: false });
   });
 
   it('ends at moonrise and stays inside the night', () => {
     const rise = night.startMs + 2 * 3_600_000;
     const gap = moonFreeWindow(night, [ev(SkyBody.Moon, EventKind.Rise, rise)], false)!;
-    expect(gap).toEqual({ startMs: night.startMs, endMs: rise });
+    expect(gap).toEqual({ startMs: night.startMs, endMs: rise, eclipsed: false });
     expect(gap.startMs).toBeGreaterThanOrEqual(night.startMs);
     expect(gap.endMs).toBeLessThanOrEqual(night.endMs);
   });
@@ -84,12 +85,55 @@ describe('moonFreeWindow', () => {
       ev(SkyBody.Moon, EventKind.Set, night.startMs + 2 * h),
       ev(SkyBody.Moon, EventKind.Rise, night.endMs - h)
     ];
-    expect(moonFreeWindow(night, moon, false)).toEqual({ startMs: night.startMs + 2 * h, endMs: night.endMs - h });
+    expect(moonFreeWindow(night, moon, false)).toEqual({ startMs: night.startMs + 2 * h, endMs: night.endMs - h, eclipsed: false });
   });
 
   it('has no window without a night', () => {
     const none: NightWindow = { startMs: 0, endMs: 0, kind: NightKind.None };
     expect(moonFreeWindow(none, events, false)).toBeNull();
+  });
+});
+
+describe('moonFreeWindow through a total lunar eclipse', () => {
+  // 2025-09-07 from New Delhi: the full moon is up all night; totality 17:31–18:53 UTC (NASA).
+  const delhi = makeObserver({ lat: 28.61, lng: 77.21 });
+  const dEvents = dayEvents(delhi, Date.UTC(2025, 8, 7, 6, 30), Date.UTC(2025, 8, 8, 6, 30));
+  const dNight = nightWindow(dEvents, Date.UTC(2025, 8, 7, 12));
+  const totality = lunarTotality(dNight.startMs, dNight.endMs)!;
+  const upAtStart = true;
+  const night = nightWindow(events, now);
+
+  it('finds totality where the whole disc is in the umbra', () => {
+    expect(Math.abs(totality.startMs - Date.parse('2025-09-07T17:30:41Z'))).toBeLessThan(10_000);
+    expect(Math.abs(totality.endMs - Date.parse('2025-09-07T18:52:47Z'))).toBeLessThan(10_000);
+    expect(lunarShadowCoverage(new Date(totality.startMs + 1_000)).umbra).toBe(1);
+    expect(lunarShadowCoverage(new Date(totality.startMs - 1_000)).umbra).toBeLessThan(1);
+    expect(lunarShadowCoverage(new Date(totality.endMs - 1_000)).umbra).toBe(1);
+    expect(lunarShadowCoverage(new Date(totality.endMs + 1_000)).umbra).toBeLessThan(1);
+  });
+
+  it('opens a window for totality alone when the moon is up all night', () => {
+    expect(moonFreeWindow(dNight, dEvents, upAtStart)).toBeNull();
+    expect(moonFreeWindow(dNight, dEvents, upAtStart, totality)).toEqual({ ...totality, eclipsed: true });
+  });
+
+  it('grows a moon-down window by the totality next to it', () => {
+    const h = 3_600_000;
+    const rise = ev(SkyBody.Moon, EventKind.Rise, night.startMs + 2 * h);
+    const w = moonFreeWindow(night, [rise], false, { startMs: night.startMs + 2 * h, endMs: night.startMs + 3 * h });
+    expect(w).toEqual({ startMs: night.startMs, endMs: night.startMs + 3 * h, eclipsed: true });
+  });
+
+  it('is unchanged by a totality with the moon already down', () => {
+    const h = 3_600_000;
+    const set = ev(SkyBody.Moon, EventKind.Set, night.startMs + h);
+    expect(moonFreeWindow(night, [set], true, { startMs: night.startMs + 2 * h, endMs: night.startMs + 3 * h })).toEqual({ startMs: night.startMs + h, endMs: night.endMs, eclipsed: false });
+  });
+
+  it('leaves a night without an eclipse as it was', () => {
+    expect(lunarTotality(night.startMs, night.endMs)).toBeNull();
+    const up = moonAlt(night.startMs) > 0;
+    expect(moonFreeWindow(night, events, up, null)).toEqual(moonFreeWindow(night, events, up));
   });
 });
 

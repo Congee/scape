@@ -500,7 +500,7 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Models P1 (merged): a hidden model does not suppress Overture rows, nor the map's fill-extrusion
   under it (`models-fill` hides it under a visible one); "Model this building" seeds from every z14
   tile the building spans; `.scape.json` export omits models until P3b.
-- Tides and eclipses (merged): NOAA harmonic (1251) and subordinate (2242) stations; a closer subordinate station wins; Timeline tide row landed later; lunar eclipse moon tinted by umbra coverage (the map's live Moon line too) (moon-free window and Milky Way status still ignore eclipses);
+- Tides and eclipses (merged): NOAA harmonic (1251) and subordinate (2242) stations; a closer subordinate station wins; Timeline tide row landed later; lunar eclipse moon tinted by umbra coverage (the map's live Moon line too) (moon-free window and Milky Way status count an eclipsed Moon as dark (user, 2026-09-25));
   eclipses via astronomy-engine (within 30 s of NASA), no Besselian elements.
 - Light extras (moon simulator, auto light source, first/last light, orbit) merged at `aa61568`. Defaults:
   moon shade on the map neutral grey (A/B pick 2026-09-25); first/last light counts terrain only; earthshine under 35 % lit;

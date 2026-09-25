@@ -71,28 +71,36 @@ export function panelNight(instant: Date, tz: string, eventsFor: (startMs: numbe
   return { ...next, events: eventsFor(next.startMs, next.endMs) };
 }
 
-/** Longest stretch of `night` with the moon below the horizon, or null when there is none. */
-export function moonFreeWindow(night: NightWindow, moonEvents: DayEvent[], moonUpAtStart: boolean): TimeWindow | null {
-  if (night.endMs <= night.startMs) return null;
-  const crossings = moonEvents
-    .filter((e) => e.body === SkyBody.Moon && MOON_CROSSINGS.has(e.kind) && e.time > night.startMs && e.time < night.endMs)
-    .toSorted((a, b) => a.time - b.time);
+export interface MoonFreeWindow extends TimeWindow {
+  /** Part of it has the moon up but totally eclipsed. */
+  eclipsed: boolean;
+}
 
-  let best: TimeWindow | null = null;
-  const consider = (startMs: number, endMs: number) => {
-    if (endMs > startMs && (!best || endMs - startMs > best.endMs - best.startMs)) best = { startMs, endMs };
+/** Longest stretch of `night` with the moon below the horizon or inside `totality`, or null when there is none. */
+export function moonFreeWindow(night: NightWindow, moonEvents: DayEvent[], moonUpAtStart: boolean, totality: TimeWindow | null = null): MoonFreeWindow | null {
+  if (night.endMs <= night.startMs) return null;
+  const inside = (t: number) => t > night.startMs && t < night.endMs;
+  const crossings = moonEvents.filter((e) => e.body === SkyBody.Moon && MOON_CROSSINGS.has(e.kind) && inside(e.time)).toSorted((a, b) => a.time - b.time);
+  const cuts = [...new Set([night.startMs, ...crossings.map((e) => e.time), ...(totality ? [totality.startMs, totality.endMs].filter(inside) : []), night.endMs])].toSorted((a, b) => a - b);
+
+  let best: MoonFreeWindow | null = null;
+  const consider = (w: MoonFreeWindow) => {
+    if (w.endMs > w.startMs && (!best || w.endMs - w.startMs > best.endMs - best.startMs)) best = w;
   };
 
   let up = moonUpAtStart;
-  let from = night.startMs;
-  for (const e of crossings) {
-    const rising = e.kind === EventKind.Rise;
-    if (rising === up) continue; // crossing that does not change the state; ignore
-    if (!up) consider(from, e.time);
-    up = rising;
-    from = e.time;
+  let next = 0;
+  let run: MoonFreeWindow = { startMs: night.startMs, endMs: night.startMs, eclipsed: false };
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const [a, b] = [cuts[k], cuts[k + 1]];
+    while (next < crossings.length && crossings[next].time <= a) up = crossings[next++].kind === EventKind.Rise;
+    const eclipsed = up && totality !== null && a >= totality.startMs && b <= totality.endMs;
+    if (up && !eclipsed) {
+      consider(run);
+      run = { startMs: b, endMs: b, eclipsed: false };
+    } else run = { ...run, endMs: b, eclipsed: run.eclipsed || eclipsed };
   }
-  if (!up) consider(from, night.endMs);
+  consider(run);
   return best;
 }
 

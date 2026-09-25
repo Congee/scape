@@ -1,4 +1,4 @@
-import { AstroTime, Body, C_AUDAY, EclipseKind, GeoMoon, GeoVector, ObserverVector, Search, SearchLocalSolarEclipse, SearchLunarEclipse, type LocalSolarEclipseInfo, type Observer } from 'astronomy-engine';
+import { AstroTime, Body, C_AUDAY, EclipseKind, GeoMoon, GeoVector, ObserverVector, Search, SearchLocalSolarEclipse, SearchLunarEclipse, type LocalSolarEclipseInfo, type LunarEclipseInfo, type Observer } from 'astronomy-engine';
 import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { besselianHours, besselianLocal, besselianTime, type BesselianElements } from './besselian';
 import { SkyBody } from './bodies';
@@ -212,7 +212,26 @@ export function lunarMagnitudes(date: Date): { umbral: number; penumbral: number
 /** Contacts of the first lunar eclipse whose peak falls after `fromMs`, with the moon's place as seen from `obs`. */
 export function lunarCircumstances(obs: Observer, fromMs: number, horizon?: HorizonProfile): LunarCircumstances {
   // astronomy-engine finds the eclipse; contacts are re-solved with NASA's shadow.
-  const e = SearchLunarEclipse(new Date(fromMs));
+  const { kind, at, times } = lunarContacts(SearchLunarEclipse(new Date(fromMs)));
+  const contacts = times.map(([k, t]) => contact(SkyBody.Moon, k, t.date.getTime(), obs, horizon));
+  return { kind, umbralMagnitude: (at.ru + at.sM - at.g) / (2 * at.sM), penumbralMagnitude: (at.rp + at.sM - at.g) / (2 * at.sM), contacts };
+}
+
+// Totality lasts under 1 h 47 min, so its start is within an hour of the peak.
+const TOTALITY_HALF_MAX_MS = 3_600_000;
+
+/** Totality (U2–U3, the whole disc in the umbra) overlapping `startMs`..`endMs`, or null. */
+export function lunarTotality(startMs: number, endMs: number): { startMs: number; endMs: number } | null {
+  const e = SearchLunarEclipse(new Date(startMs - TOTALITY_HALF_MAX_MS));
+  if (e.kind !== EclipseKind.Total || e.peak.date.getTime() > endMs + TOTALITY_HALF_MAX_MS) return null;
+  const { times } = lunarContacts(e);
+  const u2 = times.find(([k]) => k === ContactKind.U2)?.[1].date.getTime();
+  const u3 = times.find(([k]) => k === ContactKind.U3)?.[1].date.getTime();
+  if (u2 === undefined || u3 === undefined || u3 <= startMs || u2 >= endMs) return null;
+  return { startMs: u2, endMs: u3 };
+}
+
+function lunarContacts(e: LunarEclipseInfo): { kind: EclipseKind; at: EarthShadow; times: [ContactKind, AstroTime][] } {
   const slope = (t: AstroTime) => earthShadow(t.AddDays(1 / 86_400)).g - earthShadow(t.AddDays(-1 / 86_400)).g;
   const peak = searchOrThrow(slope, near(e.peak, -30), near(e.peak, 30));
   const at = earthShadow(peak);
@@ -225,9 +244,8 @@ export function lunarCircumstances(obs: Observer, fromMs: number, horizon?: Hori
   const before = live.map(([k, , f]): [ContactKind, AstroTime] => [k, searchOrThrow((t) => f(earthShadow(t)) - earthShadow(t).g, peak.AddDays(-0.2), peak)]);
   const after = live.map(([, k, f]): [ContactKind, AstroTime] => [k, searchOrThrow((t) => earthShadow(t).g - f(earthShadow(t)), peak, peak.AddDays(0.2))]);
   const times = [...before, [ContactKind.Max, peak] as [ContactKind, AstroTime], ...after.toReversed()];
-  const contacts = times.map(([kind, t]) => contact(SkyBody.Moon, kind, t.date.getTime(), obs, horizon));
   const kind = live.length === 3 ? EclipseKind.Total : live.length === 2 ? EclipseKind.Partial : EclipseKind.Penumbral;
-  return { kind, umbralMagnitude: (at.ru + at.sM - at.g) / (2 * at.sM), penumbralMagnitude: (at.rp + at.sM - at.g) / (2 * at.sM), contacts };
+  return { kind, at, times };
 }
 
 // Refracted light in the umbra: ~1e-4 of full at the axis, 20× that at the edge (Danjon L≈2).

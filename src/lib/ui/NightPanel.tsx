@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { makeObserver, siteHeightM, SkyBody } from '@core/astro/bodies';
 import { dayEvents, EventKind, type DayEvent } from '@core/astro/dayEvents';
-import { lunarEclipseLight } from '@core/astro/eclipse';
+import { lunarEclipseLight, lunarTotality } from '@core/astro/eclipse';
 import { activeShowers, radiantHorizontal, upcomingPeaks, type ShowerStatus } from '@core/astro/meteors';
 import { milkyWayStatus, MoonRule } from '@core/astro/milkyWay';
-import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type PanelNight } from '@core/astro/night';
+import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type NightWindow, type PanelNight, type TimeWindow } from '@core/astro/night';
 import { polarisAid } from '@core/astro/polaris';
 import { moonInfo, position } from '@core/astro/positions';
 import { apply, enuToEqj } from '@core/astro/skyFrame';
@@ -66,6 +66,14 @@ function tonightFor(time: number, tz: string, pin: LngLat, groundM: number | nul
     }
     return events;
   });
+}
+
+// Geocentric, so it depends on the night alone.
+let totalityCache: { key: string; totality: TimeWindow | null } | null = null;
+function totalityFor(night: NightWindow): TimeWindow | null {
+  const key = `${night.startMs}|${night.endMs}`;
+  if (totalityCache?.key !== key) totalityCache = { key, totality: night.endMs > night.startMs ? lunarTotality(night.startMs, night.endMs) : null };
+  return totalityCache.totality;
 }
 
 // Which groups are open survives tab switches but not a reload.
@@ -289,7 +297,7 @@ export function NightPanel() {
   const moon = moonInfo(new Date(time));
   const nextMoon = nextMoonEvent(tonight.events, time);
   const moonUpAtNightfall = hasNight && position(SkyBody.Moon, new Date(night.startMs), obs).altitude > 0;
-  const moonFree = moonFreeWindow(night, tonight.events, moonUpAtNightfall);
+  const moonFree = moonFreeWindow(night, tonight.events, moonUpAtNightfall, totalityFor(night));
   const moonSummary = `${moon.name} ${percent(moon.illumination, 0)}${nextMoon ? ` · ${nextMoon.kind === EventKind.Rise ? 'rises' : 'sets'} ${formatTime(nextMoon.time, tz, s.hour12)}` : ''}`;
 
   const starsSummary = `${npf ? `NPF ${npf.toFixed(1)} s at ${opt.focalMm} mm` : 'NPF needs the camera or pixel count'}${polaris.northern ? ` · Polaris ${signed(polaris.polarisAltDeg)}` : ''}`;
@@ -336,7 +344,10 @@ export function NightPanel() {
           <b className="v">
             {moonFree ? (
               <>
-                {formatTime(moonFree.startMs, tz, s.hour12)} – {formatTime(moonFree.endMs, tz, s.hour12)} <span className="muted">· {duration(moonFree.endMs - moonFree.startMs)}</span>
+                {formatTime(moonFree.startMs, tz, s.hour12)} – {formatTime(moonFree.endMs, tz, s.hour12)} <span className="muted">
+                  · {duration(moonFree.endMs - moonFree.startMs)}
+                  {moonFree.eclipsed && ' · eclipsed Moon'}
+                </span>
               </>
             ) : hasNight ? (
               'none — moon up all night'

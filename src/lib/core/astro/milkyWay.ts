@@ -2,6 +2,7 @@ import type { Observer } from 'astronomy-engine';
 import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { SkyBody } from './bodies';
 import type { DayCurve } from './dayCurve';
+import { lunarEclipseLight } from './eclipse';
 import { moonInfo, position } from './positions';
 
 export const MoonRule = {
@@ -20,7 +21,7 @@ export interface MilkyWayOptions {
   /** Altitude the Galactic Centre must reach, degrees. */
   gcMinAltDeg: number;
   moonRule: MoonRule;
-  /** Illumination tolerated by `MoonRule.Dim` while the moon is up, 0..1. */
+  /** Illumination tolerated by `MoonRule.Dim` while the moon is up, 0..1; an eclipse dims it. */
   moonMaxIllumination: number;
 }
 
@@ -65,13 +66,14 @@ export function milkyWayStatus(obs: Observer, timeMs: number, opts: MilkyWayOpti
   const illumination = moonInfo(d).illumination;
   const dark = sun <= opts.sunMaxAltDeg;
   const coreUp = gc.altitude >= floor;
-  const moonOk = moonAllowed(opts, moon, illumination);
+  const moonOk = moonAllowed(opts, moon, () => illumination * lunarEclipseLight(d));
   return { azimuthDeg: gc.azimuth, altitudeDeg: gc.altitude, sunAltDeg: sun, moonAltDeg: moon, moonIllumination: illumination, floorDeg: floor, dark, coreUp, moonOk, visible: dark && coreUp && moonOk };
 }
 
-function moonAllowed(opts: MilkyWayOptions, moonAlt: number, illumination: number): boolean {
+// Brightness is lazy: the eclipse check only runs for an up moon under `Dim`.
+function moonAllowed(opts: MilkyWayOptions, moonAlt: number, brightness: () => number): boolean {
   if (opts.moonRule === MoonRule.Ignore || moonAlt < 0) return true;
-  return opts.moonRule === MoonRule.Dim && illumination <= opts.moonMaxIllumination;
+  return opts.moonRule === MoonRule.Dim && brightness() <= opts.moonMaxIllumination;
 }
 
 /**
@@ -87,8 +89,8 @@ export function milkyWayWindows(obs: Observer, curve: DayCurve, opts: MilkyWayOp
   const floorAt = (az: number) => (horizon ? Math.max(opts.gcMinAltDeg, horizonAngleAt(horizon, az)) : opts.gcMinAltDeg);
   const okSample = (i: number) => {
     if (sunAlt[i] > opts.sunMaxAltDeg || gcAlt[i] < floorAt(gcAz[i])) return false;
-    if (opts.moonRule === MoonRule.Ignore || moonAlt[i] < 0) return true;
-    return opts.moonRule === MoonRule.Dim && moonInfo(new Date(timeAt(i))).illumination <= opts.moonMaxIllumination;
+    const d = new Date(timeAt(i));
+    return moonAllowed(opts, moonAlt[i], () => moonInfo(d).illumination * lunarEclipseLight(d));
   };
   const okExact = (ms: number) => milkyWayStatus(obs, ms, opts, horizon).visible;
   // Boundary between a sample that fails and one that passes, to a few seconds.
