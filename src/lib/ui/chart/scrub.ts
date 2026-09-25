@@ -43,3 +43,9 @@ export function touchGesture(dx: number, dy: number, slop = TOUCH_SLOP_PX): Touc
   if (ay >= slop) return TouchGesture.Scroll;
   return TouchGesture.Pending;
 }
+
+/** CSS px either side of the time line where a mouse can grab it. */
+export const GRAB_PX = 6;
+
+/** Whether a pointer at client x `px` is on the time line at `lineX`; null when no line is drawn. */
+export const nearLine = (px: number, lineX: number | null, slop = GRAB_PX) => lineX !== null && Math.abs(px - lineX) <= slop;

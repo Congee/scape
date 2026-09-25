@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test: the DateBar shows one clock, and dragging or arrow keys on the Timeline tide curve and cloud strip, the Tools tide curve and the Night moon chart move the clock and the cursor, desktop and phone; on touch a vertical swipe leaves the time.
+# Smoke test: the DateBar shows one clock; the charts show ew-resize only on the time line or mid-drag; dragging or arrow keys on the Timeline tide curve and cloud strip, the Tools tide curve and the Night moon chart move the clock and the cursor, desktop and phone; on touch a vertical swipe leaves the time.
 # Usage: scripts/smoke/timescrub.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port and a background browser with remote debugging on the CDP port; the cloud strip needs Open-Meteo.
 set -uo pipefail
@@ -64,22 +64,43 @@ drag_to() { # fraction, in four moves from the last one
 }
 release() { ab mouse up >/dev/null; }
 
+cursor_at() { # x, y: the computed cursor of what is under the pointer there
+  ab mouse move "$1" "$2" >/dev/null
+  js "(() => { const e = document.elementFromPoint($1, $2); return e ? getComputedStyle(e).cursor : 'none'; })()"
+}
+
+hover_cursor() { # tag, selector, label: ew-resize on the time line, default 40 px off it
+  local sel=$2 lx y on off side
+  lx=$(js "(() => { const r = document.querySelector('$sel .scrub-cursor .now').getBoundingClientRect(); return Math.round(r.left + r.width / 2); })()")
+  y=${GEOM##* }
+  on=$(cursor_at "$lx" "$y")
+  check "$1 $3: ew-resize on the line" "$([ "$on" = ew-resize ] && echo 1 || echo 0)" "x=$lx: $on"
+  side=$((lx - 40)); [ "$side" -lt "$(at 2)" ] && side=$((lx + 40))
+  off=$(cursor_at "$side" "$y")
+  check "$1 $3: default cursor 40 px off the line" "$([ "$off" = default ] && echo 1 || echo 0)" "x=$side: $off"
+}
+
 scrub() { # tag, selector, label, [press, mid, end fractions]
   local f0=${4:-20} f1=${5:-30} f2=${6:-70}
   local sel=$2 hd xd h1 x1 cur
   wait_for "document.querySelector('$sel')" 60 || { check "$1 $3: chart shown" 0 missing; return; }
-  cur=$(js "getComputedStyle(document.querySelector('$sel')).cursor")
-  check "$1 $3: ew-resize cursor" "$([ "$cur" = ew-resize ] && echo 1 || echo 0)" "$cur"
   press "$sel" "$f0"
   DRAG_AT=$(at "$f0")
   drag_to "$f1"
   hd=$(hm); xd=$(now_x "$sel")
+  # Mid-drag, 40 px below the chart: the captured drag keeps the resize cursor.
+  local below; below=$(js "Math.round(document.querySelector('$sel').getBoundingClientRect().bottom + 40)")
+  ab mouse move "$DRAG_AT" "$below" >/dev/null
+  cur=$(js "(() => { const s = document.querySelector('$sel'); return getComputedStyle(s).cursor + (s.contains(document.elementFromPoint($DRAG_AT, $below)) ? ' inside' : ' off-chart'); })()")
+  check "$1 $3: drag off the chart keeps ew-resize" "$([ "$cur" = 'ew-resize off-chart' ] && echo 1 || echo 0)" "$cur"
+  ab mouse move "$DRAG_AT" "${GEOM##* }" >/dev/null
   drag_to "$f2"
   h1=$(hm); x1=$(now_x "$sel")
   release
   check "$1 $3: press sets the time" "$([ -n "$hd" ] && [ "$xd" -ge 0 ] && echo 1 || echo 0)" "$hd at x=$xd"
   check "$1 $3: drag moves the clock and cursor" "$([ "$hd" != "$h1" ] && [ "$x1" -gt "$xd" ] && echo 1 || echo 0)" "$hd → $h1, x $xd → $x1"
   ab screenshot "$OUT/$1-$3.png" >/dev/null
+  hover_cursor "$1" "$sel" "$3"
   # Keys: the press focused the chart.
   local focused k0 k1 k2
   focused=$(js "document.activeElement === document.querySelector('$sel')")
@@ -130,13 +151,14 @@ pass() { # tag, width, height
   check "$tag no sideways page scroll" "$([ "$wide" = false ] && echo 1 || echo 0)" "overflow $wide"
 }
 
-night() { # Night moon chart, desktop: needs a moonlit night toward the aim
-  ab set viewport 1400 900 >/dev/null
+night() { # tag, width, height: Night moon chart; needs a moonlit night toward the aim
+  local tag=$1
+  ab set viewport "$2" "$3" >/dev/null
   go "$BASE/?camera=$CAMERA&t=$DAY" || return
   tab Night
   js '(() => { document.querySelectorAll(".night details").forEach((d) => (d.open = true)); return "ok"; })()' >/dev/null
   if wait_for 'document.querySelector(".night .moon-chart svg")' 20; then
-    scrub desktop ".night .moon-chart svg" "night moon" 5 10 25
+    scrub "$tag" ".night .moon-chart svg" "night moon" 5 10 25
     # Past midnight the chart keeps the same night.
     local s0 s1 x
     s0=$(js 'document.querySelector(".night .moon-chart svg").getAttribute("aria-label") + document.querySelector(".night .moon-chart polyline")?.getAttribute("points")')
@@ -146,15 +168,16 @@ night() { # Night moon chart, desktop: needs a moonlit night toward the aim
     s1=$(js 'document.querySelector(".night .moon-chart svg").getAttribute("aria-label") + document.querySelector(".night .moon-chart polyline")?.getAttribute("points")')
     x=$(now_x ".night .moon-chart svg")
     release
-    check "desktop night moon: drag past midnight keeps the night" "$([ "$s0" = "$s1" ] && [ "$x" -ge "$(at 85)" ] && echo 1 || echo 0)" "$(hm), cursor x $x"
-    ab screenshot "$OUT/desktop-night-moon-after-midnight.png" >/dev/null
+    check "$tag night moon: drag past midnight keeps the night" "$([ "$s0" = "$s1" ] && [ "$x" -ge "$(at 85)" ] && echo 1 || echo 0)" "$(hm), cursor x $x"
+    ab screenshot "$OUT/$tag-night-moon-after-midnight.png" >/dev/null
   else
-    check "desktop night moon: chart shown" 1 "no moon chart that night (skipped)"
+    check "$tag night moon: chart shown" 1 "no moon chart that night (skipped)"
   fi
 }
 
 pass desktop 1400 900
-night
+night desktop 1400 900
+night phone 390 844
 pass phone 390 844
 TOUCH=$(DAY=$DAY bun "$(dirname "$0")/timescrub-touch.ts" "$CDP" "$PORT" phone "$OUT" 2>&1)
 TOUCH_RC=$?

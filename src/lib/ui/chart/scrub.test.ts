@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampTime, HOUR_MS, keyStep, MINUTE_MS, timeAtX, TouchGesture, touchGesture, xAtTime } from './scrub';
+import { clampTime, GRAB_PX, HOUR_MS, keyStep, MINUTE_MS, nearLine, timeAtX, TouchGesture, touchGesture, xAtTime } from './scrub';
 
 const START = Date.UTC(2026, 5, 21);
 const END = START + 24 * HOUR_MS;
@@ -84,5 +84,22 @@ describe('touchGesture', () => {
     expect(touchGesture(2, 6)).toBe(TouchGesture.Scroll);
     expect(touchGesture(7, -7)).toBe(TouchGesture.Scroll);
     expect(touchGesture(3, 1, 2)).toBe(TouchGesture.Scrub);
+  });
+});
+
+describe('nearLine', () => {
+  it('grabs within the slop either side', () => {
+    expect(nearLine(100, 100)).toBe(true);
+    expect(nearLine(100 + GRAB_PX, 100)).toBe(true);
+    expect(nearLine(100 - GRAB_PX, 100)).toBe(true);
+  });
+
+  it('misses past the slop', () => {
+    expect(nearLine(100 + GRAB_PX + 0.5, 100)).toBe(false);
+    expect(nearLine(60, 100)).toBe(false);
+  });
+
+  it('misses when no line is drawn', () => {
+    expect(nearLine(0, null)).toBe(false);
   });
 });

@@ -1958,12 +1958,16 @@ label.file-pick input[type='file'] {
   }
 }
 
-/* Time-axis mini charts: press or drag anywhere scrubs the clock */
+/* Time-axis mini charts: press or drag anywhere scrubs the clock; the resize cursor only on the line or mid-drag */
 [data-scrub] {
-  cursor: ew-resize;
+  cursor: default;
   touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
+}
+
+[data-scrub][data-grab] {
+  cursor: ew-resize;
 }
 
 [data-scrub]:focus-visible {
@@ -2127,7 +2131,6 @@ label.file-pick input[type='file'] {
 .cloud-chart .gap { fill: url(#wx-gap); }
 .cloud-chart pattern line { stroke: var(--fg-3); stroke-width: 1.5; }
 .cloud-chart .now { stroke: var(--sun); }
-.cloud-chart g { cursor: pointer; }
 
 .wx-credit {
   margin: 2px 6px;

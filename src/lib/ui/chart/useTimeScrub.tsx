@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import { worldStore } from '@state/world';
-import { clampTime, HOUR_MS, keyStep, MINUTE_MS, timeAtX, TouchGesture, touchGesture, xAtTime } from './scrub';
+import { clampTime, HOUR_MS, keyStep, MINUTE_MS, nearLine, timeAtX, TouchGesture, touchGesture, xAtTime } from './scrub';
 
 interface ScrubOptions {
   startMs: number;
@@ -19,6 +19,19 @@ function viewX(svg: SVGSVGElement, clientX: number, clientY: number): number {
   const m = svg.getScreenCTM();
   return m ? new DOMPoint(clientX, clientY).matrixTransform(m.inverse()).x : 0;
 }
+
+/** Client x of the drawn time line, or null. */
+function lineX(svg: SVGSVGElement): number | null {
+  const r = svg.querySelector('.scrub-cursor .now')?.getBoundingClientRect();
+  return r ? r.left + r.width / 2 : null;
+}
+
+/** Shows the grab cursor via `data-grab`, set imperatively so a hover never re-renders. */
+function setGrab(svg: SVGSVGElement, on: boolean) {
+  if (on !== svg.hasAttribute('data-grab')) svg.toggleAttribute('data-grab', on);
+}
+
+const hover = (e: PointerEvent<SVGSVGElement>) => setGrab(e.currentTarget, nearLine(e.clientX, lineX(e.currentTarget)));
 
 /** SVG props that make a time-axis chart scrub the clock: press or drag sets the time at x, arrows step it. An element with `data-t` snaps a press to its time. A touch sets the time only on a tap or a sideways drag, so a vertical scroll never does. */
 export function useTimeScrub({ startMs, endMs, w, step = HOUR_MS, fine = 10 * MINUTE_MS }: ScrubOptions) {
@@ -39,6 +52,7 @@ export function useTimeScrub({ startMs, endMs, w, step = HOUR_MS, fine = 10 * MI
       }
       // No preventDefault: the native press focuses the chart for the arrow keys without a focus ring.
       e.currentTarget.setPointerCapture(e.pointerId);
+      setGrab(e.currentTarget, true);
       setTime(snapAt(e));
     },
     onPointerMove(e: PointerEvent<SVGSVGElement>) {
@@ -52,14 +66,22 @@ export function useTimeScrub({ startMs, endMs, w, step = HOUR_MS, fine = 10 * MI
         return;
       }
       if (e.currentTarget.hasPointerCapture(e.pointerId)) setTime(at(e));
+      else if (e.pointerType === 'mouse' || e.pointerType === 'pen') hover(e);
     },
     onPointerUp(e: PointerEvent<SVGSVGElement>) {
       const t = touch.current;
-      if (!t || t.id !== e.pointerId) return;
+      if (!t || t.id !== e.pointerId) {
+        if (e.pointerType !== 'touch') hover(e);
+        return;
+      }
       touch.current = null;
       if (touchGesture(e.clientX - t.x, e.clientY - t.y) === TouchGesture.Pending && t.gesture === TouchGesture.Pending) setTime(snapAt(e));
     },
+    onPointerLeave(e: PointerEvent<SVGSVGElement>) {
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) setGrab(e.currentTarget, false);
+    },
     onPointerCancel(e: PointerEvent<SVGSVGElement>) {
+      setGrab(e.currentTarget, false);
       if (touch.current?.id === e.pointerId) touch.current = null;
     },
     onKeyDown(e: KeyboardEvent<SVGSVGElement>) {
