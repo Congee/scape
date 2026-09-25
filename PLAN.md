@@ -487,7 +487,7 @@ doing, and the thin dark lines turned out to be real rock gullies.
   sprites and glyphs cached (merged 2026-09-24). Joins the terrain download by default up to 100 tiles;
   Liberty's shaded relief is dropped offline.
 - Official LoD2 buildings (merged 2026-09-24): 3DBAG (meshopt), swissBUILDINGS3D and PLATEAU Tokyo 23 wards (Draco, decoder lazy-loaded only for those tiles); worker-built BVH occluder. PLATEAU heights use a user-imported GSIGEO2011 `.asc` (OPFS, bilinear per vertex; never bundled, GSI 測量法); without it, 36.7 m and a note. Ask GSI before a public release.
-- Target height on a model: apex (shipped default) or the roof under the target point.
+- Target height on a model: apex (A/B pick 2026-09-25).
 - Tools tab (Phase 7 calculators, merged): name "Tools" after Night; tab min width 62 px so 9 tabs
   fit two rows; Rainbow overlay off by default; RAW size 14-bit uncompressed (worst case); rainbow
   behind terrain drawn dim and dashed, not hidden; Earth-shadow cloud light without refraction
@@ -512,17 +512,18 @@ doing, and the thin dark lines turned out to be real rock gullies.
 - Models P2 (merged `a45a27d`): selection and outline in accent #5aa9ff; a drawn building starts at
   10 m (nearby Overture median later?); arrow-key nudges only behind the "Arrow keys adjust it"
   checkbox; long-press 600 ms deletes a vertex; "Set target to model top" replaces "Use as target";
-  phone sheet puts the nudge pad first (collapse the sheet while drawing, as a follow-up?); the outline
+  phone sheet folds away while drawing and reopens with the model in view; the outline
   ignores occluders; meshes have no bottom face.
-- Models P4 (photo overlay + model occlusion): photo controls live in the viewfinder chips panel
-  (vs a floating toolbar?); the photo is kept in memory only (IndexedDB per plan?); a photo without
-  EXIF spans the frame width (lock to the current lens?); nudges step 0.002 photo widths / 0.1°;
-  a body behind a building stays ghosted at 35% (hide it fully?).
-- Models P3b (import sheet, export, imported render): "On a building" waits for the next map click
-  (vs a persistent Overture selection?); a file carrying `extras.scape` still waits for Place (vs
-  placing on pick?); the Height nudge is off for Imported models.
+- Models P4 (photo overlay + model occlusion): photo controls live in the viewfinder chips panel;
+  the photo is kept in memory only (IndexedDB per plan?); a photo without EXIF locks to the current
+  lens's field of view; nudges step 0.002 photo widths / 0.1°; a body behind a building stays
+  ghosted at 35%.
+- Models P3b (import sheet, export, imported render): "On a building" keeps a highlighted Overture
+  selection until "Place on this building"; a file carrying `extras.scape` is placed on pick; the
+  Height nudge is off for Imported models.
 - Models ground fix: a drawn model whose ground is unknown at save (offline/timeout) is saved at
-  sea level and healed on the next load (vs blocking save, or an editor warning?).
+  sea level and healed on the next load, with an editor warning naming the cause ("Try again" when
+  online, "terrain not downloaded" offline) until healed.
 - LoD2 follow-ups: buildings at night dimmed to the ground's moonlit level, 0.23 of day (A/B pick 2026-09-25); swissBUILDINGS3D stays
   pinned to v1/20260520 (vs following latest); PLATEAU beyond the Tokyo 23 wards not started.
 
