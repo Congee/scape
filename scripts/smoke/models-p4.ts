@@ -23,7 +23,7 @@ const FULL_FRAME_DIAG_MM = Math.hypot(36, 24);
 
 type Box = { x: number; y: number; width: number; height: number };
 type Disc = { az: number; alt: number; x: number; y: number; r: number; hidden: boolean };
-type Fit = { box: { cx: number; cy: number; w: number; h: number; rotDeg: number }; frame: { x: number; y: number; w: number; h: number }; pxPerMm: number; focalMm: number; focal35: number | null; nat: { w: number; h: number }; opacity: number };
+type Fit = { box: { cx: number; cy: number; w: number; h: number; rotDeg: number }; frame: { x: number; y: number; w: number; h: number }; pxPerMm: number; focalMm: number; focal35: number; nat: { w: number; h: number }; opacity: number };
 
 const rows: string[] = [];
 let failed = 0;
@@ -315,11 +315,11 @@ const lockHint = await tab.eval<string>(`document.querySelector('.vf-photo-tools
 let lockOk = lockHint.includes('locked to the lens') && lockHint.includes('200 mm');
 for (const [f, orient] of [[200, 'Landscape'], [24, 'Landscape'], [600, 'Landscape'], [600, 'Portrait']] as const) {
   await frameBody('Moon', f, orient);
-  const p = await js<Fit | null>('return fit();');
-  const e = p && fitError(p, null);
-  const ok = !!p && p.focal35 === null && !!e && e.model < 0.5;
-  spanOk &&= ok;
-  spans.push(`${f} ${orient[0]} ${e?.ratio.toFixed(3)}×`);
+  const p = await js<(Fit & { fromExif: boolean }) | null>('return { ...fit(), fromExif: S.photo.fromExif };');
+  const e = p && fitError(p, PHOTO_FOCAL35);
+  const ok = !!p && p.fromExif === false && Math.abs(p.focal35 - PHOTO_FOCAL35) < 0.01 && !!e && e.model < 0.5;
+  lockOk &&= ok;
+  locks.push(`${f} ${orient[0]} ${e?.ratio.toFixed(3)}×`);
 }
 check('no Exif: photo locked to the lens at pick', lockOk, `${locks.join(', ')}; hint "${lockHint}"`);
 

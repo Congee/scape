@@ -28,6 +28,7 @@ import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { segmentHitsRect } from '@core/viewfinder/segmentRect';
+import { starNight } from '@core/viewfinder/skyGate';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges, visibleRuns } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
@@ -320,7 +321,7 @@ export class ViewfinderController {
     const sun = position(SkyBody.Sun, time, obs);
     const sunAlt = sun.altitude;
     const moon = position(SkyBody.Moon, time, obs);
-    const night = smooth(-4, -14, sunAlt);
+    const night = starNight(sunAlt);
     const moonLight = moonInfo(time).illumination * lunarEclipseLight(time);
     const moonFactor = night > 0 ? smooth(-2, 8, moon.altitude) * moonLight : 0;
     const profile = view?.profile ?? null;
@@ -575,6 +576,33 @@ export class ViewfinderController {
     if (dev) dev.modelOutline = { id, segments: drawn, box: drawn > 0 ? box : null };
   }
 
+  /** The outline's pieces not behind terrain or a building, sampled every few pixels within a per-frame budget. */
+  private visibleOutline(sc: Scene, seg: Float32Array, px: (e: number, n: number, u: number) => { x: number; y: number } | null): Float32Array {
+    const occ = this.occ;
+    const view = sc.view;
+    if (!occ && !view) return seg;
+    const lenPx = new Float32Array(seg.length / 6);
+    let total = 0;
+    for (let i = 0; i < lenPx.length; i++) {
+      const p = px(seg[i * 6], seg[i * 6 + 1], seg[i * 6 + 2]);
+      const q = px(seg[i * 6 + 3], seg[i * 6 + 4], seg[i * 6 + 5]);
+      lenPx[i] = p && q ? Math.min(Math.hypot(q.x - p.x, q.y - p.y), OUTLINE_MAX_PX) : OUTLINE_MAX_PX / 8;
+      total += lenPx[i] / OUTLINE_STEP_PX;
+    }
+    const scale = Math.min(1, OUTLINE_SAMPLES / Math.max(total, 1));
+    return visibleRuns(
+      seg,
+      (i) => Math.ceil((lenPx[i] / OUTLINE_STEP_PX) * scale),
+      (e, n, u) => {
+        const h = Math.hypot(e, n);
+        const d = Math.hypot(h, u);
+        // Short of the point itself, so the model's own faces through it do not count.
+        const slack = 0.05 + d * 1e-4;
+        return (!!view && occluded(view, Math.atan2(e, n) * R2D, Math.atan2(u, h) * R2D, h - slack)) || (!!occ && occ.occludes(e, n, u, d - slack));
+      }
+    );
+  }
+
   /** The reference photo for the picture pass, sized to the frame and scaled by its field of view. */
   private photoLayer(sc: Scene): PhotoLayer | null {
     const p = photoStore.getState();
@@ -593,7 +621,7 @@ export class ViewfinderController {
     const f = sc.frame;
     const b = fitPhoto(f, sc.cam.focalMm, p);
     const image = this.photo.image;
-    if (dev) dev.photo = { box: b, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, focalMm: sc.cam.focalMm, focal35: p.focal35, hfovDeg: p.focal35 ? photoHfovDeg(p.focal35, p.w, p.h) : sc.hfov, opacity: p.opacity, nat: image && { w: image.width, h: image.height } };
+    if (dev) dev.photo = { box: b, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, focalMm: sc.cam.focalMm, focal35: p.focal35, fromExif: p.fromExif, hfovDeg: photoHfovDeg(p.focal35, p.w, p.h), opacity: p.opacity, nat: image && { w: image.width, h: image.height } };
     return image && { image, box: b, dpr: this.dpr, opacity: p.opacity };
   }
 
