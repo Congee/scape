@@ -53,6 +53,7 @@ import { planTime, worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { CloudOverlay } from './cloudOverlay';
 import { paintHeat } from './heat';
+import { latestOnly } from './latest';
 import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
 import { MapLayers } from './mapLayers';
@@ -182,6 +183,8 @@ export class MapController {
   private touches = 0;
   /** Overture feature ids a visible model stands in for. */
   private hiddenIds: string[] = [];
+  /** A later model change's answer may land first; only the newest applies. */
+  private askSuppressed = latestOnly(suppressedBuildingIds);
   /** Body behind the mask on screen; the smoke test reads it. */
   lightBody: SkyBody | null = null;
 
@@ -944,7 +947,9 @@ export class MapController {
 
   /** The worker knows which Overture rows the models suppress; the map hides the same ones. */
   private async refreshSuppression() {
-    const ids = (await suppressedBuildingIds()) ?? this.hiddenIds;
+    const answer = await this.askSuppressed();
+    if (answer === undefined) return;
+    const ids = answer ?? this.hiddenIds;
     if (ids.length === this.hiddenIds.length && ids.every((id, i) => id === this.hiddenIds[i])) return;
     this.hiddenIds = ids;
     if (!this.styleReady) return;
