@@ -7,6 +7,9 @@ export const MODEL_COLOR = '#e0b872';
 export const MODEL_ACCENT = '#5aa9ff';
 export const MODELS_FILL_LAYER = 'models-fill';
 export const MODELS_LINE_LAYER = 'models-line';
+export const MODELS_CASING_LAYER = 'models-line-casing';
+export const OUTLINE_COLOR = '#ffffff';
+export const OUTLINE_CASING = '#10141c';
 export const OTHER_MODELS_FILL_LAYER = 'models-fill-others';
 
 const fillLayer = (id: string, source: string, selected: boolean): LayerSpecification => ({
@@ -22,20 +25,27 @@ const fillLayer = (id: string, source: string, selected: boolean): LayerSpecific
   }
 });
 
-const outlineLayer = (id: string, source: string, selected: boolean): LayerSpecification => ({
+const outlineLayer = (id: string, source: string, selected: boolean, color: string, extraPx = 0): LayerSpecification => ({
   id,
   type: 'line',
   source,
   filter: ['==', ['get', 'selected'], selected],
-  paint: { 'line-color': selected ? MODEL_ACCENT : MODEL_COLOR, 'line-width': ['case', ['get', 'current'], 2.5, 1.5] }
+  paint: { 'line-color': color, 'line-width': ['case', ['get', 'current'], 2.5 + extraPx, 1.5 + extraPx] }
 });
 
 /**
- * Bottom to top: the selected model, its outline, the other models, their outlines. Lines keep no depth, so
- * extrusions drawn after the selected outline (other models, then buildings) hide it where they stand in front.
+ * Bottom to top: the selected model, its outline (white on a dark casing, to stand out on the accent part), the other
+ * models, their outlines. Lines keep no depth, so extrusions drawn after the selected outline (other models, then
+ * buildings) hide it where they stand in front.
  */
 export function modelLayers(source: string): LayerSpecification[] {
-  return [fillLayer(MODELS_FILL_LAYER, source, true), outlineLayer(MODELS_LINE_LAYER, source, true), fillLayer(OTHER_MODELS_FILL_LAYER, source, false), outlineLayer('models-line-others', source, false)];
+  return [
+    fillLayer(MODELS_FILL_LAYER, source, true),
+    outlineLayer(MODELS_CASING_LAYER, source, true, OUTLINE_CASING, 2),
+    outlineLayer(MODELS_LINE_LAYER, source, true, OUTLINE_COLOR),
+    fillLayer(OTHER_MODELS_FILL_LAYER, source, false),
+    outlineLayer('models-line-others', source, false, MODEL_COLOR)
+  ];
 }
 
 /** Where to test a vertex handle for cover: `stepPx` inside its footprint, so a wall it shares with a neighbour does not count. */

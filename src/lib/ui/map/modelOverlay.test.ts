@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { drawnModel } from '@core/model/draw';
-import { coverProbe, draftFeatures, modelFeatures, modelLayers, MODELS_FILL_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER } from './modelOverlay';
+import { coverProbe, draftFeatures, modelFeatures, MODEL_COLOR, modelLayers, MODELS_CASING_LAYER, MODELS_FILL_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER, OUTLINE_CASING, OUTLINE_COLOR } from './modelOverlay';
 
 const pts = [
   { lng: 0, lat: 0 },
@@ -44,12 +44,22 @@ describe('draftFeatures', () => {
 describe('modelLayers', () => {
   it('draws the selected outline before the other models, so those in front hide it', () => {
     const ids = modelLayers('models').map((l) => l.id);
-    expect(ids).toEqual([MODELS_FILL_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER, 'models-line-others']);
+    expect(ids).toEqual([MODELS_FILL_LAYER, MODELS_CASING_LAYER, MODELS_LINE_LAYER, OTHER_MODELS_FILL_LAYER, 'models-line-others']);
   });
 
-  it('splits every feature into exactly one fill and one line by selection', () => {
+  it('splits every feature into exactly one fill and one outline by selection', () => {
     const filters = modelLayers('models').map((l) => ('filter' in l ? l.filter : null));
-    expect(filters).toEqual([true, true, false, false].map((v) => ['==', ['get', 'selected'], v]));
+    expect(filters).toEqual([true, true, true, false, false].map((v) => ['==', ['get', 'selected'], v]));
+  });
+
+  it('draws the selected outline white over a wider dark casing, the others in the model colour', () => {
+    const lines = modelLayers('models').filter((l) => l.type === 'line');
+    const paint = (id: string) => lines.find((l) => l.id === id)!.paint as Record<string, unknown>;
+    expect(paint(MODELS_CASING_LAYER)['line-color']).toBe(OUTLINE_CASING);
+    expect(paint(MODELS_LINE_LAYER)['line-color']).toBe(OUTLINE_COLOR);
+    expect(paint('models-line-others')['line-color']).toBe(MODEL_COLOR);
+    expect(paint(MODELS_CASING_LAYER)['line-width']).toEqual(['case', ['get', 'current'], 4.5, 3.5]);
+    expect(paint(MODELS_LINE_LAYER)['line-width']).toEqual(['case', ['get', 'current'], 2.5, 1.5]);
   });
 });
 

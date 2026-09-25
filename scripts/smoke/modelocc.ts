@@ -104,10 +104,10 @@ const probe = async (tag: string, view: string) => {
   const on = await tab.shot(`${shots}/${tag}-line-on.png`, c);
   const dimmed = await js<number>(`return [...document.querySelectorAll('.map-vertex')].filter((e) => e.style.opacity === '0.2').length;`);
   const handles = await js<number>(`return document.querySelectorAll('.map-vertex').length;`);
-  await js(`for (const l of ['models-fill', 'models-line']) map().setLayoutProperty(l, 'visibility', 'none'); await idle(); return true;`);
+  await js(`for (const l of ['models-fill', 'models-line-casing', 'models-line']) map().setLayoutProperty(l, 'visibility', 'none'); await idle(); return true;`);
   await settle(500);
   const off = await tab.shot(`${shots}/${tag}-line-off.png`, c);
-  await js(`for (const l of ['models-fill', 'models-line']) map().setLayoutProperty(l, 'visibility', 'visible'); await idle(); return true;`);
+  await js(`for (const l of ['models-fill', 'models-line-casing', 'models-line']) map().setLayoutProperty(l, 'visibility', 'visible'); await idle(); return true;`);
   return { line: await js<number>(`return diff(${JSON.stringify(on)}, ${JSON.stringify(off)});`), dimmed, handles };
 };
 const pct = (x: number) => `${(x * 100).toFixed(4)} %`;

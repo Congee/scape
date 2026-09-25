@@ -522,6 +522,8 @@ doing, and the thin dark lines turned out to be real rock gullies.
   meshes are closed (a floor under every part); terrain and buildings in front hide the outline on the
   map and in the viewfinder, and on the map other models in front do too (layer order: selected, others,
   buildings); covered vertex handles dim to 0.2, checked on idle.
+  On the map the selected model's outline is white over a thin dark casing, so it reads against the
+  accent part (user, 2026-09-25); other models keep the model-colour outline.
 - Models P4 (photo overlay + model occlusion): photo controls live in the viewfinder chips panel;
   the photo is kept in memory only (IndexedDB per plan?); a photo without EXIF locks to the current
   lens's field of view; nudges step 0.002 photo widths / 0.1°; a body behind a building stays

@@ -80,6 +80,18 @@ const HELPERS = `(async () => {
     for (let i = 0; i < p.length; i += 4) if (Math.max(Math.abs(p[i] - q[i]), Math.abs(p[i + 1] - q[i + 1]), Math.abs(p[i + 2] - q[i + 2])) > tol) n++;
     return n / (p.length / 4);
   };
+  /** Of the pixels that changed, the shares now near white and near black. */
+  const tones = async (a, b, tol = 24) => {
+    const [p, q] = await Promise.all([decode(a), decode(b)]);
+    let n = 0, white = 0, dark = 0;
+    for (let i = 0; i < p.length; i += 4) {
+      if (Math.max(Math.abs(p[i] - q[i]), Math.abs(p[i + 1] - q[i + 1]), Math.abs(p[i + 2] - q[i + 2])) <= tol) continue;
+      n++;
+      if (Math.min(p[i], p[i + 1], p[i + 2]) > 200) white++;
+      if (Math.max(p[i], p[i + 1], p[i + 2]) < 70) dark++;
+    }
+    return { white: n ? white / n : 0, dark: n ? dark / n : 0 };
+  };
   /** Directed edges without a reverse twin: zero for a closed solid. */
   const openEdges = (pos) => {
     const key = (i) => pos[i].toFixed(4) + ',' + pos[i + 1].toFixed(4) + ',' + pos[i + 2].toFixed(4);
@@ -91,11 +103,11 @@ const HELPERS = `(async () => {
     }
     return [...edges.values()].reduce((s, n) => s + n, 0);
   };
-  window.__smoke = { buildings, seed, geo, core, mesh, share, S, map, named, drop, block, seedAt, centre, top, aimAt, idle, canvas, frame, diff, openEdges };
+  window.__smoke = { buildings, seed, geo, core, mesh, share, S, map, named, drop, block, seedAt, centre, top, aimAt, idle, canvas, frame, diff, tones, openEdges };
   return true;
 })()`;
 const js = <T = unknown>(body: string, timeoutMs = 90_000) =>
-  tab.eval<T>(`(async () => { await ${HELPERS}; const { buildings, seed, geo, core, mesh, share, S, map, named, drop, block, seedAt, centre, top, aimAt, idle, canvas, frame, diff, openEdges } = window.__smoke; ${body} })()`, timeoutMs);
+  tab.eval<T>(`(async () => { await ${HELPERS}; const { buildings, seed, geo, core, mesh, share, S, map, named, drop, block, seedAt, centre, top, aimAt, idle, canvas, frame, diff, tones, openEdges } = window.__smoke; ${body} })()`, timeoutMs);
 const settle = (ms = 1500) => Bun.sleep(ms);
 const home = async () => {
   await tab.navigate(`${BASE}/`);
@@ -150,27 +162,30 @@ const closed = await js<{ open: number; tris: number; source: string; parts: boo
 `);
 check('mesh closed; export → import stays Drawn', closed.open === 0 && closed.source === 'Drawn' && closed.parts && closed.warnings.length === 0 && closed.plain === closed.tris, `${closed.open} open edges over ${closed.tris} tris; import ${closed.source}, parts ${closed.parts ? 'equal' : 'differ'}; parts-free GLB ${closed.plain} tris; warnings ${JSON.stringify(closed.warnings)}`);
 
-// 4a. Map: the selected outline hides behind the towers in front of it.
+// 4a. Map: the selected outline shows over the selected part and hides behind the towers in front of it.
+const LINES = JSON.stringify(['models-line-casing', 'models-line']);
 const lineShare = async (tag: string, view: string) => {
   await js(`map().jumpTo(${view}); await idle(); return true;`);
   await settle(800);
   const c = await js<{ x: number; y: number; width: number; height: number }>('return canvas();');
   const on = await tab.shot(`${shots}/${tag}-line-on.png`, c);
-  await js(`map().setLayoutProperty('models-line', 'visibility', 'none'); await idle(); return true;`);
+  await js(`for (const l of ${LINES}) map().setLayoutProperty(l, 'visibility', 'none'); await idle(); return true;`);
   await settle(500);
   const off = await tab.shot(`${shots}/${tag}-line-off.png`, c);
-  await js(`map().setLayoutProperty('models-line', 'visibility', 'visible'); await idle(); return true;`);
-  return js<number>(`return diff(${JSON.stringify(on)}, ${JSON.stringify(off)});`);
+  await js(`for (const l of ${LINES}) map().setLayoutProperty(l, 'visibility', 'visible'); await idle(); return true;`);
+  return js<{ share: number; white: number; dark: number }>(`return { share: await diff(${JSON.stringify(on)}, ${JSON.stringify(off)}), ...(await tones(${JSON.stringify(on)}, ${JSON.stringify(off)})) };`);
 };
 const mapOutline = async (tag: string) => {
-  // No current part: an accent outline over the accent current-part fill is below the diff tolerance.
-  await js(`const m = await block(${JSON.stringify(Tag.Lawn)}, ${JSON.stringify(LAWN)}, 30, 10); S.models.getState().select(m.id); S.models.getState().selectPart(null); return true;`);
+  const part = await js<boolean>(`const m = await block(${JSON.stringify(Tag.Lawn)}, ${JSON.stringify(LAWN)}, 30, 10); S.models.getState().select(m.id); S.models.getState().selectPart(m.parts[0].id); return S.models.getState().selectedPartId === m.parts[0].id;`);
   const clear = await lineShare(`${tag}-top`, `{ center: ${JSON.stringify(LAWN)}, zoom: 19, pitch: 0, bearing: 0 }`);
   const behind = await lineShare(`${tag}-behind`, `{ center: { lng: ${LAWN.lng}, lat: ${LAWN.lat - 0.0012} }, zoom: 17.5, pitch: 75, bearing: 0 }`);
-  return { clear, behind };
+  return { part, clear, behind };
 };
+const outlineOk = (o: Awaited<ReturnType<typeof mapOutline>>) => o.part && o.clear.share > 0.0005 && o.clear.white > 0.3 && o.clear.dark > 0.1 && o.behind.share < 0.0002;
+const outlineDetail = (o: Awaited<ReturnType<typeof mapOutline>>) =>
+  `part ${o.part ? 'selected' : 'NOT selected'}; outline ${(o.clear.share * 100).toFixed(3)} % top-down (${(o.clear.white * 100).toFixed(0)} % white, ${(o.clear.dark * 100).toFixed(0)} % dark), ${(o.behind.share * 100).toFixed(4)} % behind 40th Street`;
 const desk = await mapOutline('map');
-check('map outline: drawn in the open, hidden behind towers', desk.clear > 0.0005 && desk.behind < 0.0002, `outline pixels ${(desk.clear * 100).toFixed(3)} % top-down, ${(desk.behind * 100).toFixed(4)} % behind 40th Street`);
+check('map outline: white on dark over the selected part, hidden behind towers', outlineOk(desk), outlineDetail(desk));
 
 // 4b. Viewfinder: a block right behind the tower draws no outline, one in the open draws it.
 const viewfinder = async (camera: string, t: string, f: number) => {
@@ -255,7 +270,7 @@ const phoneClear = await outline(Tag.Clear, 1, 200, false);
 await tab.shot(`${shots}/phone-viewfinder.png`);
 await home();
 const phoneMap = await mapOutline('phone');
-check(`phone ${PHONE.w}×${PHONE.h}`, phoneHidden === 0 && phoneClear > 0 && phoneMap.clear > 0.0005 && phoneMap.behind < 0.0002, `viewfinder ${phoneHidden}/${phoneClear} segments hidden/open; map outline ${(phoneMap.clear * 100).toFixed(3)} % top-down, ${(phoneMap.behind * 100).toFixed(4)} % behind`);
+check(`phone ${PHONE.w}×${PHONE.h}`, phoneHidden === 0 && phoneClear > 0 && outlineOk(phoneMap), `viewfinder ${phoneHidden}/${phoneClear} segments hidden/open; map ${outlineDetail(phoneMap)}`);
 
 await tab.viewport(1280, 800);
 await js(`for (const n of ${JSON.stringify([TOWER_NAME, ...Object.values(Tag)])}) await drop(n); return true;`);
