@@ -68,7 +68,7 @@ export function parseListing(json: unknown): string[] {
     const id = typeof c?.name === 'string' ? parseViirsName(c.name) : null;
     if (id) names.add(tileName(id.tile));
   }
-  return [...names].sort();
+  return [...names].toSorted();
 }
 
 /** Fetches and stores a year's tile listing; keyless and CORS-open. */

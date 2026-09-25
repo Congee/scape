@@ -1,3 +1,4 @@
+// oxlint-disable no-underscore-dangle -- _FillValue is HDF5's attribute name
 import { describe, expect, it } from 'vitest';
 import { H5_EARLIEST, H5_LATEST } from './hdf5.fixtures';
 import { bytesSource, openHdf5 } from './hdf5';

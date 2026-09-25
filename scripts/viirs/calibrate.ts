@@ -23,6 +23,7 @@ const siteKey = (s: SqmSite) => s.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 async function h5Tiles(): Promise<Map<string, Uint16Array>> {
   const out = new Map<string, Uint16Array>();
   for (const f of readdirSync(dir).filter((n) => parseViirsName(n))) {
+    // oxlint-disable-next-line no-await-in-loop -- one 11 MB tile in memory at a time
     const t = await decodeViirsTile(bytesSource(new Uint8Array(readFileSync(join(dir, f)))), f);
     out.set(tileName(t.tile), t.counts);
   }

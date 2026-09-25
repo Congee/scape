@@ -12,6 +12,7 @@ import { dayDataStore, startDayDataSync } from '@state/dayData';
 import { finderStore } from '@state/finder';
 import { gearStore } from '@state/gear';
 import { lightProbeStore } from '@state/lightProbe';
+import { skyglowStore, startSkyglowSync } from '@state/skyglow';
 import { markersStore } from '@state/markers';
 import { modelsStore, startModelsSync } from '@state/models';
 import { offlineStore, startGeoidSync, startOffline } from '@state/offline';
@@ -36,7 +37,7 @@ declare module '@tanstack/react-router' {
 if (import.meta.env.DEV) {
   window.addEventListener('error', (e) => console.error('[scape] error:', e.message, e.filename, e.lineno, e.error?.stack));
   window.addEventListener('unhandledrejection', (e) => console.error('[scape] rejection:', e.reason));
-  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, models: modelsStore, plans: plansStore, gear: gearStore, sky: skyStore, dayData: dayDataStore, finder: finderStore, align: alignStore, searches: searchesStore, offline: offlineStore, buildings: buildingsStore, lightProbe: lightProbeStore, ui: uiStore, idle: installIdleProbe() };
+  (window as unknown as { __scape?: unknown }).__scape = { world: worldStore, settings: settingsStore, terrain: terrainStore, composition: compositionStore, markers: markersStore, models: modelsStore, plans: plansStore, gear: gearStore, sky: skyStore, dayData: dayDataStore, finder: finderStore, align: alignStore, searches: searchesStore, offline: offlineStore, buildings: buildingsStore, lightProbe: lightProbeStore, skyglow: skyglowStore, ui: uiStore, idle: installIdleProbe() };
   (window as unknown as Record<string, unknown>)['__scapeRequestBuildings'] = requestBuildings;
 }
 
@@ -49,6 +50,7 @@ startDayDataSync();
 startClock();
 startModelsSync();
 startGeoidSync();
+startSkyglowSync();
 void markersStore.getState().load();
 void modelsStore.getState().load();
 

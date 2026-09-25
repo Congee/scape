@@ -1,3 +1,4 @@
+// oxlint-disable no-await-in-loop, no-underscore-dangle -- each read depends on the last; _FillValue is HDF5's name
 /**
  * A small read-only HDF5 reader: enough to pull one gridded dataset and its attributes out of a large file
  * without loading it whole. Superblock v0–v3, object headers v1/v2, symbol-table and compact groups,

@@ -1,3 +1,4 @@
+// oxlint-disable no-underscore-dangle -- _FillValue is HDF5's attribute name
 /** One VNP46A4 .h5 tile decoded to stored counts. */
 
 import { openHdf5, type H5Source, type H5Value } from '@core/io/hdf5';

@@ -152,7 +152,7 @@ export function domesOf(share: Float64Array, distKm: Float64Array, skyline?: (az
     const sky = skyline ? skyline(azimuthDeg) : null;
     out.push({ azimuthDeg, heightDeg, distanceKm: distKm[s], share: share[s], skylineDeg: sky, hidden: sky !== null && sky >= heightDeg });
   }
-  return out.sort((a, b) => b.share - a.share).slice(0, max);
+  return out.toSorted((a, b) => b.share - a.share).slice(0, max);
 }
 
 /** How strongly the glow shows toward one direction (DarkHours glow_toward: score / (1 + (alt/θ)²)). */
