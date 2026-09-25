@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { at, batchOf, PIN, rect, square } from '@core/geo/batchFixture';
-import { AltitudeRef, convexHull, inLngLatRing, lngLatToLocal, localToLngLat, modelOutlines, type ModelAnchor, type ModelPart } from '@core/model';
+import { AltitudeRef, convexHull, groundUnknown, inLngLatRing, lngLatToLocal, localToLngLat, modelOutlines, type ModelAnchor, type ModelPart } from '@core/model';
 import { RoofShape } from '@workers/buildings.protocol';
 import { modelHeightAt } from './heightAt';
 import { partsMesh } from './mesh';
@@ -62,6 +62,14 @@ describe('model frame', () => {
   it('hulls counter-clockwise without interior points', () => {
     const h = convexHull([[0, 0], [2, 0], [1, 1], [2, 2], [0, 2]]);
     expect(h).toEqual([[0, 0], [2, 0], [2, 2], [0, 2]]);
+  });
+});
+
+describe('groundUnknown', () => {
+  it('flags a ground-standing model saved without a DEM, until its ground is known', () => {
+    expect(groundUnknown({ anchor: ANCHOR, groundM: NaN })).toBe(true);
+    expect(groundUnknown({ anchor: ANCHOR, groundM: 4 })).toBe(false);
+    expect(groundUnknown({ anchor: { ...ANCHOR, altRef: AltitudeRef.Absolute }, groundM: NaN })).toBe(false);
   });
 });
 

@@ -1858,6 +1858,10 @@ label.file input {
   width: 3em;
 }
 
+.model-editor .error p {
+  margin: 0 0 6px;
+}
+
 .model-editor .kv input[type='text'] {
   box-sizing: border-box;
   width: 100%;

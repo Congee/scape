@@ -72,6 +72,11 @@ export interface SavedModel {
 
 const D2R = Math.PI / 180;
 
+/** Stands on the ground but was saved before the DEM could say where that is, so it sits at sea level for now. */
+export function groundUnknown(m: Pick<SavedModel, 'anchor' | 'groundM'>): boolean {
+  return m.anchor.altRef === AltitudeRef.Ground && Number.isNaN(m.groundM);
+}
+
 /** Sea-level altitude of the local frame's U = 0. */
 export function modelBaseM(anchor: ModelAnchor, groundM: number): number {
   assertPlaceable(anchor, groundM);

@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { compass, distance, height } from '@core/format';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
-import { modelBaseM, ModelSource, type ModelPart, type SavedModel } from '@core/model';
+import { groundUnknown, modelBaseM, ModelSource, type ModelPart, type SavedModel } from '@core/model';
 import { apexOf, applyNudge, azElTo, NUDGE_STEPS, NudgeKind, ringEdges, withEdgeBearing, withEdgeLength, withPart } from '@core/model/draw';
 import { importedMesh, modelMesh, modelTopM } from '@core/model/mesh';
 import { newPart, spirePart } from '@core/model/seed';
 import { endpointHeightM } from '@core/terrain/los';
-import { finishDraft, useModels, modelsStore } from '@state/models';
+import { finishDraft, retryGround, useModels, modelsStore } from '@state/models';
 import { useSettings } from '@state/settings';
 import { EYE_HEIGHT_M, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
@@ -14,6 +14,43 @@ import { RoofShape } from '@workers/buildings.protocol';
 import { downloadBlob } from './download';
 import { ModelImportSheet } from './ModelImport';
 import { useMedia } from './useMedia';
+
+const onLine = (fn: () => void) => {
+  addEventListener('online', fn);
+  addEventListener('offline', fn);
+  return () => {
+    removeEventListener('online', fn);
+    removeEventListener('offline', fn);
+  };
+};
+
+/** Why a model stands at sea level, shown until its ground is read. */
+function GroundWarning({ id }: { id: string }) {
+  const online = useSyncExternalStore(onLine, () => navigator.onLine);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (!online)
+    return (
+      <p className="error" data-testid="ground-unknown">
+        Offline, and the terrain for this spot isn't downloaded: saved at sea level for now; it is fixed when the terrain next loads.
+      </p>
+    );
+  return (
+    <div className="error" data-testid="ground-unknown">
+      <p>{failed ? 'Still no answer from the terrain server.' : 'The terrain server did not answer in time.'} Saved at sea level for now.</p>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setFailed(!(await retryGround(id)));
+          setBusy(false);
+        }}
+      >
+        {busy ? 'Reading the ground…' : 'Try again'}
+      </button>
+    </div>
+  );
+}
 
 const ROOFS = Object.entries(RoofShape) as [keyof typeof RoofShape, RoofShape][];
 
@@ -279,6 +316,7 @@ function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
   const pad = <NudgePad m={m} partId={current?.id ?? null} />;
   return (
     <div className={compact ? 'model-editor compact' : 'model-editor'}>
+      {groundUnknown(m) && <GroundWarning id={m.id} />}
       {compact && pad}
       <div className="kv">
         <span className="k">Name</span>

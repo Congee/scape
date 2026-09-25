@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
 import { modelTriangles } from '@core/geo/modelPlace';
-import { AltitudeRef, modelOutlines, type SavedModel } from '@core/model';
+import { groundUnknown, modelOutlines, type SavedModel } from '@core/model';
 import { drawnModel } from '@core/model/draw';
 import { modelFootprint, modelMesh } from '@core/model/mesh';
 import { exportModelGlb, modelFileName } from '@core/model/share';
@@ -54,7 +54,7 @@ const healTried = new Set<string>();
 
 /** Re-resolves the ground of models saved while the DEM was unreadable, once per model per session. */
 async function healGrounds(models: SavedModel[]): Promise<void> {
-  const lost = models.filter((m) => m.anchor.altRef === AltitudeRef.Ground && Number.isNaN(m.groundM) && m.footprint.length >= 3 && !healTried.has(m.id));
+  const lost = models.filter((m) => groundUnknown(m) && m.footprint.length >= 3 && !healTried.has(m.id));
   await Promise.all(
     lost.map(async (m) => {
       healTried.add(m.id);
@@ -63,6 +63,17 @@ async function healGrounds(models: SavedModel[]): Promise<void> {
       if (groundM !== null && cur && Number.isNaN(cur.groundM)) await modelsStore.getState().save({ ...cur, groundM });
     })
   );
+}
+
+/** Reads the ground of a model saved at sea level again, now; false when the DEM still cannot say. */
+export async function retryGround(id: string): Promise<boolean> {
+  const m = modelsStore.getState().models.find((x) => x.id === id);
+  if (!m || !groundUnknown(m)) return true;
+  const groundM = await groundUnder(m.footprint.map(([lng, lat]) => ({ lng, lat }))).catch(() => null);
+  const cur = modelsStore.getState().models.find((x) => x.id === id);
+  if (groundM === null || !cur) return false;
+  if (Number.isNaN(cur.groundM)) await modelsStore.getState().save({ ...cur, groundM });
+  return true;
 }
 
 /** Keeps the buffer already loaded when the bytes match, so the mesh parse cache survives a reload of the store. */
