@@ -13,6 +13,7 @@ mkdir -p "$OUT"
 # Its own agent-browser session: "default" is shared with every other agent.
 SESSION=${AGENT_BROWSER_SESSION:-smoke-$CDP}
 ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
+bun "$(dirname "$0")/reset.ts" "$CDP" "$BASE"
 # agent-browser prints eval results JSON-encoded; strip the string quotes.
 js() { ab eval "$1" | sed -e 's/^"//' -e 's/"$//' -e 's/\\"/"/g'; }
 
@@ -125,8 +126,7 @@ PY
 vf_shot() { # camera, instant, focal, orientation, az, alt, png → "sun dark white bright red" pixel counts
   go "$BASE/viewfinder?camera=$1&t=$2&f=$3$([ "$4" = P ] && echo '&o=p')"
   sleep 1.5
-  # Paths persist off after other smokes, which would leave no labels to check.
-  js "(() => { const c = window.__scape.composition.getState(); c.update({ showPaths: true }); c.aim($5, $6); return 'ok'; })()" >/dev/null
+  js "(() => { window.__scape.composition.getState().aim($5, $6); return 'ok'; })()" >/dev/null
   sleep 1
   # A background window gets no animation frames; each screenshot forces one.
   ab screenshot "$7" >/dev/null

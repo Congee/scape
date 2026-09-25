@@ -32,6 +32,7 @@ const check = (name: string, ok: boolean, detail: string) => {
 };
 
 const tab = await Tab.open(Number(cdp), BASE);
+await tab.fresh(BASE);
 
 const SETTLED = `(() => {
   const S = window.__scape, t = S.terrain.getState(), p = S.prism;

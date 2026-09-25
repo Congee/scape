@@ -20,6 +20,7 @@ const check = (name: string, ok: boolean, detail: string) => {
 };
 
 const tab = await Tab.open(Number(cdp), BASE);
+await tab.fresh(BASE);
 await tab.activate();
 await tab.viewport(1280, 800);
 await tab.navigate(`${BASE}/?camera=${PIN.lat},${PIN.lng}&target=${TARGET.lat},${TARGET.lng}&t=${TIME}`);

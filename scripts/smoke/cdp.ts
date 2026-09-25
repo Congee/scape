@@ -135,6 +135,12 @@ export class Tab {
     await this.until('document.readyState === "complete"', 30_000, 250);
   }
 
+  /** Drops the app's persisted `scape.*` state, which leaks between smokes; call once before the first load. */
+  async fresh(origin: string) {
+    await this.navigate(`${origin}/robots.txt`);
+    await this.eval("Object.keys(localStorage).filter((k) => k.startsWith('scape.')).forEach((k) => localStorage.removeItem(k))");
+  }
+
   async reload() {
     await this.send('Page.reload', { ignoreCache: false });
     await this.activate();

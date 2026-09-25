@@ -15,6 +15,7 @@ mkdir -p "$SHOTS"
 # Its own agent-browser session: "default" is shared with every other agent.
 SESSION=${AGENT_BROWSER_SESSION:-smoke-$CDP}
 ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
+bun "$(dirname "$0")/reset.ts" "$CDP" "$BASE"
 js() { ab eval "$1" | sed -e 's/^"//' -e 's/"$//' -e 's/\\"/"/g'; }
 declare -a ROWS
 FAIL=0

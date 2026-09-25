@@ -35,6 +35,7 @@ const check = (name: string, ok: boolean, detail: string) => {
 };
 
 const tab = await Tab.open(Number(cdp), BASE);
+await tab.fresh(BASE);
 await tab.activate();
 
 // Page-side helpers, re-installed after every load.
@@ -104,8 +105,7 @@ const tap = async (x: number, y: number) => {
   await settle(250);
 };
 const click = (label: string) => tab.eval<boolean>(`(() => { const b = [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)} || b.textContent.trim() === ${JSON.stringify(label)}); b?.click(); return !!b; })()`);
-// The collapse persists, so a run can inherit a hidden panel.
-const openModels = () => js(`ui.uiStore.getState().setPanelCollapsed(false); ui.uiStore.getState().setPanelTab('Markers'); ui.uiStore.getState().setMarkersView('Models'); return true;`);
+const openModels = () => js(`ui.uiStore.getState().setPanelTab('Markers'); ui.uiStore.getState().setMarkersView('Models'); return true;`);
 // Its own camera: the stored one is wherever the last smoke left it, and a far one keeps the buildings worker busy there.
 const home = async () => {
   await tab.navigate(`${BASE}/?camera=${HOBOKEN}&target=${TOWER.lat},${TOWER.lng}&z=15`);

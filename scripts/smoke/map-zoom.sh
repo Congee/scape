@@ -35,6 +35,7 @@ for u in "$BASE/" "http://localhost:$CDP/json/version"; do
 done
 
 ab() { agent-browser --cdp "${CDP:?no CDP port}" --session "$SESSION" "$@"; }
+bun "$(dirname "$0")/reset.ts" "$CDP" "$BASE"
 
 FAILS=0
 ROWS=()

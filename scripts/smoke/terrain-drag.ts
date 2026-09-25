@@ -37,6 +37,7 @@ const check = (name: string, ok: boolean, detail: string) => {
 };
 
 const tab = await Tab.open(Number(cdp), BASE);
+await tab.fresh(BASE);
 await tab.viewport(1400, 900);
 
 /** Browser-level CDP for per-process CPU time. */

@@ -22,6 +22,7 @@ const check = (name: string, ok: boolean, detail: string) => {
 const pages = (await (await fetch(`http://localhost:${cdp}/json/list`)).json()) as { type: string; url: string }[];
 if (!pages.some((p) => p.type === "page" && (p.url.startsWith(BASE) || p.url === "about:blank"))) await fetch(`http://localhost:${cdp}/json/new?about:blank`, { method: "PUT" });
 const tab = await Tab.open(Number(cdp), pages.some((p) => p.url.startsWith(BASE)) ? BASE : "about:blank");
+await tab.fresh(BASE);
 if (!(await tab.eval<boolean>("document.visibilityState === \"visible\""))) throw new Error("the smoke tab is hidden; touch input would hang");
 type P = { lng: number; lat: number };
 type World = { pin: P; pin2: P | null };
