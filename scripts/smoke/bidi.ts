@@ -1,7 +1,7 @@
 // A minimal WebDriver BiDi client for Firefox's remote agent: one session, one tab, the calls the smokes need.
 /* oxlint-disable no-await-in-loop -- BiDi steps are sequential */
 
-type Msg = { id?: number | null; type?: string; method?: string; result?: Record<string, unknown>; error?: string; message?: string };
+type Msg = { id?: number | null; type?: string; method?: string; result?: Record<string, unknown>; params?: Record<string, unknown>; error?: string; message?: string };
 type Remote = { type: string; value?: unknown };
 type Listener = (e: { data?: unknown; code?: number; reason?: string }) => void;
 
@@ -47,6 +47,8 @@ export class BidiTab {
   private unhook = () => {};
 
   context = '';
+  /** Called with every event the session subscribed to. */
+  listeners: ((method: string, params: Record<string, unknown>) => void)[] = [];
 
   private constructor(
     private ws: Socket,
@@ -134,6 +136,7 @@ export class BidiTab {
       return;
     }
     if (m.id != null) this.waiters.get(m.id)?.done(m);
+    else if (m.type === 'event' && m.method) for (const fn of this.listeners) fn(m.method, m.params ?? {});
     else if (m.type === 'error') console.error(`BiDi: ${m.error} ${m.message}`);
   }
 

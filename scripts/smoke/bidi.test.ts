@@ -206,6 +206,19 @@ describe('BidiTab.send', () => {
     expect(err).toHaveBeenCalledTimes(2);
     await expect(tab.send('session.status')).resolves.toEqual({});
   });
+
+  it('hands events to its listeners', async () => {
+    const tab = await harness().open();
+    const got: [string, unknown][] = [];
+    tab.listeners.push((m, p) => got.push([m, p]));
+    const s = (tab as unknown as { ws: FakeSocket }).ws;
+    s.message({ type: 'event', method: 'log.entryAdded', params: { level: 'warn', text: 'w' } });
+    s.message({ type: 'event', method: 'network.fetchError' });
+    expect(got).toEqual([
+      ['log.entryAdded', { level: 'warn', text: 'w' }],
+      ['network.fetchError', {}]
+    ]);
+  });
 });
 
 describe('BidiTab.close', () => {
