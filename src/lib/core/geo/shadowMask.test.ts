@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frameOf, frameToLngLat, longestShadowM, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
+import { frameOf, frameToLngLat, longestShadowM, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, rectCovers, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
 
 const merc = (lat: number) => 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
 
@@ -46,6 +46,21 @@ describe('maskPixels', () => {
     expect(r).toBe(g);
     expect(g).toBe(b);
     expect(r).toBeLessThan(Math.min(...SHADOW_RGB));
+  });
+});
+
+describe('rectCovers', () => {
+  const outer = { originE: -2048, originN: -2048, nx: 1024, ny: 1024, cellM: 4 };
+
+  it('holds a smaller rect on the same grid', () => {
+    expect(rectCovers(outer, { ...outer, originE: -1984, nx: 900, ny: 600 })).toBe(true);
+    expect(rectCovers(outer, outer)).toBe(true);
+  });
+
+  it('refuses a rect that spills past an edge or sits on another grid', () => {
+    expect(rectCovers(outer, { ...outer, originE: -1984 })).toBe(false);
+    expect(rectCovers(outer, { ...outer, originN: -2112 })).toBe(false);
+    expect(rectCovers(outer, { ...outer, cellM: outer.cellM * 2 })).toBe(false);
   });
 });
 

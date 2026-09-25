@@ -77,6 +77,11 @@ export function maskRect(e0: number, e1: number, n0: number, n1: number): MaskRe
   }
 }
 
+/** Whether `outer` already holds every cell of `inner` on the same grid. */
+export function rectCovers(outer: MaskRect, inner: MaskRect): boolean {
+  return outer.cellM === inner.cellM && inner.originE >= outer.originE && inner.originN >= outer.originN && inner.originE + inner.nx * inner.cellM <= outer.originE + outer.nx * outer.cellM && inner.originN + inner.ny * inner.cellM <= outer.originN + outer.ny * outer.cellM;
+}
+
 /** Corner coordinates for an image source: the cells' outer edges, north-west first, clockwise. */
 export function maskCorners(centre: LngLat, r: MaskRect): [[number, number], [number, number], [number, number], [number, number]] {
   const f = maskFrame(centre);
