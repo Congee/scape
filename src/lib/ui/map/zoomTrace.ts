@@ -131,6 +131,8 @@ export type ZoomMetrics = {
   /** The old metric, for contrast: rAF interval p95 over the period, during gestures. */
   rafP95: number;
   renderP95: number;
+  /** Intervals between gesture renders that input fell into, ms: p50, p95, max. Browsers without long-frame timing show stalls here. */
+  frameDt: [number, number, number];
   loaf: number;
   loafMax: number;
   loafTop: string[];
@@ -253,6 +255,8 @@ export function analyze(tr: ZoomTrace): ZoomMetrics {
   const travelOut = moving.reduce((a, s) => a + Math.abs(s.dzOut), 0);
 
   const gFrames = frames.filter((f) => inGesture(f.t));
+  // Only intervals that input was due inside, so pauses in the gesture don't count.
+  const frameDt = gFrames.slice(1).flatMap((f, i) => (wheel.some((w) => w.t > gFrames[i].start && w.t < f.start - periodMs) ? [f.start - gFrames[i].start] : []));
   const rafIn = tr.vsync.slice(1).flatMap((v, i) => (inGesture(v) ? [v - tr.vsync[i]] : []));
   const loaf = tr.loaf.filter((l) => inGesture(l.t) || inGesture(l.t + l.d));
   const scripts = new Map<string, number>();
@@ -274,6 +278,7 @@ export function analyze(tr: ZoomTrace): ZoomMetrics {
     loafSplit: loafSplit(loaf.filter((l) => l.d > 50)),
     rafP95: round(quantile(rafIn, 0.95) / periodMs, 2),
     renderP95: round(quantile(frames.filter((f) => inGesture(f.t)).map((f) => f.end - f.start), 0.95)),
+    frameDt: [quantile(frameDt, 0.5), quantile(frameDt, 0.95), Math.max(0, ...frameDt)].map((x) => round(x)) as [number, number, number],
     loaf: loaf.filter((l) => l.d > 50).length,
     loafMax: Math.round(loaf.reduce((a, l) => Math.max(a, l.d), 0)),
     loafTop: [...scripts].toSorted((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `${Math.round(v)}ms ${k}`),

@@ -1,16 +1,17 @@
 // How a Map-tab zoom feels: replays a realistic trackpad stream (or a trace recorded with ?zoomprobe) and scores what reached the screen.
 /* oxlint-disable no-await-in-loop -- input is paced one event at a time */
 // Usage: bun scripts/smoke/map-zoom.ts <cdp> <port> <scene> <layers> [--stream pinch|scroll|flick] [--trace scape-zoom.json] [--inject block|ease]
-//   [--seed n] [--zooms n] [--runs n] [--depth n] [--viewport WxH] [--profile <out.json>] [--shot <out.png>] [--save <trace.json>]
+//   [--seed n] [--zooms n] [--runs n] [--depth n] [--viewport WxH[@dpr]] [--profile <out.json>] [--shot <out.png>] [--save <trace.json>]
 // Works on dev and preview builds alike. Prints one JSON line per run.
 import { analyze, pipelineFrames, StreamKind, trackpadStream, wheelPixels, type StreamEvent, type TraceEvent, type ZoomTrace } from '../../src/lib/ui/map/zoomTrace';
 import { Tab } from './cdp';
+import { DEFAULTS, Injects, Layers, Scenes, sceneUrl } from './map-zoom-scenes';
 
 const args = process.argv.slice(2);
 const [cdp = '9426', port = '5426', sceneName = 'hoboken', layersName = 'default'] = args;
 const opt = (k: string, d: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const runs = Number(opt('--runs', '1'));
-const [vw, vh] = opt('--viewport', '1400x900').split('x').map(Number);
+const [vw, vh, vdpr = 2] = opt('--viewport', '1400x900').split(/[x@]/).map(Number);
 const profileOut = args.includes('--profile') ? opt('--profile', '') : null;
 const shot = args.includes('--shot') ? opt('--shot', '') : null;
 const saveTo = args.includes('--save') ? opt('--save', '') : null;
@@ -18,28 +19,6 @@ const traceFile = args.includes('--trace') ? opt('--trace', '') : null;
 const kind = opt('--stream', StreamKind.Pinch) as StreamKind;
 const injectName = opt('--inject', '');
 const depth = Number(opt('--depth', '3'));
-
-const DAY = '2026-06-21T13:00Z';
-const Scenes: Record<string, { at: string; z: number; pitch?: number; bearing?: number }> = {
-  // Across the Hudson from Hoboken at the Midtown skyline, where the lag was felt.
-  hoboken: { at: '40.7450,-74.0300', z: 15.5, pitch: 60, bearing: 90 },
-  rotterdam: { at: '51.9091,4.4868', z: 15.5 },
-  manhattan: { at: '40.7549,-73.9840', z: 15.5 },
-  zermatt: { at: '45.9900,7.7200', z: 12.5 },
-  plain: { at: '38.5000,-98.5000', z: 12 }
-};
-// Settings patches over the defaults (buildings, sun shadows, event and live lines on; hillshade and 3D terrain off).
-const Layers: Record<string, Record<string, boolean>> = {
-  default: {},
-  bare: { showBuildings: false, showSunShadows: false, showEventLines: false, showLiveLines: false },
-  nobuildings: { showBuildings: false },
-  noshadow: { showSunShadows: false },
-  nolines: { showEventLines: false, showLiveLines: false },
-  hillshade: { showHillshade: true },
-  terrain3d: { terrain3d: true }
-};
-const DEFAULTS = { terrain: true, showBuildings: true, showSunShadows: true, showEventLines: true, showLiveLines: true, showHillshade: false, terrain3d: false };
-const Injects: Record<string, object> = { block: { blockMs: 30, everyMs: 300 }, ease: { ease: true } };
 
 const scene = Scenes[sceneName];
 const layers = Layers[layersName];
@@ -54,9 +33,9 @@ if (traceFile) {
 } else stream = trackpadStream(kind, { seed: Number(opt('--seed', '1')), zooms: Number(opt('--zooms', '1.5')) });
 
 const origin = `http://localhost:${port}`;
-const url = `${origin}/?zoomprobe&camera=${scene.at}&t=${DAY}&z=${scene.z}`;
+const url = sceneUrl(origin, scene);
 const tab = await Tab.open(Number(cdp), origin);
-await tab.viewport(vw, vh);
+await tab.viewport(vw, vh, vdpr);
 await tab.navigate(url);
 // Settings through storage, so a preview build (no dev hooks) takes them too.
 await tab.eval(`(() => {
@@ -176,7 +155,7 @@ for (let run = 1; run <= runs; run++) {
       scene: sceneName,
       layers: layersName,
       build,
-      viewport: `${vw}x${vh}`,
+      viewport: `${vw}x${vh}@${vdpr}`,
       stream: traceFile ? `trace:${traceFile.split('/').pop()}` : kind,
       inject: injectName || null,
       run,

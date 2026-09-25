@@ -88,6 +88,7 @@ describe('analyze', () => {
     expect(m.lagMs).toBeLessThanOrEqual(10);
     expect(m.gain).toBeCloseTo(1, 1);
     expect(m.periodMs).toBeCloseTo(PERIOD, 1);
+    expect(m.frameDt[2]).toBeLessThan(2 * PERIOD);
   });
 
   it('catches a periodic 30 ms block that rAF p95 misses', () => {
@@ -97,6 +98,7 @@ describe('analyze', () => {
     expect(m.jumps).toBeGreaterThan(2);
     expect(m.loaf).toBe(0);
     expect(m.loafMax).toBe(32);
+    expect(m.frameDt[2]).toBeGreaterThan(30);
   });
 
   it('catches eased zoom as lag, not stutter', () => {

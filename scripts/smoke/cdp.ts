@@ -131,8 +131,8 @@ export class Tab {
     if (this.front) await this.send('Page.bringToFront');
   }
 
-  async viewport(width: number, height: number) {
-    await this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
+  async viewport(width: number, height: number, deviceScaleFactor = 2) {
+    await this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor, mobile: false });
   }
 
   /** PNG of the page, or of a CSS-pixel rect of it. */
