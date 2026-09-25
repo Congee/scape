@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Units } from '@core/format';
-import { nearestTideStation, tideSite, tideStations, TideKind, type TideDay, type TideStationRef } from '@data/tides';
+import { nearestTideStation, tideSite, tideStations, TideKind, type TideDay, type TideSite, type TideStationRef } from '@data/tides';
 import { useWorld } from '@state/world';
 import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 
-/** The pin's tide station, harmonic first, from the lazily fetched tables. */
+/** The pin's nearest tide station of either kind, from the lazily fetched tables. */
 export function useNearestTide() {
   const pin = useWorld((s) => s.pin);
   const [stations, setStations] = useState<TideStationRef[] | null>(null);
@@ -24,16 +24,17 @@ export function useNearestTide() {
 
 export const tideText = (m: number, units: Units) => (units === Units.Imperial ? `${(m / 0.3048).toFixed(1)} ft` : `${m.toFixed(2)} m`);
 
-export const tideKindText = (kind: TideKind) => (kind === TideKind.Harmonic ? 'harmonic' : 'subordinate');
+/** "harmonic", or "subordinate to <reference>". */
+export const tideKindText = (site: TideSite) => (site.kind === TideKind.Harmonic ? 'harmonic' : `subordinate to ${site.ref.name}`);
 
 const W = 300;
 
-/** The day's tide: the curve and its highs and lows, or the highs and lows alone for a subordinate station. */
-export function TideChart({ day, startMs, endMs, time, h = 72 }: { day: TideDay; startMs: number; endMs: number; time: number; h?: number }) {
+/** The day's tide curve and its highs and lows; `interpolated` dashes a subordinate station's cosine curve. */
+export function TideChart({ day, startMs, endMs, time, h = 72, interpolated = false }: { day: TideDay; startMs: number; endMs: number; time: number; h?: number; interpolated?: boolean }) {
   const { curve, extremes } = day;
   let lo = Infinity;
   let hi = -Infinity;
-  for (const v of curve ?? extremes.map((e) => e.heightM)) {
+  for (const v of curve) {
     lo = Math.min(lo, v);
     hi = Math.max(hi, v);
   }
@@ -41,17 +42,17 @@ export function TideChart({ day, startMs, endMs, time, h = 72 }: { day: TideDay;
   const pad = (hi - lo) * 0.12 || 0.1;
   const x = (ms: number) => ((ms - startMs) / (endMs - startMs)) * W;
   const y = (m: number) => h - ((m - lo + pad) / (hi - lo + 2 * pad)) * h;
-  const step = curve ? (endMs - startMs) / (curve.length - 1) : 0;
+  const step = (endMs - startMs) / (curve.length - 1);
   const scrub = useTimeScrub({ startMs, endMs, w: W });
-  const points = curve ? Array.from(curve, (v, i) => `${x(startMs + i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ') : '';
+  const points = Array.from(curve, (v, i) => `${x(startMs + i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   return (
-    <svg className="tide-curve" viewBox={`0 0 ${W} ${h}`} role="img" aria-label={`${curve ? 'Tide height over the day' : 'High and low tides over the day'}. Drag to set the time; arrow keys step an hour, Shift ten minutes.`} {...scrub}>
+    <svg className="tide-curve" viewBox={`0 0 ${W} ${h}`} role="img" aria-label={`Tide height over the day${interpolated ? ', interpolated between highs and lows' : ''}. Drag to set the time; arrow keys step an hour, Shift ten minutes.`} {...scrub}>
       {lo < 0 && <line className="datum" x1={0} x2={W} y1={y(0)} y2={y(0)} />}
-      {curve && <polyline points={points} />}
+      <polyline className={interpolated ? 'interpolated' : undefined} points={points} />
       {extremes.map((e) => (
         <g key={e.timeMs} data-t={e.timeMs}>
           <circle className="hit" cx={x(e.timeMs)} cy={y(e.heightM)} r={10} />
-          <circle className={e.high ? 'high' : 'low'} cx={x(e.timeMs)} cy={y(e.heightM)} r={curve ? 3 : 4} />
+          <circle className={e.high ? 'high' : 'low'} cx={x(e.timeMs)} cy={y(e.heightM)} r={3} />
         </g>
       ))}
       <ScrubCursor time={time} startMs={startMs} endMs={endMs} w={W} h={h} />

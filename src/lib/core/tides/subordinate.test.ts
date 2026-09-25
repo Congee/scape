@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NOAA_HARMONIC, NOAA_SUBORDINATE } from './noaaFixture';
 import { parseStation, tideExtremes, type TideStationRow } from './predict';
-import { HeightOffset, parseSubordinate, subordinateExtremes, type SubordinateRow } from './subordinate';
+import { cosineCurve, cosineTide, HeightOffset, parseSubordinate, subordinateExtremes, type SubordinateRow } from './subordinate';
 
 const T0 = Date.UTC(2026, 9, 1);
 const T1 = Date.UTC(2026, 9, 22);
@@ -79,5 +79,42 @@ describe('subordinateExtremes', () => {
 
   it('rejects a height offset kind it does not know', () => {
     expect(() => parseSubordinate(base({}, 'X'))).toThrow(/unknown height offset/);
+  });
+});
+
+describe('cosineTide', () => {
+  const H = 3_600_000;
+  const ext = [
+    { timeMs: 0, heightM: 0.2, high: false },
+    { timeMs: 6 * H, heightM: 1.8, high: true },
+    { timeMs: 12 * H, heightM: 0.4, high: false }
+  ];
+
+  it('passes through each high and low and follows half a cosine between them', () => {
+    expect(cosineTide(ext, 0)?.heightM).toBeCloseTo(0.2, 9);
+    expect(cosineTide(ext, 6 * H)?.heightM).toBeCloseTo(1.8, 9);
+    expect(cosineTide(ext, 3 * H)?.heightM).toBeCloseTo(1.0, 9);
+    // Table 3: a quarter of the way through, a (1 - cos 45°) / 2 share of the range.
+    expect(cosineTide(ext, 1.5 * H)?.heightM).toBeCloseTo(0.2 + 1.6 * ((1 - Math.SQRT1_2) / 2), 9);
+    expect(cosineTide(ext, 9 * H)?.heightM).toBeCloseTo(1.1, 9);
+  });
+
+  it('rises toward a high and falls toward a low', () => {
+    expect(cosineTide(ext, 2 * H)?.rising).toBe(true);
+    expect(cosineTide(ext, 8 * H)?.rising).toBe(false);
+  });
+
+  it('is null outside the extremes', () => {
+    expect(cosineTide(ext, -1)).toBeNull();
+    expect(cosineTide(ext, 12 * H + 1)).toBeNull();
+    expect(cosineTide(ext.slice(0, 1), 0)).toBeNull();
+  });
+
+  it('samples a curve that stays within each pair and throws on an unbracketed span', () => {
+    const c = cosineCurve(ext, 0, 12 * H);
+    expect(c.length).toBe(73);
+    expect(c[36]).toBeCloseTo(1.8, 6);
+    for (const v of c) expect(v >= 0.2 - 1e-6 && v <= 1.8 + 1e-6).toBe(true);
+    expect(() => cosineCurve(ext, 0, 13 * H)).toThrow(/bracket/);
   });
 });

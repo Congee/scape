@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NOAA_HARMONIC } from './noaaFixture';
-import { nearestStation, parseStation, tideExtremes, tideHeight, type TideStationRow } from './predict';
+import { dropShortPairs, nearestStation, parseStation, tideExtremes, tideHeight, type TideExtreme, type TideStationRow } from './predict';
 
 const T0 = Date.UTC(2026, 9, 1);
 const T1 = Date.UTC(2026, 10, 1);
@@ -81,5 +81,30 @@ describe('nearestStation', () => {
 
   it('returns null beyond 50 km', () => {
     expect(nearestStation(stations, { lat: 41.5, lng: -74 })).toBeNull();
+  });
+});
+
+describe('dropShortPairs', () => {
+  const H = 3_600_000;
+  const x = (h: number, heightM: number, high: boolean): TideExtreme => ({ timeMs: h * H, heightM, high });
+
+  it('drops a pair under 2 h and 0.1 ft apart', () => {
+    const all = [x(0, 1, true), x(6, 0.5, false), x(7, 0.52, true), x(12, 1, true)];
+    expect(dropShortPairs(all, 0, 24 * H).map((e) => e.timeMs / H)).toEqual([0, 12]);
+  });
+
+  it('keeps a short pair with a real height change', () => {
+    const all = [x(0, 1, true), x(6, 0.5, false), x(7, 0.6, true), x(12, 1, true)];
+    expect(dropShortPairs(all, 0, 24 * H)).toHaveLength(4);
+  });
+
+  it('keeps a pair far apart in time', () => {
+    const all = [x(0, 1, true), x(6, 0.5, false), x(8, 0.5, true)];
+    expect(dropShortPairs(all, 0, 24 * H)).toHaveLength(3);
+  });
+
+  it('judges a pair swapped by offsets by its gap, not its order', () => {
+    const all = [x(6, 0.5, false), x(5.5, 0.51, true)];
+    expect(dropShortPairs(all, 0, 24 * H)).toEqual([]);
   });
 });

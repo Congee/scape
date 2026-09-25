@@ -30,8 +30,8 @@ import { effectiveOptics, sensorPixels } from '@core/optics/fov';
 import { rawBytesPerShot, timelapse, TimelapseSolve } from '@core/optics/timelapse';
 import { formatTime } from '@core/time/format';
 import { dayBounds } from '@core/time/localDay';
-import { NEAREST_STATION_MAX_M, tideHeight, tideRate } from '@core/tides/predict';
-import { tideDay, TideKind } from '@data/tides';
+import { NEAREST_STATION_MAX_M } from '@core/tides/predict';
+import { tideDay, TideKind, tideNow } from '@data/tides';
 import { compositionStore, useComposition } from '@state/composition';
 import { sensorById, useGear } from '@state/gear';
 import { useSettings } from '@state/settings';
@@ -102,6 +102,7 @@ function TidesGroup() {
   const [startMs, endMs] = [day.start.getTime(), day.end.getTime()];
   const today = site ? tideDay(site, startMs, endMs) : null;
   const next = today?.extremes.find((e) => e.timeMs > time);
+  const now = site && today ? tideNow(site, today, time) : null;
   const st = site?.station;
   const summary = failed
     ? 'Tides · station data unavailable'
@@ -118,7 +119,7 @@ function TidesGroup() {
           <button onClick={retry}>Retry</button>
           <span className="muted">The bundled station table did not load.</span>
         </div>
-      ) : !loaded ? null : !site || !today ? (
+      ) : !loaded ? null : !site || !today || !now ? (
         <p className="muted hint">No tide station within {distance(NEAREST_STATION_MAX_M, units)} of the camera.</p>
       ) : (
         <>
@@ -127,20 +128,15 @@ function TidesGroup() {
             <b className="v">
               {site.station.name}{' '}
               <span className="muted">
-                · {site.station.id} · {tideKindText(site.kind)}
-                {site.kind === TideKind.Subordinate && ` of ${site.ref.name}`} · {distance(distM, units)} away
+                · {site.station.id} · {tideKindText(site)} · {distance(distM, units)} away
               </span>
             </b>
             <span className="k">Now</span>
-            {site.kind === TideKind.Harmonic ? (
-              <b className="v">
-                {tideText(tideHeight(site.station, time), units)} <span className="muted">{tideRate(site.station, time) > 0 ? 'rising' : 'falling'}</span>
-              </b>
-            ) : (
-              <b className="v">{next ? (next.high ? 'rising' : 'falling') : '—'}</b>
-            )}
+            <b className="v">
+              {tideText(now.heightM, units)} <span className="muted">{now.rising ? 'rising' : 'falling'}</span>
+            </b>
           </div>
-          <TideChart day={today} startMs={startMs} endMs={endMs} time={time} />
+          <TideChart day={today} startMs={startMs} endMs={endMs} time={time} interpolated={site.kind === TideKind.Subordinate} />
           <table className="nd-table">
             <tbody>
               {today.extremes.map((e) => (
@@ -154,8 +150,8 @@ function TidesGroup() {
           </table>
           <p className="muted hint">
             {site.kind === TideKind.Harmonic
-              ? `Heights above MLLW from NOAA CO-OPS harmonic constants, at the nearest harmonic station within ${distance(NEAREST_STATION_MAX_M, units)}, even if a subordinate one is closer.`
-              : `Highs and lows above MLLW from NOAA CO-OPS offsets on the reference station's harmonic prediction; no curve between them. Used because no harmonic station is within ${distance(NEAREST_STATION_MAX_M, units)}.`}
+              ? `Heights above MLLW from NOAA CO-OPS harmonic constants, at the nearest station within ${distance(NEAREST_STATION_MAX_M, units)}.`
+              : `Highs and lows above MLLW from NOAA CO-OPS offsets on ${site.ref.name}'s harmonic prediction, at the nearest station within ${distance(NEAREST_STATION_MAX_M, units)}. Between them, NOAA's cosine curve (Tide Tables, Table 3), dashed.`}
           </p>
         </>
       )}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tides smoke: the Timeline tide row and Tools tides group for a harmonic station, a harmonic one beating a closer subordinate one, a subordinate station and an inland pin, desktop and phone.
+# Tides smoke: the Timeline tide row and Tools tides group for a harmonic station, a closer subordinate one beating a harmonic one, a subordinate-only site and an inland pin, desktop and phone.
 # Usage: scripts/smoke/tides.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port and a background browser with remote debugging on the CDP port.
 set -uo pipefail
@@ -63,8 +63,8 @@ quiet() { # fewest rAF/timers over up to three 3 s windows, so late tile loads d
 
 tab() { js "(() => { const u = window.__scape.ui.getState(); u.setPanelTab('$1'); u.setPanelCollapsed(false); return 'ok'; })()" >/dev/null; }
 
-# Timeline row: "kind|marks|polyline|label|time|extra" or "none".
-row() { js '(() => { const r = document.querySelector(".timeline .tide-row"); if (!r) return "none"; const t = (s) => r.querySelector(s)?.textContent ?? ""; return [/subordinate/.test(t(".extra")) ? "subordinate" : /harmonic/.test(t(".extra")) ? "harmonic" : "?", r.querySelectorAll("circle.high, circle.low").length, r.querySelectorAll("polyline").length, t(".label"), t(".time"), t(".extra")].join("|"); })()'; }
+# Timeline row: "kind|marks|curve|label|time|extra" or "none"; curve is 1 solid, 2 dashed (interpolated).
+row() { js '(() => { const r = document.querySelector(".timeline .tide-row"); if (!r) return "none"; const t = (s) => r.querySelector(s)?.textContent ?? ""; return [/subordinate to /.test(t(".extra")) ? "subordinate" : /harmonic/.test(t(".extra")) ? "harmonic" : "?", r.querySelectorAll("circle.high, circle.low").length, r.querySelectorAll("polyline").length + r.querySelectorAll("polyline.interpolated").length, t(".label"), t(".time"), t(".extra")].join("|"); })()'; }
 
 tools() { # summary|station line
   tab Tools
@@ -72,7 +72,7 @@ tools() { # summary|station line
   js '(() => { const d = [...document.querySelectorAll(".tools details")].find((g) => g.querySelector("summary").textContent.startsWith("Tides")); if (!d) return "missing"; d.open = true; d.scrollIntoView(); const v = d.querySelector(".kv .v"); return `${d.querySelector("summary").textContent}|${v ? v.textContent : ""}`; })()'
 }
 
-site() { # tag, camera, expected kind, viewport tag, [expected station name], [min marks]
+site() { # tag, camera, expected kind, viewport tag, [expected station name], [min marks], [expected reference name]
   go "$BASE/?camera=$2&t=$DAY"
   tab Timeline
   if [ "$3" = none ]; then
@@ -84,8 +84,8 @@ site() { # tag, camera, expected kind, viewport tag, [expected station name], [m
     sleep 0.3
     local r; r=$(row)
     IFS='|' read -r kind marks lines label time extra <<<"$r"
-    local want=1; [ "$3" = subordinate ] && want=0
-    check "$4 $1: tide row, $3" "$([ "$kind" = "$3" ] && [ "$marks" -ge "${6:-3}" ] && [ "$marks" -le 5 ] && [ "$lines" = "$want" ] && echo 1 || echo 0)" "$label $time · $extra · $marks marks, $lines curve"
+    local want=1; [ "$3" = subordinate ] && want=2
+    check "$4 $1: tide row, $3" "$([ "$kind" = "$3" ] && [ "$marks" -ge "${6:-3}" ] && [ "$marks" -le 5 ] && [ "$lines" = "$want" ] && echo 1 || echo 0)" "$label $time · $extra · $marks marks, curve $lines"
     local t0; t0=$(js 'window.__scape.world.getState().time')
     # Press by coordinates: marks scrub on pointerdown, and the dot covers the hit ring.
     local xy; xy=$(js '(() => { const c = document.querySelector(".timeline .tide-row circle.hit"); c.scrollIntoView({ block: "center" }); const r = c.getBoundingClientRect(); return `${Math.round(r.left + r.width / 2)} ${Math.round(r.top + r.height / 2)}`; })()')
@@ -103,7 +103,8 @@ site() { # tag, camera, expected kind, viewport tag, [expected station name], [m
   if [ "$3" = none ]; then
     check "$4 $1: Tools says no station" "$([[ $t == *"no station within"* ]] && echo 1 || echo 0)" "${t%%|*}"
   else
-    check "$4 $1: Tools names the $3 station${5:+ $5} and distance" "$([[ $t == *"${5:-}"*"$3"*away* ]] && echo 1 || echo 0)" "${t#*|}"
+    local kind=$3; [ "$3" = subordinate ] && kind="subordinate to ${7:?}"
+    check "$4 $1: Tools names the $kind station${5:+ $5} and distance" "$([[ $t == *"${5:-}"*"$kind"*away* ]] && echo 1 || echo 0)" "${t#*|}"
   fi
   sleep 0.3
   ab screenshot "$OUT/$4-$1-tools.png" >/dev/null
@@ -119,15 +120,16 @@ idle_case() { # viewport tag: idle rAF/timers with the row vs. inland without it
   local without; without=$(quiet)
   read -r r1 t1 <<<"$with"
   read -r r0 t0 <<<"$without"
-  check "$1 idle 3 s: tide row adds no frames or timers" "$([ "$r1" -le "$r0" ] && [ "$t1" -le "$t0" ] && echo 1 || echo 0)" "rAF/timers $with with the row, $without without"
+  check "$1 idle 3 s: subordinate tide row adds no frames or timers" "$([ "$r1" -le "$r0" ] && [ "$t1" -le "$t0" ] && echo 1 || echo 0)" "rAF/timers $with with the row, $without without"
+  check "$1 idle 3 s: no frames with the subordinate row" "$([ "$r1" = 0 ] && echo 1 || echo 0)" "rAF $r1"
 }
 
 IDLE_ROW="0 0"
 for vp in desktop phone; do
   if [ $vp = desktop ]; then ab set viewport 1400 900 >/dev/null; else ab set viewport 390 844 >/dev/null; fi
   site harmonic "$HARMONIC" harmonic $vp
-  site closer-subordinate "$CLOSER_SUB" harmonic $vp Kaunakakai 2 # diurnal that day: NOAA lists 2 and 1 extremes
-  site subordinate "$SUBORDINATE" subordinate $vp Hana 1
+  site closer-subordinate "$CLOSER_SUB" subordinate $vp Kamalo 1 HONOLULU
+  site subordinate "$SUBORDINATE" subordinate $vp Hana 1 KAHULUI
   idle_case $vp
   site inland "$INLAND" none $vp
 done

@@ -102,17 +102,25 @@ export interface TideExtreme {
 }
 
 const SCAN_MS = 10 * 60_000;
-/** NOAA omits a high and low closer together than this (its undocumented rule, fitted to a year of Gulf stations). */
+/** NOAA omits a high and low this close in time and height (its undocumented rule, fitted to a year of 22 stations). */
 const MIN_PAIR_MS = 2 * HOUR_MS;
-const PAIR_MARGIN_MS = 3 * MIN_PAIR_MS;
+const MIN_PAIR_DH_M = 0.1 * 0.3048;
 
 /** Highs and lows with `fromMs <= time < toMs`, from sign changes of the rate refined by bisection, less NOAA's short pairs. */
 export function tideExtremes(st: TideStation, fromMs: number, toMs: number): TideExtreme[] {
-  const all = turningPoints(st, fromMs - PAIR_MARGIN_MS, toMs + PAIR_MARGIN_MS);
+  return dropShortPairs(turningPoints(st, fromMs - PAIR_MARGIN_MS, toMs + PAIR_MARGIN_MS), fromMs, toMs);
+}
+
+export const PAIR_MARGIN_MS = 3 * MIN_PAIR_MS;
+const short = (a: TideExtreme, b: TideExtreme) =>
+  Math.abs(b.timeMs - a.timeMs) < MIN_PAIR_MS && Math.abs(b.heightM - a.heightM) < MIN_PAIR_DH_M;
+
+/** `all` (time or reference order), less NOAA's short pairs, within [fromMs, toMs); `all` should run `PAIR_MARGIN_MS` past both ends. */
+export function dropShortPairs(all: readonly TideExtreme[], fromMs: number, toMs: number): TideExtreme[] {
   const out: TideExtreme[] = [];
   for (let i = 0; i < all.length; i++) {
     // Scan forward and drop the first of any overlapping short pairs, as NOAA does.
-    if (i + 1 < all.length && all[i + 1].timeMs - all[i].timeMs < MIN_PAIR_MS) {
+    if (i + 1 < all.length && short(all[i], all[i + 1])) {
       i++;
       continue;
     }
@@ -121,7 +129,8 @@ export function tideExtremes(st: TideStation, fromMs: number, toMs: number): Tid
   return out;
 }
 
-function turningPoints(st: TideStation, fromMs: number, toMs: number): TideExtreme[] {
+/** Every high and low with `fromMs <= time < toMs`, short pairs included. */
+export function turningPoints(st: TideStation, fromMs: number, toMs: number): TideExtreme[] {
   const out: TideExtreme[] = [];
   let t0 = fromMs;
   let r0 = tideRate(st, t0);

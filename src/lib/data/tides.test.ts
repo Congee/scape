@@ -10,10 +10,19 @@ describe('nearestTideStation', () => {
   const kamalo = subordinate('1614465', 21.049, -156.877);
   const stations = [battery, hoboken, kamalo];
 
-  it('prefers a harmonic station in range over a closer subordinate one', () => {
+  it('prefers a closer subordinate station over a farther harmonic one', () => {
     const hit = nearestTideStation(stations, { lat: 40.745, lng: -74.027 });
-    expect(hit?.station).toBe(battery);
-    expect(hit?.distM).toBeGreaterThan(4000);
+    expect(hit?.station).toBe(hoboken);
+    expect(hit?.distM).toBeLessThan(500);
+  });
+
+  it('keeps a harmonic station closer than any subordinate one', () => {
+    expect(nearestTideStation(stations, { lat: 40.702, lng: -74.015 })?.station).toBe(battery);
+  });
+
+  it('gives a tie to the harmonic station', () => {
+    const twin = subordinate('X', battery.lat, battery.lng);
+    expect(nearestTideStation([twin, battery], { lat: 40.71, lng: -74.0 })?.station).toBe(battery);
   });
 
   it('falls back to the nearest subordinate station when no harmonic one is in range', () => {

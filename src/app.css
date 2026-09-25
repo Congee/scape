@@ -1998,6 +1998,10 @@ label.file-pick input[type='file'] {
   stroke-width: 1.5;
 }
 
+.tide-curve polyline.interpolated {
+  stroke-dasharray: 4 3;
+}
+
 .tide-curve .datum {
   stroke: var(--line);
 }

@@ -3,7 +3,7 @@ import { EventKind, type DayEvent } from '@core/astro/dayEvents';
 import { degrees, distance, percent } from '@core/format';
 import { formatTime } from '@core/time/format';
 import type { SightVerdict } from '@core/weather/sightline';
-import { tideDay } from '@data/tides';
+import { tideDay, TideKind } from '@data/tides';
 import { useDayData } from '@state/dayData';
 import { settingsStore, useSettings } from '@state/settings';
 import { usePlanTime, useWorld, worldStore } from '@state/world';
@@ -136,10 +136,10 @@ function TideRow() {
         {next && <span className="time">{formatTime(next.timeMs, tz, hour12)}</span>}
         {next && <span className="az">{tideText(next.heightM, units)}</span>}
         <span className="extra">
-          {site.station.name} · {tideKindText(site.kind)} · {distance(distM, units)} away
+          {site.station.name} · {tideKindText(site)} · {distance(distM, units)} away
         </span>
       </button>
-      <TideChart day={day} startMs={dayStart} endMs={dayEnd} time={time} h={40} />
+      <TideChart day={day} startMs={dayStart} endMs={dayEnd} time={time} h={40} interpolated={site.kind === TideKind.Subordinate} />
     </div>
   );
 }
