@@ -3,14 +3,17 @@ import { ageText } from '@core/weather/format';
 import { CloudLayer, LAYER_TEXT, legendGradient } from '@core/weather/layer';
 import { modelInfo } from '@core/weather/models';
 import { useSettings } from '@state/settings';
+import { useUi } from '@state/ui';
 import { useWeather, weatherStore } from '@state/weather';
 import { useWorld } from '@state/world';
 import { Credit, WindyLink } from './CloudChart';
+import { useMedia } from './useMedia';
 
 const HOUR_MS = 3_600_000;
 
 /** Windy uses 256 px tiles, MapLibre 512 px, so its zoom runs one higher. */
 const WINDY_ZOOM_OFFSET = 1;
+const PHONE = '(max-width: 900px)';
 
 /** Weather-tab picker for the map cloud layer. */
 export function CloudLayerControls() {
@@ -55,12 +58,31 @@ export function CloudLegend() {
   const time = useWorld((s) => s.time);
   const tz = useWorld((s) => s.tz);
   const hour12 = useSettings((s) => s.hour12);
+  const phone = useMedia(PHONE);
+  const open = useUi((s) => s.cloudLegendOpen);
+  const setOpen = useUi((s) => s.setCloudLegendOpen);
   if (layer === CloudLayer.Off) return null;
   const hour = Math.round(time / HOUR_MS) * HOUR_MS;
+  const title = (
+    <>
+      <b>{LAYER_TEXT[layer]}</b> <span className="muted">· {formatTime(hour, tz, hour12)} forecast</span>
+    </>
+  );
+  if (phone && !open)
+    return (
+      <button className="cloud-legend folded" data-layer={layer} aria-expanded={false} onClick={() => setOpen(true)} title="Show the cloud legend">
+        {title} <span aria-hidden="true">▸</span>
+      </button>
+    );
   return (
     <div className="cloud-legend" data-layer={layer}>
       <div className="row">
-        <b>{LAYER_TEXT[layer]}</b> <span className="muted">· {formatTime(hour, tz, hour12)} forecast</span>
+        {title}
+        {phone && (
+          <button className="link fold" aria-expanded={true} onClick={() => setOpen(false)} title="Fold the cloud legend">
+            ▾
+          </button>
+        )}
       </div>
       <div className="scale">
         <span>{layer === CloudLayer.Fog ? 'clear' : '0%'}</span>

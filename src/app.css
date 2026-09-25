@@ -833,6 +833,10 @@ button:focus-visible {
   flex: 0 0 68px;
 }
 
+.layer-opts {
+  margin-left: 24px;
+}
+
 .radio-list,
 .list {
   list-style: none;
@@ -2188,3 +2192,16 @@ label.file-pick input[type='file'] {
 }
 
 .cloud-legend .wx-credit { margin: 2px 0 0; }
+
+button.cloud-legend.folded {
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cloud-legend .fold {
+  float: right;
+  padding: 0 4px;
+}
+
+.cloud-legend .fold:hover { color: var(--fg); }

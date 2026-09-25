@@ -23,6 +23,9 @@ export interface UiState {
   /** The orbit turns by itself until the user grabs the map. */
   orbitSpin: boolean;
   setOrbit(orbit: OrbitPivot, spin?: boolean): void;
+  /** The phone's cloud legend is folded to one line until opened. */
+  cloudLegendOpen: boolean;
+  setCloudLegendOpen(open: boolean): void;
 }
 
 export const uiStore = create<UiState>()(
@@ -36,9 +39,11 @@ export const uiStore = create<UiState>()(
       setPanelCollapsed: (panelCollapsed) => set({ panelCollapsed }),
       orbit: OrbitPivot.Off,
       orbitSpin: true,
-      setOrbit: (orbit, spin) => set((s) => ({ orbit, orbitSpin: spin ?? s.orbitSpin }))
+      setOrbit: (orbit, spin) => set((s) => ({ orbit, orbitSpin: spin ?? s.orbitSpin })),
+      cloudLegendOpen: false,
+      setCloudLegendOpen: (cloudLegendOpen) => set({ cloudLegendOpen })
     }),
-    { name: 'scape.ui', partialize: ({ panelTab, panelCollapsed, markersView }) => ({ panelTab, panelCollapsed, markersView }) }
+    { name: 'scape.ui', partialize: ({ panelTab, panelCollapsed, markersView, cloudLegendOpen }) => ({ panelTab, panelCollapsed, markersView, cloudLegendOpen }) }
   )
 );
 

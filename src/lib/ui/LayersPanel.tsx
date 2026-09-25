@@ -4,9 +4,9 @@ import { basemapGroup, BasemapGroup, BasemapKind, BUILTIN_BASEMAPS, offlineBasem
 import { registerLocalPmtiles } from '@data/pmtiles';
 import { useMapStatus } from '@state/mapStatus';
 import { useOffline } from '@state/offline';
-import { settingsStore, useSettings, type Settings } from '@state/settings';
+import { settingsStore, useSettings } from '@state/settings';
 import { OrbitPivot, useUi } from '@state/ui';
-import { DayNightToggle, TerrainTintToggles } from './MapLayerToggles';
+import { CloudToggle, DayNightToggle, SettingLayer, TerrainTintToggles, type BoolKey } from './MapLayerToggles';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 const LIGHT_LABEL: Record<LightMode, string> = { [LightMode.Auto]: 'Sun by day, moon by night', [LightMode.Sun]: 'Sun only', [LightMode.Moon]: 'Moon only' };
@@ -24,7 +24,6 @@ export function LayersPanel() {
   const mapError = useMapStatus((s) => s.error);
   const terrain = useSettings((s) => s.terrain);
   const rangeKm = useSettings((s) => s.horizonRangeKm);
-  const showShadow = useSettings((s) => s.showShadow);
   const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
   const lightSource = useSettings((s) => s.lightSource);
   const orbit = useUi((s) => s.orbit);
@@ -51,7 +50,7 @@ export function LayersPanel() {
 
   return (
     <div className="layers">
-      <h3>Basemap · {current?.name ?? 'none'}</h3>
+      <h3>Map type · {current?.name ?? 'none'}</h3>
       {mapError && <p className="error">Basemap problem: {mapError}</p>}
       <div className="tree">
         {GROUPS.map((g) => {
@@ -111,63 +110,68 @@ export function LayersPanel() {
         </details>
       </div>
 
-      <h3>Overlays</h3>
-      <Toggle k="showEventLines" label="Rise and set azimuth lines" />
-      <Toggle k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
-      <div className="field-row">
-        <Toggle k="showShadow" label="Sun shadow (direction and length)" />
-        <input
-          type="number"
-          className="num"
-          min={0.1}
-          step={0.1}
-          value={shadowHeight}
-          disabled={!showShadow}
-          onChange={(e) => Number(e.target.value) > 0 && update({ shadowObjectHeightM: Number(e.target.value) })}
-          title="Height of the object casting the shadow, metres"
-        />
-      </div>
-      <Toggle k="showGc" label="Galactic Centre" />
-      <Toggle k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
-      <DayNightToggle />
-
-      <h3>Buildings</h3>
-      <Toggle k="showBuildings" label="3D buildings (Overture, in place of the basemap's own)" />
-      <Toggle k="showSunShadows" label="Shadows on the ground (terrain and buildings)" />
-      <label className="toggle">
-        <span>Light from</span>
-        <select value={lightSource} onChange={(e) => update({ lightSource: e.target.value as LightMode })} aria-label="Light source for shadows" title="The moon takes over once it is up and the sun is 6° below the horizon; the viewfinder follows too">
-          {Object.values(LightMode).map((m) => (
-            <option key={m} value={m}>
-              {LIGHT_LABEL[m]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="muted hint">Buildings appear from zoom 14; their shadows follow the timeline time and need the buildings layer on. Shade cast by the moon is drawn a deeper blue.</p>
-
-      <h3>Terrain</h3>
+      <h3>Map layers</h3>
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
-      <Toggle k="showHillshade" label="Hillshade" />
+      <DayNightToggle />
+      <CloudToggle />
       <TerrainTintToggles />
-      <Toggle k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)" />
-      <label className="toggle">
-        <span>Orbit</span>
-        <select aria-label="Orbit the 3D map" value={orbit} onChange={(e) => setOrbit(e.target.value as OrbitPivot, true)}>
-          {Object.values(OrbitPivot).map((o) => (
-            <option key={o} value={o}>
-              {ORBIT_LABEL[o]}
-            </option>
-          ))}
-        </select>
-      </label>
-      {orbit !== OrbitPivot.Off && (
+      <SettingLayer k="showHillshade" label="Hillshade" />
+      <SettingLayer k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)">
         <label className="toggle">
-          <input type="checkbox" checked={orbitSpin} onChange={(e) => setOrbit(orbit, e.target.checked)} />
-          <span>Turn slowly (stops when you grab the map)</span>
+          <span>Orbit</span>
+          <select aria-label="Orbit the 3D map" value={orbit} onChange={(e) => setOrbit(e.target.value as OrbitPivot, true)}>
+            {Object.values(OrbitPivot).map((o) => (
+              <option key={o} value={o}>
+                {ORBIT_LABEL[o]}
+              </option>
+            ))}
+          </select>
         </label>
-      )}
-      <Toggle k="terrainHorizon" label="Terrain horizon: skyline on the chart, rise and set behind terrain" />
+        {orbit !== OrbitPivot.Off && (
+          <label className="toggle">
+            <input type="checkbox" checked={orbitSpin} onChange={(e) => setOrbit(orbit, e.target.checked)} />
+            <span>Turn slowly (stops when you grab the map)</span>
+          </label>
+        )}
+      </SettingLayer>
+      <SettingLayer k="showBuildings" label="3D buildings (Overture, in place of the basemap's own)">
+        <p className="muted hint">Buildings appear from zoom 14.</p>
+      </SettingLayer>
+      <SettingLayer k="showSunShadows" label="Shadows on the ground (terrain and buildings)">
+        <label className="toggle">
+          <span>Light from</span>
+          <select value={lightSource} onChange={(e) => update({ lightSource: e.target.value as LightMode })} aria-label="Light source for shadows" title="The moon takes over once it is up and the sun is 6° below the horizon; the viewfinder follows too">
+            {Object.values(LightMode).map((m) => (
+              <option key={m} value={m}>
+                {LIGHT_LABEL[m]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="muted hint">Shadows follow the timeline time; buildings cast them once their layer is on. Shade cast by the moon is drawn a deeper blue.</p>
+      </SettingLayer>
+      <SettingLayer k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
+      <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />
+      <SettingLayer k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
+      <SettingLayer k="showShadow" label="Sun shadow (direction and length)">
+        <label className="toggle">
+          <span>Object height</span>
+          <input
+            type="number"
+            className="num"
+            min={0.1}
+            step={0.1}
+            value={shadowHeight}
+            onChange={(e) => Number(e.target.value) > 0 && update({ shadowObjectHeightM: Number(e.target.value) })}
+            title="Height of the object casting the shadow, metres"
+          />
+          <span className="muted">m</span>
+        </label>
+      </SettingLayer>
+      <SettingLayer k="showGc" label="Galactic Centre" />
+
+      <h3>Terrain horizon</h3>
+      <Toggle k="terrainHorizon" label="Skyline on the chart, rise and set behind terrain" />
       <label className="toggle">
         <span>Horizon range</span>
         <select value={rangeKm} onChange={(e) => update({ horizonRangeKm: Number(e.target.value) })} title="How far the skyline sweep looks">
@@ -189,8 +193,6 @@ function shortName(b: Basemap, g: BasemapGroup): string {
   if (g === BasemapGroup.Raster) return b.name.replace(/ \(raster\)$/, '');
   return b.name;
 }
-
-type BoolKey = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
 
 function Toggle({ k, label }: { k: BoolKey; label: string }) {
   const on = useSettings((s) => s[k]);
