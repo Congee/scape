@@ -106,7 +106,7 @@ const SHADOW_MAX_LENGTH_M = 5_000;
 /** Relief that can throw a shadow into the view from outside it — an Alpine wall, not Everest. */
 const TALLEST_TERRAIN_M = 3_000;
 const SHADOW_MAX_TERRAIN_M = 40_000;
-const BLD_HEIGHT: ExpressionSpecification = ['coalesce', ['get', 'height'], ['*', ['get', 'num_floors'], 3], 5];
+const BLD_HEIGHT: ExpressionSpecification = ['coalesce', ['get', 'height'], ['case', ['has', 'num_floors'], ['*', ['get', 'num_floors'], 3], 5]];
 const BLD_BASE: ExpressionSpecification = ['coalesce', ['get', 'min_height'], 0];
 const NOT_UNDERGROUND: ExpressionSpecification = ['!=', ['get', 'is_underground'], true];
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
