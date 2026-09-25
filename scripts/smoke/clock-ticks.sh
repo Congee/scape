@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test that the DateBar clock still ticks each second and the panels follow a time change, on desktop and phone.
+# Smoke test that the live DateBar clock shows minutes, ticks seconds only on hover, focus or the Timeline tab, and that the panels follow a time change, on desktop and phone.
 # Usage: scripts/smoke/clock-ticks.sh [port] [cdp-port] [screenshot-dir]
 # Needs a server (dev or probe build) on the port and a browser with remote debugging on the CDP port.
 set -uo pipefail
@@ -47,18 +47,51 @@ readout() { js 'document.querySelector(".readout")?.textContent ?? "none"'; }
 # A fixed zone, so the expected wall time is known.
 set_time() { js "(() => { const w = window.__scape.world.getState(); w.setTz('UTC'); w.setTime(Date.parse('$1')); return 'ok'; })()" >/dev/null; }
 
+colons() { local x=${1//[^:]/}; echo ${#x}; }
+ticks() { # check name: the clock shows seconds and they move
+  local a b
+  sleep 0.3
+  a=$(clock)
+  sleep 2.2
+  b=$(clock)
+  check "$1" "$([ "$(colons "$a")" = 2 ] && [ "$a" != "$b" ] && echo 1 || echo 0)" "$a → $b"
+}
+
 pass() { # viewport label, width, height
   local tag=$1
   ab set viewport "$2" "$3" >/dev/null
   go "$BASE/" || { check "$tag load" 0 "no DateBar"; return; }
   js '(() => { window.__scape.world.getState().setNow(); return "ok"; })()' >/dev/null
 
-  local c0 c1
+  # Away from the Timeline and the clock, live time moves only on the minute.
+  js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Geodetics"); document.activeElement?.blur(); return "ok"; })()' >/dev/null
+  ab mouse move 1 1 >/dev/null
+  sleep 0.3
+  local c0 c1 t0 t1
   c0=$(clock)
+  t0=$(js 'window.__scape.world.getState().time')
   sleep 2.2
   c1=$(clock)
-  check "$tag live clock ticks" "$([ -n "$c0" ] && [ "$c0" != "$c1" ] && echo 1 || echo 0)" "$c0 → $c1"
-  ab screenshot "$OUT/$tag-live.png" >/dev/null
+  t1=$(js 'window.__scape.world.getState().time')
+  check "$tag live clock shows minutes" "$([ "$(colons "$c0")" = 1 ] && echo 1 || echo 0)" "$c0"
+  check "$tag no tick within the minute" "$([ "$t0" = "$t1" ] || [ "$c0" != "$c1" ] && echo 1 || echo 0)" "time $([ "$t0" = "$t1" ] && echo held || echo 'rolled over')"
+  ab screenshot "$OUT/$tag-live-minutes.png" >/dev/null
+
+  ab hover ".datebar .clock" >/dev/null
+  ticks "$tag hover ticks seconds"
+  ab screenshot "$OUT/$tag-live-hover.png" >/dev/null
+  ab mouse move 1 1 >/dev/null
+  sleep 0.3
+  c0=$(clock)
+  check "$tag unhover back to minutes" "$([ "$(colons "$c0")" = 1 ] && echo 1 || echo 0)" "$c0"
+
+  ab focus ".datebar .clock" >/dev/null
+  ticks "$tag focus ticks seconds"
+  js '(() => { document.activeElement?.blur(); return "ok"; })()' >/dev/null
+
+  js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Timeline"); u.setPanelCollapsed(false); return "ok"; })()' >/dev/null
+  ticks "$tag Timeline tab ticks seconds"
+  ab screenshot "$OUT/$tag-live-timeline.png" >/dev/null
 
   set_time 2026-06-21T06:30:00Z
   sleep 0.3

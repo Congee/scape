@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { formatTime } from '@core/time/format';
 import { isoDate, localParts, offsetLabel, withLocalTime } from '@core/time/localDay';
+import { useClock, useSecondsTick } from '@state/clock';
 import { useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 import { Calendar } from './Calendar';
@@ -7,15 +9,26 @@ import { Calendar } from './Calendar';
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const ZONES: string[] = Intl.supportedValuesOf('timeZone');
 
-/** The only part of the bar that changes every second. */
+/** The only part of the bar that can change every second; live, it shows seconds only while hovered, focused or asked for elsewhere. */
 function Clock() {
+  const [hot, setHot] = useState(false);
+  useSecondsTick(hot);
   const time = useWorld((s) => s.time);
   const tz = useWorld((s) => s.tz);
   const live = useWorld((s) => s.live);
+  const seconds = useClock((s) => s.secondsWanted > 0);
   const hour12 = useSettings((s) => s.hour12);
   return (
-    <span className={`clock${live ? ' live' : ''}`} title={live ? 'Following real time' : 'Simulated time'}>
-      {formatTime(time, tz, hour12, true)}
+    <span
+      className={`clock${live ? ' live' : ''}`}
+      title={live ? 'Following real time' : 'Simulated time'}
+      tabIndex={0}
+      onMouseEnter={() => setHot(true)}
+      onMouseLeave={() => setHot(false)}
+      onFocus={() => setHot(true)}
+      onBlur={() => setHot(false)}
+    >
+      {formatTime(time, tz, hour12, !live || seconds)}
     </span>
   );
 }
