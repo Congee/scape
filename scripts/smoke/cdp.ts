@@ -19,6 +19,7 @@ export class Tab {
   private workers = new Map<string, string>();
   private offline = false;
   private logging = false;
+  private listeners = new Map<string, ((params: Record<string, unknown>, sessionId?: string) => void)[]>();
   /** False keeps the tab in the background: Page.bringToFront can raise the window over the user's. */
   private front = false;
   /** URLs the page and its workers requested since `logRequests()`. */
@@ -35,7 +36,7 @@ export class Tab {
     ws.addEventListener('message', (e) => {
       const m = JSON.parse(String(e.data)) as Msg;
       if (m.id != null) this.waiters.get(m.id)?.(m);
-      if (m.method) for (const l of this.listeners) l(m.method, m.params ?? {}, m.sessionId);
+      if (m.method) for (const cb of this.listeners.get(m.method) ?? []) cb(m.params ?? {}, m.sessionId);
       if (m.method === 'Network.requestWillBeSent' && this.logging) this.requests.push(String((m.params as { request: { url: string } }).request.url));
       if (m.method === 'Target.attachedToTarget') {
         const p = m.params as { sessionId: string; targetInfo?: { url?: string } };
@@ -104,6 +105,11 @@ export class Tab {
       });
       this.ws.send(JSON.stringify({ id, method, params, ...(sessionId && { sessionId }) }));
     });
+  }
+
+  /** Calls `cb` for every `method` event of the page or its workers. */
+  on(method: string, cb: (params: Record<string, unknown>, sessionId?: string) => void) {
+    this.listeners.set(method, [...(this.listeners.get(method) ?? []), cb]);
   }
 
   async eval<T = unknown>(expression: string, timeoutMs = 60_000): Promise<T> {

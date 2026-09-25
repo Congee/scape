@@ -17,6 +17,9 @@
   --gc: #b48cff;
   --terrain: #8fd18c;
   --tide: #3cc6c0;
+  --cloud: #dfe6ee;
+  --sky-clear: #1f4a78;
+  --fog: #e8c547;
   --danger: #ff5c5c;
   --rail: 56px;
   --panel: 340px;
@@ -1942,19 +1945,88 @@ label.file-pick input[type='file'] {
   margin: 4px 0 0;
 }
 
-.viirs-need .chip {
-  margin: 0 4px 2px 0;
+/* Weather */
+.timeline .dot.cloud { background: var(--cloud); }
+
+.timeline .cloud-row {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
 }
 
-.viirs-need .viirs-have {
-  color: var(--terrain);
+.timeline .cloud-row > button {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  grid-template-areas:
+    'dot label time az'
+    'dot extra extra extra';
+  align-items: center;
+  column-gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 6px;
 }
 
-.viirs-need .viirs-missing {
-  color: var(--sun);
+.timeline .cloud-row > button:hover {
+  background: var(--bg-3);
 }
 
-.viirs-need .viirs-ocean {
+.cloud-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 0 6px;
+  box-sizing: border-box;
+}
+
+.cloud-chart .sky { fill: var(--sky-clear); }
+.cloud-chart .cloud { fill: var(--cloud); }
+.cloud-chart .fog { fill: var(--fog); }
+.cloud-chart .gap { fill: url(#wx-gap); }
+.cloud-chart pattern line { stroke: var(--fg-3); stroke-width: 1.5; }
+.cloud-chart .now { stroke: var(--sun); }
+.cloud-chart g { cursor: pointer; }
+
+.wx-credit {
+  margin: 2px 6px;
+  font-size: 11px;
   color: var(--fg-3);
-  text-decoration: line-through;
+}
+
+.wx-credit a { color: var(--fg-2); }
+
+.weather .wx-model,
+.weather .wx-caveat {
+  margin: 4px 6px;
+  font-size: 12px;
+}
+
+.weather h3 {
+  margin: 12px 6px 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+
+.weather h3 .muted {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.wx-missing {
+  margin: 4px 6px;
+  color: var(--fg-2);
+}
+
+.wx-missing .link { margin-left: 8px; }
+
+.wx-windy {
+  display: inline-block;
+  margin: 4px 6px;
+  font-size: 12px;
+  color: var(--fg-2);
 }

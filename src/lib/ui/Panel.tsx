@@ -8,9 +8,10 @@ import { NightPanel } from './NightPanel';
 import { ToolsPanel } from './ToolsPanel';
 import { OfflinePanel } from './OfflinePanel';
 import { Timeline } from './Timeline';
+import { WeatherPanel } from './WeatherPanel';
 import { PanelTab, uiStore, useUi } from '@state/ui';
 
-const TABS: PanelTab[] = [PanelTab.Timeline, PanelTab.Geodetics, PanelTab.Frame, PanelTab.Night, PanelTab.Tools, PanelTab.Find, PanelTab.Markers, PanelTab.Layers, PanelTab.Offline];
+const TABS: PanelTab[] = [PanelTab.Timeline, PanelTab.Geodetics, PanelTab.Frame, PanelTab.Night, PanelTab.Tools, PanelTab.Weather, PanelTab.Find, PanelTab.Markers, PanelTab.Layers, PanelTab.Offline];
 
 /** Page roots take this class so the grid drops the panel column. */
 export function usePanelClass(base: string): string {
@@ -65,6 +66,7 @@ export function Panel() {
         {tab === PanelTab.Frame && <FramePanel />}
         {tab === PanelTab.Night && <NightPanel />}
         {tab === PanelTab.Tools && <ToolsPanel />}
+        {tab === PanelTab.Weather && <WeatherPanel />}
         {tab === PanelTab.Find && <FindPanel />}
         {tab === PanelTab.Markers && <MarkersPanel />}
         {tab === PanelTab.Layers && <LayersPanel />}

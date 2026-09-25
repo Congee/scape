@@ -6,6 +6,7 @@ import { tideDay } from '@data/tides';
 import { useDayData } from '@state/dayData';
 import { settingsStore, useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
+import { CloudRow } from './CloudChart';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
 
 const LABELS: Record<SkyBody, Partial<Record<EventKind, string>>> = {
@@ -74,6 +75,7 @@ export function Timeline() {
         </label>
       </div>
       <TideRow />
+      <CloudRow />
       {list.length === 0 && !loading && <p className="muted">No events on this day.</p>}
       <ul>
         {list.map((ev, i) => (
