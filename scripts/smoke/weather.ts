@@ -3,6 +3,7 @@
 // With a profile and lock it also measures idle renderer CPU with the map layer on, holding the lock per measurement.
 /* oxlint-disable no-await-in-loop -- checks run one at a time against one page */
 import { mkdirSync, rmdirSync } from 'node:fs';
+import { FOG_TEXT } from '../../src/lib/core/weather/fog';
 import { windyUrl } from '../../src/lib/core/weather/windy';
 import { Tab } from './cdp';
 import { OpenMeteoStub, StubMode } from './weather-stub';
@@ -114,6 +115,15 @@ async function run(vp: 'desktop' | 'phone') {
   const want = [windyUrl(CAMERA.lat, CAMERA.lng), windyUrl(TARGET.lat, TARGET.lng)];
   check(`${vp}: Windy links for camera and target (not followed)`, links.length === 2 && links.every((l, i) => l.href === want[i] && l.target === '_blank' && l.rel === 'noopener noreferrer'), links.map((l) => l.href).join(' , '));
   await tab.shot(`${out}/${vp}-now.png`);
+
+  // The fixture's pre-dawn hours carry fog code and 600 m visibility.
+  await fresh(url.replace(DAY, DAY.replace('T17', 'T03')));
+  await cardReady('camera');
+  const fog = await text('[data-card="camera"] [data-v="fog"]');
+  check(`${vp}: fog row names the tuned signs`, fog === `possible: ${FOG_TEXT.Code}, ${FOG_TEXT.Visibility}`, fog);
+  await tab.shot(`${out}/${vp}-fog.png`);
+  await fresh(url);
+  await cardReady('camera');
 
   // Model switch through the picker.
   const before = await cloudText();

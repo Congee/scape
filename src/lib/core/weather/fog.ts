@@ -1,10 +1,11 @@
 export const FogReason = { Code: 'Code', Visibility: 'Visibility', Spread: 'Spread' } as const;
 export type FogReason = (typeof FogReason)[keyof typeof FogReason];
 
-export const FOG_VISIBILITY_M = 1000;
+/** Fit by scripts/weather/fogcal.ts on METAR fog or mist at sunrise and sunset hours. */
+export const FOG_VISIBILITY_M = 5000;
 export const FOG_SPREAD_C = 1;
 /** Low cloud share that makes a saturated surface read as fog rather than dew. */
-export const FOG_LOW_CLOUD = 50;
+export const FOG_LOW_CLOUD = 80;
 
 export interface FogInput {
   code: number;
@@ -25,6 +26,6 @@ export function fogReasons(x: FogInput): FogReason[] {
 
 export const FOG_TEXT: Record<FogReason, string> = {
   Code: 'fog code 45/48',
-  Visibility: 'visibility < 1 km',
-  Spread: 'dew-point spread < 1 °C with low cloud'
+  Visibility: `visibility < ${FOG_VISIBILITY_M / 1000} km`,
+  Spread: `dew-point spread < ${FOG_SPREAD_C} °C with low cloud`
 };
