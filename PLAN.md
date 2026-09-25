@@ -505,8 +505,10 @@ doing, and the thin dark lines turned out to be real rock gullies.
   moon shade on the map neutral grey (A/B pick 2026-09-25); first/last light counts terrain only; earthshine under 35 % lit;
   orbit pitch 65° (max 80°), 6°/s, not saved.
 - Terrain waste at long focal lengths: dropped (merge `6a54ad2` reverted). It cut built blocks 6–21 % at
-  200–2400 mm, but DEM tiles and frame/build times were unchanged, so there was no measurable gain. Cutting DEM
-  tiles needs a separate cascade change (`coneDepthRange` ignoring eye-leaf boxes).
+  200–2400 mm, but DEM tiles and frame/build times were unchanged, so there was no measurable gain. The follow-up
+  (uncapped eye leaves, `coneDepthRange` skipping them; `wip/conedepth`, 2026-09-25) was dropped as well: it saved
+  only 5–9 of ~140 DEM fetches at 600/2400 mm, build and frame times stayed within noise, and shadows moved (AE up
+  to 385 px at 2400 mm). `viewNearM` was already 1 here; the change came from the coarse eye leaves' own heights.
 - Model sharing (P3b core, merged): exported models are named `<name>.glb`; a Drawn model's export
   carries its parts, so re-import gives an editable model; `.scape.json` Replace also wipes models.
 - Models P2 (merged `a45a27d`): selection and outline in accent #5aa9ff; a drawn building starts at
