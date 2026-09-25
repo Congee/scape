@@ -2,8 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
-import type { MaskRect } from '@core/geo/shadowMask';
-import { adoptPrismSlots } from '@core/geo/prismOcclude';
+import { longestShadowM, shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
 import type { Lod2Source } from '@core/lod2/regions';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
@@ -12,8 +11,8 @@ import { addLod2Tile, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLo
 const MAX_TILES = 96;
 /** A height lookup that never comes back resolves null rather than leaving the caller hanging. */
 const HEIGHT_TIMEOUT_MS = 15_000;
-/** Sun angles are rounded to this before they become a key, so scrubbing the clock rebuilds far less. */
-const SUN_QUANTUM_DEG = 0.25;
+/** A sun that moves the shadows less than this, in screen pixels, keeps the mask in hand. */
+const SHADOW_DRIFT_PX = 1;
 
 export interface BuildingsState {
   /** Prisms by "14/x/y", each placed for the frame it names. */
@@ -67,6 +66,8 @@ let lastTiles: Parameters<typeof requestBuildings> | null = null;
 let maskId = 0;
 let maskKey = '';
 let lastMask: Omit<MaskRequest, 'id'> | null = null;
+/** Height that throws the longest shadow in the last mask built; zero until one lands. */
+let builtShadow = { tallM: 0 };
 /** Sent to each worker as it starts and again on every change. */
 let modelsSync: ModelsSync | null = null;
 /** Id of the LoD2 request whose responses the store still wants. */
@@ -144,6 +145,10 @@ function ensureMaskWorker(): Worker {
     const res = e.data;
     if (res.kind === BuildingsKind.Shade) {
       const { centre, originE, originN, nx, ny, cellM, mask, lod2 } = res;
+      if (res.id === maskId && lastMask) {
+        // Measured under the sun it was built for, so a later sun can tell how far those shadows move.
+        builtShadow = { tallM: Math.max(0, longestShadowM(mask, nx, ny, cellM, lastMask.sunAzDeg) * Math.tan(lastMask.sunAltDeg * (Math.PI / 180))) };
+      }
       if (res.id === maskId) buildingsStore.setState({ shadowMask: { centre, originE, originN, nx, ny, cellM, mask, lod2 }, shadowMaskMs: res.ms });
     } else if (res.kind === BuildingsKind.Error) {
       buildingsStore.setState({ error: res.error });
@@ -194,17 +199,13 @@ export function requestLod2(pin: LngLat, eyeM: number, azFromDeg: number, azSpan
   ensureWorker().postMessage(req);
 }
 
-const quantise = (deg: number) => Math.round(deg / SUN_QUANTUM_DEG) * SUN_QUANTUM_DEG;
-
-/** Builds the map's ground-shadow mask; an identical consecutive request is ignored. */
-export function requestShadowMask(centre: LngLat, rect: MaskRect, sunAzDeg: number, sunAltDeg: number, softM: number, buildings: boolean): void {
-  const az = quantise(sunAzDeg);
-  const alt = quantise(sunAltDeg);
-  const key = `${centre.lat.toFixed(6)},${centre.lng.toFixed(6)}|${rect.originE}|${rect.originN}|${rect.nx}|${rect.ny}|${rect.cellM}|${az}|${alt}|${softM}|${buildings}`;
-  if (key === maskKey) return;
+/** Builds the map's ground-shadow mask; the same rect under a sun that moves no edge `SHADOW_DRIFT_PX` at `mPerPx` is ignored. */
+export function requestShadowMask(centre: LngLat, rect: MaskRect, sunAzDeg: number, sunAltDeg: number, softM: number, buildings: boolean, maxLenM: number, mPerPx: number): void {
+  const key = `${centre.lat.toFixed(6)},${centre.lng.toFixed(6)}|${rect.originE}|${rect.originN}|${rect.nx}|${rect.ny}|${rect.cellM}|${softM}|${buildings}`;
+  if (key === maskKey && lastMask && shadowDriftPx({ azDeg: lastMask.sunAzDeg, altDeg: lastMask.sunAltDeg }, { azDeg: sunAzDeg, altDeg: sunAltDeg }, { ...builtShadow, maxLenM }, mPerPx) < SHADOW_DRIFT_PX) return;
   maskKey = key;
   maskId = ++seq;
-  lastMask = { kind: BuildingsKind.Mask, centre, ...rect, sunAzDeg: az, sunAltDeg: alt, softM, buildings };
+  lastMask = { kind: BuildingsKind.Mask, centre, ...rect, sunAzDeg, sunAltDeg, softM, buildings };
   ensureMaskWorker().postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);
 }
 

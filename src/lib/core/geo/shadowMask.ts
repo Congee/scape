@@ -123,3 +123,46 @@ export function maskPixels(mask: Uint8Array, nx: number, ny: number, rgb: readon
   }
   return px;
 }
+
+/** Longest run of full shadow in a mask, metres, walked along lines in the sun's direction. */
+export function longestShadowM(mask: Uint8Array, nx: number, ny: number, cellM: number, azDeg: number): number {
+  const a = azDeg * (Math.PI / 180);
+  const de = Math.sin(a);
+  const dn = Math.cos(a);
+  const alongE = Math.abs(de) >= Math.abs(dn);
+  const major = alongE ? nx : ny;
+  const minor = alongE ? ny : nx;
+  const t = alongE ? dn / de : de / dn;
+  const reach = Math.ceil(Math.abs(t) * (major - 1));
+  let best = 0;
+  for (let k = -reach; k < minor + reach; k++) {
+    let run = 0;
+    for (let i = 0; i < major; i++) {
+      const m = k + Math.round(t * i);
+      const on = m >= 0 && m < minor && mask[alongE ? m * nx + i : i * nx + m] >= 128;
+      run = on ? run + 1 : 0;
+      if (run > best) best = run;
+    }
+  }
+  return best * cellM * Math.hypot(1, t);
+}
+
+/** The tallest caster a mask must track and the cap on its shadow's length, metres. */
+export interface ShadowCaster {
+  tallM: number;
+  maxLenM: number;
+}
+
+/** Ground offset, metres east and north, from a caster's foot to the tip of its shadow. */
+export function shadowTip(azDeg: number, altDeg: number, c: ShadowCaster): { e: number; n: number } {
+  const len = Math.min(c.tallM / Math.tan(Math.max(altDeg, 1e-6) * (Math.PI / 180)), c.maxLenM);
+  const a = azDeg * (Math.PI / 180);
+  return { e: -Math.sin(a) * len, n: -Math.cos(a) * len };
+}
+
+/** Screen pixels the shadows move between two sun directions; a point h up a caster shifts h/tallM as far as the tip, so no edge moves farther. */
+export function shadowDriftPx(from: { azDeg: number; altDeg: number }, to: { azDeg: number; altDeg: number }, c: ShadowCaster, mPerPx: number): number {
+  const a = shadowTip(from.azDeg, from.altDeg, c);
+  const b = shadowTip(to.azDeg, to.altDeg, c);
+  return Math.hypot(b.e - a.e, b.n - a.n) / mPerPx;
+}

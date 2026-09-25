@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frameOf, frameToLngLat, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, shadowMask, SHADOW_RGB } from './shadowMask';
+import { frameOf, frameToLngLat, longestShadowM, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
 
 const merc = (lat: number) => 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
 
@@ -139,5 +139,66 @@ describe('image registration', () => {
     }
     expect(worstM).toBeLessThan(r.cellM / 2);
     expect(worstM).toBeLessThan(0.01);
+  });
+});
+
+describe('shadowDriftPx', () => {
+  const tower = { tallM: 100, maxLenM: 5_000 };
+
+  it('points the shadow away from the sun', () => {
+    const t = shadowTip(180, 45, tower);
+    expect(t.e).toBeCloseTo(0, 9);
+    expect(t.n).toBeCloseTo(100, 9);
+  });
+
+  it('caps the shadow length near the horizon', () => {
+    const t = shadowTip(90, 0, tower);
+    expect(t.e).toBeCloseTo(-5_000, 6);
+  });
+
+  it('is the tip displacement in pixels', () => {
+    // 45° altitude, 100 m tower: a 1° azimuth step swings a 100 m shadow by 2·100·sin(0.5°).
+    const px = shadowDriftPx({ azDeg: 180, altDeg: 45 }, { azDeg: 181, altDeg: 45 }, tower, 1);
+    expect(px).toBeCloseTo(2 * 100 * Math.sin(Math.PI / 360), 6);
+  });
+
+  it('scales with the tallest caster and the map scale', () => {
+    const a = { azDeg: 200, altDeg: 30 };
+    const b = { azDeg: 200.25, altDeg: 30.1 };
+    const base = shadowDriftPx(a, b, tower, 2);
+    expect(shadowDriftPx(a, b, { ...tower, tallM: 300 }, 2)).toBeCloseTo(3 * base, 9);
+    expect(shadowDriftPx(a, b, tower, 1)).toBeCloseTo(2 * base, 9);
+  });
+
+  it('is zero for the same sun', () => {
+    expect(shadowDriftPx({ azDeg: 90, altDeg: 10 }, { azDeg: 90, altDeg: 10 }, tower, 1)).toBe(0);
+  });
+});
+
+const grid = (nx: number, ny: number, on: [number, number][]) => {
+  const m = new Uint8Array(nx * ny);
+  for (const [x, y] of on) m[y * nx + x] = 255;
+  return m;
+};
+
+describe('longestShadowM', () => {
+  it('reads an east-west shadow along a row', () => {
+    const m = grid(8, 3, [[1, 1], [2, 1], [3, 1], [4, 1]]);
+    expect(longestShadowM(m, 8, 3, 2, 90)).toBeCloseTo(8);
+  });
+
+  it('reads a north-south shadow down a column', () => {
+    const m = grid(3, 8, [[1, 2], [1, 3], [1, 4]]);
+    expect(longestShadowM(m, 3, 8, 2, 180)).toBeCloseTo(6);
+  });
+
+  it('never reads a diagonal shadow short', () => {
+    const m = grid(6, 6, [0, 1, 2, 3, 4].map((i) => [i, i] as [number, number]));
+    expect(longestShadowM(m, 6, 6, 1, 45)).toBeGreaterThanOrEqual(Math.SQRT2 * 4);
+  });
+
+  it('ignores faint penumbra and a lit grid', () => {
+    const m = new Uint8Array(16).fill(100);
+    expect(longestShadowM(m, 4, 4, 1, 90)).toBe(0);
   });
 });

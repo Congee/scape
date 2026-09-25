@@ -336,7 +336,7 @@ export class MapController {
       ),
       worldStore.subscribe((st) => st.time, () => {
         this.renderLive(true);
-        // A 1 Hz live tick needs no debounce, and a timer per tick keeps an idle page awake.
+        // A live tick needs no debounce, and a timer per tick keeps an idle page awake.
         if (worldStore.getState().live) this.requestShadows();
         else this.scheduleShadows();
       }),
@@ -964,9 +964,18 @@ export class MapController {
     // Sized against the true centre, then rebuilt around a snapped one so a small pan reuses the grid.
     const rough = this.shadowRect({ lng: c.lng, lat: c.lat }, b);
     const centre = snapPoint({ lng: c.lng, lat: c.lat }, rough.cellM * 16);
-    requestShadowMask(centre, this.shadowRect(centre, b), light.azimuthDeg, light.altitudeDeg, SHADOW_SOFT_M, buildings);
+    const maxLenM = buildings ? SHADOW_MAX_LENGTH_M : SHADOW_MAX_TERRAIN_M;
+    requestShadowMask(centre, this.shadowRect(centre, b), light.azimuthDeg, light.altitudeDeg, SHADOW_SOFT_M, buildings, maxLenM, this.finestMPerPx());
     // A toggle back on finds the store unchanged; the mask already in hand goes back up.
     this.paintShadowMask();
+  }
+
+  /** Ground metres per pixel along the bottom edge, where a pitched view is at its finest. */
+  private finestMPerPx(): number {
+    const { clientWidth: w, clientHeight: h } = this.map.getContainer();
+    const a = this.map.unproject([w / 2 - 50, h - 1]);
+    const b = this.map.unproject([w / 2 + 50, h - 1]);
+    return Math.max(a.distanceTo(b) / 100, 1e-3);
   }
 
   private shadowRect(centre: LngLat, b: { west: number; east: number; south: number; north: number }): MaskRect {
