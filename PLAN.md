@@ -543,6 +543,9 @@ visible errors are design choices, each waiting on a decision (recommendation in
   eye (ERFA within 0.2 % above 10°); constellation vertices snap to the brightest catalogue star
   within 120″ (were 13″ median, 95″ max off). Still sea-level density: last light, moon view, map
   light, finder/align workers, fastHorizon, `RISE_APPARENT_DEG`.
+- Rise/set times come from 0.5° horizon columns, so a jagged near ridge can put the viewfinder's
+  Sun/Moon flip up to ~30 s off the listed time (Zermatt 1–6 s). Finer azimuth steps around the
+  rise/set azimuths [leave for now].
 - Safari/iOS (AWS terrain) reads ground up to 197 m low (1.1° at 10 km). Software WebP decode (new
   path or dependency) or accept.
 - Fixed 2026-09-24 (astro2): Mapterhorn ground below sea level reaches eye and mesh (Zuidplaspolder
