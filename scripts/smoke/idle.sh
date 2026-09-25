@@ -2,7 +2,7 @@
 # Quiet smoke: per tab and scene, an idle app draws no GL frames and keeps the renderer and GPU process ≤ 2 %.
 # Usage: scripts/smoke/idle.sh [port] [cdp-port] [session] [brave-profile] [idle-seconds] [only-case-substring] [prod|dev]
 # prod (the gate) builds the `probe` mode and serves it with vite preview; dev reuses or starts vite dev.
-# Starts what is missing (server, one background Brave) and stops only what it started.
+# Starts what is missing (server, one headless Brave) and stops only what it started.
 set -uo pipefail
 
 MODE=${7:-prod}
@@ -30,7 +30,11 @@ elif ! curl -s -o /dev/null "$BASE/"; then
 fi
 BRAVE=0
 if ! curl -s -o /dev/null "http://localhost:$CDP/json/version"; then
-  brave_launch "$CDP" "$PROFILE" || exit 1
+  mkdir -p "$PROFILE"
+  # Headless only: any headed launch can take the user's focus.
+  nohup "${BRAVE_BIN:-/nix/store/4fripln844kh7xfjfh803hr2nm235v4x-brave-1.94.121/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}" \
+    --headless=new --remote-debugging-port="$CDP" --user-data-dir="$PROFILE" --no-first-run \
+    --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling about:blank >/dev/null 2>&1 &
   BRAVE=1
 fi
 for u in "$BASE/" "http://localhost:$CDP/json/version"; do
