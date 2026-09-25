@@ -179,22 +179,36 @@ export interface Refinement {
   sweep(src: DemSource): HorizonProfile;
 }
 
+/** The coarse pass of a refinement and the fine re-march it plans; shared by the horizon and view sweeps. */
+export interface RefinePlan {
+  /** Coarse angle per sample of the plan; NaN where no tile was read. */
+  angle: Float32Array;
+  /** Per sample of the plan, 1 where the fine plan re-marches its stretch instead. */
+  refined: Uint8Array;
+  /** Coarse skyline per column and its distance; -Infinity where nothing was read. */
+  best: Float64Array;
+  bestD: Float32Array;
+  /** Fine samples per column, in distance order. */
+  fine: SweepPlan;
+}
+
 /**
  * Coarse zooms average a summit away, so the skyline reads low by up to a cell's relief. The coarse sweep
  * also bounds the fine ground under each sample (highest post of its cell plus a multiple of the cell's post
- * range); every sample whose bound could still reach the coarse skyline is re-marched at a finer zoom, and
- * the rest, which cannot set the skyline, keep their coarse read. `plan` must come from `planSweep`.
+ * range); every sample whose bound could still reach the coarse skyline is planned for a re-march at a finer
+ * zoom, and the rest, which cannot set the skyline, keep their coarse read. `plan` must come from `planSweep`.
  */
-export function refineHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eyeAboveGroundM: number, rangeM: number, o: RefineOptions = {}): Refinement {
+export function planRefinement(src: DemSource, plan: SweepPlan, eyeM: number, o: RefineOptions = {}): RefinePlan {
   const minZ = o.minZoom ?? 8;
   const maxZ = o.maxZoom ?? 15;
   const size = o.tileSize ?? TILE_SIZE;
   const frac = o.stepFraction ?? 0.0005;
-  const relief = o.reliefFactor ?? 1;
+  const relief = o.reliefFactor ?? 0.5;
   const tolDeg = o.toleranceDeg ?? 0.001;
   const n = plan.distM.length;
   const angle = new Float32Array(n).fill(NaN);
   const bound = new Float32Array(n);
+  const refined = new Uint8Array(n);
   const best = new Float64Array(plan.nAz).fill(-Infinity);
   const bestD = new Float32Array(plan.nAz);
   for (let i = 0; i < plan.nAz; i++)
@@ -211,7 +225,6 @@ export function refineHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eye
         bestD[i] = plan.distM[j];
       }
     }
-  const coarse = toProfile(plan, best, bestD, eyeAboveGroundM, rangeM);
 
   // planSweep gives every column the same distance ladder, so the fine zoom per rung is shared.
   const rungs = plan.nAz ? plan.start[1] - plan.start[0] : 0;
@@ -226,8 +239,6 @@ export function refineHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eye
   const dist: number[] = [];
   const zoom: number[] = [];
   const start = new Int32Array(plan.nAz + 1);
-  const rest = new Float64Array(plan.nAz).fill(-Infinity);
-  const restD = new Float32Array(plan.nAz);
   const frame = pinFrame(plan.pin);
   for (let i = 0; i < plan.nAz; i++) {
     start[i] = dist.length;
@@ -241,13 +252,8 @@ export function refineHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eye
     let reach = -Infinity;
     for (let j = j0, k = 0; j < j1; j++, k++) {
       if (Number.isNaN(angle[j])) continue;
-      if (fineZ[k] <= plan.zoom[j] || bound[j] < eyeM + plan.distM[j] * tanFloor + drop[k]) {
-        if (angle[j] > rest[i]) {
-          rest[i] = angle[j];
-          restD[i] = plan.distM[j];
-        }
-        continue;
-      }
+      if (fineZ[k] <= plan.zoom[j] || bound[j] < eyeM + plan.distM[j] * tanFloor + drop[k]) continue;
+      refined[j] = 1;
       // The stretch between this sample's neighbours: the ground its bilinear read blends.
       let d = Math.max(reach, plan.distM[Math.max(j - 1, j0)]);
       const d1 = plan.distM[Math.min(j + 1, j1 - 1)];
@@ -265,12 +271,27 @@ export function refineHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eye
   }
   start[plan.nAz] = dist.length;
   const fine: SweepPlan = { ...plan, start, lng: Float32Array.from(lng), lat: Float32Array.from(lat), distM: Float32Array.from(dist), zoom: Uint8Array.from(zoom) };
+  return { angle, refined, best, bestD, fine };
+}
+
+/** Horizon sweep refined near the skyline; see `planRefinement`. */
+export function refineHorizon(src: DemSource, plan: SweepPlan, eyeM: number, eyeAboveGroundM: number, rangeM: number, o: RefineOptions = {}): Refinement {
+  const r = planRefinement(src, plan, eyeM, o);
+  // The coarse reads the fine pass leaves standing.
+  const rest = new Float64Array(plan.nAz).fill(-Infinity);
+  const restD = new Float32Array(plan.nAz);
+  for (let i = 0; i < plan.nAz; i++)
+    for (let j = plan.start[i]; j < plan.start[i + 1]; j++)
+      if (!r.refined[j] && r.angle[j] > rest[i]) {
+        rest[i] = r.angle[j];
+        restD[i] = plan.distM[j];
+      }
   return {
-    coarse,
-    tiles: requiredTiles(fine),
-    samples: dist.length,
+    coarse: toProfile(plan, r.best, r.bestD, eyeAboveGroundM, rangeM),
+    tiles: requiredTiles(r.fine),
+    samples: r.fine.distM.length,
     sweep(src2) {
-      const f = sweepMax(src2, fine, eyeM);
+      const f = sweepMax(src2, r.fine, eyeM);
       for (let i = 0; i < plan.nAz; i++)
         if (rest[i] > f.best[i]) {
           f.best[i] = rest[i];

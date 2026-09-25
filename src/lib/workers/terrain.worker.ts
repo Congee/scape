@@ -6,7 +6,7 @@ import { BlockCache } from '@core/terrain/blockCache';
 import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
 import { planSweep, refineHorizon, requiredTiles, sweepColumns, type HorizonProfile } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
-import { assembleView, sweepView, type ViewProfile } from '@core/terrain/view';
+import { assembleView, refineView, type ViewProfile } from '@core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, tileKey, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
@@ -146,16 +146,29 @@ async function view(req: ViewRequest): Promise<TerrainResponse | null> {
   const plan = planSweep(req.pin, req.rangeM, { azStepDeg: step, columns: fresh, minDistM: 20, minZoom: demZoom(8), maxZoom: demZoom(15), tileSize: TERRAIN_TILE_SIZE });
   const tiles = requiredTiles(plan);
   const release = cache.retain(tiles);
+  let releaseFine: (() => void) | null = null;
   try {
     await cache.loadAll(tiles);
     if (latest.View !== req.id) return null;
-    const swept = sweepView(memoSource(cache), plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg);
+    const r = refineView(memoSource(cache), plan, eyeM, req.eyeAboveGroundM, req.rangeM, req.minStepDeg, { minZoom: demZoom(8), maxZoom: demZoom(16), tileSize: TERRAIN_TILE_SIZE });
     const at = new Map(fresh.map((k, i) => [k, i]));
-    const layers = fresh.length === nAz ? swept : assembleView(step, k0, nAz, req.rangeM, (k) => (held(k) ? { v: prev!.v, col: k - prev!.k0 } : { v: swept, col: at.get(k)! }));
-    const missing = tiles.filter((t) => !cache.get(t.z, t.x, t.y)).length;
-    if (missing === 0) lastView = { key, k0, v: layers };
-    return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length, missing } };
+    const layered = (swept: ViewProfile) => (fresh.length === nAz ? swept : assembleView(step, k0, nAz, req.rangeM, (k) => (held(k) ? { v: prev!.v, col: k - prev!.k0 } : { v: swept, col: at.get(k)! })));
+    const absent = (ts: TileCoord[]) => ts.filter((t) => !cache.get(t.z, t.x, t.y)).length;
+    const missing = absent(tiles);
+    const result = (layers: ViewProfile, refined: boolean, fine: TileCoord[]): TerrainResponse => {
+      const lost = missing + absent(fine);
+      if (refined && lost === 0) lastView = { key, k0, v: layers };
+      return { kind: TerrainKind.View, id: req.id, result: { profile: layers, groundM, eyeM, tiles: tiles.length + fine.length, missing: lost, refined } };
+    };
+    if (!r.samples) return result(layered(r.coarse), true, []);
+    // The coarse view shows at once; the refined one replaces it when its tiles arrive.
+    scope.postMessage(result(layered(r.coarse), false, []));
+    releaseFine = cache.retain(r.tiles);
+    await cache.loadAll(r.tiles);
+    if (latest.View !== req.id) return null;
+    return result(layered(r.sweep(memoSource(cache))), true, r.tiles);
   } finally {
+    releaseFine?.();
     release();
   }
 }

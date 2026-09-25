@@ -103,6 +103,8 @@ export interface ViewResult {
   eyeM: number;
   tiles: number;
   missing: number;
+  /** False for the coarse view posted while the refinement's tiles load. */
+  refined: boolean;
 }
 
 export interface MeshResult {

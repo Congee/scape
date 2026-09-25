@@ -14,6 +14,7 @@ import { terrainRiseSet } from '../src/lib/core/astro/terrainEvents';
 import { SkyBody } from '../src/lib/core/astro/bodies';
 import { decodeTerrarium, elevationAtCubic, groundSurface, overzoomTile, BelowSea, type DemSource, type DemTile } from '../src/lib/core/terrain/dem';
 import { planSweep, refineHorizon, requiredTiles, sweepHorizon, type HorizonProfile, type RefineOptions, type SweepOptions } from '../src/lib/core/terrain/horizon';
+import { refineView, sweepView, type ViewProfile } from '../src/lib/core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, zoomForResolution, tileKey, type TileCoord } from '../src/lib/core/terrain/tiles';
 
 const SIZE = 512;
@@ -244,6 +245,28 @@ async function appSweep(store: Store, pin: LngLat, eyeM: number, refine: boolean
   return { h, tiles: tiles.length + r.tiles.length, ms: planMs + fineMs };
 }
 
+/** The worker's view request over the reference's columns, in 512 px terms. */
+const APP_VIEW: SweepOptions = { azStepDeg: AZ_STEP, minDistM: 20, minZoom: 7, maxZoom: 14, tileSize: SIZE };
+
+const skylineOf = (v: ViewProfile): HorizonProfile => ({ azStepDeg: v.azStepDeg, angleDeg: v.skylineDeg, distM: v.skylineDistM, rangeM: v.rangeM });
+
+async function viewSweep(store: Store, pin: LngLat, eyeM: number, refine: boolean): Promise<{ h: HorizonProfile; tiles: number; ms: number }> {
+  const plan = planSweep(pin, RANGE_M, APP_VIEW);
+  const tiles = requiredTiles(plan);
+  await store.ensure(tiles);
+  const t0 = performance.now();
+  if (!refine) {
+    const v = sweepView(store, plan, eyeM, EYE_AGL_M, RANGE_M, 0.02);
+    return { h: skylineOf(v), tiles: tiles.length, ms: performance.now() - t0 };
+  }
+  const r = refineView(store, plan, eyeM, EYE_AGL_M, RANGE_M, 0.02, { minZoom: 7, maxZoom: 15, ...REFINE, tileSize: SIZE });
+  const planMs = performance.now() - t0;
+  await store.ensure(r.tiles);
+  const t1 = performance.now();
+  const v = r.sweep(store);
+  return { h: skylineOf(v), tiles: tiles.length + r.tiles.length, ms: planMs + performance.now() - t1 };
+}
+
 function pct(xs: number[], p: number): number {
   const s = xs.toSorted((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.floor(p * s.length))];
@@ -296,15 +319,15 @@ for (const [name, pin] of Object.entries(scenes)) {
     const ref2 = await reference(store, pin, eyeM, 80, REF_FRAC / 2, REF_MAX_Z + 1);
     console.log(`  reference vs 2x finer + 4x margin: ${fmt(compare(ref2, ref))}`);
   }
-  for (const refine of [false, true]) {
+  for (const [kind, refine] of [['horizon', false], ['horizon', true], ['view', false], ['view', true]] as const) {
     const runs = [];
-    for (let k = 0; k < 5; k++) runs.push(await appSweep(store, pin, eyeM, refine));
+    for (let k = 0; k < 5; k++) runs.push(await (kind === 'view' ? viewSweep : appSweep)(store, pin, eyeM, refine));
     const { h, tiles } = runs[0];
     const ms = runs.map((r) => r.ms).toSorted((a, b) => a - b)[2];
     if (process.env.AUDIT_WORST)
       for (const i of Array.from(ref.angleDeg.keys()).toSorted((a, b) => Math.abs(ref.angleDeg[b] - h.angleDeg[b]) - Math.abs(ref.angleDeg[a] - h.angleDeg[a])).slice(0, +process.env.AUDIT_WORST))
         console.log(`    az ${i * AZ_STEP}: ref ${ref.angleDeg[i].toFixed(4)}° @${ref.distM[i].toFixed(0)} m, got ${h.angleDeg[i].toFixed(4)}° @${h.distM[i].toFixed(0)} m`);
-    console.log(`  ${refine ? 'refined' : 'current'}: ${fmt(compare(ref, h))}  tiles ${tiles}  sweep ${ms.toFixed(0)} ms  sun rise/set shift ≤${riseSetShift(pin, eyeM, ref, h).toFixed(0)} s`);
+    console.log(`  ${kind} ${refine ? 'refined' : 'coarse'}: ${fmt(compare(ref, h))}  tiles ${tiles}  sweep ${ms.toFixed(0)} ms  sun rise/set shift ≤${riseSetShift(pin, eyeM, ref, h).toFixed(0)} s`);
   }
   console.log(`  fetched ${store.fetched} new tiles`);
 }

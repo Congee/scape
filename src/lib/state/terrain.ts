@@ -181,7 +181,7 @@ export function startTerrainSync(): () => void {
       terrainStore.setState({ mesh, meshKey: pending.Mesh, error: null, busy: { ...terrainStore.getState().busy, Mesh: mesh.length < res.result.levels } });
       return;
     }
-    setBusy(res.kind, res.kind === TerrainKind.Horizon && !res.result.refined);
+    setBusy(res.kind, (res.kind === TerrainKind.Horizon || res.kind === TerrainKind.View) && !res.result.refined);
     if (res.kind === TerrainKind.Elevation) {
       terrainStore.setState({ pinGroundM: res.elevations[0] ?? null, pin2GroundM: res.elevations[1] ?? null, elevationKey: pending.Elevation, error: null });
     } else if (res.kind === TerrainKind.Points) {

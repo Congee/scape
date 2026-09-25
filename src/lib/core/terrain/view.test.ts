@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { elevationAngleDeg } from '@core/geo/geodesy';
 import type { DemSource, DemTile } from './dem';
-import { planSweep } from './horizon';
+import { planSweep, refineHorizon } from './horizon';
+import { peakSource } from './peakFixture';
 import { TILE_SIZE, tileKey, tilePixelToLngLat } from './tiles';
-import { assembleView, columnAt, occluded, surfaceAt, sweepView } from './view';
+import { assembleView, columnAt, occluded, refineView, surfaceAt, sweepView } from './view';
 
 const pin = { lng: -74.1553, lat: 40.7463 };
 
@@ -86,5 +88,52 @@ describe('assembleView', () => {
     const v = assembleView(1, 80, 21, 8_000, (k) => (k < 91 ? { v: old, col: k - 70 } : { v: fresh, col: k - 91 }));
     expect(v).toEqual(whole);
     expect(v.azFromDeg).toBe(80);
+  });
+});
+
+describe('refineView', () => {
+  const eyeM = 1.6;
+  for (const km of [10, 50]) {
+    it(`recovers a summit ${km} km away and matches the refined horizon`, () => {
+      const src = peakSource(pin, km * 1000, 400, 1000);
+      const truth = elevationAngleDeg(km * 1000, 400 - eyeM);
+      const plan = planSweep(pin, 60_000, { azFromDeg: 88, azSpanDeg: 4, azStepDeg: 0.5 });
+      const r = refineView(src, plan, eyeM, eyeM, 60_000, 0.02);
+      const east = (90 - 88) / 0.5;
+      const fine = r.sweep(src);
+      expect(r.coarse).toEqual(sweepView(src, plan, eyeM, eyeM, 60_000, 0.02));
+      expect(truth - r.coarse.skylineDeg[east]).toBeGreaterThan(0.02);
+      expect(Math.abs(truth - fine.skylineDeg[east])).toBeLessThan(0.01);
+      expect(fine.skylineDeg).toEqual(refineHorizon(src, plan, eyeM, eyeM, 60_000).sweep(src).angleDeg);
+      // Layers still climb outward, and the top one is the skyline.
+      for (let i = 0; i < fine.nAz; i++) {
+        for (let m = fine.start[i] + 1; m < fine.start[i + 1]; m++) {
+          expect(fine.angleDeg[m]).toBeGreaterThan(fine.angleDeg[m - 1]);
+          expect(fine.distM[m]).toBeGreaterThan(fine.distM[m - 1]);
+        }
+        expect(fine.angleDeg[fine.start[i + 1] - 1]).toBe(fine.skylineDeg[i]);
+      }
+      // A mark just under the summit hides behind it, one just over clears it.
+      expect(occluded(fine, 90, truth - 0.01, km * 2000)).toBe(true);
+      expect(occluded(fine, 90, truth + 0.01, km * 2000)).toBe(false);
+    });
+  }
+
+  it('keeps the layers under the skyline', () => {
+    const plan = planSweep(pin, 8_000, { azStepDeg: 1, azFromDeg: 60, azSpanDeg: 60 });
+    const r = refineView(wallsSource(), plan, 1.6, 1.6, 8_000, 0.02);
+    const v = r.sweep(wallsSource());
+    const col = columnAt(v, 90);
+    expect(v.distM[surfaceAt(v, col, 2)]).toBeLessThan(2_700);
+    expect(v.distM[surfaceAt(v, col, 5)]).toBeGreaterThan(5_000);
+  });
+
+  it('leaves flat ground alone', () => {
+    const plan = planSweep(pin, 20_000, { azStepDeg: 10 });
+    const flat: DemSource = { get: (z, x, y) => ({ z, x, y, size: TILE_SIZE, elev: new Float32Array(TILE_SIZE * TILE_SIZE) }) };
+    const r = refineView(flat, plan, 1.6, 1.6, 20_000);
+    expect(r.samples).toBe(0);
+    expect(r.tiles).toEqual([]);
+    expect(r.sweep(flat)).toEqual(sweepView(flat, plan, 1.6, 1.6, 20_000));
   });
 });
