@@ -1268,6 +1268,17 @@ visible errors are design choices, each waiting on a decision (recommendation in
     the minute tick, not the zoom. **Open**: to cut this, the viewfinder mesh rebuild has to
     allocate less.
 
+    **Baseline, time pinned** (2026-09-26, after strip re-stamps) — a minute tick landing a
+    low-sun mask re-stamp failed cases at random, so every visible case is pinned at local noon
+    (hidden cases stay live). One **live-tick** case (Rotterdam map, clock shifted to
+    2026-06-21 19:00 Z, tick a quarter into the window) runs the real tick; its own budget allows
+    one re-stamp: +8 s renderer CPU, ≤ 80 fetches. Two full passes, 45 cases, GPU lock per case:
+    - 44/45 pass both times; renderer ≤ 0.3 % in every other case but one hidden viewfinder at
+      1.0 %, GPU ≤ 0.1 %, 0 GL frames and 0 fetches wherever time is pinned.
+    - Live tick: 1 re-stamp, 5.9 s CPU (19.7 % renderer), 65 fetches, 3 GL frames (3 runs before
+      the passes: 4.6–6.2 s, 53–65 fetches).
+    - Still over: viewfinder after zoom, 3.0 and 3.1 % (the open GC item above).
+
     **Note:** viewfinder rebuild reuses buffers, released after long idle; viewfinder fills a
     maximized window (user, 2026-09-25).
     **Note:** viewfinder fills the available space; the sensor frame is marked by a border (user, 2026-09-25).
