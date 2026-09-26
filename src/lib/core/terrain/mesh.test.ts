@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BufferPool } from '@core/pool';
 import { curvatureDropM } from '@core/geo/geodesy';
 import { frameAt } from '@core/geo/pinFrame';
 import { buildPrisms } from '@core/geo/prismRaster';
@@ -553,6 +554,16 @@ describe('joinBlocks', () => {
     for (const k of ['pos', 'nrm', 'idx', 'blockStart', 'blockBox'] as const) expect(joined[k]).toEqual(whole[k]);
     expect(joined.missing).toBe(whole.missing);
     expect(joined.cellM).toBe(whole.cellM);
+  });
+
+  it('builds the same mesh into reused buffers left dirty by the last one', () => {
+    const whole = buildLevel(PIN, 1250, 3, blocks, ridge, skirt);
+    const pool = new BufferPool();
+    for (let i = 0; i < 8; i++) pool.give(new Float32Array(whole.pos.length * 2).fill(Number.NaN).buffer);
+    const parts = blocks.map((b, i) => buildBlock(PIN, 1250, 3, b, ridge, skirt[i], pool));
+    const joined = joinBlocks(3, parts, pool);
+    expect(joined.pos.buffer.byteLength).toBeGreaterThan(joined.pos.byteLength);
+    for (const k of ['pos', 'nrm', 'idx', 'blockStart', 'blockBox'] as const) expect(joined[k]).toEqual(whole[k]);
   });
 
   it('leaves the parts it copies untouched', () => {

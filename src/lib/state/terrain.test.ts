@@ -3,7 +3,7 @@ import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { analyzeSightline, endpointHeightM } from '@core/terrain/los';
 import type { MeshResult, ProfileResult } from '@workers/terrain.protocol';
 import { aimFor } from './composition';
-import { isComplete, meshEyeKeyFor, meshKeyFor, mergeLevel, profileKeyFor, targetAngleFor, type TerrainState } from './terrain';
+import { isComplete, meshEyeKeyFor, meshKeyFor, mergeLevel, profileKeyFor, retiredBuffers, targetAngleFor, type TerrainState } from './terrain';
 
 // Zermatt to the Matterhorn: 8.5 km, the target 1.7 km above the eye.
 const PIN: LngLat = { lat: 46.0207, lng: 7.7491 };
@@ -108,6 +108,7 @@ describe('aimFor over targetAngleFor', () => {
 });
 
 const lvl = (level: number, levels = 3, tag = 0) => ({ mesh: { level }, levels, ms: tag }) as unknown as MeshResult;
+const withBuffers = (level: number) => ({ mesh: { level, pos: new Float32Array(3), nrm: new Float32Array(3), idx: new Uint32Array(3) }, levels: 2 }) as unknown as MeshResult;
 
 describe('mesh sets', () => {
   const win = { azimuthDeg: 220, hfovDeg: 60, vfovDeg: 40, pitchDeg: 10, elHalfDeg: 30, targetRad: 0.001, rangeM: 120_000 };
@@ -132,5 +133,13 @@ describe('mesh sets', () => {
     expect(isComplete(set)).toBe(false);
     expect(isComplete(mergeLevel(set, lvl(1)))).toBe(true);
     expect(isComplete([])).toBe(false);
+  });
+
+  it('retires only levels no set still holds, each buffer once', () => {
+    const [a, b, c] = [withBuffers(0), withBuffers(1), withBuffers(0)];
+    expect(retiredBuffers([a, b], [[b], null])).toEqual([a.mesh.pos.buffer, a.mesh.nrm.buffer, a.mesh.idx.buffer]);
+    expect(retiredBuffers([a, a], [])).toHaveLength(3);
+    structuredClone(c.mesh.pos.buffer, { transfer: [c.mesh.pos.buffer] });
+    expect(retiredBuffers([c], [])).toEqual([c.mesh.nrm.buffer, c.mesh.idx.buffer]);
   });
 });

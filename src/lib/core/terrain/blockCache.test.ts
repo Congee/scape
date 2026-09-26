@@ -37,4 +37,18 @@ describe('BlockCache', () => {
     c.set('1', block(8));
     expect(c.bytes).toBe(B);
   });
+
+  it('hands back every block that leaves, and not one replaced by itself', () => {
+    const gone: MeshBlock[] = [];
+    const c = new BlockCache(2 * B, (b) => gone.push(b));
+    c.setAnchor('a');
+    const [b1, b2, b3] = [block(8), block(8), block(8)];
+    c.set('1', b1);
+    c.set('1', b1);
+    c.set('2', b2);
+    c.set('3', b3);
+    expect(gone).toEqual([b1]);
+    c.setAnchor('b');
+    expect(gone).toEqual([b1, b2, b3]);
+  });
 });

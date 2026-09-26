@@ -2,6 +2,7 @@
 
 import { HAZE_M, ROOF_SHADE, sphereVisible } from '@core/geo/prismRaster';
 import type { Camera, CameraBasis } from '@core/optics/projection';
+import { IdleRelease, poolSize } from '@core/pool';
 import type { MeshLevel } from '@core/terrain/mesh';
 import { linkProgram, prismClipMatrix, uniforms } from './prismGl';
 import { axialFar, axialNear, boxCastsInto, coneDepthRange, type Cascade, type SceneBounds } from './shadowFit';
@@ -63,12 +64,19 @@ precision highp float;
 void main() {}
 `;
 
-interface LevelGpu {
-  key: MeshLevel;
+/** One level's GPU buffers; a dropped level's go back to the pool with their byte capacities. */
+interface Slot {
   vao: WebGLVertexArrayObject;
   vbo: WebGLBuffer;
   nbo: WebGLBuffer;
   ibo: WebGLBuffer;
+  vertexBytes: number;
+  indexBytes: number;
+}
+
+interface LevelGpu {
+  key: MeshLevel;
+  slot: Slot;
   blockStart: Int32Array;
   blockBox: Float32Array;
   blocks: number;
@@ -107,6 +115,11 @@ export class TerrainGl {
   private readonly uni: Record<string, WebGLUniformLocation | null>;
   private readonly depthUni: Record<string, WebGLUniformLocation | null>;
   private levels: LevelGpu[] = [];
+  private free: Slot[] = [];
+  private readonly idle = new IdleRelease(() => {
+    for (const s of this.free) this.deleteSlot(s);
+    this.free = [];
+  });
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
@@ -173,7 +186,7 @@ export class TerrainGl {
     let blocks = 0;
     let triangles = 0;
     for (const lv of this.levels) {
-      gl.bindVertexArray(lv.vao);
+      gl.bindVertexArray(lv.slot.vao);
       blocks += runs(
         lv,
         (b) => {
@@ -201,7 +214,7 @@ export class TerrainGl {
     gl.uniformMatrix4fv(this.depthUni.uProj, false, cascade.matrix);
     let triangles = 0;
     for (const lv of this.levels) {
-      gl.bindVertexArray(lv.vao);
+      gl.bindVertexArray(lv.slot.vao);
       runs(
         lv,
         (b) => boxCastsInto(lv.blockBox, b * 6, light, cascade),
@@ -216,38 +229,75 @@ export class TerrainGl {
   }
 
   dispose(): void {
-    for (const l of this.levels) this.drop(l);
+    this.idle.cancel();
+    for (const l of this.levels) this.deleteSlot(l.slot);
+    for (const s of this.free) this.deleteSlot(s);
     this.levels = [];
+    this.free = [];
     this.gl.deleteProgram(this.prog);
     this.gl.deleteProgram(this.depthProg);
   }
 
+  /** Refills the tightest free slot that fits, else grows one (or makes the first); a rebuild then allocates nothing. */
   private upload(m: MeshLevel): LevelGpu {
+    const gl = this.gl;
+    this.idle.touch();
+    const vb = m.pos.byteLength;
+    const ib = m.idx.byteLength;
+    let best = -1;
+    for (let i = 0; i < this.free.length; i++) {
+      const f = this.free[i];
+      if (f.vertexBytes >= vb && f.indexBytes >= ib && (best < 0 || f.vertexBytes < this.free[best].vertexBytes)) best = i;
+    }
+    const slot = best >= 0 ? this.free.splice(best, 1)[0] : (this.free.pop() ?? this.createSlot());
+    gl.bindVertexArray(slot.vao);
+    if (slot.vertexBytes < vb) {
+      slot.vertexBytes = poolSize(vb);
+      for (const b of [slot.vbo, slot.nbo]) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, b);
+        gl.bufferData(gl.ARRAY_BUFFER, slot.vertexBytes, gl.STATIC_DRAW);
+      }
+    }
+    if (slot.indexBytes < ib) {
+      slot.indexBytes = poolSize(ib);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, slot.indexBytes, gl.STATIC_DRAW);
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, slot.vbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, m.pos);
+    gl.bindBuffer(gl.ARRAY_BUFFER, slot.nbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, m.nrm);
+    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, m.idx);
+    gl.bindVertexArray(null);
+    return { key: m, slot, blockStart: m.blockStart, blockBox: m.blockBox, blocks: m.blocks };
+  }
+
+  private createSlot(): Slot {
     const gl = this.gl;
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
     const vbo = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, m.pos, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
     const nbo = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, nbo);
-    gl.bufferData(gl.ARRAY_BUFFER, m.nrm, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(1);
     gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
     const ibo = gl.createBuffer()!;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
-    gl.bindVertexArray(null);
-    return { key: m, vao, vbo, nbo, ibo, blockStart: m.blockStart, blockBox: m.blockBox, blocks: m.blocks };
+    return { vao, vbo, nbo, ibo, vertexBytes: 0, indexBytes: 0 };
   }
 
   private drop(l: LevelGpu): void {
+    this.idle.touch();
+    this.free.push(l.slot);
+  }
+
+  private deleteSlot(s: Slot): void {
     const gl = this.gl;
-    gl.deleteVertexArray(l.vao);
-    gl.deleteBuffer(l.vbo);
-    gl.deleteBuffer(l.nbo);
-    gl.deleteBuffer(l.ibo);
+    gl.deleteVertexArray(s.vao);
+    gl.deleteBuffer(s.vbo);
+    gl.deleteBuffer(s.nbo);
+    gl.deleteBuffer(s.ibo);
   }
 }

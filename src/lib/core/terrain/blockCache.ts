@@ -6,12 +6,17 @@ export class BlockCache {
   private blocks = new Map<string, MeshBlock>();
   private used = 0;
 
-  constructor(readonly budgetBytes: number) {}
+  constructor(
+    readonly budgetBytes: number,
+    /** Told of every block that leaves, so its buffers can be reused. */
+    private readonly onEvict: (b: MeshBlock) => void = () => {}
+  ) {}
 
   /** Eye-relative blocks go stale when the eye moves, so a new anchor empties the cache. */
   setAnchor(anchor: string) {
     if (anchor === this.anchor) return;
     this.anchor = anchor;
+    for (const b of this.blocks.values()) this.onEvict(b);
     this.blocks.clear();
     this.used = 0;
   }
@@ -29,6 +34,7 @@ export class BlockCache {
     if (old) {
       this.used -= bytesOf(old);
       this.blocks.delete(key);
+      if (old !== b) this.onEvict(old);
     }
     this.blocks.set(key, b);
     this.used += bytesOf(b);
@@ -36,6 +42,7 @@ export class BlockCache {
       if (this.used <= this.budgetBytes) break;
       this.blocks.delete(k);
       this.used -= bytesOf(v);
+      this.onEvict(v);
     }
   }
 
@@ -48,4 +55,5 @@ export class BlockCache {
   }
 }
 
-const bytesOf = (b: MeshBlock) => b.pos.byteLength + b.nrm.byteLength + b.box.byteLength;
+// Whole buffers: a pooled block's arrays may be views into larger ones.
+const bytesOf = (b: MeshBlock) => b.pos.buffer.byteLength + b.nrm.buffer.byteLength + b.box.byteLength;

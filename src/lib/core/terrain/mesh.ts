@@ -518,10 +518,10 @@ export interface MeshLevel {
   level: number;
   cellM: number;
   /** Eye-relative metres, three per vertex. */
-  pos: Float32Array;
+  pos: Float32Array<ArrayBuffer>;
   /** Unit surface normal, three per vertex. */
-  nrm: Float32Array;
-  idx: Uint32Array;
+  nrm: Float32Array<ArrayBuffer>;
+  idx: Uint32Array<ArrayBuffer>;
   /** Indices of block b are [blockStart[b], blockStart[b + 1]). */
   blockStart: Int32Array;
   /** Six per block: minE, minN, minU, maxE, maxN, maxU. */
@@ -549,8 +549,8 @@ export const seamSkirtM = (level: number, neighbourLevel: number) => Math.max(sk
 /** One block's vertices, the unit a level is joined from; eye-relative, so reusable while the eye stays put. */
 export interface MeshBlock {
   /** Grid posts then the skirt ring, three per vertex. */
-  pos: Float32Array;
-  nrm: Float32Array;
+  pos: Float32Array<ArrayBuffer>;
+  nrm: Float32Array<ArrayBuffer>;
   /** minE, minN, minU, maxE, maxN, maxU. */
   box: Float32Array;
   missing: number;
@@ -559,6 +559,15 @@ export interface MeshBlock {
 const SIDE = BLOCK_CELLS + 1;
 const HALO = BLOCK_CELLS + 3;
 export const VERTICES_PER_BLOCK = SIDE * SIDE + 4 * BLOCK_CELLS;
+
+/** Where a mesh's large arrays come from; every element is written, so a reused buffer needs no clearing. */
+export interface MeshAlloc {
+  f32(n: number): Float32Array<ArrayBuffer>;
+  u32(n: number): Uint32Array<ArrayBuffer>;
+}
+const freshAlloc: MeshAlloc = { f32: (n) => new Float32Array(n), u32: (n) => new Uint32Array(n) };
+/** Halo heights for the block being built; buildBlock is synchronous, so one serves every call. */
+const haloU = new Float64Array(HALO * HALO);
 
 /** Triangles of one block over its own vertices; every block shares the pattern. */
 const BLOCK_IDX = (() => {
@@ -596,11 +605,11 @@ const RIM = blockRim();
  * One block. Heights come from `sample` over a one-cell halo so every vertex normal is a central
  * difference, and the block is rimmed with a downward skirt `drop` deep so a level seam cannot crack.
  */
-export function buildBlock(pin: LngLat, eyeM: number, level: number, { ix, iy }: BlockId, sample: HeightSampler, drop = skirtDepth(levelCellM(level))): MeshBlock {
+export function buildBlock(pin: LngLat, eyeM: number, level: number, { ix, iy }: BlockId, sample: HeightSampler, drop = skirtDepth(levelCellM(level)), alloc = freshAlloc): MeshBlock {
   const cellM = levelCellM(level);
-  const pos = new Float32Array(VERTICES_PER_BLOCK * 3);
-  const nrm = new Float32Array(VERTICES_PER_BLOCK * 3);
-  const u = new Float64Array(HALO * HALO);
+  const pos = alloc.f32(VERTICES_PER_BLOCK * 3);
+  const nrm = alloc.f32(VERTICES_PER_BLOCK * 3);
+  const u = haloU;
   let missing = 0;
   const i0 = ix * BLOCK_CELLS;
   const j0 = iy * BLOCK_CELLS;
@@ -658,11 +667,11 @@ export function buildBlock(pin: LngLat, eyeM: number, level: number, { ix, iy }:
 }
 
 /** A level from its blocks, in order; the blocks are copied, so a cached one stays intact. */
-export function joinBlocks(level: number, parts: readonly MeshBlock[]): MeshLevel {
+export function joinBlocks(level: number, parts: readonly MeshBlock[], alloc = freshAlloc): MeshLevel {
   const vPerBlock = VERTICES_PER_BLOCK;
-  const pos = new Float32Array(parts.length * vPerBlock * 3);
-  const nrm = new Float32Array(parts.length * vPerBlock * 3);
-  const idx = new Uint32Array(parts.length * TRIANGLES_PER_BLOCK * 3);
+  const pos = alloc.f32(parts.length * vPerBlock * 3);
+  const nrm = alloc.f32(parts.length * vPerBlock * 3);
+  const idx = alloc.u32(parts.length * TRIANGLES_PER_BLOCK * 3);
   const blockStart = new Int32Array(parts.length + 1);
   const blockBox = new Float32Array(parts.length * 6);
   let missing = 0;

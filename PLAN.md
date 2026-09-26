@@ -1268,6 +1268,9 @@ visible errors are design choices, each waiting on a decision (recommendation in
     the minute tick, not the zoom. **Open**: to cut this, the viewfinder mesh rebuild has to
     allocate less.
 
+    **Note:** viewfinder rebuild reuses buffers, released after long idle; viewfinder fills a
+    maximized window (user, 2026-09-25).
+
     **Fixed:** the map's shadow mask re-stamped terrain and buildings (about 0.5 s of worker time)
     on roughly every third live-clock minute, because the moving sun changed the shape of the padded
     rect. It now keeps the current grid while that grid still covers the pad (`rectCovers`), so on a

@@ -3,13 +3,14 @@ import { bearingDeg, distanceM, geodesicBetween, normalizeLng, type LngLat } fro
 import { cubicStencilTiles, elevationAt, elevationAtCubic, memoSource } from '@core/terrain/dem';
 import { buildDetailBound, buildHeightBound, planDetailBound } from '@core/terrain/heightBound';
 import { BlockCache } from '@core/terrain/blockCache';
-import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type Selection } from '@core/terrain/mesh';
+import { BufferPool } from '@core/pool';
+import { blockUnitBounds, BLOCKS_PER_SIDE, blockSideM, buildBlock, enuBoxUnitBounds, joinBlocks, levelCellM, levelsForRange, selectBlocks, type MeshBlock, type Selection } from '@core/terrain/mesh';
 import { planSweep, refineHorizon, requiredTiles, sweepColumns, type HorizonProfile } from '@core/terrain/horizon';
 import { analyzeSightline } from '@core/terrain/los';
 import { assembleView, refineView, type ViewProfile } from '@core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, tileKey, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
-import { TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
+import { RECYCLE, TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainMessage, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** Detail-bound zooms, in 256 px terms: z14 posts are ~7 m, z13 ~14 m at mid-latitudes. */
@@ -17,8 +18,16 @@ const DETAIL_ZOOMS = [demZoom(13), demZoom(14)] as const;
 /** Narrower than this the detail bound usually pays, so its tiles load alongside the coarse ones; wider waits to be asked. */
 const DETAIL_PREFETCH_HFOV_DEG = 6;
 const cache = new DemCache(demCacheTiles(320));
+/** Mesh buffers the main thread sent back and blocks the cache let go; a rebuild draws on them before allocating. */
+const meshPool = new BufferPool();
+/** Blocks out of the cache wait for the level being joined, which may still hold them. */
+let evicted: MeshBlock[] = [];
 // About 1500 blocks: an aim drag re-cuts the wedge, and most of it was built a moment ago.
-const meshBlocks = new BlockCache(96 * 2 ** 20);
+const meshBlocks = new BlockCache(96 * 2 ** 20, (b) => evicted.push(b));
+const recycleBlock = (b: MeshBlock) => {
+  meshPool.give(b.pos.buffer);
+  meshPool.give(b.nrm.buffer);
+};
 /** Newest request id per kind; older ones stop before the expensive step. */
 const latest: Record<TerrainKind, number> = { Elevation: 0, Profile: 0, Horizon: 0, View: 0, Points: 0, Mesh: 0 };
 
@@ -258,6 +267,7 @@ async function mesh(req: MeshRequest): Promise<null> {
       const src = memoSource(cache);
       const sample = (lng: number, lat: number) => elevationAtCubic(src, lng, lat, zoom);
       let reused = 0;
+      const loose: MeshBlock[] = [];
       const parts = blocks.map((b, i) => {
         const drop = skirtM[i];
         const key = `${level}/${b.ix}/${b.iy}/${zoom}/${drop}`;
@@ -266,12 +276,16 @@ async function mesh(req: MeshRequest): Promise<null> {
           reused++;
           return hit;
         }
-        const part = buildBlock(req.pin, eyeM, level, b, sample, drop);
+        const part = buildBlock(req.pin, eyeM, level, b, sample, drop, meshPool);
         // A block over an absent tile holds sea level or a bilinear edge; built again once the tile lands.
         if (part.missing === 0 && blockTiles[i].every((t) => cache.get(t.z, t.x, t.y))) meshBlocks.set(key, part);
+        else loose.push(part);
         return part;
       });
-      const out = joinBlocks(level, parts);
+      const out = joinBlocks(level, parts, meshPool);
+      for (const b of loose) recycleBlock(b);
+      for (const b of evicted) recycleBlock(b);
+      evicted = [];
       if (latest.Mesh !== req.id) return null;
       const result = { mesh: out, zoom, eyeM, groundM, levels: sel.levels.length, reused, cacheBytes: meshBlocks.bytes, tiles: tiles.size, reachM: sel.reachM, targetRad: sel.targetRad, minCellM: sel.minCellM, ms: performance.now() - t0 };
       scope.postMessage({ kind: TerrainKind.Mesh, id: req.id, result } satisfies TerrainResponse, [out.pos.buffer, out.nrm.buffer, out.idx.buffer, out.blockStart.buffer, out.blockBox.buffer]);
@@ -298,8 +312,12 @@ function dispatch(req: TerrainRequest): Promise<TerrainResponse | null> {
   }
 }
 
-scope.addEventListener('message', (e: MessageEvent<TerrainRequest>) => {
+scope.addEventListener('message', (e: MessageEvent<TerrainMessage>) => {
   const req = e.data;
+  if (req.kind === RECYCLE) {
+    for (const b of req.buffers) meshPool.give(b);
+    return;
+  }
   latest[req.kind] = req.id;
   dispatch(req).then(
     (res) => {

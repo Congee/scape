@@ -66,6 +66,15 @@ export interface MeshRequest {
 
 export type TerrainRequest = ElevationRequest | PointsRequest | ProfileRequest | HorizonRequest | ViewRequest | MeshRequest;
 
+export const RECYCLE = 'Recycle';
+/** Buffers of mesh levels the main thread is done with, transferred back for the next rebuild. */
+export interface RecycleMessage {
+  kind: typeof RECYCLE;
+  buffers: ArrayBuffer[];
+}
+
+export type TerrainMessage = TerrainRequest | RecycleMessage;
+
 export interface ProfileResult {
   a: LngLat;
   b: LngLat;
