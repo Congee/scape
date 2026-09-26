@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frameOf, frameToLngLat, longestShadowM, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, rectCovers, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
+import { frameOf, frameToLngLat, grownRect, longestShadowM, MASK_SNAP_CELLS, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, rectCovers, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
 
 const merc = (lat: number) => 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
 
@@ -61,6 +61,35 @@ describe('rectCovers', () => {
     expect(rectCovers(outer, { ...outer, originE: -1984 })).toBe(false);
     expect(rectCovers(outer, { ...outer, originN: -2112 })).toBe(false);
     expect(rectCovers(outer, { ...outer, cellM: outer.cellM * 2 })).toBe(false);
+  });
+});
+
+describe('grownRect', () => {
+  const last = { originE: -2880, originN: -960, nx: 801, ny: 289, cellM: 4 };
+
+  it('pads only the side a lengthening shadow spills past, keeping the snap grid', () => {
+    const want = { ...last, originE: -2944, nx: 817 };
+    const r = grownRect(last, want);
+    expect(rectCovers(r, want)).toBe(true);
+    expect(r.originE).toBeLessThan(want.originE);
+    expect(r.originE + r.nx * r.cellM).toBe(want.originE + want.nx * want.cellM);
+    expect(r.originN).toBe(want.originN);
+    expect(r.ny).toBe(want.ny);
+    expect(Math.abs(r.originE % (r.cellM * MASK_SNAP_CELLS))).toBe(0);
+  });
+
+  it('leaves room for the next several minutes of growth', () => {
+    const r = grownRect(last, { ...last, originE: -2944, nx: 817 });
+    let covered = 0;
+    for (let step = 1; step <= 10; step++) if (rectCovers(r, { ...last, originE: last.originE - 64 * step, nx: last.nx + 16 * step })) covered++;
+    expect(covered).toBeGreaterThanOrEqual(5);
+  });
+
+  it('stays within the cell budget and on the same grid', () => {
+    const wide = { ...last, nx: MASK_MAX_PX - 16 };
+    const r = grownRect(wide, { ...wide, originE: wide.originE - 64 });
+    expect(r.nx).toBeLessThanOrEqual(MASK_MAX_PX);
+    expect(grownRect(last, { ...last, cellM: 8 })).toEqual({ ...last, cellM: 8 });
   });
 });
 

@@ -82,6 +82,28 @@ export function rectCovers(outer: MaskRect, inner: MaskRect): boolean {
   return outer.cellM === inner.cellM && inner.originE >= outer.originE && inner.originN >= outer.originN && inner.originE + inner.nx * inner.cellM <= outer.originE + outer.nx * outer.cellM && inner.originN + inner.ny * inner.cellM <= outer.originN + outer.ny * outer.cellM;
 }
 
+/** Share of the span added past each edge a pad outgrows, so a sinking sun re-stamps the grid every few minutes, not every minute. */
+export const MASK_GROW_SLACK = 0.25;
+
+/** `want`, pushed further out on each side where it spills past `last` on the same grid, within the cell budget. */
+export function grownRect(last: MaskRect, want: MaskRect): MaskRect {
+  if (last.cellM !== want.cellM) return want;
+  const { cellM } = want;
+  const axis = (lastLo: number, lastN: number, lo: number, n: number): [number, number] => {
+    const lower = lo < lastLo;
+    const upper = lo + n * cellM > lastLo + lastN * cellM;
+    const sides = +lower + +upper;
+    if (sides === 0) return [lo, n];
+    // Whole snap blocks keep the origin on the snap grid.
+    const room = Math.floor((MASK_MAX_PX - n) / sides / MASK_SNAP_CELLS) * MASK_SNAP_CELLS;
+    const slack = Math.max(0, Math.min(room, Math.ceil((MASK_GROW_SLACK * n) / MASK_SNAP_CELLS) * MASK_SNAP_CELLS));
+    return [lower ? lo - slack * cellM : lo, n + sides * slack];
+  };
+  const [originE, nx] = axis(last.originE, last.nx, want.originE, want.nx);
+  const [originN, ny] = axis(last.originN, last.ny, want.originN, want.ny);
+  return { originE, originN, nx, ny, cellM };
+}
+
 /** Corner coordinates for an image source: the cells' outer edges, north-west first, clockwise. */
 export function maskCorners(centre: LngLat, r: MaskRect): [[number, number], [number, number], [number, number], [number, number]] {
   const f = maskFrame(centre);

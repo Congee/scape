@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
-import { rectCovers, shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
+import { grownRect, rectCovers, shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
 import { adoptPrismSlots } from '@core/geo/prismOcclude';
 import { adoptPrismSurfaces } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
@@ -214,7 +214,8 @@ export function stopBuildings(): void {
 /** Builds the map's ground-shadow mask; the same rect under a sun that moves no edge `SHADOW_DRIFT_PX` at `mPerPx` is ignored. */
 export function requestShadowMask(centre: LngLat, want: MaskRect, sunAzDeg: number, sunAltDeg: number, softM: number, buildings: boolean, maxLenM: number, mPerPx: number): void {
   // A drifting sun reshapes the pad; keeping a grid that still covers it spares the worker a full re-stamp.
-  const rect = lastMask && lastMask.centre.lat === centre.lat && lastMask.centre.lng === centre.lng && rectCovers(lastMask, want) ? { originE: lastMask.originE, originN: lastMask.originN, nx: lastMask.nx, ny: lastMask.ny, cellM: lastMask.cellM } : want;
+  const last = lastMask && lastMask.centre.lat === centre.lat && lastMask.centre.lng === centre.lng ? { originE: lastMask.originE, originN: lastMask.originN, nx: lastMask.nx, ny: lastMask.ny, cellM: lastMask.cellM } : null;
+  const rect = !last ? want : rectCovers(last, want) ? last : grownRect(last, want);
   const key = `${centre.lat.toFixed(6)},${centre.lng.toFixed(6)}|${rect.originE}|${rect.originN}|${rect.nx}|${rect.ny}|${rect.cellM}|${softM}|${buildings}`;
   if (key === maskKey && lastMask && shadowDriftPx({ azDeg: lastMask.sunAzDeg, altDeg: lastMask.sunAltDeg }, { azDeg: sunAzDeg, altDeg: sunAltDeg }, { ...builtShadow, maxLenM }, mPerPx) < SHADOW_DRIFT_PX) return;
   maskKey = key;
