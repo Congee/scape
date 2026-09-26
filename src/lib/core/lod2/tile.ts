@@ -226,13 +226,6 @@ export function placeLod2(t: Lod2Tile, pin: LngLat, eyeM: number): SurfaceMesh {
   };
 }
 
-/** World triangles, nine numbers each, as the mask stamps them. */
-export function lod2Triangles(t: Lod2Tile): Float64Array {
-  const out = new Float64Array(t.idx.length * 3);
-  for (let i = 0; i < t.idx.length; i++) out.set(t.world.subarray(t.idx[i] * 3, t.idx[i] * 3 + 3), i * 3);
-  return out;
-}
-
 /** Apex above the ground at the target; walls often reach below the terrain, so the lowest vertex stands in only without a DEM. */
 export function lod2HeightAboveM(b: Lod2Building, groundM: number | null): number {
   return Math.max(0, b.apexM - (groundM != null && Number.isFinite(groundM) ? groundM : b.baseM));

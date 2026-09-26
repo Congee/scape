@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frameOf, frameToLngLat, grownRect, keepsCentre, longestShadowM, MASK_SNAP_CELLS, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, maskStrips, MOON_SHADOW_RGB, rectCovers, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
+import { dirtyRects, frameOf, frameToLngLat, grownRect, keepsCentre, longestShadowM, MASK_SNAP_CELLS, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, maskStrips, MOON_SHADOW_RGB, rectCovers, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB, type MaskRect } from './shadowMask';
 
 const merc = (lat: number) => 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
 
@@ -155,6 +155,41 @@ describe('maskStrips', () => {
     expect(maskStrips(last, { ...last, cellM: 8 })).toBeNull();
     expect(maskStrips(last, { ...last, originE: -254 })).toBeNull();
     expect(maskStrips(last, { ...last, originE: 4096 })).toBeNull();
+  });
+});
+
+const inside = (r: MaskRect, e: number, n: number) => e >= r.originE && e < r.originE + r.nx * r.cellM && n >= r.originN && n < r.originN + r.ny * r.cellM;
+
+describe('dirtyRects', () => {
+  const last = { originE: -256, originN: -128, nx: 128, ny: 64, cellM: 4 };
+  const next = { ...last, ny: 96 };
+
+  it('covers every shared cell within a cell of a box, and no cell outside last', () => {
+    const boxes = [
+      { e0: -200, n0: -100, e1: -150, n1: -90 },
+      { e0: 60, n0: 100, e1: 70, n1: 400 },
+      { e0: -130, n0: -60, e1: 40, n1: 10 }
+    ];
+    const rects = dirtyRects(last, next, boxes);
+    for (let iy = 0; iy < next.ny; iy++)
+      for (let ix = 0; ix < next.nx; ix++) {
+        const e = next.originE + ix * next.cellM;
+        const n = next.originN + iy * next.cellM;
+        const held = rects.filter((r) => inside(r, e, n)).length;
+        expect(held).toBeLessThanOrEqual(1);
+        if (held) expect(inside(last, e, n)).toBe(true);
+        const near = boxes.some((b) => e >= b.e0 - 4 && e <= b.e1 + 4 && n >= b.n0 - 4 && n <= b.n1 + 4);
+        if (near && inside(last, e, n)) expect(held).toBe(1);
+      }
+  });
+
+  it('merges a column of blocks into one rect', () => {
+    expect(dirtyRects(last, next, [{ e0: -250, n0: -120, e1: -240, n1: 120 }])).toEqual([{ originE: -256, originN: -128, nx: 16, ny: 64, cellM: 4 }]);
+  });
+
+  it('adds nothing for a box outside the shared cells', () => {
+    expect(dirtyRects(last, next, [{ e0: 0, n0: 200, e1: 10, n1: 250 }])).toEqual([]);
+    expect(dirtyRects(last, next, [])).toEqual([]);
   });
 });
 

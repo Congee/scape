@@ -137,6 +137,65 @@ export function maskStrips(last: MaskRect, next: MaskRect): MaskRect[] | null {
   return out;
 }
 
+/** East/north extent in frame metres. */
+export interface FrameBox {
+  e0: number;
+  n0: number;
+  e1: number;
+  n1: number;
+}
+
+/**
+ * The cells `next` shares with `last` that a stamp inside any of `boxes` may have raised, as a few
+ * snap-block rects on `next`'s lattice; rebuilt whole, they undo what `last` stamped there.
+ */
+export function dirtyRects(last: MaskRect, next: MaskRect, boxes: readonly FrameBox[]): MaskRect[] {
+  const { cellM, originE, originN } = next;
+  const x0 = Math.max(0, Math.round((last.originE - originE) / cellM));
+  const x1 = Math.min(next.nx, Math.round((last.originE - originE) / cellM) + last.nx);
+  const y0 = Math.max(0, Math.round((last.originN - originN) / cellM));
+  const y1 = Math.min(next.ny, Math.round((last.originN - originN) / cellM) + last.ny);
+  if (x0 >= x1 || y0 >= y1) return [];
+  const B = MASK_SNAP_CELLS;
+  const bw = Math.ceil(next.nx / B);
+  const marked = new Set<number>();
+  for (const b of boxes) {
+    // A cell a stamp touches has its centre inside the shape or within half a cell of a vertex.
+    const ix0 = Math.max(x0, Math.ceil((b.e0 - cellM - originE) / cellM));
+    const ix1 = Math.min(x1 - 1, Math.floor((b.e1 + cellM - originE) / cellM));
+    const iy0 = Math.max(y0, Math.ceil((b.n0 - cellM - originN) / cellM));
+    const iy1 = Math.min(y1 - 1, Math.floor((b.n1 + cellM - originN) / cellM));
+    if (ix0 > ix1 || iy0 > iy1) continue;
+    for (let by = Math.floor(iy0 / B); by <= Math.floor(iy1 / B); by++) for (let bx = Math.floor(ix0 / B); bx <= Math.floor(ix1 / B); bx++) marked.add(by * bw + bx);
+  }
+  const out: MaskRect[] = [];
+  // Runs of marked blocks per block row; a run matching the one below extends its rect.
+  let open = new Map<string, MaskRect>();
+  for (let by = Math.floor(y0 / B); by * B < y1; by++) {
+    const runs = new Map<string, MaskRect>();
+    for (let bx = Math.floor(x0 / B); bx * B < x1; bx++) {
+      if (!marked.has(by * bw + bx)) continue;
+      const a = bx;
+      while (marked.has(by * bw + bx + 1) && (bx + 1) * B < x1) bx++;
+      const k = `${a},${bx}`;
+      const ry0 = Math.max(y0, by * B);
+      const ry1 = Math.min(y1, (by + 1) * B);
+      const below = open.get(k);
+      if (below) {
+        below.ny += ry1 - ry0;
+        runs.set(k, below);
+        continue;
+      }
+      const rx0 = Math.max(x0, a * B);
+      const r = { originE: originE + rx0 * cellM, originN: originN + ry0 * cellM, nx: Math.min(x1, (bx + 1) * B) - rx0, ny: ry1 - ry0, cellM };
+      out.push(r);
+      runs.set(k, r);
+    }
+    open = runs;
+  }
+  return out;
+}
+
 /** Whether a mask framed at `last` still suits a view centred at `p`: within `stepM` on both axes. */
 export function keepsCentre(last: LngLat, p: LngLat, stepM: number): boolean {
   const d = frameOf(maskFrame(last), p);

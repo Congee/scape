@@ -6,7 +6,7 @@ import { pinFrame } from '@core/geo/pinFrame';
 import type { GltfWorld } from '@core/model/gltf';
 import { geodeticToEcef } from './ecef';
 import { LOD2_REGIONS, type Lod2Region } from './regions';
-import { lod2BuildingAt, lod2HeightAboveM, lod2Tile, lod2Triangles, placeLod2 } from './tile';
+import { lod2BuildingAt, lod2HeightAboveM, lod2Tile, placeLod2 } from './tile';
 
 const PIN: LngLat = { lng: 4.4868, lat: 51.9091 };
 const REGION: Lod2Region = { ...LOD2_REGIONS[0], groundProperty: undefined, idProperty: undefined, geoidM: 40 };
@@ -55,7 +55,6 @@ describe('lod2Tile', () => {
     expect(t.buildings[0].baseM).toBeCloseTo(5, 6);
     expect(t.buildings[0].apexM).toBeCloseTo(35, 6);
     expect(t.buildings[0].hull).toHaveLength(4);
-    expect(lod2Triangles(t)).toHaveLength(b.idx.length * 3);
   });
 
   it('reads the datum off the ground column and ids off the id column', () => {

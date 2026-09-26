@@ -5,14 +5,14 @@ import { meshOccluderParts } from '@core/geo/meshOcclude';
 import { prismSlots } from '@core/geo/prismOcclude';
 import { buildPrisms, prismFrameKey } from '@core/geo/prismRaster';
 import { prismSurfaces, surfaceBuffers } from '@core/geo/surfaces';
-import { frameOf, frameToLngLat, longestShadowM, maskFrame, maskStrips, shadowMask, type MaskFrame } from '@core/geo/shadowMask';
+import { dirtyRects, frameOf, frameToLngLat, longestShadowM, maskFrame, maskStrips, shadowMask, type FrameBox, type MaskFrame } from '@core/geo/shadowMask';
 import { ecefToGeodetic } from '@core/lod2/ecef';
 import { lod2CoverOf, type Lod2Cover } from '@core/lod2/cover';
 import { lod2RegionsNear, type Lod2Region, type Lod2Source } from '@core/lod2/regions';
-import { lod2BuildingAt, lod2HeightAboveM, lod2Triangles, placeLod2, type Lod2Tile } from '@core/lod2/tile';
+import { lod2BuildingAt, lod2HeightAboveM, placeLod2, type Lod2Tile } from '@core/lod2/tile';
 import type { Sphere, WalkContent } from '@core/lod2/tileset';
 import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStitch';
-import { blitGrid, raiseGrid, stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
+import { blitGrid, stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
 import { cubicStencilTiles, demRowAt, elevationAtCubic, lowestGroundAt, withDemTiles } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { yieldTurn } from '@data/yieldTurn';
@@ -228,14 +228,6 @@ interface MaskBuild {
 /** Height grid for the map's shadow rect; only the sun march is redone while the map stays put. */
 let cachedMask: MaskBuild | null = null;
 
-/** East/north extent in frame metres. */
-interface FrameBox {
-  e0: number;
-  n0: number;
-  e1: number;
-  n1: number;
-}
-
 const meets = (a: FrameBox, b: FrameBox) => a.e0 <= b.e1 && b.e0 <= a.e1 && a.n0 <= b.n1 && b.n0 <= a.n1;
 
 /** The ground a grid's cells cover, a cell wider all round for vertices that round into its edge cells. */
@@ -273,8 +265,9 @@ function batchBox(b: DecodedBuildings): [number, number, number, number] {
   return box;
 }
 
-/** Whether a row whose centroid `hit` takes has a footprint reaching `box`. */
-function dropsInto(f: MaskFrame, b: DecodedBuildings, hit: (lng: number, lat: number) => boolean, box: FrameBox): boolean {
+/** Footprint extents of the rows whose centroid `hit` takes. */
+function rowBoxes(f: MaskFrame, b: DecodedBuildings, hit: (lng: number, lat: number) => boolean): FrameBox[] {
+  const out: FrameBox[] = [];
   for (let i = 0; i < b.count; i++) {
     if (!hit(b.cLng[i], b.cLat[i])) continue;
     const r: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
@@ -284,9 +277,9 @@ function dropsInto(f: MaskFrame, b: DecodedBuildings, hit: (lng: number, lat: nu
       r[2] = Math.max(r[2], b.lng[j]);
       r[3] = Math.max(r[3], b.lat[j]);
     }
-    if (meets(lngLatBox(f, r), box)) return true;
+    out.push(lngLatBox(f, r));
   }
-  return false;
+  return out;
 }
 
 /** Terrain over a grid laid out in local Mercator metres; latitude varies by row only. */
@@ -340,11 +333,47 @@ function stampWorld(gs: readonly HeightGrid[], f: MaskFrame, tris: ArrayLike<num
   for (const g of gs) stampTriangles(g, e, n, u);
 }
 
+/** Stamps an LoD2 tile into each of `gs`, projecting only the vertices of triangles near one. */
+function stampLod2(gs: readonly HeightGrid[], f: MaskFrame, t: Lod2Tile): void {
+  const { idx, world } = t;
+  const e = new Float64Array(world.length / 3);
+  const n = new Float64Array(world.length / 3);
+  const seen = new Uint8Array(world.length / 3);
+  for (const g of gs) {
+    const box = gridBox(g);
+    // Culled in lng/lat, where frame east and north run monotone; a cell of slack covers the inverse's rounding.
+    const lo = frameToLngLat(f, box.e0 - g.cellM, box.n0 - g.cellM);
+    const hi = frameToLngLat(f, box.e1 + g.cellM, box.n1 + g.cellM);
+    const te = new Float64Array(idx.length);
+    const tn = new Float64Array(idx.length);
+    const tu = new Float64Array(idx.length);
+    let k = 0;
+    for (let i = 0; i + 2 < idx.length; i += 3) {
+      const [a, b, c] = [idx[i] * 3, idx[i + 1] * 3, idx[i + 2] * 3];
+      if (Math.max(world[a], world[b], world[c]) < lo.lng || Math.min(world[a], world[b], world[c]) > hi.lng) continue;
+      if (Math.max(world[a + 1], world[b + 1], world[c + 1]) < lo.lat || Math.min(world[a + 1], world[b + 1], world[c + 1]) > hi.lat) continue;
+      for (let j = i; j < i + 3; j++) {
+        const v = idx[j];
+        if (!seen[v]) {
+          const p = frameOf(f, { lng: world[v * 3], lat: world[v * 3 + 1] });
+          e[v] = p.e;
+          n[v] = p.n;
+          seen[v] = 1;
+        }
+        te[k] = e[v];
+        tn[k] = n[v];
+        tu[k++] = world[v * 3 + 2];
+      }
+    }
+    stampTriangles(g, te.subarray(0, k), tn.subarray(0, k), tu.subarray(0, k));
+  }
+}
+
 const hideFor = (picks: Map<string, Lod2Pick>): SuppressRing[] => [...suppress, ...[...picks.values()].flatMap((p) => p.rings)];
 
 /** Raises the grid to every roof standing over it. Stops early, partly stamped, once `live` turns false. */
 async function stampFrameBuildings(g: HeightGrid, f: MaskFrame, live: () => boolean): Promise<MaskStamps> {
-  const picks = (await pickLod2(g, f, live, new Map(), (t) => stampWorld([g], f, lod2Triangles(t)))) ?? new Map<string, Lod2Pick>();
+  const picks = await pickLod2(g, f, live, new Map(), (t) => stampLod2([g], f, t));
   const tiles = new Set<string>();
   if (!live()) return { picks, tiles };
   const hide = hideFor(picks);
@@ -375,9 +404,9 @@ async function lod2Around(p: LngLat, rangeM: number): Promise<{ c: WalkContent; 
 
 /**
  * The LoD2 leaves over the grid, nearest the view first until the budget runs out. Those in `prev` are taken
- * as they are; the rest are fetched and passed to `stamp`. Null when the budget leaves out one of `prev`.
+ * as they are, or left out where a nearer new one takes their budget; the rest are fetched and passed to `stamp`.
  */
-async function pickLod2(g: HeightGrid, f: MaskFrame, live: () => boolean, prev: Map<string, Lod2Pick>, stamp: (t: Lod2Tile) => void): Promise<Map<string, Lod2Pick> | null> {
+async function pickLod2(g: HeightGrid, f: MaskFrame, live: () => boolean, prev: Map<string, Lod2Pick>, stamp: (t: Lod2Tile) => void): Promise<Map<string, Lod2Pick>> {
   const box = gridBox(g);
   // Nearest the frame centre rather than the rect's, so a grown rect keeps the order and the budget cut.
   const rangeM = Math.hypot(Math.max(-box.e0, box.e1), Math.max(-box.n0, box.n1));
@@ -403,7 +432,7 @@ async function pickLod2(g: HeightGrid, f: MaskFrame, live: () => boolean, prev: 
     stamp(t);
     picks.set(c.url, { c, region, tris: n, bbox: t.bbox, rings: t.buildings.map((b) => suppressRing(b.hull)) });
   }
-  return [...prev.keys()].every((u) => picks.has(u)) ? picks : null;
+  return picks;
 }
 
 /** Terrain and, with `buildings`, roofs over all of `g`; null once superseded. */
@@ -417,60 +446,76 @@ async function wholeMask(g: HeightGrid, f: MaskFrame, zoom: number, buildings: b
 }
 
 /**
- * `g` laid over `last`'s cells with only the strips it adds built anew, which matches a whole stamp;
- * null where it might not, or once superseded. Whatever `last` never stamped goes over all of `g`.
+ * `g` laid over `last`'s cells with only the strips it adds built anew, and the cells a changed LoD2 pick
+ * reaches rebuilt, which matches a whole stamp; null where it might not, or once superseded.
  */
 async function grownMask(last: MaskBuild, g: HeightGrid, f: MaskFrame, zoom: number, buildings: boolean, live: () => boolean): Promise<{ stamps: MaskStamps; complete: boolean } | null> {
   const rects = maskStrips(last.grid, g);
   if (!rects) return null;
-  const parts: HeightGrid[] = rects.map((r) => Object.assign(r, { h: new Float32Array(r.nx * r.ny) }));
-  const dems = new Map<string, TileCoord>();
-  for (const p of parts) for (const t of tilesInBounds(frameBounds(f, p), zoom)) dems.set(tileKey(t.z, t.x, t.y), t);
-  const complete = await withDemTiles(dem, [...dems.values()], () => live() && parts.map((p) => fillFrameTerrain(p, f, zoom)).every(Boolean));
+  const strips: HeightGrid[] = rects.map((r) => Object.assign(r, { h: new Float32Array(r.nx * r.ny) }));
+  let complete = await fillParts(strips, f, zoom, live);
   if (!live()) return null;
   blitGrid(last.grid, g);
-  for (const p of parts) blitGrid(p, g);
+  for (const p of strips) blitGrid(p, g);
   if (!buildings) return { stamps: last.stamps, complete };
   const coords = tilesInBounds(frameBounds(f, g), BUILDINGS_ZOOM);
   const keys = coords.map((t) => tileKey(t.z, t.x, t.y));
   // A sliced list or a dropped tile would take away rows `last` stamped.
   if (coords.length > MASK_TILE_MAX || [...last.stamps.tiles].some((k) => !keys.includes(k))) return null;
-  const picks = await pickLod2(g, f, live, last.stamps.picks, (t) => stampWorld([g], f, lod2Triangles(t)));
-  if (!picks || !live()) return null;
-  const boxes = parts.map(gridBox);
-  const inStrips = (b: FrameBox) => boxes.some((s) => meets(b, s));
-  for (const p of last.stamps.picks.values()) {
-    if (!inStrips(lngLatBox(f, p.bbox))) continue;
-    // oxlint-disable-next-line no-await-in-loop -- one tile in memory at a time
-    const t = await fetchLod2Tile(p.c, p.region).catch(() => null);
-    if (!t || !live()) return null;
-    stampWorld(parts, f, lod2Triangles(t));
-  }
-  const fresh = [...picks.values()].filter((p) => !last.stamps.picks.has(p.c.url)).flatMap((p) => p.rings);
-  const hit = fresh.length > 0 ? ringLookup(fresh) : null;
+  // New leaves go into `g` once the rebuilt cells are laid over it.
+  const late: Lod2Tile[] = [];
+  const picks = await pickLod2(g, f, live, last.stamps.picks, (t) => late.push(t));
+  if (!live()) return null;
+  const dropped = [...last.stamps.picks.values()].filter((p) => !picks.has(p.c.url));
+  const fresh = [...picks.values()].filter((p) => !last.stamps.picks.has(p.c.url));
   const decoded = await Promise.all(coords.map((t) => fetchBuildingBatch(t)));
   if (!live()) return null;
   const lastBox = gridBox(last.grid);
-  const todo: { raw: DecodedBuildings; into: HeightGrid[] }[] = [];
+  // A dropped leaf's triangles, and a row whose hiding hull came or went, stand in `last`'s cells.
+  const hulls = [...dropped, ...fresh].flatMap((p) => p.rings);
+  const hit = hulls.length > 0 ? ringLookup(hulls) : null;
+  const stale = dropped.map((p) => lngLatBox(f, p.bbox));
+  for (const [i, raw] of decoded.entries()) if (raw && hit && last.stamps.tiles.has(keys[i]) && meets(lngLatBox(f, batchBox(raw)), lastBox)) stale.push(...rowBoxes(f, raw, hit));
+  const dirty: HeightGrid[] = dirtyRects(last.grid, g, stale).map((r) => Object.assign(r, { h: new Float32Array(r.nx * r.ny) }));
+  complete = (await fillParts(dirty, f, zoom, live)) && complete;
+  if (!live()) return null;
+  const parts = [...strips, ...dirty];
+  const boxes = parts.map(gridBox);
+  const into = (b: FrameBox, from: readonly HeightGrid[]) => from.filter((_, i) => meets(b, boxes[i]));
+  for (const p of picks.values()) {
+    const to = last.stamps.picks.has(p.c.url) ? into(lngLatBox(f, p.bbox), parts) : [];
+    if (to.length === 0) continue;
+    // oxlint-disable-next-line no-await-in-loop -- one tile in memory at a time
+    const t = await fetchLod2Tile(p.c, p.region).catch(() => null);
+    if (!t || !live()) return null;
+    stampLod2(to, f, t);
+  }
+  const todo: { raw: DecodedBuildings; into: HeightGrid[]; late: boolean }[] = [];
   const tiles = new Set<string>();
   for (const [i, raw] of decoded.entries()) {
     if (!raw) continue;
     tiles.add(keys[i]);
     const box = lngLatBox(f, batchBox(raw));
-    if (!last.stamps.tiles.has(keys[i])) todo.push({ raw, into: [g] });
-    else {
-      // A row a new LoD2 hull now hides still stands in `last`'s cells.
-      if (hit && meets(box, lastBox) && dropsInto(f, raw, hit, lastBox)) return null;
-      if (inStrips(box)) todo.push({ raw, into: parts });
-    }
+    if (!last.stamps.tiles.has(keys[i])) todo.push({ raw, into: [], late: true });
+    else if (into(box, parts).length > 0) todo.push({ raw, into: into(box, parts), late: false });
   }
   const grounds = await Promise.all(todo.map(async ({ raw }) => (await groundOf(raw)).groundM));
   if (!live()) return null;
   const hide = hideFor(picks);
-  for (const [i, { raw, into }] of todo.entries()) stampRows(into, f, raw, grounds[i], hide);
+  for (const [i, t] of todo.entries()) stampRows(t.into, f, t.raw, grounds[i], hide);
   for (const m of models) stampWorld(parts, f, m.tris);
-  for (const p of parts) raiseGrid(p, g);
+  for (const p of parts) blitGrid(p, g);
+  for (const t of late) stampLod2([g], f, t);
+  for (const [i, t] of todo.entries()) if (t.late) stampRows([g], f, t.raw, grounds[i], hide);
   return { stamps: { picks, tiles }, complete };
+}
+
+/** Terrain over each of `parts`; false where a DEM tile was missing. */
+async function fillParts(parts: readonly HeightGrid[], f: MaskFrame, zoom: number, live: () => boolean): Promise<boolean> {
+  if (parts.length === 0) return true;
+  const dems = new Map<string, TileCoord>();
+  for (const p of parts) for (const t of tilesInBounds(frameBounds(f, p), zoom)) dems.set(tileKey(t.z, t.x, t.y), t);
+  return withDemTiles(dem, [...dems.values()], () => live() && parts.map((p) => fillFrameTerrain(p, f, zoom)).every(Boolean));
 }
 
 /** Null when a newer mask request has superseded this one. */

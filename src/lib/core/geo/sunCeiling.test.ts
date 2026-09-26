@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { maskStrips, type MaskRect } from './shadowMask';
+import { dirtyRects, maskStrips, type MaskRect } from './shadowMask';
 import { blitGrid, raiseGrid, stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from './sunCeiling';
 
 const R2D = 180 / Math.PI;
@@ -259,6 +259,29 @@ describe('stamping strips', () => {
       for (const r of rings.slice(0, 60)) stampFootprint(p, r.e, r.n, r.u);
       raiseGrid(p, g);
     }
+    expect(g.h).toEqual(whole(next).h);
+  });
+
+  it('matches once the cells a dropped occluder raised are rebuilt and the new occluders go over them', () => {
+    const next = { ...last, originE: -256, nx: 128 };
+    const gone = rings.slice(0, 20).map((r) => ({ e: r.e.map((e) => e + 7), n: r.n, u: r.u + 30 }));
+    const old = (p: HeightGrid) => {
+      for (const r of rings.slice(0, 60)) stampFootprint(p, r.e, r.n, r.u);
+      for (const t of tris) stampTriangles(p, t.e, t.n, t.u);
+    };
+    const early = terrain(last);
+    old(early);
+    for (const r of gone) stampFootprint(early, r.e, r.n, r.u);
+    const g = { ...next, h: new Float32Array(next.nx * next.ny) };
+    blitGrid(early, g);
+    const boxes = gone.map((r) => ({ e0: Math.min(...r.e), n0: Math.min(...r.n), e1: Math.max(...r.e), n1: Math.max(...r.n) }));
+    const dirty = dirtyRects(last, next, boxes).map(terrain);
+    expect(dirty.length).toBeGreaterThan(0);
+    for (const p of [...(maskStrips(last, next) ?? []).map(terrain), ...dirty]) {
+      old(p);
+      blitGrid(p, g);
+    }
+    for (const r of rings.slice(60)) stampFootprint(g, r.e, r.n, r.u);
     expect(g.h).toEqual(whole(next).h);
   });
 });
