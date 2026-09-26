@@ -61,7 +61,7 @@ export class PhotoGl {
     this.vao = gl.createVertexArray()!;
   }
 
-  /** Blends the photo into the current viewport, which clips it to the frame. */
+  /** Blends the photo into the current viewport, which clips it to the picture area. */
   render(layer: PhotoLayer | null): void {
     if (!layer) return this.drop();
     const gl = this.gl;

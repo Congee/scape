@@ -49,6 +49,8 @@ export interface MoonShading {
 
 export interface SceneGlInput {
   cam: Camera;
+  /** The sensor frame's camera; shadows are fitted to it so the frame's pixels do not depend on the area around it. */
+  shadowCam?: Camera;
   basis: CameraBasis;
   eyeAboveGroundM: number;
   /** Flat-horizon dip used until the terrain mesh arrives. */
@@ -541,10 +543,11 @@ export class SceneGl {
     const gl = this.gl;
     const light = lightBasis(input.lightAzDeg, input.lightAltDeg, input.basis.forward);
     // Towers reach hundreds of metres above the terrain band, so the prisms must widen the fit too.
-    const terrainScene = this.terrainGl.ready ? this.terrainGl.bounds(input.cam, input.basis) : null;
-    const prismScene = input.prism ? this.prismGl.bounds(input.cam, input.basis, input.prism.tiles, input.prism.models) : null;
+    const cam = input.shadowCam ?? input.cam;
+    const terrainScene = this.terrainGl.ready ? this.terrainGl.bounds(cam, input.basis) : null;
+    const prismScene = input.prism ? this.prismGl.bounds(cam, input.basis, input.prism.tiles, input.prism.models) : null;
     const scene = mergeScene(terrainScene, prismScene) ?? { halfM: 20000, minU: -1000, maxU: 1000 };
-    const cascades = fitCascades(input.cam, input.basis, light, scene, this.shadowGl.res);
+    const cascades = fitCascades(cam, input.basis, light, scene, this.shadowGl.res);
     let triangles = 0;
     let prismTriangles = 0;
     let modelTriangles = 0;

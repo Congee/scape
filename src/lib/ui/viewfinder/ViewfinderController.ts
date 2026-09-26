@@ -27,6 +27,7 @@ import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayG
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
+import { borderRects, fitFrame, fitViewports, type FitViewports, type Rect } from '@core/viewfinder/frameFit';
 import { segmentHitsRect } from '@core/viewfinder/segmentRect';
 import { starNight } from '@core/viewfinder/skyGate';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
@@ -84,6 +85,7 @@ const haloText = (ctx: CanvasRenderingContext2D, text: string, x: number, y: num
   ctx.restore();
   ctx.fillText(text, x, y);
 };
+const upEighth = (k: number) => Math.ceil(k * 8 - 1e-6) / 8;
 /** Hex colour multiplied by a flat shade factor. */
 const shaded = (hex: string, k: number) => {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -105,8 +107,14 @@ interface Scene {
   /** False while a locked aim has no target elevation yet, so its 0 is a placeholder. */
   aimKnown: boolean;
   frame: Frame;
+  /** Picture area the scene fills around the frame, CSS px, snapped to the drawn device pixels. */
+  area: Rect;
+  vp: FitViewports;
   hfov: number;
   vfov: number;
+  /** Field of view across the whole area. */
+  viewHfov: number;
+  viewVfov: number;
   view: ViewProfile | null;
   eyeM: number;
   eyeAboveGroundM: number;
@@ -258,7 +266,7 @@ export class ViewfinderController {
     const c = compositionStore.getState();
     const s = settingsStore.getState();
     const fPx = sc.frame.w / (2 * Math.tan((sc.hfov / 2) * D2R));
-    const halfDiagDeg = Math.atan(Math.hypot(sc.frame.w, sc.frame.h) / 2 / fPx) / D2R;
+    const halfDiagDeg = Math.atan(Math.hypot(sc.area.w, sc.area.h) / 2 / fPx) / D2R;
     const near = (b: SkyBody) => {
       const p = position(b, sc.time, sc.obs);
       return skyAngleDeg(sc.cam.elevationDeg, sc.cam.azimuthDeg, p.altitude, p.azimuth) < halfDiagDeg + 2;
@@ -288,14 +296,15 @@ export class ViewfinderController {
     this.schedule();
   }
 
-  /** Frame with the sensor's aspect ratio, centred, filling the canvas but for the readout line below. */
-  private frameRect(frameWmm: number, frameHmm: number): Frame {
-    const availW = Math.max(40, this.w - 16);
-    const availH = Math.max(40, this.h - 30);
-    const scale = Math.min(availW / frameWmm, availH / frameHmm);
-    const w = frameWmm * scale;
-    const h = frameHmm * scale;
-    return { x: (this.w - w) / 2, y: 8 + (availH - h) / 2, w, h, pxPerMm: scale };
+  /** Frame with the sensor's aspect ratio, centred in the area that fills the canvas but for the readout line below. */
+  private frameLayout(frameWmm: number, frameHmm: number, hfov: number, vfov: number) {
+    const fit = fitFrame(this.w, this.h, frameWmm, frameHmm);
+    const bufferH = this.canvas.height;
+    const vp = fitViewports(fit, bufferH, this.dpr);
+    const a = vp.area;
+    const area = { x: a.x / this.dpr, y: (bufferH - a.y - a.h) / this.dpr, w: a.w / this.dpr, h: a.h / this.dpr };
+    const wider = (fovD: number, k: number) => (2 * Math.atan(Math.tan((fovD / 2) * D2R) * k)) / D2R;
+    return { frame: fit.frame, area, vp, viewHfov: wider(hfov, a.w / vp.frame.w), viewVfov: wider(vfov, a.h / vp.frame.h) };
   }
 
   private scene(): Scene {
@@ -330,7 +339,7 @@ export class ViewfinderController {
       if (profile) for (let i = 0; i < profile.nAz; i++) max = Math.max(max, profile.skylineDeg[i]);
       this.skylineMax = { view: profile, max };
     }
-    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, frame: this.frameRect(fm.w, fm.h), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, light: lightAt(s.lightSource, time, obs), time, obs, airDensity: airDensity(eyeM), night, moonFactor, moonLight, maxSkyline: this.skylineMax.max };
+    return { cam, basis: cameraBasis(cam), aim, aimKnown: !aim.locked || targetAngleDeg != null, ...this.frameLayout(fm.w, fm.h, fov.hDeg, fov.vDeg), hfov: fov.hDeg, vfov: fov.vDeg, view: profile, eyeM, eyeAboveGroundM, sunAlt, sunAz: sun.azimuth, light: lightAt(s.lightSource, time, obs), time, obs, airDensity: airDensity(eyeM), night, moonFactor, moonLight, maxSkyline: this.skylineMax.max };
   }
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
@@ -344,14 +353,14 @@ export class ViewfinderController {
       return;
     }
     const wantStep = clamp(sc.hfov / Math.max(100, sc.frame.w), 0.02, 0.5);
-    const wantSpan = Math.min(360, Math.max(30, sc.hfov * 2 + 10));
+    const wantSpan = Math.min(360, Math.max(30, sc.viewHfov * 2 + 10));
     const stepForSpan = Math.max(wantStep, wantSpan / MAX_COLUMNS);
     const rangeM = s.horizonRangeKm * 1000;
     this.ensureMeshWindow(sc, rangeM);
     const minStepDeg = Math.max(0.005, sc.vfov / Math.max(100, sc.frame.h) / 2);
     const cur = viewfinderStore.getState().window;
-    const needFrom = sc.aim.azimuthDeg - sc.hfov / 2 - 5;
-    const needTo = sc.aim.azimuthDeg + sc.hfov / 2 + 5;
+    const needFrom = sc.aim.azimuthDeg - sc.viewHfov / 2 - 5;
+    const needTo = sc.aim.azimuthDeg + sc.viewHfov / 2 + 5;
     if (cur && cur.rangeM === rangeM && cur.minStepDeg === minStepDeg && cur.azStepDeg <= stepForSpan * 1.3 && cur.azStepDeg >= stepForSpan / 3) {
       const rel = (a: number) => (((a - cur.azFromDeg) % 360) + 360) % 360;
       const covered = cur.azSpanDeg >= 360 || (rel(needFrom) <= cur.azSpanDeg && rel(needTo) <= cur.azSpanDeg && rel(needFrom) <= rel(needTo));
@@ -381,15 +390,18 @@ export class ViewfinderController {
     // Cutting the mesh for a placeholder pitch would build the whole thing again once the real one lands.
     if (!sc.aimKnown) return;
     const focalMm = 2 ** (Math.round(Math.log2(sc.cam.focalMm) * 4) / 4);
-    const hfovDeg = fovDeg(sc.cam.frameWmm, focalMm);
+    // The whole area, in eighths so a resize seldom asks for a new wedge.
+    const wMm = sc.cam.frameWmm * upEighth(sc.vp.area.w / sc.vp.frame.w);
+    const hMm = sc.cam.frameHmm * upEighth(sc.vp.area.h / sc.vp.frame.h);
+    const hfovDeg = fovDeg(wMm, focalMm);
     const pxH = Math.max(100, sc.frame.h * this.dpr);
     const targetRad = 2 ** (Math.round(Math.log2((MESH_PX_PER_CELL * sc.cam.frameHmm) / (focalMm * pxH)) * 4) / 4);
     const step = meshAzPadDeg(hfovDeg);
     const azimuthDeg = Math.round(sc.aim.azimuthDeg / step) * step;
-    const vfovDeg = fovDeg(sc.cam.frameHmm, focalMm);
+    const vfovDeg = fovDeg(hMm, focalMm);
     const elStep = meshElPadDeg(vfovDeg);
     const pitchDeg = Math.round(sc.aim.elevationDeg / elStep) * elStep;
-    const span = frameElevationSpanDeg(pitchDeg, sc.cam.frameWmm, sc.cam.frameHmm, focalMm);
+    const span = frameElevationSpanDeg(pitchDeg, wMm, hMm, focalMm);
     const elHalfDeg = Math.max(span.maxDeg - pitchDeg, pitchDeg - span.minDeg);
     const cur = viewfinderStore.getState().meshWindow;
     // Frame height sets the wedge as well as the band, so hfov and pitch alone do not pin the mesh.
@@ -478,8 +490,9 @@ export class ViewfinderController {
     return { x: sc.frame.x + sc.frame.w / 2 + p.x * sc.frame.pxPerMm, y: sc.frame.y + sc.frame.h / 2 - p.y * sc.frame.pxPerMm };
   }
 
-  private inFrame(sc: Scene, p: { x: number; y: number } | null, slack = 0): p is { x: number; y: number } {
-    return !!p && p.x >= sc.frame.x - slack && p.x <= sc.frame.x + sc.frame.w + slack && p.y >= sc.frame.y - slack && p.y <= sc.frame.y + sc.frame.h + slack;
+  private inView(sc: Scene, p: { x: number; y: number } | null, slack = 0): p is { x: number; y: number } {
+    const a = sc.area;
+    return !!p && p.x >= a.x - slack && p.x <= a.x + a.w + slack && p.y >= a.y - slack && p.y <= a.y + a.h + slack;
   }
 
   /** Prisms the worker placed for the current camera location; a tile from an old one waits for its rebuild. */
@@ -550,7 +563,7 @@ export class ViewfinderController {
     let drawn = 0;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
     ctx.strokeStyle = MODEL_ACCENT;
     ctx.lineWidth = 1.5;
@@ -703,13 +716,11 @@ export class ViewfinderController {
 
   /** Sky, terrain, buildings and shadows on the GPU, into the canvas that sits under this one. */
   private drawSceneGl(sc: Scene, gl: SceneGl) {
-    const { frame } = sc;
     const pal = palette(sc.sunAlt);
-    const vx = Math.round(frame.x * this.dpr);
-    const vw = Math.max(2, Math.round(frame.w * this.dpr));
-    const vh = Math.max(2, Math.round(frame.h * this.dpr));
-    // GL counts rows from the bottom of the drawing buffer.
-    const vy = Math.max(0, this.canvas.height - Math.round(frame.y * this.dpr) - vh);
+    const { frame, area } = sc.vp;
+    const { x: vx, y: vy, w: vw, h: vh } = area;
+    // A sensor as much larger as the area, round the same centre: the frame's own pixels project as before.
+    const cam = { ...sc.cam, frameWmm: (sc.cam.frameWmm * vw) / frame.w, frameHmm: (sc.cam.frameHmm * vh) / frame.h };
     const comp = compositionStore.getState();
     const wantMw = comp.showMilkyWay && sc.night > 0;
     if (wantMw) skyStore.getState().ensure();
@@ -718,7 +729,8 @@ export class ViewfinderController {
     const t0 = performance.now();
     const stats = gl.render(
       {
-        cam: sc.cam,
+        cam,
+        shadowCam: sc.cam,
         basis: sc.basis,
         eyeAboveGroundM: sc.eyeAboveGroundM,
         fallbackDeg: flatHorizonDeg(sc.eyeAboveGroundM),
@@ -754,7 +766,7 @@ export class ViewfinderController {
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       const shade = { on: stats.cascades > 0, light: sc.light?.body ?? null, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, viewRangeM: stats.viewRangeM };
-      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, gpuPass: stats.gpuPassMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, gpuPass: stats.gpuPassMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, area: sc.area, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
       if (dev) dev.moonDisc = this.moonGeometry(sc);
     }
   }
@@ -847,7 +859,7 @@ export class ViewfinderController {
       const ys = ((le * U.x + ln * U.y + lu * U.z) / depth) * sc.cam.focalMm;
       p = { x: sc.frame.x + sc.frame.w / 2 + xs * sc.frame.pxPerMm, y: sc.frame.y + sc.frame.h / 2 - ys * sc.frame.pxPerMm };
     }
-    if (!this.inFrame(sc, p, slack)) return null;
+    if (!this.inView(sc, p, slack)) return null;
     let hidden = false;
     if (alt < sc.maxSkyline) {
       if (Number.isNaN(az)) az = Math.atan2(e, n) / D2R;
@@ -1049,7 +1061,7 @@ export class ViewfinderController {
     const { ctx } = this;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
     const M = starFrame(sc.time, sc.obs);
     if (c.showConstellations && sky.constellations) this.drawConstellations(sc, M, sky.constellations);
@@ -1075,7 +1087,7 @@ export class ViewfinderController {
     const discs: Disc[] = [SkyBody.Sun, SkyBody.Moon].flatMap((b) => this.seen.bodies[b] ?? []);
     ctx.font = '10px system-ui, sans-serif';
     const pxs = Array.from({ length: curve.n }, (_, i) => this.toPx(sc, azs[i], alts[i]));
-    const ins = pxs.map((p) => this.inFrame(sc, p, 40));
+    const ins = pxs.map((p) => this.inView(sc, p, 40));
     // Occlusion does not depend on the aim, so a drag reuses it until the path or occluders change.
     let memo = this.pathHidden.get(body);
     if (!memo || memo.occ !== this.occ || memo.view !== sc.view || memo.curve !== curve) this.pathHidden.set(body, (memo = { occ: this.occ, view: sc.view, curve, h: new Int8Array(curve.n) }));
@@ -1086,7 +1098,7 @@ export class ViewfinderController {
       const col = sc.view ? columnAt(sc.view, azs[i]) : -1;
       const sky = col >= 0 && alts[i] < sc.view!.skylineDeg[col];
       // Segments are clipped per pixel in the picture pass; the skyline is only known here.
-      if (p && prev && segmentHitsRect(prev, p, sc.frame, 40)) {
+      if (p && prev && segmentHitsRect(prev, p, sc.area, 40)) {
         this.marks.segment(prev.x, prev.y, p.x, p.y, 1.5, sky || prevSky ? OverlayFlag.Hidden : 0, 0.35, line);
         if (this.probe) {
           const a = this.behindBuilding(azs[i - 1], alts[i - 1], Infinity);
@@ -1129,6 +1141,17 @@ export class ViewfinderController {
       if (p) pts.push(p.x, p.y);
     }
     this.marks.dashed(pts, 1, 4, 6, OverlayFlag.Over, HORIZON_RGBA);
+    // Out into the wider area as separate lines, so the dashes inside the frame keep their phase.
+    const reach = sc.viewHfov * 0.75 - sc.hfov * 0.75;
+    if (reach <= 0) return;
+    for (const side of [-1, 1]) {
+      const ext: number[] = [];
+      for (let i = 0; i <= 40; i++) {
+        const p = this.toPx(sc, sc.aim.azimuthDeg + side * (sc.hfov * 0.75 + (reach * i) / 40), 0);
+        if (p) ext.push(p.x, p.y);
+      }
+      this.marks.dashed(ext, 1, 4, 6, OverlayFlag.Over, HORIZON_RGBA);
+    }
   }
 
   /** Primary and secondary bows as colour bands; dashed and dim where terrain or a building is in front. */
@@ -1140,7 +1163,7 @@ export class ViewfinderController {
       if (!rainbowTop(sc.sunAz, sc.sunAlt, mid).possible) continue;
       const width = Math.abs(rainbowRadiusDeg(WATER_N.Red, k) - rainbowRadiusDeg(WATER_N.Violet, k));
       // Sample only what the frame can show, so long lenses keep a smooth arc.
-      const range = arcWindow(sc.sunAz, sc.sunAlt, mid, sc.aim.azimuthDeg, sc.aim.elevationDeg, Math.hypot(sc.hfov, sc.vfov) / 2 + width);
+      const range = arcWindow(sc.sunAz, sc.sunAlt, mid, sc.aim.azimuthDeg, sc.aim.elevationDeg, Math.hypot(sc.viewHfov, sc.viewVfov) / 2 + width);
       if (!range) continue;
       const centre = rainbowArc(sc.sunAz, sc.sunAlt, mid, -90, BOW_STEPS, range);
       const hidden = centre.map((p) => p.altitudeDeg < minAlt || this.hiddenBySkyline(sc, p.azimuthDeg, p.altitudeDeg) || this.behindBuilding(p.azimuthDeg, p.altitudeDeg, Infinity));
@@ -1152,9 +1175,9 @@ export class ViewfinderController {
         let prev: { x: number; y: number } | null = null;
         for (let i = 0; i < pts.length; i++) {
           const p = pts[i].altitudeDeg >= minAlt ? this.toPx(sc, pts[i].azimuthDeg, pts[i].altitudeDeg) : null;
-          if (p && prev && segmentHitsRect(prev, p, sc.frame, 40)) {
+          if (p && prev && segmentHitsRect(prev, p, sc.area, 40)) {
             const dim = hidden[i] || hidden[i - 1];
-            if (this.inFrame(sc, p)) seen[dim ? 'dim' : 'clear']++;
+            if (this.inView(sc, p)) seen[dim ? 'dim' : 'clear']++;
             this.marks.segment(prev.x, prev.y, p.x, p.y, lineWidth, OverlayFlag.Over | (dim ? OverlayFlag.Hidden : 0), alpha * 0.35, rgba);
           }
           prev = p;
@@ -1170,7 +1193,7 @@ export class ViewfinderController {
   private drawBody(sc: Scene, body: SkyBody, date: Date): BodyLabel | null {
     const pos = position(body, date, sc.obs);
     const p = this.toPx(sc, pos.azimuth, pos.altitude);
-    if (!this.inFrame(sc, p, 60)) return null;
+    if (!this.inView(sc, p, 60)) return null;
     const { ctx } = this;
     const col = sc.view ? columnAt(sc.view, pos.azimuth) : -1;
     const skyline = col >= 0 && sc.view ? sc.view.skylineDeg[col] : flatHorizonDeg(sc.eyeAboveGroundM);
@@ -1182,7 +1205,7 @@ export class ViewfinderController {
     const inPicture = !!this.sceneGl && body !== SkyBody.Gc;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
     ctx.globalAlpha = hidden ? 0.35 : 1;
     if (body === SkyBody.Gc) {
@@ -1235,7 +1258,7 @@ export class ViewfinderController {
     const { ctx } = this;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -1260,12 +1283,12 @@ export class ViewfinderController {
     const alt = targetAngleFor(w, s, t);
     if (alt == null) return;
     const p = this.toPx(sc, az, alt);
-    if (!this.inFrame(sc, p, 30)) return;
+    if (!this.inView(sc, p, 30)) return;
     const { ctx } = this;
     const blocked = fresh?.los.status === 'Blocked';
     ctx.save();
     ctx.beginPath();
-    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
     ctx.strokeStyle = blocked ? '#ff5c5c' : '#8fd18c';
     ctx.lineWidth = 2;
@@ -1280,7 +1303,7 @@ export class ViewfinderController {
     ctx.textBaseline = 'middle';
     ctx.fillStyle = ctx.strokeStyle;
     const label = `Target · ${distance(d, s.units)}${w.pin2HeightM > 0 ? ` · ${height(w.pin2HeightM, s.units)}` : ''}${blocked ? ' · behind terrain' : ''}`;
-    const spills = p.x + 13 + ctx.measureText(label).width > sc.frame.x + sc.frame.w;
+    const spills = p.x + 13 + ctx.measureText(label).width > sc.area.x + sc.area.w;
     ctx.textAlign = spills ? 'right' : 'left';
     haloText(ctx, label, spills ? p.x - 13 : p.x + 13, p.y);
     ctx.restore();
@@ -1294,7 +1317,7 @@ export class ViewfinderController {
     const { ctx } = this;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -1315,7 +1338,7 @@ export class ViewfinderController {
       const base = this.toPx(sc, az, baseAlt);
       const top = this.toPx(sc, az, topAlt);
       const halfW = m.widthM > 0 ? (Math.atan(m.widthM / 2 / d) / D2R / sc.hfov) * sc.frame.w : 0;
-      if (!base || !top || !(this.inFrame(sc, base, 20 + halfW) || this.inFrame(sc, top, 20 + halfW))) continue;
+      if (!base || !top || !(this.inView(sc, base, 20 + halfW) || this.inView(sc, top, 20 + halfW))) continue;
       const hidden = (!!sc.view && occluded(sc.view, az, topAlt, d)) || this.behindBuilding(az, topAlt, d);
       this.seen.markers[m.id] = hidden;
       const color = CATEGORY_COLORS[m.category];
@@ -1365,7 +1388,7 @@ export class ViewfinderController {
     for (const f of facesToward(solid, eye)) {
       const poly = f.v.map((i) => pts[i]);
       if (poly.some((p) => p == null)) continue;
-      if (poly.every((p) => !this.inFrame(sc, p, slack))) continue;
+      if (poly.every((p) => !this.inView(sc, p, slack))) continue;
       ctx.fillStyle = shaded(color, faceShade(f, lightAzDeg));
       ctx.strokeStyle = color;
       ctx.beginPath();
@@ -1413,15 +1436,17 @@ export class ViewfinderController {
     else if (t.view?.missing) status = `${t.view.missing} terrain tiles missing`;
     // Too narrow for both: the status is the one that changes, so it wins.
     const both = !status || ctx.measureText(lens).width + ctx.measureText(status).width + 12 <= sc.frame.w;
+    // Below the frame lies picture when the area reaches past it vertically.
+    const put = (text: string, x: number) => (sc.vp.padY > 0 ? haloText(ctx, text, x, y) : ctx.fillText(text, x, y));
     if (both) {
       ctx.textAlign = 'left';
       ctx.fillStyle = 'rgba(230,237,243,0.9)';
-      ctx.fillText(lens, sc.frame.x, y);
+      put(lens, sc.frame.x);
     }
     if (status) {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(230,237,243,0.7)';
-      ctx.fillText(status, sc.frame.x + sc.frame.w, y);
+      put(status, sc.frame.x + sc.frame.w);
     }
   }
 
@@ -1481,7 +1506,7 @@ export class ViewfinderController {
     }
     ctx.save();
     ctx.beginPath();
-    ctx.rect(sc.frame.x, sc.frame.y, sc.frame.w, sc.frame.h);
+    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
     if (c.showPaths) {
       for (const b of BODIES) {
@@ -1503,10 +1528,13 @@ export class ViewfinderController {
     this.drawModelOutline(sc);
     this.drawTarget(sc);
 
-    // Frame, thirds grid and centre mark.
-    ctx.strokeStyle = 'rgba(230,237,243,0.9)';
+    // Frame border where the picture reaches past it, thirds grid and centre mark.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = 'rgb(230,237,243)';
+    for (const b of borderRects(sc.vp, this.canvas.height, this.dpr)) ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.restore();
     ctx.lineWidth = 1;
-    ctx.strokeRect(Math.round(sc.frame.x) + 0.5, Math.round(sc.frame.y) + 0.5, Math.round(sc.frame.w), Math.round(sc.frame.h));
     if (c.showGrid) {
       ctx.strokeStyle = 'rgba(230,237,243,0.25)';
       for (const f of [1 / 3, 2 / 3]) {
