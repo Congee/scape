@@ -8,7 +8,8 @@ const D2R = Math.PI / 180;
 
 /**
  * A regular east/north grid of surface heights in metres, axis aligned. Cell (ix, iy) has its centre
- * at `originE + ix * cellM`, `originN + iy * cellM`; `iy` increases north. Row-major.
+ * at `originE + ix * cellM`, `originN + iy * cellM`; `iy` increases north. Row-major. Origins are
+ * whole multiples of `cellM`, so grids of one cell size share a lattice.
  */
 export interface HeightGrid {
   cellM: number;
@@ -94,6 +95,35 @@ export function sunCeiling(g: HeightGrid, sunAzDeg: number, sunAltDeg: number): 
 }
 
 
+/** Calls `row` with the start in `src`, the start in `dst` and the length of each run of cells the two share; both on one lattice. */
+function sharedRows(src: HeightGrid, dst: HeightGrid, row: (s: number, d: number, n: number) => void): void {
+  const dx = Math.round((src.originE - dst.originE) / dst.cellM);
+  const dy = Math.round((src.originN - dst.originN) / dst.cellM);
+  const x0 = Math.max(0, dx);
+  const x1 = Math.min(dst.nx, dx + src.nx);
+  if (x0 >= x1) return;
+  for (let iy = Math.max(0, dy); iy < Math.min(dst.ny, dy + src.ny); iy++) row((iy - dy) * src.nx - dx + x0, iy * dst.nx + x0, x1 - x0);
+}
+
+/** Copies the cells `src` shares with `dst`. */
+export function blitGrid(src: HeightGrid, dst: HeightGrid): void {
+  sharedRows(src, dst, (s, d, n) => dst.h.set(src.h.subarray(s, s + n), d));
+}
+
+/** Raises the cells `dst` shares with `src` to `src`'s heights, as a stamp would; an unknown `src` cell leaves `dst` be. */
+export function raiseGrid(src: HeightGrid, dst: HeightGrid): void {
+  sharedRows(src, dst, (s, d, n) => {
+    for (let i = 0; i < n; i++) {
+      const v = src.h[s + i];
+      if (!Number.isNaN(v) && !(dst.h[d + i] >= v)) dst.h[d + i] = v;
+    }
+  });
+}
+
+// Indices are taken on the absolute lattice, so a sub-grid picks exactly the cells the whole grid would.
+const firstCell = (v: number, origin: number, cellM: number) => Math.ceil(v / cellM) - origin / cellM;
+const lastCell = (v: number, origin: number, cellM: number) => Math.floor(v / cellM) - origin / cellM;
+
 // Scratch for the scanline crossings; one footprint is stamped at a time.
 let xs = new Float64Array(64);
 
@@ -109,8 +139,8 @@ export function stampFootprint(g: HeightGrid, ringE: readonly number[], ringN: r
     if (ringN[i] < n0) n0 = ringN[i];
     if (ringN[i] > n1) n1 = ringN[i];
   }
-  const iy0 = Math.max(0, Math.ceil((n0 - g.originN) / cellM));
-  const iy1 = Math.min(ny - 1, Math.floor((n1 - g.originN) / cellM));
+  const iy0 = Math.max(0, firstCell(n0, g.originN, cellM));
+  const iy1 = Math.min(ny - 1, lastCell(n1, g.originN, cellM));
   for (let iy = iy0; iy <= iy1; iy++) {
     const y = g.originN + iy * cellM;
     let k = 0;
@@ -132,8 +162,8 @@ export function stampFootprint(g: HeightGrid, ringE: readonly number[], ringN: r
     }
     const row = iy * nx;
     for (let s = 0; s + 1 < k; s += 2) {
-      const ix0 = Math.max(0, Math.ceil((xs[s] - g.originE) / cellM));
-      const ix1 = Math.min(nx - 1, Math.floor((xs[s + 1] - g.originE) / cellM));
+      const ix0 = Math.max(0, firstCell(xs[s], g.originE, cellM));
+      const ix1 = Math.min(nx - 1, lastCell(xs[s + 1], g.originE, cellM));
       for (let ix = ix0; ix <= ix1; ix++) {
         const idx = row + ix;
         // Written as a failed >= so an unknown cell takes the building rather than staying NaN.
@@ -157,17 +187,17 @@ export function stampTriangles(g: HeightGrid, e: ArrayLike<number>, n: ArrayLike
     const [an, bn, cn] = [n[t], n[t + 1], n[t + 2]];
     const [au, bu, cu] = [u[t], u[t + 1], u[t + 2]];
     for (const [ve, vn, vu] of [[ae, an, au], [be, bn, bu], [ce, cn, cu]]) {
-      const ix = Math.round((ve - g.originE) / cellM);
-      const iy = Math.round((vn - g.originN) / cellM);
+      const ix = Math.round(ve / cellM) - g.originE / cellM;
+      const iy = Math.round(vn / cellM) - g.originN / cellM;
       if (ix >= 0 && ix < nx && iy >= 0 && iy < ny && Number.isFinite(vu)) raise(iy * nx + ix, vu);
     }
     const det = (be - ae) * (cn - an) - (ce - ae) * (bn - an);
     // Walls project to a line; their vertices and neighbouring roofs carry them.
     if (Math.abs(det) < 1e-9 || !Number.isFinite(au + bu + cu)) continue;
-    const ix0 = Math.max(0, Math.ceil((Math.min(ae, be, ce) - g.originE) / cellM));
-    const ix1 = Math.min(nx - 1, Math.floor((Math.max(ae, be, ce) - g.originE) / cellM));
-    const iy0 = Math.max(0, Math.ceil((Math.min(an, bn, cn) - g.originN) / cellM));
-    const iy1 = Math.min(ny - 1, Math.floor((Math.max(an, bn, cn) - g.originN) / cellM));
+    const ix0 = Math.max(0, firstCell(Math.min(ae, be, ce), g.originE, cellM));
+    const ix1 = Math.min(nx - 1, lastCell(Math.max(ae, be, ce), g.originE, cellM));
+    const iy0 = Math.max(0, firstCell(Math.min(an, bn, cn), g.originN, cellM));
+    const iy1 = Math.min(ny - 1, lastCell(Math.max(an, bn, cn), g.originN, cellM));
     for (let iy = iy0; iy <= iy1; iy++) {
       const y = g.originN + iy * cellM;
       for (let ix = ix0; ix <= ix1; ix++) {

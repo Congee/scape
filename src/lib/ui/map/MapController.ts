@@ -24,7 +24,7 @@ import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { formatLngLat } from '@core/geo/coords';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
-import { frameOf, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, SHADOW_RGB, type MaskRect } from '@core/geo/shadowMask';
+import { frameOf, keepsCentre, MASK_SNAP_CELLS, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, SHADOW_RGB, type MaskRect } from '@core/geo/shadowMask';
 import { depthOfField } from '@core/optics/dof';
 import { cocMm, effectiveOptics, focalForFovMm, fovDeg, frameMm, sensorPixels, tcFactor } from '@core/optics/fov';
 import '@data/maplibre';
@@ -171,6 +171,8 @@ export class MapController {
   private dragging2 = false;
   private draggingFov = false;
   private shadowTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  /** Frame centre of the last shadow request, kept while the view stays near it. */
+  private shadowCentre: LngLat | null = null;
   private live: { src: GeoJSONSource; data: GeoJSON.FeatureCollection } | null = null;
   private painted: { src: ImageSource; mask: ShadowMaskField } | null = null;
   private drawer: ModelDrawer;
@@ -967,7 +969,11 @@ export class MapController {
     const c = this.map.getCenter();
     // Sized against the true centre, then rebuilt around a snapped one so a small pan reuses the grid.
     const rough = this.shadowRect({ lng: c.lng, lat: c.lat }, b);
-    const centre = snapPoint({ lng: c.lng, lat: c.lat }, rough.cellM * 16);
+    const step = rough.cellM * MASK_SNAP_CELLS;
+    // A coarser grid snaps to a sparser lattice; moving the frame then would re-stamp every cell and drop the grown rect.
+    const last = this.shadowCentre;
+    const centre = last && keepsCentre(last, c, step) ? last : snapPoint({ lng: c.lng, lat: c.lat }, step);
+    this.shadowCentre = centre;
     const maxLenM = buildings ? SHADOW_MAX_LENGTH_M : SHADOW_MAX_TERRAIN_M;
     requestShadowMask(centre, this.shadowRect(centre, b), light.azimuthDeg, light.altitudeDeg, SHADOW_SOFT_M, buildings, maxLenM, this.finestMPerPx());
     // A toggle back on finds the store unchanged; the mask already in hand goes back up.

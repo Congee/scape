@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frameOf, frameToLngLat, grownRect, longestShadowM, MASK_SNAP_CELLS, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, rectCovers, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
+import { frameOf, frameToLngLat, grownRect, keepsCentre, longestShadowM, MASK_SNAP_CELLS, MASK_BIAS_M, MASK_MAX_PX, MASK_MIN_CELL_M, maskCorners, maskFrame, maskPixels, maskRect, maskStrips, MOON_SHADOW_RGB, rectCovers, shadowDriftPx, shadowMask, shadowTip, SHADOW_RGB } from './shadowMask';
 
 const merc = (lat: number) => 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
 
@@ -69,7 +69,7 @@ describe('grownRect', () => {
 
   it('pads only the side a lengthening shadow spills past, keeping the snap grid', () => {
     const want = { ...last, originE: -2944, nx: 817 };
-    const r = grownRect(last, want);
+    const r = grownRect(last, want, 90);
     expect(rectCovers(r, want)).toBe(true);
     expect(r.originE).toBeLessThan(want.originE);
     expect(r.originE + r.nx * r.cellM).toBe(want.originE + want.nx * want.cellM);
@@ -79,7 +79,7 @@ describe('grownRect', () => {
   });
 
   it('leaves room for the next several minutes of growth', () => {
-    const r = grownRect(last, { ...last, originE: -2944, nx: 817 });
+    const r = grownRect(last, { ...last, originE: -2944, nx: 817 }, 90);
     let covered = 0;
     for (let step = 1; step <= 10; step++) if (rectCovers(r, { ...last, originE: last.originE - 64 * step, nx: last.nx + 16 * step })) covered++;
     expect(covered).toBeGreaterThanOrEqual(5);
@@ -87,9 +87,85 @@ describe('grownRect', () => {
 
   it('stays within the cell budget and on the same grid', () => {
     const wide = { ...last, nx: MASK_MAX_PX - 16 };
-    const r = grownRect(wide, { ...wide, originE: wide.originE - 64 });
+    const r = grownRect(wide, { ...wide, originE: wide.originE - 64 }, 90);
     expect(r.nx).toBeLessThanOrEqual(MASK_MAX_PX);
-    expect(grownRect(last, { ...last, cellM: 8 })).toEqual({ ...last, cellM: 8 });
+    expect(grownRect(last, { ...last, cellM: 2 }, 90)).toEqual({ ...last, cellM: 2 });
+  });
+
+  it('keeps the last cells on the same grid while the budget allows', () => {
+    const want = { ...last, originE: -2944, originN: -896, nx: 817, ny: 257 };
+    const r = grownRect(last, want, 90);
+    expect(rectCovers(r, want)).toBe(true);
+    expect(rectCovers(r, last)).toBe(true);
+    const wide = { ...last, nx: MASK_MAX_PX - 16 };
+    expect(rectCovers(grownRect(wide, { ...wide, originE: wide.originE + 1024 }, 90), wide)).toBe(false);
+  });
+
+  it('keeps slack on the sun side of a coarser grid, and only there', () => {
+    const want = { originE: -2944, originN: -1024, nx: 449, ny: 161, cellM: 8 };
+    const r = grownRect(last, want, 100);
+    expect(rectCovers(r, want)).toBe(true);
+    expect(r.originE).toBe(want.originE);
+    expect(r.nx).toBeGreaterThan(want.nx);
+    expect(r.originN).toBeLessThan(want.originN);
+    expect(r.originN + r.ny * r.cellM).toBe(want.originN + want.ny * want.cellM);
+    expect(Math.abs(r.originE % (r.cellM * MASK_SNAP_CELLS))).toBe(0);
+    expect(Math.abs(r.originN % (r.cellM * MASK_SNAP_CELLS))).toBe(0);
+    // The next minute's pad, a snap block longer, still fits.
+    expect(rectCovers(r, { ...want, nx: want.nx + MASK_SNAP_CELLS })).toBe(true);
+  });
+});
+
+describe('maskStrips', () => {
+  const last = { originE: -256, originN: -128, nx: 64, ny: 32, cellM: 4 };
+
+  /** How many of `strips` and `last` hold each cell of `next`. */
+  function cover(next: typeof last, strips: (typeof last)[]): number[] {
+    const n = Array.from({ length: next.nx * next.ny }, () => 0);
+    for (const r of [...strips, last])
+      for (let iy = 0; iy < next.ny; iy++)
+        for (let ix = 0; ix < next.nx; ix++) {
+          const e = next.originE + ix * next.cellM;
+          const nn = next.originN + iy * next.cellM;
+          if (e >= r.originE && e < r.originE + r.nx * r.cellM && nn >= r.originN && nn < r.originN + r.ny * r.cellM) n[iy * next.nx + ix]++;
+        }
+    return n;
+  }
+
+  it.each([
+    ['west', { ...last, originE: -320, nx: 80 }, 1],
+    ['east', { ...last, nx: 80 }, 1],
+    ['south', { ...last, originN: -192, ny: 48 }, 1],
+    ['north', { ...last, ny: 48 }, 1],
+    ['north-east corner', { ...last, nx: 80, ny: 48 }, 2],
+    ['south-west corner', { ...last, originE: -320, originN: -192, nx: 80, ny: 48 }, 2],
+    ['every side', { ...last, originE: -320, originN: -192, nx: 96, ny: 64 }, 4],
+    ['a shift that drops cells', { ...last, originE: -192, originN: -64 }, 2]
+  ])('fills the cells %s of the last rect exactly once', (_, next, count) => {
+    const strips = maskStrips(last, next);
+    expect(strips).toHaveLength(count);
+    expect(cover(next, strips ?? []).every((n) => n === 1)).toBe(true);
+  });
+
+  it('adds nothing for a rect inside the last', () => {
+    expect(maskStrips(last, { ...last, originE: -128, nx: 16 })).toEqual([]);
+  });
+
+  it('refuses another cell size, an off-lattice origin or no shared cell', () => {
+    expect(maskStrips(last, { ...last, cellM: 8 })).toBeNull();
+    expect(maskStrips(last, { ...last, originE: -254 })).toBeNull();
+    expect(maskStrips(last, { ...last, originE: 4096 })).toBeNull();
+  });
+});
+
+describe('keepsCentre', () => {
+  const c = { lng: 4.9, lat: 52.37 };
+
+  it('keeps a centre the view has not left by a snap step', () => {
+    const f = maskFrame(c);
+    expect(keepsCentre(c, frameToLngLat(f, 60, -60), 64)).toBe(true);
+    expect(keepsCentre(c, frameToLngLat(f, 70, 0), 64)).toBe(false);
+    expect(keepsCentre(c, frameToLngLat(f, 0, -70), 64)).toBe(false);
   });
 });
 

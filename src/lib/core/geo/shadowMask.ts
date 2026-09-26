@@ -85,23 +85,62 @@ export function rectCovers(outer: MaskRect, inner: MaskRect): boolean {
 /** Share of the span added past each edge a pad outgrows, so a sinking sun re-stamps the grid every few minutes, not every minute. */
 export const MASK_GROW_SLACK = 0.25;
 
-/** `want`, pushed further out on each side where it spills past `last` on the same grid, within the cell budget. */
-export function grownRect(last: MaskRect, want: MaskRect): MaskRect {
-  if (last.cellM !== want.cellM) return want;
+/**
+ * `want`, pushed further out on each side where it spills past `last`, within the cell budget; on the
+ * same grid it keeps `last`'s cells too. On a coarser grid only the sides facing the sun at `sunAzDeg`
+ * are pushed: the pad grows toward the sun, and the coarser snap alone spills the others.
+ */
+export function grownRect(last: MaskRect, want: MaskRect, sunAzDeg: number): MaskRect {
+  if (want.cellM < last.cellM) return want;
+  const coarser = want.cellM > last.cellM;
+  const a = sunAzDeg * (Math.PI / 180);
   const { cellM } = want;
-  const axis = (lastLo: number, lastN: number, lo: number, n: number): [number, number] => {
-    const lower = lo < lastLo;
-    const upper = lo + n * cellM > lastLo + lastN * cellM;
+  const axis = (lastLo: number, lastN: number, lo: number, n: number, toward: number): [number, number] => {
+    const lower = lo < lastLo && (!coarser || toward < 0);
+    const upper = lo + n * cellM > lastLo + lastN * last.cellM && (!coarser || toward > 0);
     const sides = +lower + +upper;
-    if (sides === 0) return [lo, n];
     // Whole snap blocks keep the origin on the snap grid.
-    const room = Math.floor((MASK_MAX_PX - n) / sides / MASK_SNAP_CELLS) * MASK_SNAP_CELLS;
+    const room = sides === 0 ? 0 : Math.floor((MASK_MAX_PX - n) / sides / MASK_SNAP_CELLS) * MASK_SNAP_CELLS;
     const slack = Math.max(0, Math.min(room, Math.ceil((MASK_GROW_SLACK * n) / MASK_SNAP_CELLS) * MASK_SNAP_CELLS));
-    return [lower ? lo - slack * cellM : lo, n + sides * slack];
+    const grown: [number, number] = [lower ? lo - slack * cellM : lo, n + sides * slack];
+    if (coarser) return grown;
+    // Keeping the last grid's cells lets the worker stamp only the strips added to them.
+    const u0 = Math.min(grown[0], lastLo);
+    const un = (Math.max(grown[0] + grown[1] * cellM, lastLo + lastN * cellM) - u0) / cellM;
+    return un <= MASK_MAX_PX ? [u0, un] : grown;
   };
-  const [originE, nx] = axis(last.originE, last.nx, want.originE, want.nx);
-  const [originN, ny] = axis(last.originN, last.ny, want.originN, want.ny);
+  const [originE, nx] = axis(last.originE, last.nx, want.originE, want.nx, Math.sin(a));
+  const [originN, ny] = axis(last.originN, last.ny, want.originN, want.ny, Math.cos(a));
   return { originE, originN, nx, ny, cellM };
+}
+
+/** The parts of `next` that `last` does not hold, disjoint; null when the two share no cells on one lattice. */
+export function maskStrips(last: MaskRect, next: MaskRect): MaskRect[] | null {
+  const { cellM } = next;
+  if (last.cellM !== cellM) return null;
+  const dx = (last.originE - next.originE) / cellM;
+  const dy = (last.originN - next.originN) / cellM;
+  if (!Number.isInteger(dx) || !Number.isInteger(dy)) return null;
+  const x0 = Math.max(0, dx);
+  const x1 = Math.min(next.nx, dx + last.nx);
+  const y0 = Math.max(0, dy);
+  const y1 = Math.min(next.ny, dy + last.ny);
+  if (x0 >= x1 || y0 >= y1) return null;
+  const out: MaskRect[] = [];
+  const part = (ix: number, iy: number, nx: number, ny: number) => {
+    if (nx > 0 && ny > 0) out.push({ originE: next.originE + ix * cellM, originN: next.originN + iy * cellM, nx, ny, cellM });
+  };
+  part(0, 0, next.nx, y0);
+  part(0, y1, next.nx, next.ny - y1);
+  part(0, y0, x0, y1 - y0);
+  part(x1, y0, next.nx - x1, y1 - y0);
+  return out;
+}
+
+/** Whether a mask framed at `last` still suits a view centred at `p`: within `stepM` on both axes. */
+export function keepsCentre(last: LngLat, p: LngLat, stepM: number): boolean {
+  const d = frameOf(maskFrame(last), p);
+  return Math.abs(d.e) <= stepM && Math.abs(d.n) <= stepM;
 }
 
 /** Corner coordinates for an image source: the cells' outer edges, north-west first, clockwise. */

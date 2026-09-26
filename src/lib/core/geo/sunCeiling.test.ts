@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from './sunCeiling';
+import { maskStrips, type MaskRect } from './shadowMask';
+import { blitGrid, raiseGrid, stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from './sunCeiling';
 
 const R2D = 180 / Math.PI;
 
@@ -163,5 +164,101 @@ describe('stampTriangles', () => {
     const g = makeGrid(3, 3);
     stampTriangles(g, [-10, -5, -10, 1, 1, 1], [-10, -10, -5, 0, 2, 2], [9, 9, 9, 0, 0, 40]);
     expect(Array.from(g.h).filter((v) => v !== 0)).toEqual([40]);
+  });
+});
+
+describe('blitGrid and raiseGrid', () => {
+  const src = { cellM: 2, nx: 2, ny: 2, originE: 2, originN: 0, h: Float32Array.from([1, 2, Number.NaN, 4]) };
+
+  it('copies the shared cells and leaves the rest', () => {
+    const dst = makeGrid(3, 3, 9, 2);
+    blitGrid(src, dst);
+    expect([...dst.h]).toEqual([9, 1, 2, 9, Number.NaN, 4, 9, 9, 9]);
+  });
+
+  it('raises only where the source stands higher and is known', () => {
+    const dst = makeGrid(3, 3, 3, 2);
+    raiseGrid(src, dst);
+    expect([...dst.h]).toEqual([3, 3, 3, 3, 3, 4, 3, 3, 3]);
+  });
+});
+
+const ground = (e: number, n: number) => Math.fround(Math.sin(e * 0.013) * 30 + Math.cos(n * 0.007) * 20);
+
+describe('stamping strips', () => {
+  let seed = 7;
+  const rand = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+  // Footprints and triangles over the whole area, many straddling the strip edges.
+  const rings = Array.from({ length: 120 }, () => {
+    const e = -400 + rand() * 800;
+    const n = -300 + rand() * 600;
+    const w = 3 + rand() * 60;
+    return { e: [e, e + w, e + w * 0.7, e - w * 0.2], n: [n, n + w * 0.3, n + w, n + w * 0.8], u: 20 + rand() * 60 };
+  });
+  const tris = Array.from({ length: 80 }, () => {
+    const e = -400 + rand() * 800;
+    const n = -300 + rand() * 600;
+    return { e: [e, e + rand() * 50, e - rand() * 30], n: [n, n + rand() * 10, n + rand() * 45], u: [30 + rand() * 20, 40, 25 + rand() * 30] };
+  });
+
+  function stampAll(g: HeightGrid): void {
+    for (const r of rings) stampFootprint(g, r.e, r.n, r.u);
+    for (const t of tris) stampTriangles(g, t.e, t.n, t.u);
+  }
+
+  function terrain(r: MaskRect): HeightGrid {
+    const g = { ...r, h: new Float32Array(r.nx * r.ny) };
+    for (let iy = 0; iy < r.ny; iy++) for (let ix = 0; ix < r.nx; ix++) g.h[iy * r.nx + ix] = ground(r.originE + ix * r.cellM, r.originN + iy * r.cellM);
+    return g;
+  }
+
+  function whole(r: MaskRect): HeightGrid {
+    const g = terrain(r);
+    stampAll(g);
+    return g;
+  }
+
+  /** `next` from `last`'s cells and freshly stamped strips, as the mask worker grows it. */
+  function grown(last: MaskRect, next: MaskRect): HeightGrid {
+    const parts = (maskStrips(last, next) ?? []).map(terrain);
+    const g = { ...next, h: new Float32Array(next.nx * next.ny) };
+    blitGrid(whole(last), g);
+    for (const p of parts) {
+      stampAll(p);
+      blitGrid(p, g);
+    }
+    return g;
+  }
+
+  const last = { originE: -128, originN: -128, nx: 64, ny: 48, cellM: 2 };
+
+  it.each([
+    ['west', { ...last, originE: -256, nx: 128 }],
+    ['east', { ...last, nx: 112 }],
+    ['south', { ...last, originN: -256, ny: 112 }],
+    ['north', { ...last, ny: 96 }],
+    ['north-east corner', { ...last, nx: 96, ny: 96 }],
+    ['south-west corner', { ...last, originE: -256, originN: -192, nx: 128, ny: 80 }],
+    ['every side', { ...last, originE: -288, originN: -256, nx: 256, ny: 192 }],
+    ['a shift that drops cells', { ...last, originE: -64, originN: -96 }]
+  ])('matches a whole stamp bit for bit when grown %s', (_, next) => {
+    expect(grown(last, next).h).toEqual(whole(next).h);
+  });
+
+  it('matches with the new occluders stamped over the whole grid and the strips raised in', () => {
+    const next = { ...last, originE: -256, originN: -192, nx: 160, ny: 112 };
+    const g = { ...next, h: new Float32Array(next.nx * next.ny) };
+    const parts = (maskStrips(last, next) ?? []).map(terrain);
+    const early = terrain(last);
+    for (const r of rings.slice(0, 60)) stampFootprint(early, r.e, r.n, r.u);
+    blitGrid(early, g);
+    for (const p of parts) blitGrid(p, g);
+    for (const r of rings.slice(60)) stampFootprint(g, r.e, r.n, r.u);
+    for (const t of tris) stampTriangles(g, t.e, t.n, t.u);
+    for (const p of parts) {
+      for (const r of rings.slice(0, 60)) stampFootprint(p, r.e, r.n, r.u);
+      raiseGrid(p, g);
+    }
+    expect(g.h).toEqual(whole(next).h);
   });
 });

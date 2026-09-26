@@ -215,7 +215,7 @@ export function stopBuildings(): void {
 export function requestShadowMask(centre: LngLat, want: MaskRect, sunAzDeg: number, sunAltDeg: number, softM: number, buildings: boolean, maxLenM: number, mPerPx: number): void {
   // A drifting sun reshapes the pad; keeping a grid that still covers it spares the worker a full re-stamp.
   const last = lastMask && lastMask.centre.lat === centre.lat && lastMask.centre.lng === centre.lng ? { originE: lastMask.originE, originN: lastMask.originN, nx: lastMask.nx, ny: lastMask.ny, cellM: lastMask.cellM } : null;
-  const rect = !last ? want : rectCovers(last, want) ? last : grownRect(last, want);
+  const rect = !last ? want : rectCovers(last, want) ? last : grownRect(last, want, sunAzDeg);
   const key = `${centre.lat.toFixed(6)},${centre.lng.toFixed(6)}|${rect.originE}|${rect.originN}|${rect.nx}|${rect.ny}|${rect.cellM}|${softM}|${buildings}`;
   if (key === maskKey && lastMask && shadowDriftPx({ azDeg: lastMask.sunAzDeg, altDeg: lastMask.sunAltDeg }, { azDeg: sunAzDeg, altDeg: sunAltDeg }, { ...builtShadow, maxLenM }, mPerPx) < SHADOW_DRIFT_PX) return;
   maskKey = key;

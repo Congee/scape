@@ -447,7 +447,8 @@ export function suppressRows<T extends RowBatch>(batch: T, rings: readonly Suppr
 /** Rings per grid cell, so thousands of LoD2 hulls cost a few tests per centroid. */
 const RING_GRID_DEG = 0.002;
 
-function ringLookup(rings: readonly SuppressRing[]): (lng: number, lat: number) => boolean {
+/** Whether a point falls in any of `rings`. */
+export function ringLookup(rings: readonly SuppressRing[]): (lng: number, lat: number) => boolean {
   if (rings.length < 16) return (lng, lat) => rings.some((s) => inSuppressRing(s, lng, lat));
   const cell = (v: number) => Math.floor(v / RING_GRID_DEG);
   const grid = new Map<string, SuppressRing[]>();
