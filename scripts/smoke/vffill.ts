@@ -148,7 +148,8 @@ async function inspect(tag: string, ok: boolean, time: keyof typeof TIMES) {
   const refPath = `${ref}/${tag}.png`;
   if (ref && existsSync(refPath)) {
     const d = frameDiff(await load(refPath), img, r.frame, s);
-    check(`${tag} in-frame pixels match master`, d.px === 0, d.px < 0 ? 'size differs' : `${d.px} px differ (${(d.share * 100).toFixed(4)} %), max Δ ${d.max}`);
+    // A handful of pixels on geometry edges flip as the viewport's float origin moves; anything wider is a real change.
+    check(`${tag} in-frame pixels match master`, d.px >= 0 && d.share <= 1e-4, d.px < 0 ? 'size differs' : `${d.px} px differ (${(d.share * 100).toFixed(4)} %), max Δ ${d.max}`);
   }
 }
 
