@@ -25,6 +25,8 @@ export interface TilesRequest {
   lod2Urls: string[];
   /** Tiles the caller holds with their `sig`; one still matching is not rebuilt. */
   have: [string, string][];
+  /** Newest Tiles `n` the caller has read; one posted after it is still on its way. */
+  seen: number;
 }
 
 /** Apex height of the building under a point (max over the building and all its parts); null when none. */
@@ -117,6 +119,8 @@ export interface Lod2Request {
   pxPerRad: number;
   /** Tiles the caller already holds placed for this pin and eye; they are kept, not resent. */
   have: string[];
+  /** Newest Lod2Tile `n` the caller has read; one posted after it is still on its way. */
+  seen: number;
 }
 
 export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request | GeoidSync | StopRequest;
@@ -174,14 +178,14 @@ export interface BuildingBatch {
 }
 
 export type BuildingsResponse =
-  | { kind: typeof BuildingsKind.Tiles; id: number; tile: PrismPlaced }
+  | { kind: typeof BuildingsKind.Tiles; id: number; n: number; tile: PrismPlaced }
   | { kind: typeof BuildingsKind.Done; id: number; tiles: number; missing: number }
   | { kind: typeof BuildingsKind.Height; id: number; heightM: number | null }
   | { kind: typeof BuildingsKind.Rows; id: number; batch: BuildingBatch | null }
   | { kind: typeof BuildingsKind.Ids; id: number; ids: string[] }
   | { kind: typeof BuildingsKind.Ground; id: number; groundM: number | null }
   | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; lod2: Lod2Source[]; tallM: number; ms: number }
-  | { kind: typeof BuildingsKind.Lod2Tile; id: number; tile: Lod2Placed }
+  | { kind: typeof BuildingsKind.Lod2Tile; id: number; n: number; tile: Lod2Placed }
   | { kind: typeof BuildingsKind.Lod2Done; id: number; urls: string[]; tris: number; missing: number; error: string | null }
   | { kind: typeof BuildingsKind.Error; id: number; error: string };
 

@@ -130,6 +130,8 @@ async function cpuTimes(): Promise<{ renderer: Map<string, number>; gpu: number 
 const rendererDelta = (a: Map<string, number>, b: Map<string, number>) => Math.max(0, ...[...b].map(([pid, s]) => s - (a.get(pid) ?? s)));
 
 const tab = await Tab.open(Number(cdp), BASE);
+// The last run's service worker would serve its build to the first case.
+await tab.send('Storage.clearDataForOrigin', { origin: BASE, storageTypes: 'service_workers' });
 await tab.send('Performance.enable');
 await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: COMMIT_HOOK });
 await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: CLOCK_HOOK });

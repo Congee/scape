@@ -4,6 +4,7 @@ import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { tilePixelToLngLat } from '@core/terrain/tiles';
 import { grownRect, rectCovers, shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
 import { adoptPrismSlots } from '@core/geo/prismOcclude';
+import { prismFrameKey } from '@core/geo/prismRaster';
 import { adoptPrismSurfaces } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
@@ -61,6 +62,11 @@ let maskWorker: Worker | null = null;
 let seq = 0;
 /** Id of the wedge request whose responses the store still wants. */
 let tilesId = 0;
+/** Pin and eye of the newest wedge request; a superseded request's tile placed for them is kept too. */
+let tilesFrame = '';
+/** Newest `n` read from each stream, so the worker skips tiles still on their way here. */
+let tilesSeen = 0;
+let lod2Seen = 0;
 let lastKey = '';
 let lastPin: LngLat = { lat: 0, lng: 0 };
 let lastTiles: Parameters<typeof requestBuildings> | null = null;
@@ -106,6 +112,8 @@ function ensureWorker(): Worker {
       else waiter.resolve(res);
       return;
     }
+    if (res.kind === BuildingsKind.Tiles) tilesSeen = res.n;
+    else if (res.kind === BuildingsKind.Lod2Tile) lod2Seen = res.n;
     if (res.kind === BuildingsKind.Height || res.kind === BuildingsKind.Rows || res.kind === BuildingsKind.Ids || res.kind === BuildingsKind.Ground) return; // its waiter already timed out
     if (res.id === lod2Id) {
       if (res.kind === BuildingsKind.Lod2Tile) addLod2Tile(res.tile);
@@ -121,8 +129,7 @@ function ensureWorker(): Worker {
       holdLod2Tile(res.tile);
       return;
     }
-    if (res.id !== tilesId) return;
-    if (res.kind === BuildingsKind.Tiles) {
+    if (res.kind === BuildingsKind.Tiles && (res.id === tilesId || res.tile.frame === tilesFrame)) {
       buildingsStore.setState((st) => {
         const tiles = new Map(st.tiles);
         adoptPrismSlots(res.tile.prism, res.tile.slots);
@@ -130,6 +137,8 @@ function ensureWorker(): Worker {
         tiles.set(res.tile.tileKey, res.tile);
         return { tiles: evict(tiles, lastPin), version: st.version + 1 };
       });
+    } else if (res.id !== tilesId) {
+      return;
     } else if (res.kind === BuildingsKind.Done) {
       buildingsStore.setState((st) => ({ busy: false, missing: res.missing, version: st.version + 1, error: null }));
     } else if (res.kind === BuildingsKind.Error) {
@@ -169,9 +178,10 @@ export function requestBuildings(pin: LngLat, eyeM: number, azFromDeg: number, a
   lastKey = key;
   lastPin = pin;
   tilesId = ++seq;
+  tilesFrame = prismFrameKey(pin, eyeM);
   buildingsStore.setState({ busy: true, error: null });
   const have = [...buildingsStore.getState().tiles.values()].map((t): [string, string] => [t.tileKey, t.sig]);
-  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, eyeM, azFromDeg, azSpanDeg, rangeM, lod2Urls, have };
+  const req: TilesRequest = { kind: BuildingsKind.Tiles, id: tilesId, pin, eyeM, azFromDeg, azSpanDeg, rangeM, lod2Urls, have, seen: tilesSeen };
   ensureWorker().postMessage(req);
 }
 
@@ -196,7 +206,7 @@ export function requestLod2(pin: LngLat, eyeM: number, azFromDeg: number, azSpan
     lod2PlaceId = lod2Id;
   }
   lod2Store.setState({ busy: true, error: null });
-  const req: Lod2Request = { kind: BuildingsKind.Lod2, id: lod2Id, pin, eyeM, azFromDeg, azSpanDeg, rangeM, pxPerRad, have: lod2HeldUrls() };
+  const req: Lod2Request = { kind: BuildingsKind.Lod2, id: lod2Id, pin, eyeM, azFromDeg, azSpanDeg, rangeM, pxPerRad, have: lod2HeldUrls(), seen: lod2Seen };
   ensureWorker().postMessage(req);
 }
 

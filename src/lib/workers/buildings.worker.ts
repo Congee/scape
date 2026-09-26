@@ -15,6 +15,7 @@ import { edgeNeighbours, mergeTileRows, type TileRows } from '@core/geo/tileStit
 import { blitGrid, stampFootprint, stampTriangles, sunCeiling, type HeightGrid } from '@core/geo/sunCeiling';
 import { cubicStencilTiles, demRowAt, elevationAtCubic, lowestGroundAt, withDemTiles } from '@core/terrain/dem';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
+import { InFlight } from '@core/inFlight';
 import { yieldTurn } from '@data/yieldTurn';
 import { abandonBuildingFetches, fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
 import { abandonLod2Fetches, fetchLod2Tile, setLod2Geoid, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
@@ -61,6 +62,9 @@ const LOD2_COVERS_MAX = 512;
 /** Ground per decoded tile; a window change does not move it. */
 const groundCache = new WeakMap<DecodedBuildings, Float32Array>();
 let geoidKey = '';
+/** Tiles posted to the caller; a request it sent before reading them need not build them again. */
+const tilesSent = new InFlight();
+const lod2Sent = new InFlight();
 
 function syncModels(req: ModelsSync): void {
   models = req.models;
@@ -151,10 +155,12 @@ async function run(req: TilesRequest): Promise<void> {
     covers.push(c);
   }
   const tiles: { t: TileCoord; cover: { sig: string; rings: SuppressRing[] }; sig: string }[] = [];
+  tilesSent.read(req.seen);
   for (const t of wedge) {
-    const cover = lod2CoverOf(tileKey(t.z, t.x, t.y), covers);
+    const k = tileKey(t.z, t.x, t.y);
+    const cover = lod2CoverOf(k, covers);
     const sig = `${frame}|${suppressRev}|${cover.sig}`;
-    if (have.get(tileKey(t.z, t.x, t.y)) !== sig) tiles.push({ t, cover, sig });
+    if (have.get(k) !== sig && !tilesSent.pending(k, sig)) tiles.push({ t, cover, sig });
   }
   let missing = 0;
   let sent = 0;
@@ -183,7 +189,7 @@ async function run(req: TilesRequest): Promise<void> {
     const tile: PrismPlaced = { tileKey: decoded.tileKey, frame, sig: complete ? sig : `${sig}|partial`, prism, slots, mesh, hidden: decoded.count - kept.count };
     const arrays = [...Object.values(prism), slots.start, slots.i, slots.uMin, slots.uMax].filter((a) => ArrayBuffer.isView(a));
     const buffers = [...arrays.map((a) => a.buffer as ArrayBuffer), ...surfaceBuffers(mesh)];
-    scope.postMessage({ kind: BuildingsKind.Tiles, id: req.id, tile } satisfies BuildingsResponse, [...new Set(buffers)]);
+    scope.postMessage({ kind: BuildingsKind.Tiles, id: req.id, n: tilesSent.post(tile.tileKey, tile.sig), tile } satisfies BuildingsResponse, [...new Set(buffers)]);
     sent++;
   }
   if (latest !== req.id) return;
@@ -621,7 +627,11 @@ function placed(t: Lod2Tile, c: WalkContent, region: Lod2Region, req: Lod2Reques
 
 /** Streams the wedge's LoD2 tiles nearest first until the triangle budget is spent. */
 async function lod2Run(req: Lod2Request): Promise<void> {
+  lod2Sent.read(req.seen);
+  // The caller holds a superseded request's tiles placed for the same pin, eye and geoid.
+  const place = `${prismFrameKey(req.pin, req.eyeM)}|${geoidKey}`;
   const have = new Set(req.have);
+  for (const u of lod2Tris.keys()) if (lod2Sent.pending(u, place)) have.add(u);
   const urls: string[] = [];
   let tris = 0;
   let missing = 0;
@@ -675,7 +685,7 @@ async function lod2Run(req: Lod2Request): Promise<void> {
     touchCover({ url: c.url, bbox: t.bbox, rings: t.buildings.map((b) => suppressRing(b.hull)) });
     tris += tile.tris;
     urls.push(c.url);
-    scope.postMessage({ kind: BuildingsKind.Lod2Tile, id: req.id, tile } satisfies BuildingsResponse, transfer);
+    scope.postMessage({ kind: BuildingsKind.Lod2Tile, id: req.id, n: lod2Sent.post(c.url, place), tile } satisfies BuildingsResponse, transfer);
   }
   if (latestLod2 !== req.id) return;
   scope.postMessage({ kind: BuildingsKind.Lod2Done, id: req.id, urls, tris, missing, error } satisfies BuildingsResponse);

@@ -4,7 +4,7 @@ import { PrismGl } from '@core/viewfinder/gl/prismGl';
 import { RoofShape } from '@workers/buildings.protocol';
 import { batchOf, PIN, rect, square, type Box } from './batchFixture';
 import { buildPrisms } from './prismRaster';
-import { adoptPrismSurfaces, prismSurfaces, surfaceBuffers, tileSurfaces } from './surfaces';
+import { adoptPrismSurfaces, earClip, earClipAt, prismSurfaces, surfaceBuffers, tileSurfaces } from './surfaces';
 
 const CAM: Camera = { azimuthDeg: 20, elevationDeg: 2, focalMm: 50, frameWmm: 36, frameHmm: 24 };
 
@@ -79,6 +79,35 @@ describe('prismSurfaces', () => {
     expect(Math.max(...m.idx)).toBeLessThan(m.surfId.length);
     expect(m.doubleSided).toBe(false);
     for (let i = 0; i < BOXES.length; i++) expect(m.size[i * 4 + 3]).toBe(1);
+  });
+});
+
+describe('earClipAt', () => {
+  const RINGS: [number[], number[]][] = [
+    [[0, 4, 4, 2, 0], [0, 0, 4, 1, 4]],
+    [[0, 0, 4, 4], [0, 4, 4, 0]],
+    // A bow tie has no ear; the fan still emits m - 2.
+    [[0, 4, 4, 0], [0, 4, 0, 4]],
+    [Array.from({ length: 90 }, (_, i) => Math.cos(i / 14.3) * (i % 2 ? 3 : 5)), Array.from({ length: 90 }, (_, i) => Math.sin(i / 14.3) * (i % 2 ? 3 : 5))]
+  ];
+
+  it('writes m - 2 triangles at the offset and returns the end', () => {
+    for (const [px, py] of RINGS) {
+      const out = new Uint32Array(3 + (px.length - 2) * 3 + 1).fill(7);
+      const end = earClipAt(px, py, px.length, 10, out, 3);
+      expect(end).toBe(3 + (px.length - 2) * 3);
+      expect([out[0], out[end]]).toEqual([7, 7]);
+      const want: number[] = [];
+      earClip(px, py, 10, want);
+      expect([...out.subarray(3, end)]).toEqual(want);
+    }
+  });
+
+  it('clips only the first m points', () => {
+    const [px, py] = RINGS[0];
+    const out = new Uint32Array(3);
+    expect(earClipAt([...px, 99, -99], [...py, 99, 99], 3, 0, out, 0)).toBe(3);
+    expect([...out].toSorted()).toEqual([0, 1, 2]);
   });
 });
 
