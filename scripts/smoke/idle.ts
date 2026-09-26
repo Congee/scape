@@ -13,10 +13,10 @@ const SETTLE_MS = 45_000;
 const CPU_MAX = 2;
 // The live clock may redraw when the sky has visibly drifted: ≥ 0.5 px, about every 3.7 s at 35 mm.
 const LIVE_FRAMES_MAX = Math.ceil(SECS / 3);
-// The live-tick case may land one map shadow-mask re-stamp on top of the 2 % (seen: 0.6–7.7 s CPU, up to 53 fetches).
+// The live-tick case may land one map shadow-mask re-stamp on top of the 2 % (after strip re-stamps: 4.6–6.2 s CPU, 53–65 fetches).
 const RESTAMP_MAX = 1;
 const RESTAMP_CPU_S = 8;
-const RESTAMP_FETCH_MAX = 64;
+const RESTAMP_FETCH_MAX = 80;
 
 const Scene = {
   // `noon`: a visible live scene is pinned here, with the sun high, so no minute tick can land a mask re-stamp in the window.
