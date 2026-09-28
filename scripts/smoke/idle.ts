@@ -1,4 +1,4 @@
-// Quiet budget: an idle app draws no frames and burns ~0 % CPU, per tab and scene, and again after input stops.
+// Quiet budget: an idle app draws no frames, commits nothing, leaves the DOM alone, fetches nothing and burns ~0 % CPU, per tab and scene, and again after input stops.
 /* oxlint-disable no-await-in-loop -- measurements are sequential */
 // Usage: bun scripts/smoke/idle.ts <cdp> <port> <brave-profile> [idle-seconds] [only-case-substring, or =exact-label]
 // Prints a markdown table; exits non-zero on any budget breach.
@@ -17,6 +17,8 @@ const LIVE_FRAMES_MAX = Math.ceil(SECS / 3);
 const RESTAMP_MAX = 1;
 const RESTAMP_CPU_S = 2.5;
 const RESTAMP_FETCH_MAX = 50;
+// DOM the minute tick itself may change: the time field and the sun and moon readouts.
+const TICK_DOM = /^(input\.live < div\.datebar|span\.(val|extra) < div\.readout-row\S*) /;
 
 const Scene = {
   // `noon`: a visible live scene is pinned here, with the sun high, so no minute tick can land a mask re-stamp in the window.
@@ -43,6 +45,27 @@ const COMMIT_HOOK = `(() => {
     }
   };
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { supportsFiber: true, isDisabled: false, renderers: new Map(), inject: (r) => 1, checkDCE() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {}, onCommitFiberRoot(_id, root) { c.commits++; walk(root.current.child); } };
+})();`;
+// Counts DOM mutations by target, e.g. `div.time-label attr:style` or `span text`.
+const MUTATION_HOOK = `(() => {
+  const m = { count: 0, targets: {}, reset() { m.count = 0; m.targets = {}; } };
+  window.__mutations = m;
+  const one = (e) => e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className ? '.' + e.className.trim().split(/\\s+/).slice(0, 2).join('.') : '');
+  // The element, and its nearest ancestor with a class, e.g. span.val < div.readout-row.
+  const name = (n) => {
+    const e = n.nodeType === 1 ? n : n.parentElement;
+    if (!e) return '#' + n.nodeName;
+    let p = e.parentElement;
+    while (p && !(typeof p.className === 'string' && p.className)) p = p.parentElement;
+    return one(e) + (p ? ' < ' + one(p) : '');
+  };
+  new MutationObserver((rs) => {
+    for (const r of rs) {
+      m.count++;
+      const k = name(r.target) + ' ' + (r.type === 'attributes' ? 'attr:' + r.attributeName : r.type === 'characterData' ? 'text' : 'children');
+      m.targets[k] = (m.targets[k] ?? 0) + 1;
+    }
+  }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
 })();`;
 // For the live-tick case: shifts the page clock to a stored instant, so the real minute tick runs under a low sun; records each shadow-mask grid posted to a worker.
 const CLOCK_HOOK = `(() => {
@@ -129,12 +152,35 @@ async function cpuTimes(): Promise<{ renderer: Map<string, number>; gpu: number 
 /** The busiest renderer over the window is the app tab's. */
 const rendererDelta = (a: Map<string, number>, b: Map<string, number>) => Math.max(0, ...[...b].map(([pid, s]) => s - (a.get(pid) ?? s)));
 
+/** Requests of this origin's service workers, which the page's own sessions never see. */
+async function serviceWorkerLog(cdpPort: number) {
+  const { webSocketDebuggerUrl } = (await (await fetch(`http://localhost:${cdpPort}/json/version`)).json()) as { webSocketDebuggerUrl: string };
+  const ws = new WebSocket(webSocketDebuggerUrl);
+  await new Promise((ok, fail) => (ws.addEventListener('open', ok), ws.addEventListener('error', fail)));
+  let seq = 0;
+  const send = (method: string, params: Record<string, unknown> = {}, sessionId?: string) => ws.send(JSON.stringify({ id: ++seq, method, params, ...(sessionId && { sessionId }) }));
+  const log = { on: false, requests: [] as string[], close: () => ws.close() };
+  ws.addEventListener('message', (e) => {
+    const m = JSON.parse(String(e.data)) as { method?: string; params?: Record<string, unknown>; sessionId?: string };
+    if (m.method === 'Target.attachedToTarget') {
+      const p = m.params as { sessionId: string; targetInfo: { url: string } };
+      if (!p.targetInfo.url.startsWith(BASE)) return;
+      send('Network.enable', {}, p.sessionId);
+      send('Runtime.runIfWaitingForDebugger', {}, p.sessionId);
+    } else if (m.method === 'Network.requestWillBeSent' && log.on) log.requests.push(String((m.params as { request: { url: string } }).request.url));
+  });
+  send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true, filter: [{ type: 'service_worker' }, { exclude: true }] });
+  return log;
+}
+
 const tab = await Tab.open(Number(cdp), BASE);
+const sw = await serviceWorkerLog(Number(cdp));
 // The last run's service worker would serve its build to the first case.
 await tab.send('Storage.clearDataForOrigin', { origin: BASE, storageTypes: 'service_workers' });
 await tab.send('Performance.enable');
 await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: COMMIT_HOOK });
 await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: CLOCK_HOOK });
+await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: MUTATION_HOOK });
 const taskSecs = async () => ((await tab.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] }).metrics.find((m) => m.name === 'TaskDuration')?.value ?? 0;
 
 const mouse = (type: string, x: number, y: number, extra: Record<string, unknown> = {}) => tab.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, ...extra });
@@ -172,8 +218,12 @@ interface Row {
   timers: number;
   commits: number;
   renders: number;
+  mutations: number;
   fetches: number;
+  swFetches: number;
   urls: string[];
+  /** What changed besides the minute tick's own updates, or anything at all where time is pinned. */
+  offenders: string[];
   restamps: number;
   cpuS: number;
   top: [string, number][];
@@ -203,8 +253,10 @@ async function measure(c: Case): Promise<Row> {
   // Land the tick a quarter into the window, so its work finishes inside it.
   if (c.clock) await Bun.sleep(await tab.eval<number>(`(60000 - Date.now() % 60000 + 60000 - ${(SECS * 250) | 0}) % 60000`));
   await tab.logRequests();
+  sw.requests.length = 0;
+  sw.on = true;
   const grids0 = await tab.eval<number>('window.__masks.grids.length');
-  await tab.eval('window.__scape.idle.reset(); window.__commits?.reset()');
+  await tab.eval('window.__scape.idle.reset(); window.__commits?.reset(); window.__mutations?.reset()');
   const cpu0 = await cpuTimes();
   const task0 = await taskSecs();
   const t0 = performance.now();
@@ -212,22 +264,34 @@ async function measure(c: Case): Promise<Row> {
   const dt = (performance.now() - t0) / 1000;
   const cpu1 = await cpuTimes();
   const task1 = await taskSecs();
-  const fetches = tab.requests.length;
-  const urls = tab.requests.slice(0, 10);
   tab.stopRequests();
+  sw.on = false;
+  // A request the page made that the worker passed on is one fetch, not two.
+  const page = new Set(tab.requests);
+  const swOnly = sw.requests.filter((u) => !page.has(u));
+  const fetches = tab.requests.length + swOnly.length;
+  const urls = [...tab.requests, ...swOnly.map((u) => `sw ${u}`)].slice(0, 10);
   const grids = await tab.eval<string[]>('window.__masks.grids');
   const restamps = grids.slice(grids0).filter((g, i) => g !== grids[grids0 + i - 1]).length;
-  const p = await tab.eval<{ raf: number; glFrames: number; timers: number; commits: number; renders: number }>('(() => { const p = window.__scape.idle, c = window.__commits ?? {}; return { raf: p.raf, glFrames: p.glFrames, timers: p.timers, commits: c.commits ?? -1, renders: c.renders ?? -1 }; })()');
+  const p = await tab.eval<{ raf: number; glFrames: number; timers: number; commits: number; renders: number; mutations: number }>('(() => { const p = window.__scape.idle, c = window.__commits ?? {}; return { raf: p.raf, glFrames: p.glFrames, timers: p.timers, commits: c.commits ?? -1, renders: c.renders ?? -1, mutations: window.__mutations?.count ?? -1 }; })()');
+  const mutated = await tab.eval<[string, number][]>('Object.entries(window.__mutations?.targets ?? {}).sort((a, b) => b[1] - a[1])');
   const pct = (a: number, b: number) => +((100 * (b - a)) / dt).toFixed(1);
-  const r: Row = { label: label(c), renderer: pct(0, rendererDelta(cpu0.renderer, cpu1.renderer)), gpu: pct(cpu0.gpu, cpu1.gpu), task: pct(task0, task1), ...p, fetches, urls, restamps, cpuS: +(rendererDelta(cpu0.renderer, cpu1.renderer) + cpu1.gpu - cpu0.gpu).toFixed(2), top: await tab.eval('Object.entries(window.__commits?.names ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8)'), pass: false };
+  const r: Row = { label: label(c), renderer: pct(0, rendererDelta(cpu0.renderer, cpu1.renderer)), gpu: pct(cpu0.gpu, cpu1.gpu), task: pct(task0, task1), ...p, fetches, swFetches: sw.requests.length, urls, offenders: [], restamps, cpuS: +(rendererDelta(cpu0.renderer, cpu1.renderer) + cpu1.gpu - cpu0.gpu).toFixed(2), top: await tab.eval('Object.entries(window.__commits?.names ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8)'), pass: false };
   if (c.hidden) await tab.eval(HIDE(false));
   const live = !t && !c.hidden;
   // Hidden, nothing may run at all: no frames, timers or fetches.
   const quiet = !c.hidden || (r.raf === 0 && r.timers === 0 && r.fetches === 0);
+  // Visible with time pinned, the screen and the network stay still: no frame, commit, DOM change or fetch.
+  if (!c.hidden && !live) {
+    for (const [k, n] of [['rAF', r.raf], ['GL frames', r.glFrames], ['React commits', r.commits], ['DOM mutations', r.mutations], ['fetches', r.fetches]] as const) if (n !== 0) r.offenders.push(`${k} ${n}`);
+    r.offenders.push(...mutated.map(([k, n]) => `dom ${k} ×${n}`), ...r.top.map(([k, n]) => `render ${k} ×${n}`), ...urls.map((u) => `fetch ${u}`));
+  }
+  // The live tick may change only its own readouts; anything else is listed.
+  if (c.clock) r.offenders.push(...mutated.filter(([k]) => !TICK_DOM.test(k)).map(([k, n]) => `dom ${k} ×${n}`));
   // A re-stamp may spend RESTAMP_CPU_S over the window's 2 % in the renderer; the GPU keeps its 2 %.
   const restampOk = c.clock ? r.restamps <= RESTAMP_MAX && r.fetches <= RESTAMP_FETCH_MAX : true;
   const rendererMax = c.clock && r.restamps > 0 ? CPU_MAX + (100 * RESTAMP_CPU_S) / dt : CPU_MAX;
-  r.pass = r.renderer <= rendererMax && r.gpu <= CPU_MAX && r.glFrames <= (live ? LIVE_FRAMES_MAX : 0) && quiet && restampOk;
+  r.pass = r.renderer <= rendererMax && r.gpu <= CPU_MAX && r.glFrames <= (live ? LIVE_FRAMES_MAX : 0) && quiet && restampOk && r.offenders.length === 0;
   return r;
 }
 
@@ -239,8 +303,9 @@ for (const c of cases.filter((k) => (only.startsWith('=') ? label(k) === only.sl
 }
 await tab.send('Emulation.clearDeviceMetricsOverride');
 tab.close();
+sw.close();
 
-console.log(`| case (${SECS} s idle) | renderer % | GPU % | TaskDuration % | rAF | GL frames | timers | React commits | renders | fetches | mask re-stamps | CPU s | result |`);
-console.log('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
-for (const r of rows) console.log(`| ${r.label} | ${r.renderer} | ${r.gpu} | ${r.task} | ${r.raf} | ${r.glFrames} | ${r.timers} | ${r.commits} | ${r.renders} | ${r.fetches} | ${r.restamps} | ${r.cpuS} | ${r.pass ? 'PASS' : 'FAIL'} |`);
+console.log(`| case (${SECS} s idle) | renderer % | GPU % | TaskDuration % | rAF | GL frames | timers | React commits | renders | DOM mutations | fetches (SW) | mask re-stamps | CPU s | result |`);
+console.log('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+for (const r of rows) console.log(`| ${r.label} | ${r.renderer} | ${r.gpu} | ${r.task} | ${r.raf} | ${r.glFrames} | ${r.timers} | ${r.commits} | ${r.renders} | ${r.mutations} | ${r.fetches} (${r.swFetches}) | ${r.restamps} | ${r.cpuS} | ${r.pass ? 'PASS' : `FAIL${r.offenders.length ? `: ${r.offenders.slice(0, 6).join('; ')}` : ''}`} |`);
 process.exit(rows.every((r) => r.pass) ? 0 : 1);

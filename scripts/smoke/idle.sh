@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quiet smoke: per tab and scene, an idle app draws no GL frames and keeps the renderer and GPU process ≤ 2 %.
+# Quiet smoke: per tab and scene, an idle app draws no GL frames, commits, DOM changes or fetches (page, workers, service worker) and keeps the renderer and GPU process ≤ 2 %.
 # Usage: scripts/smoke/idle.sh [port] [cdp-port] [session] [brave-profile] [idle-seconds] [only-case-substring, or =exact-label] [prod|dev]
 # prod (the gate) builds the `probe` mode and serves it with vite preview; dev reuses or starts vite dev.
 # Starts what is missing (server, one headless Brave) and stops only what it started.
