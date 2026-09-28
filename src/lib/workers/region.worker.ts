@@ -3,6 +3,7 @@ import { Compression, FetchSource, FileSource, PMTiles, tileIdToZxy, TileType, t
 import { bboxCentre } from '@core/geo/bbox';
 import { planExtract } from '@core/tiles/extract';
 import type { StyleSpecification } from 'maplibre-gl';
+import { Coverage, coverageOf, DONE_AT, fillBlank, noDataShare, offlineCandidates, SAT_OFFLINE_ATTRIBUTION, SAT_TILE_BYTES, sourceTileUrl, whitenBlank } from '@core/tiles/satellite';
 import { ArchiveBuilder, coalesceRanges, gzip, tileCountInBounds, tileIdsInBounds, tileRange, type TileSink } from '@core/tiles/pmtiles';
 import {
   assetFileName,
@@ -22,6 +23,7 @@ import { announceArchives, archiveName, archivesDir, assetsDirName, metaFromHead
 import { importGeoid } from '@data/geoid';
 import { importViirs } from '@data/viirs';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
+import { encodeJpeg, pixels, SAT_PX } from '@data/satelliteImage';
 import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
 
@@ -36,6 +38,8 @@ const COPY_CHUNK = 8 * 1024 * 1024;
 const PROGRESS_MS = 150;
 const BASEMAP_CONCURRENCY = 4;
 const TERRAIN_CONCURRENCY = 8;
+/** Mapping-agency WMS servers are slow; stay polite. */
+const SATELLITE_CONCURRENCY = 4;
 const RETRIES = 3;
 /** Gzipped vector tile size assumed when a server hides Content-Length. */
 const FALLBACK_TILE_BYTES = 60_000;
@@ -395,6 +399,84 @@ async function downloadTiles(id: string, spec: RegionSpec, signal: AbortSignal):
 }
 
 /** Per-zoom tile size sampled with a HEAD of the centre tile. */
+/** The best offline-licensed source's JPEG, or a composite where it is partly blank at a border. */
+async function satelliteTileBytes(z: number, x: number, y: number, signal: AbortSignal): Promise<Uint8Array | null> {
+  let out: Uint8ClampedArray | null = null;
+  for (const s of offlineCandidates(z, x, y)) {
+    // oxlint-disable-next-line no-await-in-loop -- a lower source is asked only where the one above is blank
+    const res = await fetchRetry(sourceTileUrl(s, z, x, y), { signal }).catch(() => null);
+    signal.throwIfAborted();
+    if (!res?.ok) continue;
+    // oxlint-disable-next-line no-await-in-loop
+    const blob = await res.blob();
+    if (!blob.size || !blob.type.startsWith('image/')) continue;
+    // oxlint-disable-next-line no-await-in-loop
+    const bmp = await createImageBitmap(blob).catch(() => null);
+    if (!bmp) continue;
+    const rgba = pixels(bmp);
+    bmp.close();
+    const cov = coverageOf(noDataShare(rgba, 4));
+    if (cov === Coverage.Empty) continue;
+    // oxlint-disable-next-line no-await-in-loop
+    if (cov === Coverage.Full && !out && blob.type === 'image/jpeg') return new Uint8Array(await blob.arrayBuffer());
+    out ??= new Uint8ClampedArray(SAT_PX * SAT_PX * 4);
+    if (fillBlank(out, rgba) / (SAT_PX * SAT_PX) <= DONE_AT) break;
+  }
+  if (!out) return null;
+  whitenBlank(out);
+  return encodeJpeg(out);
+}
+
+async function downloadSatellite(id: string, spec: RegionSpec, signal: AbortSignal): Promise<ArchiveMeta> {
+  const ids = tileIdsInBounds(spec.bbox, spec.minZoom, spec.maxZoom);
+  const dir = await archivesDir();
+  const tmpName = `${id}.data`;
+  const tmp = await openSync(dir, tmpName);
+  try {
+    const builder = new ArchiveBuilder(new SyncSink(tmp));
+    const report = reporter(id, ids.length);
+    let done = 0;
+    for await (const got of inOrder(ids, SATELLITE_CONCURRENCY, async (tileId) => {
+      const [z, x, y] = tileIdToZxy(tileId);
+      return { tileId, bytes: await satelliteTileBytes(z, x, y, signal) };
+    })) {
+      signal.throwIfAborted();
+      done++;
+      // oxlint-disable-next-line no-await-in-loop -- one sequential writer
+      if (got.bytes) await builder.add(got.tileId, got.bytes);
+      report(done, builder.dataLength);
+    }
+    if (!builder.count) throw new Error('No aerial imagery that may be kept offline covers that area');
+
+    const prefix = await builder.finish({
+      tileType: TileType.Jpeg,
+      tileCompression: Compression.None,
+      minZoom: spec.minZoom,
+      maxZoom: spec.maxZoom,
+      bounds: spec.bbox,
+      centre: { ...bboxCentre(spec.bbox), zoom: spec.minZoom },
+      metadata: { name: spec.name, attribution: SAT_OFFLINE_ATTRIBUTION }
+    });
+    signal.throwIfAborted();
+    const bytes = await assemble(dir, id, prefix, tmp);
+    return {
+      id,
+      name: spec.name,
+      kind: ArchiveKind.Satellite,
+      bbox: spec.bbox,
+      minZoom: spec.minZoom,
+      maxZoom: spec.maxZoom,
+      bytes,
+      tileCount: builder.count,
+      sourceUrl: spec.sourceUrl,
+      downloadedAt: new Date().toISOString()
+    };
+  } finally {
+    tmp.close();
+    await removeQuietly(dir, tmpName);
+  }
+}
+
 async function estimateTiles(spec: RegionSpec, signal: AbortSignal): Promise<Estimate> {
   const tj = await fetchTileJson(spec.sourceUrl, signal);
   const [minZoom, maxZoom] = packZooms(spec.minZoom, spec.maxZoom, tj);
@@ -444,6 +526,10 @@ async function estimate(spec: RegionSpec, signal: AbortSignal): Promise<Estimate
     const tileCount = tileCountInBounds(spec.bbox, TERRAIN_MIN_ZOOM, TERRAIN_MAX_ZOOM);
     return { tileCount, bytes: tileCount * TERRAIN_TILE_BYTES, exact: false, sourceUrl: spec.sourceUrl };
   }
+  if (spec.kind === ArchiveKind.Satellite) {
+    const tileCount = tileCountInBounds(spec.bbox, spec.minZoom, spec.maxZoom);
+    return { tileCount, bytes: tileCount * SAT_TILE_BYTES, exact: false, sourceUrl: spec.sourceUrl };
+  }
   const { pm, url, header } = await openRemote(spec.sourceUrl, signal);
   const reader = { header, getDirectory: (offset: number, length: number) => pm.cache.getDirectory(pm.source, offset, length, header) };
   const plan = await planExtract(reader, spec.bbox, spec.minZoom, spec.maxZoom);
@@ -474,7 +560,9 @@ async function run(req: Exclude<RegionRequest, { kind: typeof RegionRequestKind.
         ? await importFile(req.id, req.file, req.name, signal)
         : req.spec.kind === ArchiveKind.Terrain
           ? await downloadTerrain(req.id, req.spec, signal)
-          : req.spec.kind === ArchiveKind.Basemap && !isPmtilesUrl(req.spec.sourceUrl)
+          : req.spec.kind === ArchiveKind.Satellite
+            ? await downloadSatellite(req.id, req.spec, signal)
+            : req.spec.kind === ArchiveKind.Basemap && !isPmtilesUrl(req.spec.sourceUrl)
             ? await downloadTiles(req.id, req.spec, signal)
             : await downloadExtract(req.id, req.spec, signal);
     await writeMeta(meta);

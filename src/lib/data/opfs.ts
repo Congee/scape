@@ -40,6 +40,7 @@ const BUILDING_LAYERS = new Set(['building', 'building_part']);
 
 /** A vector archive holding only building layers is a buildings region, not a basemap. */
 export function archiveKindOf(tileType: TileType, layerIds: readonly string[]): ArchiveKind {
+  if (tileType === TileType.Jpeg) return ArchiveKind.Satellite;
   if (tileType !== TileType.Mvt) return ArchiveKind.Terrain;
   return layerIds.length > 0 && layerIds.every((l) => BUILDING_LAYERS.has(l)) ? ArchiveKind.Buildings : ArchiveKind.Basemap;
 }

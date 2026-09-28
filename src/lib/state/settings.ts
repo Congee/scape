@@ -47,6 +47,8 @@ export interface Settings {
   terrain3d: boolean;
   /** NASA VIIRS night-lights raster as a light-pollution proxy. */
   showLightPollution: boolean;
+  /** Aerial imagery: national orthophotos, then MapTiler, then Esri. */
+  showSatellite: boolean;
   /** Send camera, target and map locations to Open-Meteo for forecasts. */
   weather: boolean;
   /** Night and twilight shading with the sunrise/sunset line. */
@@ -97,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showHillshade: false,
   terrain3d: false,
   showLightPollution: false,
+  showSatellite: false,
   weather: true,
   showDayNight: false,
   dayNightOpacity: 0.6,

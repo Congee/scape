@@ -4,6 +4,7 @@ import { formatLngLat } from '@core/geo/coords';
 import { distanceM } from '@core/geo/geodesy';
 import { bytes } from '@core/format';
 import { BUILDINGS_DEFAULT_MAX_TILES, BUILDINGS_ZOOM, buildingsByDefault } from '@core/tiles/buildingsRegion';
+import { offlineSources, SAT_OFFLINE_MIN_ZOOM, SAT_OFFLINE_SOURCE, SAT_OFFLINE_ZOOMS } from '@core/tiles/satellite';
 import { PmFlavor } from '@data/basemaps';
 import { OVERTURE_BUILDINGS_RELEASE, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
 import { BASEMAP_DEFAULT_MAX_TILES, basemapByDefault, isPmtilesUrl, OFM_STYLE, OFM_TILEJSON } from '@data/openfreemap';
@@ -28,7 +29,11 @@ type BasemapSource = (typeof BasemapSource)[keyof typeof BasemapSource];
 const sourceOf = (url: string): BasemapSource => (isPmtilesUrl(url) ? BasemapSource.Protomaps : BasemapSource.OpenFreeMap);
 const defaultSourceUrl = (s: BasemapSource) => (s === BasemapSource.Protomaps ? defaultBasemapSourceUrl() : OFM_TILEJSON);
 
-const KIND_LABEL: Record<ArchiveKind, string> = { [ArchiveKind.Basemap]: 'Basemap', [ArchiveKind.Terrain]: 'Terrain', [ArchiveKind.Buildings]: 'Buildings' };
+const KIND_LABEL: Record<ArchiveKind, string> = { [ArchiveKind.Basemap]: 'Basemap', [ArchiveKind.Terrain]: 'Terrain', [ArchiveKind.Buildings]: 'Buildings', [ArchiveKind.Satellite]: 'Satellite' };
+const SAT_DEFAULT_MAX_ZOOM = 16;
+const SAT_OFFLINE_NAMES = offlineSources()
+  .map((s) => s.name)
+  .join(', ');
 
 const STATE_LABEL: Record<JobState, string> = {
   [JobState.Estimating]: 'Estimating',
@@ -66,12 +71,13 @@ const todayName = () => `Region ${new Date().toISOString().slice(0, 10)}`;
 
 /** A dated Protomaps build is refreshed to today's; any other source is reused as is. */
 const freshSource = (a: ArchiveMeta) =>
-  a.kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : a.kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : a.sourceUrl.startsWith(PROTOMAPS_BUILD) ? defaultBasemapSourceUrl() : a.sourceUrl;
+  a.kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : a.kind === ArchiveKind.Satellite ? SAT_OFFLINE_SOURCE : a.kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : a.sourceUrl.startsWith(PROTOMAPS_BUILD) ? defaultBasemapSourceUrl() : a.sourceUrl;
 
 const ZOOMS: Record<ArchiveKind, [number, number] | null> = {
   [ArchiveKind.Basemap]: null,
   [ArchiveKind.Terrain]: [TERRAIN_MIN_ZOOM, TERRAIN_MAX_ZOOM],
-  [ArchiveKind.Buildings]: [BUILDINGS_ZOOM, BUILDINGS_ZOOM]
+  [ArchiveKind.Buildings]: [BUILDINGS_ZOOM, BUILDINGS_ZOOM],
+  [ArchiveKind.Satellite]: null
 };
 
 export function OfflinePanel() {
@@ -87,6 +93,7 @@ export function OfflinePanel() {
 
   const [name, setName] = useState(todayName);
   const [maxZoom, setMaxZoom] = useState(DEFAULT_MAX_ZOOM);
+  const [satMaxZoom, setSatMaxZoom] = useState(SAT_DEFAULT_MAX_ZOOM);
   const [sourceUrl, setSourceUrl] = useState(OFM_TILEJSON);
   const [estimates, setEstimates] = useState<Partial<Record<ArchiveKind, Estimate>>>({});
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +118,7 @@ export function OfflinePanel() {
   }
 
   const spec = (kind: ArchiveKind, bbox: Bbox): RegionSpec => {
-    const [minZoom, maxZ] = ZOOMS[kind] ?? [0, maxZoom];
+    const [minZoom, maxZ] = ZOOMS[kind] ?? (kind === ArchiveKind.Satellite ? [SAT_OFFLINE_MIN_ZOOM, satMaxZoom] : [0, maxZoom]);
     const url = sourceUrl.trim() || OFM_TILEJSON;
     return {
       kind,
@@ -119,7 +126,7 @@ export function OfflinePanel() {
       bbox,
       minZoom,
       maxZoom: maxZ,
-      sourceUrl: kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : url,
+      sourceUrl: kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : kind === ArchiveKind.Satellite ? SAT_OFFLINE_SOURCE : url,
       ...(kind === ArchiveKind.Basemap && !isPmtilesUrl(url) && { styleUrl: OFM_STYLE })
     };
   };
@@ -180,6 +187,7 @@ export function OfflinePanel() {
   const basemapEstimate = estimates[ArchiveKind.Basemap];
   const terrainEstimate = estimates[ArchiveKind.Terrain];
   const buildingsEstimate = estimates[ArchiveKind.Buildings];
+  const satelliteEstimate = estimates[ArchiveKind.Satellite];
 
   return (
     <div className="layers offline">
@@ -309,6 +317,35 @@ export function OfflinePanel() {
           Download
         </button>
         {buildingsEstimate && <span className="muted">{estimateLabel(buildingsEstimate)}</span>}
+      </div>
+      <div className="field">
+        <span>Satellite</span>
+        <select
+          value={satMaxZoom}
+          onChange={(e) => {
+            setSatMaxZoom(Number(e.target.value));
+            setEstimates(({ [ArchiveKind.Satellite]: _, ...rest }) => rest);
+          }}
+          aria-label="Highest satellite zoom"
+        >
+          {SAT_OFFLINE_ZOOMS.map((z) => (
+            <option key={z} value={z}>
+              zoom {SAT_OFFLINE_MIN_ZOOM}–{z}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="muted hint" title={SAT_OFFLINE_NAMES}>
+        Only national aerial photos whose licence allows offline copies are packed; MapTiler, Esri, and the Dutch, Swiss, US and Japanese photos stay online.
+      </p>
+      <div className="actions" data-offline="satellite">
+        <button onClick={() => void runEstimate(ArchiveKind.Satellite)} disabled={!draft}>
+          Estimate
+        </button>
+        <button onClick={() => start(ArchiveKind.Satellite)} disabled={!draft}>
+          Download
+        </button>
+        {satelliteEstimate && <span className="muted">{estimateLabel(satelliteEstimate)}</span>}
       </div>
       {error && <p className="error">{error}</p>}
 

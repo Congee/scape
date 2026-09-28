@@ -14,4 +14,8 @@ describe('archiveKindOf', () => {
     expect(archiveKindOf(TileType.Png, [])).toBe(ArchiveKind.Terrain);
     expect(archiveKindOf(TileType.Webp, ['building'])).toBe(ArchiveKind.Terrain);
   });
+
+  it('reads JPEG archives as satellite imagery', () => {
+    expect(archiveKindOf(TileType.Jpeg, [])).toBe(ArchiveKind.Satellite);
+  });
 });

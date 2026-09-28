@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LightMode } from '@core/astro/lightSource';
 import { basemapGroup, BasemapGroup, BasemapKind, BUILTIN_BASEMAPS, offlineBasemaps, PmFlavor, type Basemap } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
+import { satKeys } from '@data/satellite';
 import { useMapStatus } from '@state/mapStatus';
 import { useOffline } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
@@ -112,6 +113,9 @@ export function LayersPanel() {
 
       <h3>Map layers</h3>
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
+      <SettingLayer k="showSatellite" label="Satellite">
+        <p className="muted hint">{satKeys().maptiler ? 'National aerial photos where available, MapTiler elsewhere.' : 'National aerial photos only: imagery elsewhere needs a MapTiler key.'}</p>
+      </SettingLayer>
       <DayNightToggle />
       <CloudToggle />
       <TerrainTintToggles />

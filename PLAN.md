@@ -474,6 +474,13 @@ collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts
 - **OPFS is the source of truth for archives** (each `<id>.pmtiles` with an `<id>.json` sidecar);
   IndexedDB stays for the library.
 - **Name**: "scape" is a placeholder.
+- **Satellite fallback is MapTiler Satellite on the Free plan** (user, 2026-09-28): Scape is
+  non-commercial, so the logo is shown and use stays within 100k requests a month. National open
+  imagery comes first (`core/tiles/satellite.ts`).
+- **Esri World Imagery is a second fallback, online only** (user, 2026-09-28): never in the service
+  worker cache or offline packs.
+- **Satellite sources needing their own keys are skipped** (user, 2026-09-28): DK, FI and NZ LINZ;
+  Canada, Norway and Slovenia follow later.
 
 ## 9. Open work (2026-09-18)
 

@@ -58,6 +58,7 @@ import { latestOnly } from './latest';
 import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
 import { MapLayers } from './mapLayers';
+import { SatelliteLayer } from './satelliteLayer';
 import { MapMenu } from './mapMenu';
 import { ModelDrawer } from './ModelDrawer';
 import { MODELS_FILL_LAYER } from './modelOverlay';
@@ -320,8 +321,10 @@ export class MapController {
     this.map.on('idle', () => this.senseUrban());
 
     const layers = new MapLayers(this.map, HILL_SRC, (id) => this.ensureDem(id));
+    const satellite = new SatelliteLayer(this.map);
     this.unsubs.push(
       () => layers.dispose(),
+      () => satellite.dispose(),
       () => clearTimeout(this.shadowTimer),
       () => this.drawer.dispose(),
       () => this.clouds.dispose(),

@@ -2,7 +2,7 @@ import type { Bbox } from '@core/geo/bbox';
 import type { GeoidMeta } from '@data/geoid';
 import type { ViirsTileMeta } from '@data/viirs';
 
-export const ArchiveKind = { Basemap: 'basemap', Terrain: 'terrain', Buildings: 'buildings' } as const;
+export const ArchiveKind = { Basemap: 'basemap', Terrain: 'terrain', Buildings: 'buildings', Satellite: 'satellite' } as const;
 export type ArchiveKind = (typeof ArchiveKind)[keyof typeof ArchiveKind];
 
 /** An offline archive in OPFS, mirrored by a `<id>.json` sidecar next to `<id>.pmtiles`. */

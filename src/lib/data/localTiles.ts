@@ -62,3 +62,4 @@ export async function readThrough<T>(local: () => Promise<T | null>, remote: () 
 
 export const localTerrain = new LocalTiles(ArchiveKind.Terrain);
 export const localBuildings = new LocalTiles(ArchiveKind.Buildings);
+export const localSatellite = new LocalTiles(ArchiveKind.Satellite);
