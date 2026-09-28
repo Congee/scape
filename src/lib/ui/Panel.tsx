@@ -5,6 +5,7 @@ import { LayersPanel } from './LayersPanel';
 import { LiveReadout } from './LiveReadout';
 import { MarkersPanel } from './MarkersPanel';
 import { NightPanel } from './NightPanel';
+import { ParkingLinks } from './ParkingLinks';
 import { ToolsPanel } from './ToolsPanel';
 import { OfflinePanel } from './OfflinePanel';
 import { Timeline } from './Timeline';
@@ -59,6 +60,7 @@ export function Panel() {
         {tab === PanelTab.Timeline && (
           <>
             <LiveReadout />
+            <ParkingLinks />
             <Timeline />
           </>
         )}

@@ -101,6 +101,7 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 - Tides: NOAA harmonic constituents + offline prediction for US stations (P)
 - Eclipses (✔ calendar marks 2026-09-12; local circumstances later), 3D terrain orbit view (MapLibre
   terrain), Moon simulator (T)
+- Parking links to SpotHero/SpotAngels for city spots (user, 2026-09-28)
 
 Explicitly out of scope: accounts/sync server, AR camera overlay (no reliable web compass),
 Google Street View / photorealistic tiles (paid, non-relightable); a bring-your-own-key

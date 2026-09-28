@@ -22,6 +22,7 @@ import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, rowsRings, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { formatLngLat } from '@core/geo/coords';
+import { isUrban, placeClass, type Place } from '@core/geo/parking';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
 import { frameOf, keepsCentre, MASK_SNAP_CELLS, maskCorners, maskFrame, maskPixels, maskRect, MOON_SHADOW_RGB, SHADOW_RGB, type MaskRect } from '@core/geo/shadowMask';
@@ -69,6 +70,8 @@ const LIVE_SRC = 'sky-live';
 const GEO_SRC = 'geodetic';
 const FOV_SRC = 'fov';
 const MARKERS_SRC = 'markers';
+// Below this the basemap drops town labels, so a spot can look rural when it is not.
+const URBAN_MIN_ZOOM = 10;
 const REGION_SRC = 'region';
 const IMPORT_SRC = 'import-pick';
 const HEAT_SRC = 'heat';
@@ -314,6 +317,7 @@ export class MapController {
       const c = this.map.getCenter();
       worldStore.getState().setView({ center: { lng: c.lng, lat: c.lat }, zoom: this.map.getZoom() });
     });
+    this.map.on('idle', () => this.senseUrban());
 
     const layers = new MapLayers(this.map, HILL_SRC, (id) => this.ensureDem(id));
     this.unsubs.push(
@@ -331,6 +335,7 @@ export class MapController {
           this.renderGeodetic();
           this.renderFov();
           this.scheduleShadows();
+          this.senseUrban();
         },
         { equalityFn: samePoint }
       ),
@@ -835,6 +840,29 @@ export class MapController {
       },
       paint: { 'text-color': '#e6edf3', 'text-halo-color': '#0f1216', 'text-halo-width': 1.2 }
     });
+  }
+
+  /** Whether the basemap's loaded place labels put the pin in town; only a close enough view can say no. */
+  private senseUrban(): void {
+    if (!this.styleReady || this.map.getZoom() < URBAN_MIN_ZOOM) return;
+    const pin = worldStore.getState().pin;
+    if (!this.map.getBounds().contains([pin.lng, pin.lat])) return;
+    const places: Place[] = [];
+    let vector = false;
+    for (const [id, src] of Object.entries(this.map.getStyle().sources)) {
+      if (src.type !== 'vector') continue;
+      vector = true;
+      for (const sourceLayer of ['place', 'places']) {
+        for (const f of this.map.querySourceFeatures(id, { sourceLayer })) {
+          const cls = f.geometry.type === 'Point' ? placeClass(sourceLayer, f.properties ?? {}) : null;
+          if (cls) {
+            const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates;
+            places.push({ lng, lat, cls });
+          }
+        }
+      }
+    }
+    if (vector) mapStatusStore.getState().setUrban(pin, isUrban(pin, places));
   }
 
   private ensureDem(id: string) {
