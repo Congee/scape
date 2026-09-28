@@ -75,6 +75,18 @@ ids=${r%%|*}
 rest=${r#*|}
 check "NL/DE border at Venlo: both sides, no empty tile" "$([ "$(has "$ids" nl-pdok)" = 1 ] && [ "$(has "$ids" de-nrw)" = 1 ] && [ "${rest%%/*}" = 0 ] && echo 1 || echo 0)" "$r"
 
+border() { # name, screenshot, want-id, lng, lat, zoom
+  local r ids rest
+  r=$(scene "$4" "$5" "$6")
+  ab screenshot "$OUT/$2" >/dev/null
+  ids=${r%%|*}
+  rest=${r#*|}
+  check "$1" "$([ "$(has "$ids" "$3")" = 1 ] && [ "${rest%%/*}" = 0 ] && echo 1 || echo 0)" "$r"
+}
+border "NL/BE at Baarle-Nassau: PDOK, no empty tile" baarle-nl-be.png nl-pdok 4.93 51.445 16
+border "AT/CH on the Rhine at Feldkirch: SWISSIMAGE, no empty tile" feldkirch-at-ch.png ch-swissimage 9.56 47.25 15
+border "PL/DE on the Oder at Frankfurt: no empty tile" oder-pl-de.png de-brandenburg 14.55 52.34 15
+
 # Snow and white roofs are imagery: every tile comes whole from the national source.
 only() { js "String(Object.values(window.__scape.satellite.tiles).every((l) => l.join() === '$1'))"; }
 r=$(scene 7.985 46.547 16)

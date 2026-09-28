@@ -251,15 +251,15 @@ export const SAT_SOURCES: readonly SatSource[] = [
     id: 'pl-gugik',
     name: 'Geoportal.gov.pl',
     tier: SatTier.National,
-    kind: SatKind.Xyz,
-    url: 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMTS/StandardResolution?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTOFOTOMAPA&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
+    kind: SatKind.Wms,
+    url: 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution',
+    layers: 'Raster',
     bboxes: [box(14.1, 49, 24.2, 54.9)],
-    minZoom: 5,
+    minZoom: 11,
     maxZoom: 19,
     tilePx: 256,
     attribution: '© GUGiK',
-    cache: CachePolicy.Offline,
-    opaque: true
+    cache: CachePolicy.Offline
   },
   {
     id: 'fr-ign',
