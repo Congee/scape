@@ -11,8 +11,8 @@ import {
   creditFor,
   creditsFor,
   fillBlank,
+  isNoData,
   lacksDetail,
-  maskNoData,
   nativeTile,
   noDataShare,
   offlineCandidates,
@@ -21,8 +21,9 @@ import {
   swCacheHosts,
   swCachePattern,
   tileBbox3857,
+  tileCoverage,
   tileLngLatBbox,
-  whitenBlank,
+  uniformFill,
   wmsGetMapUrl
 } from './satellite';
 
@@ -103,6 +104,8 @@ describe('tile geometry and URLs', () => {
     expect(q.get('CRS')).toBe('EPSG:3857');
     expect(q.get('LAYERS')).toBe('dop');
     expect(q.get('WIDTH')).toBe('256');
+    expect(q.get('FORMAT')).toBe('image/png');
+    expect(q.get('TRANSPARENT')).toBe('TRUE');
     expect(q.get('BBOX')).toBe('0.00,-20037508.34,20037508.34,0.00');
     expect(wmsGetMapUrl('https://example.org/wms?map=a', 'x', 0, 0, 0)).toContain('?map=a&SERVICE=WMS');
   });
@@ -110,8 +113,7 @@ describe('tile geometry and URLs', () => {
   it('fills XYZ templates', () => {
     expect(sourceTileUrl(byId('us-naip'), 10, 300, 400)).toMatch(/\/tile\/10\/400\/300$/);
     expect(sourceTileUrl(byId('es-pnoa'), 3, 1, 2)).toMatch(/\/3\/1\/5\.jpeg$/);
-    expect(sourceTileUrl(byId('de-nrw'), 16, 34000, 21800)).toMatch(/EPSG_3857_16\/11\/34000\/21800$/);
-    expect(sourceTileUrl(byId('de-nrw'), 9, 1, 2)).toMatch(/\/04\/1\/2$/);
+    expect(sourceTileUrl(byId('de-nrw'), 16, 34000, 21800)).toContain('LAYERS=nw_dop_rgb');
     expect(sourceTileUrl(byId('lu'), 5, 1, 2)).toMatch(/^https:\/\/wmts4\.geoportail/);
     expect(sourceTileUrl(byId('maptiler'), 5, 1, 2, { maptiler: 'a b' })).toBe('https://api.maptiler.com/tiles/satellite-v2/5/1/2.jpg?key=a%20b');
     expect(sourceTileUrl(byId('de-bayern'), 16, 34800, 22500)).toContain('LAYERS=by_dop20c');
@@ -148,6 +150,12 @@ describe('source choice', () => {
     expect(ids(...lngLatTile(5.5, 52.3, 16))[0]).toBe('nl-pdok');
   });
 
+  it('asks transparent sources before opaque ones, which would hide what lies under their fill', () => {
+    expect(ids(...lngLatTile(6.16, 51.37, 16)).slice(0, 2)).toEqual(['de-nrw', 'nl-pdok']);
+    expect(ids(...lngLatTile(6.05, 51.9, 16)).slice(0, 2)).toEqual(['de-nrw', 'nl-pdok']);
+    for (const s of SAT_SOURCES) expect(!!s.opaque).toBe(s.kind === SatKind.Xyz && s.id !== 'es-pnoa');
+  });
+
   it('prefers city sources inside their region', () => {
     expect(ids(...lngLatTile(13.4, 52.52, 16))[0]).toBe('de-berlin');
     expect(ids(...lngLatTile(13.4, 52.52, 16))).toContain('de-brandenburg');
@@ -182,18 +190,35 @@ describe('detail and blank tests', () => {
     expect(lacksDetail(200, 60000, 512, 16)).toBe(false);
   });
 
-  it('classifies white and transparent tiles as blank', () => {
+  it('marks no-data by alpha only, never by colour', () => {
+    expect(isNoData(0)).toBe(true);
+    expect(isNoData(255)).toBe(false);
     const white = new Uint8ClampedArray(px(255, 255, 255, 255, 100));
     const clear = new Uint8ClampedArray(px(10, 20, 30, 0, 100));
-    const photo = new Uint8ClampedArray(px(80, 120, 60, 255, 100));
-    const half = new Uint8ClampedArray([...px(255, 255, 255, 255, 50), ...px(80, 120, 60, 255, 50)]);
-    expect(coverageOf(noDataShare(white))).toBe(Coverage.Empty);
+    const half = new Uint8ClampedArray([...px(0, 0, 0, 0, 50), ...px(255, 255, 255, 255, 50)]);
+    const sliver = new Uint8ClampedArray([...px(0, 0, 0, 0, 99), ...px(80, 120, 60, 255, 1)]);
+    expect(coverageOf(noDataShare(white))).toBe(Coverage.Full);
     expect(coverageOf(noDataShare(clear))).toBe(Coverage.Empty);
-    expect(coverageOf(noDataShare(photo))).toBe(Coverage.Full);
     expect(coverageOf(noDataShare(half))).toBe(Coverage.Partial);
-    expect(maskNoData(half)).toBe(50);
-    expect(half[3]).toBe(0);
-    expect(half[50 * 4 + 3]).toBe(255);
+    expect(coverageOf(noDataShare(sliver))).toBe(Coverage.Partial);
+  });
+
+  it('drops an opaque source only for a whole uniform white or black tile', () => {
+    const snow = new Uint8ClampedArray(Array.from({ length: 400 }, (_, i) => [248 + (i % 8), 250 + (i % 6), 255, 255]).flat());
+    const roofs = new Uint8ClampedArray([...px(255, 255, 255, 255, 90), ...px(90, 90, 95, 255, 10)]);
+    const fillWhite = new Uint8ClampedArray([...px(255, 255, 255, 255, 99), ...px(254, 253, 255, 255, 1)]);
+    const fillBlack = new Uint8ClampedArray(px(0, 1, 0, 255, 100));
+    const grey = new Uint8ClampedArray(px(128, 128, 128, 255, 100));
+    expect(uniformFill(snow)).toBe(false);
+    expect(uniformFill(roofs)).toBe(false);
+    expect(uniformFill(fillWhite)).toBe(true);
+    expect(uniformFill(fillBlack)).toBe(true);
+    expect(uniformFill(grey)).toBe(false);
+    const opaque = { opaque: true } as const;
+    expect(tileCoverage(snow, opaque)).toBe(Coverage.Full);
+    expect(tileCoverage(roofs, opaque)).toBe(Coverage.Full);
+    expect(tileCoverage(fillWhite, opaque)).toBe(Coverage.Empty);
+    expect(tileCoverage(fillWhite, {})).toBe(Coverage.Full);
   });
 });
 
@@ -204,6 +229,13 @@ describe('credits', () => {
     expect(creditFor(gsi, 11)).toContain('Landsat8');
     expect(creditFor(gsi, 16)).toContain('Axelspace');
     for (const z of [6, 11, 16]) expect(creditFor(gsi, z)).toContain('地理院タイル');
+  });
+
+  it('credits German states as their licences ask', () => {
+    expect(creditFor(byId('de-bw'), 16)).toMatch(new RegExp(`^© LGL-BW \\(${new Date().getFullYear()}\\) .*Datenlizenz Deutschland – Namensnennung – Version 2\\.0.*, www\\.lgl-bw\\.de$`));
+    for (const id of ['de-hamburg', 'de-brandenburg']) expect(creditFor(byId(id), 16)).toContain('dl-de/by-2-0');
+    expect(creditFor(byId('de-brandenburg'), 16)).toContain('© Geoportal Berlin');
+    for (const id of ['de-bayern', 'de-thueringen']) expect(creditFor(byId(id), 16)).toContain('CC BY 4.0');
   });
 
   it('credits every source that may draw in the view', () => {
@@ -221,14 +253,9 @@ describe('credits', () => {
 describe('compositing', () => {
   it('fills only blank output pixels from data pixels', () => {
     const out = bytes(1, 2, 3, 255, 0, 0, 0, 0, 0, 0, 0, 0);
-    const blank = fillBlank(out, bytes(9, 9, 9, 255, 40, 50, 60, 255, 255, 255, 255, 255));
-    expect([...out]).toEqual([1, 2, 3, 255, 40, 50, 60, 255, 0, 0, 0, 0]);
+    const blank = fillBlank(out, bytes(9, 9, 9, 255, 255, 255, 255, 255, 40, 50, 60, 0));
+    expect([...out]).toEqual([1, 2, 3, 255, 255, 255, 255, 255, 0, 0, 0, 0]);
     expect(blank).toBe(1);
-  });
-  it('whitens what no source covered', () => {
-    const out = bytes(1, 2, 3, 255, 0, 0, 0, 0);
-    whitenBlank(out);
-    expect([...out]).toEqual([1, 2, 3, 255, 255, 255, 255, 255]);
   });
 });
 

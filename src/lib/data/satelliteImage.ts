@@ -1,6 +1,6 @@
 /** Decoding and cutting satellite tiles. Worker-safe. */
 
-import type { NativeTile } from '@core/tiles/satellite';
+import { type NativeTile, noDataShare } from '@core/tiles/satellite';
 
 export const SAT_PX = 256;
 
@@ -27,9 +27,14 @@ export async function cut(bmp: ImageBitmap, nt: NativeTile): Promise<ImageBitmap
   return createImageBitmap(bmp, nt.col * sw, nt.row * sh, sw, sh, { resizeWidth: SAT_PX, resizeHeight: SAT_PX, resizeQuality: 'high' }).catch(() => null);
 }
 
-export async function encodeJpeg(rgba: Uint8ClampedArray, quality = 0.85): Promise<Uint8Array> {
+/** PNG where any pixel is still transparent, so a reader can tell no-data from white; JPEG otherwise. */
+export async function encodeTile(rgba: Uint8ClampedArray, quality = 0.85): Promise<Uint8Array> {
   const c = ctx();
   c.putImageData(new ImageData(rgba as Uint8ClampedArray<ArrayBuffer>, SAT_PX, SAT_PX), 0, 0);
-  const blob = await (c.canvas as OffscreenCanvas).convertToBlob({ type: 'image/jpeg', quality });
+  const type = noDataShare(rgba) > 0 ? 'image/png' : 'image/jpeg';
+  const blob = await (c.canvas as OffscreenCanvas).convertToBlob({ type, quality });
   return new Uint8Array(await blob.arrayBuffer());
 }
+
+/** An offline tile's type by its magic bytes; a satellite pack mixes JPEG and PNG. */
+export const imageType = (buf: ArrayBuffer): string => (buf.byteLength > 1 && new Uint8Array(buf, 0, 2).join() === '137,80' ? 'image/png' : 'image/jpeg');

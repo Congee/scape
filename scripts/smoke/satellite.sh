@@ -75,6 +75,16 @@ ids=${r%%|*}
 rest=${r#*|}
 check "NL/DE border at Venlo: both sides, no empty tile" "$([ "$(has "$ids" nl-pdok)" = 1 ] && [ "$(has "$ids" de-nrw)" = 1 ] && [ "${rest%%/*}" = 0 ] && echo 1 || echo 0)" "$r"
 
+# Snow and white roofs are imagery: every tile comes whole from the national source.
+only() { js "String(Object.values(window.__scape.satellite.tiles).every((l) => l.join() === '$1'))"; }
+r=$(scene 7.985 46.547 16)
+ab screenshot "$OUT/jungfraujoch-snow.png" >/dev/null
+check "Jungfraujoch snow: SWISSIMAGE in every tile" "$([ "$(only ch-swissimage)" = true ] && echo 1 || echo 0)" "$r"
+
+r=$(scene 4.25 52.0 17)
+ab screenshot "$OUT/westland-roofs.png" >/dev/null
+check "Westland greenhouse roofs: PDOK in every tile" "$([ "$(only nl-pdok)" = true ] && echo 1 || echo 0)" "$r"
+
 r=$(scene -0.1276 51.5072 15)
 ab screenshot "$OUT/london.png" >/dev/null
 hint=$(js "document.querySelector('.layer-row[data-layer=showSatellite] .hint').innerText")

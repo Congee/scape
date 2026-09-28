@@ -1,22 +1,21 @@
 import { addProtocol, type RasterSourceSpecification } from 'maplibre-gl';
 import {
   CachePolicy,
-  coverageOf,
   Coverage,
   candidates,
   DONE_AT,
   fillBlank,
   lacksDetail,
   nativeTile,
-  noDataShare,
   SAT_MAX_ZOOM,
   SatKey,
   type SatKeys,
   type SatSource,
-  sourceTileUrl
+  sourceTileUrl,
+  tileCoverage
 } from '@core/tiles/satellite';
 import { localSatellite } from './localTiles';
-import { cut, pixels, SAT_PX } from './satelliteImage';
+import { cut, imageType, pixels, SAT_PX } from './satelliteImage';
 
 const TEMPLATE = 'scape-sat://{z}/{x}/{y}';
 const PX = SAT_PX;
@@ -92,11 +91,11 @@ export async function satelliteTile(z: number, x: number, y: number, signal: Abo
   let out: Uint8ClampedArray | null = null;
   let weak: ImageBitmap | null = null;
   const local = await localSatellite.tile(z, x, y);
-  const localBmp = local ? await createImageBitmap(new Blob([local], { type: 'image/jpeg' })).catch(() => null) : null;
-  // A downloaded tile may be partly blank (white) at a border; the network fills the rest.
+  const localBmp = local ? await createImageBitmap(new Blob([local], { type: imageType(local) })).catch(() => null) : null;
+  // A downloaded tile may be partly transparent at a border; the network fills the rest.
   if (localBmp) {
     const rgba = pixels(localBmp);
-    const cov = coverageOf(noDataShare(rgba, 4));
+    const cov = tileCoverage(rgba, {});
     used.push('local');
     if (cov === Coverage.Full) {
       record(z, x, y, used);
@@ -116,7 +115,7 @@ export async function satelliteTile(z: number, x: number, y: number, signal: Abo
       continue;
     }
     const rgba = pixels(bmp);
-    const cov = coverageOf(noDataShare(rgba, 4));
+    const cov = tileCoverage(rgba, s);
     if (cov === Coverage.Empty) continue;
     used.push(s.id);
     if (cov === Coverage.Full && !out) {

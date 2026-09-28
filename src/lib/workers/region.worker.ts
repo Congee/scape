@@ -3,7 +3,7 @@ import { Compression, FetchSource, FileSource, PMTiles, tileIdToZxy, TileType, t
 import { bboxCentre } from '@core/geo/bbox';
 import { planExtract } from '@core/tiles/extract';
 import type { StyleSpecification } from 'maplibre-gl';
-import { Coverage, coverageOf, DONE_AT, fillBlank, noDataShare, offlineCandidates, SAT_OFFLINE_ATTRIBUTION, SAT_TILE_BYTES, sourceTileUrl, whitenBlank } from '@core/tiles/satellite';
+import { Coverage, DONE_AT, fillBlank, offlineCandidates, SAT_OFFLINE_ATTRIBUTION, SAT_TILE_BYTES, sourceTileUrl, tileCoverage } from '@core/tiles/satellite';
 import { ArchiveBuilder, coalesceRanges, gzip, tileCountInBounds, tileIdsInBounds, tileRange, type TileSink } from '@core/tiles/pmtiles';
 import {
   assetFileName,
@@ -23,7 +23,7 @@ import { announceArchives, archiveName, archivesDir, assetsDirName, metaFromHead
 import { importGeoid } from '@data/geoid';
 import { importViirs } from '@data/viirs';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
-import { encodeJpeg, pixels, SAT_PX } from '@data/satelliteImage';
+import { encodeTile, pixels, SAT_PX } from '@data/satelliteImage';
 import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
 
@@ -399,7 +399,7 @@ async function downloadTiles(id: string, spec: RegionSpec, signal: AbortSignal):
 }
 
 /** Per-zoom tile size sampled with a HEAD of the centre tile. */
-/** The best offline-licensed source's JPEG, or a composite where it is partly blank at a border. */
+/** The best offline-licensed source's JPEG, or a composite where it is partly transparent at a border. */
 async function satelliteTileBytes(z: number, x: number, y: number, signal: AbortSignal): Promise<Uint8Array | null> {
   let out: Uint8ClampedArray | null = null;
   for (const s of offlineCandidates(z, x, y)) {
@@ -415,16 +415,14 @@ async function satelliteTileBytes(z: number, x: number, y: number, signal: Abort
     if (!bmp) continue;
     const rgba = pixels(bmp);
     bmp.close();
-    const cov = coverageOf(noDataShare(rgba, 4));
+    const cov = tileCoverage(rgba, s);
     if (cov === Coverage.Empty) continue;
     // oxlint-disable-next-line no-await-in-loop
     if (cov === Coverage.Full && !out && blob.type === 'image/jpeg') return new Uint8Array(await blob.arrayBuffer());
     out ??= new Uint8ClampedArray(SAT_PX * SAT_PX * 4);
     if (fillBlank(out, rgba) / (SAT_PX * SAT_PX) <= DONE_AT) break;
   }
-  if (!out) return null;
-  whitenBlank(out);
-  return encodeJpeg(out);
+  return out ? encodeTile(out) : null;
 }
 
 async function downloadSatellite(id: string, spec: RegionSpec, signal: AbortSignal): Promise<ArchiveMeta> {

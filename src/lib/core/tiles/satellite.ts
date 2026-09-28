@@ -39,13 +39,11 @@ export interface SatSource {
   name: string;
   tier: SatTier;
   kind: SatKind;
-  /** XYZ template ({z} {x} {y} {-y} {s} {m} {key}) or the WMS base URL. */
+  /** XYZ template ({z} {x} {y} {-y} {s} {key}) or the WMS base URL. */
   url: string;
-  /** WMS GetMap layer; version 1.3.0, EPSG:3857, JPEG. */
+  /** WMS GetMap layer; version 1.3.0, EPSG:3857, transparent PNG. */
   layers?: string;
   subdomains?: readonly string[];
-  /** `{m}` = z + offset, two digits. */
-  matrixOffset?: number;
   bboxes: readonly SatBbox[];
   /** Zooms of the source's own tile grid. */
   minZoom: number;
@@ -54,10 +52,15 @@ export interface SatSource {
   attribution: string | readonly ZoomCredit[];
   cache: CachePolicy;
   key?: SatKey;
+  /** Paints a flat colour outside its data, so only a uniform tile is no-data. */
+  opaque?: true;
 }
 
 const box = (west: number, south: number, east: number, north: number): SatBbox => ({ west, south, east, north });
 
+const DL_BY = '<a href="https://www.govdata.de/dl-de/by-2-0">dl-de/by-2-0</a>';
+// LGL-BW asks for the licence's full name and the year the data was fetched.
+const DL_BY_LONG = '<a href="https://www.govdata.de/dl-de/by-2-0">Datenlizenz Deutschland – Namensnennung – Version 2.0</a>';
 const GSI_LINK = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
 
 export const SAT_SOURCES: readonly SatSource[] = [
@@ -100,7 +103,7 @@ export const SAT_SOURCES: readonly SatSource[] = [
     minZoom: 11,
     maxZoom: 20,
     tilePx: 256,
-    attribution: '© FHH, LGV (dl-de/by-2-0)',
+    attribution: `© Freie und Hansestadt Hamburg, LGV (${DL_BY})`,
     cache: CachePolicy.Offline
   },
   {
@@ -115,7 +118,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     maxZoom: 20,
     tilePx: 256,
     attribution: '© ACT Luxembourg (CC0)',
-    cache: CachePolicy.Offline
+    cache: CachePolicy.Offline,
+    opaque: true
   },
   {
     id: 'nl-pdok',
@@ -128,17 +132,18 @@ export const SAT_SOURCES: readonly SatSource[] = [
     maxZoom: 20,
     tilePx: 256,
     attribution: 'Beeldmateriaal Nederland / PDOK',
-    cache: CachePolicy.DeviceCache
+    cache: CachePolicy.DeviceCache,
+    opaque: true
   },
   {
     id: 'de-nrw',
     name: 'NRW DOP',
     tier: SatTier.National,
-    kind: SatKind.Xyz,
-    url: 'https://www.wmts.nrw.de/geobasis/wmts_nw_dop/tiles/nw_dop/EPSG_3857_16/{m}/{x}/{y}',
-    matrixOffset: -5,
+    kind: SatKind.Wms,
+    url: 'https://www.wms.nrw.de/geobasis/wms_nw_dop',
+    layers: 'nw_dop_rgb',
     bboxes: [box(5.8, 50.3, 9.5, 52.6)],
-    minZoom: 5,
+    minZoom: 11,
     maxZoom: 20,
     tilePx: 256,
     attribution: '© GeoBasis-DE / NRW (dl-de/zero-2-0)',
@@ -155,7 +160,7 @@ export const SAT_SOURCES: readonly SatSource[] = [
     minZoom: 11,
     maxZoom: 20,
     tilePx: 256,
-    attribution: '© Bayerische Vermessungsverwaltung (CC BY 4.0)',
+    attribution: '© Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0)',
     cache: CachePolicy.Offline
   },
   {
@@ -169,7 +174,7 @@ export const SAT_SOURCES: readonly SatSource[] = [
     minZoom: 11,
     maxZoom: 20,
     tilePx: 256,
-    attribution: 'Datenquelle: © LGL, www.lgl-bw.de (dl-de/by-2-0)',
+    attribution: `© LGL-BW (${new Date().getFullYear()}) ${DL_BY_LONG}, www.lgl-bw.de`,
     cache: CachePolicy.Offline
   },
   {
@@ -211,7 +216,7 @@ export const SAT_SOURCES: readonly SatSource[] = [
     minZoom: 11,
     maxZoom: 20,
     tilePx: 256,
-    attribution: '© GeoBasis-DE/LGB (dl-de/by-2-0)',
+    attribution: `© GeoBasis-DE/LGB, ${DL_BY}; © Geoportal Berlin, ${DL_BY}`,
     cache: CachePolicy.Offline
   },
   {
@@ -225,7 +230,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     maxZoom: 20,
     tilePx: 256,
     attribution: '© Data: swisstopo',
-    cache: CachePolicy.DeviceCache
+    cache: CachePolicy.DeviceCache,
+    opaque: true
   },
   {
     id: 'at-basemap',
@@ -238,7 +244,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     maxZoom: 20,
     tilePx: 256,
     attribution: 'basemap.at (CC BY 4.0)',
-    cache: CachePolicy.Offline
+    cache: CachePolicy.Offline,
+    opaque: true
   },
   {
     id: 'pl-gugik',
@@ -251,7 +258,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     maxZoom: 19,
     tilePx: 256,
     attribution: '© GUGiK',
-    cache: CachePolicy.Offline
+    cache: CachePolicy.Offline,
+    opaque: true
   },
   {
     id: 'fr-ign',
@@ -264,7 +272,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     maxZoom: 19,
     tilePx: 256,
     attribution: '© IGN',
-    cache: CachePolicy.Offline
+    cache: CachePolicy.Offline,
+    opaque: true
   },
   {
     id: 'es-pnoa',
@@ -290,7 +299,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     maxZoom: 16,
     tilePx: 256,
     attribution: 'USGS The National Map',
-    cache: CachePolicy.DeviceCache
+    cache: CachePolicy.DeviceCache,
+    opaque: true
   },
   {
     id: 'jp-gsi',
@@ -307,7 +317,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
       { minZoom: 9, maxZoom: 13, text: `${GSI_LINK} (Landsat8: GSI, TSIC, GEO Grid/AIST; courtesy of the U.S. Geological Survey; 海底地形: GEBCO)` },
       { minZoom: 14, maxZoom: 99, text: `${GSI_LINK} (全国最新写真, 一部 © Axelspace)` }
     ],
-    cache: CachePolicy.DeviceCache
+    cache: CachePolicy.DeviceCache,
+    opaque: true
   },
   {
     id: 'maptiler',
@@ -321,7 +332,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     tilePx: 512,
     attribution: '<a href="https://www.maptiler.com/copyright/">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>',
     cache: CachePolicy.DeviceCache,
-    key: SatKey.MapTiler
+    key: SatKey.MapTiler,
+    opaque: true
   },
   {
     id: 'esri',
@@ -335,7 +347,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     tilePx: 256,
     attribution: 'Powered by Esri. Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
     cache: CachePolicy.None,
-    key: SatKey.Esri
+    key: SatKey.Esri,
+    opaque: true
   }
 ];
 
@@ -373,7 +386,7 @@ export function wmsGetMapUrl(base: string, layers: string, z: number, x: number,
   const bbox = tileBbox3857(z, x, y)
     .map((v) => v.toFixed(2))
     .join(',');
-  const q = `SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=${encodeURIComponent(layers)}&STYLES=&CRS=EPSG:3857&BBOX=${bbox}&WIDTH=${px}&HEIGHT=${px}&FORMAT=image/jpeg`;
+  const q = `SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=${encodeURIComponent(layers)}&STYLES=&CRS=EPSG:3857&BBOX=${bbox}&WIDTH=${px}&HEIGHT=${px}&FORMAT=image/png&TRANSPARENT=TRUE`;
   return `${base}${base.includes('?') ? '&' : '?'}${q}`;
 }
 
@@ -387,7 +400,6 @@ export function sourceTileUrl(s: SatSource, z: number, x: number, y: number, key
     .replace('{-y}', String(2 ** z - 1 - y))
     .replace('{y}', String(y))
     .replace('{s}', sub)
-    .replace('{m}', String(z + (s.matrixOffset ?? 0)).padStart(2, '0'))
     .replace('{key}', s.key ? encodeURIComponent(keys[s.key] ?? '') : '');
 }
 
@@ -424,7 +436,7 @@ export interface ChoiceContext {
 /** A keyed source without its key is hidden. */
 export const hasKey = (s: SatSource, keys: SatKeys) => !s.key || !!keys[s.key];
 
-/** National sources whose box meets the tile and zoom range: the smallest box holding the tile's centre first. */
+/** National sources whose box meets the tile and zoom range: transparent before opaque, then the smallest box holding the tile's centre. */
 function nationals(z: number, x: number, y: number, keys: SatKeys): { exact: SatSource[]; stretched: SatSource[] } {
   const t = tileLngLatBbox(z, x, y);
   const cLng = (t.west + t.east) / 2;
@@ -442,7 +454,9 @@ function nationals(z: number, x: number, y: number, keys: SatKeys): { exact: Sat
   }
   const area = (s: SatSource) => Math.min(...s.bboxes.filter((b) => contains(b, cLng, cLat)).map((b) => (b.east - b.west) * (b.north - b.south)));
   inside.sort((a, b) => area(a) - area(b));
-  return { exact: [...inside, ...edge], stretched };
+  // An opaque tile ends a composite, so it goes under every source that can leave gaps.
+  const exact = [...inside, ...edge].toSorted((a, b) => Number(!!a.opaque) - Number(!!b.opaque));
+  return { exact, stretched };
 }
 
 /** Sources to try for a map tile, best first: national, MapTiler, Esri (online only), stretched national. */
@@ -474,11 +488,12 @@ export function lacksDetail(status: number, bytes: number, px: number, z: number
 export const Coverage = { Empty: 'empty', Partial: 'partial', Full: 'full' } as const;
 export type Coverage = (typeof Coverage)[keyof typeof Coverage];
 
-/** WMS answers white outside its data; WMTS answers transparent. */
-export const isNoData = (r: number, g: number, b: number, a: number) => a < 8 || (r >= 250 && g >= 250 && b >= 250);
+/** Only alpha marks no-data: white or black pixels may be snow, roofs or shadow. */
+export const isNoData = (a: number) => a < 8;
 
-const EMPTY_AT = 0.98;
 const FULL_AT = 0.005;
+/** Per-channel spread a flat JPEG fill keeps. */
+const FILL_SPREAD = 3;
 
 /** Share of no-data pixels in RGBA bytes, sampling every `step`th pixel. */
 export function noDataShare(rgba: Uint8ClampedArray, step = 1): number {
@@ -486,24 +501,32 @@ export function noDataShare(rgba: Uint8ClampedArray, step = 1): number {
   let seen = 0;
   for (let i = 0; i < rgba.length; i += 4 * step) {
     seen++;
-    if (isNoData(rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3])) none++;
+    if (isNoData(rgba[i + 3])) none++;
   }
   return seen ? none / seen : 1;
 }
 
 export function coverageOf(share: number): Coverage {
-  return share >= EMPTY_AT ? Coverage.Empty : share <= FULL_AT ? Coverage.Full : Coverage.Partial;
+  return share >= 1 ? Coverage.Empty : share <= FULL_AT ? Coverage.Full : Coverage.Partial;
 }
 
-/** Clears no-data pixels in place so a lower source shows through; returns how many were cleared. */
-export function maskNoData(rgba: Uint8ClampedArray): number {
-  let n = 0;
+/** Every pixel one near-white or near-black colour: an opaque source's fill outside its data. */
+export function uniformFill(rgba: Uint8ClampedArray): boolean {
+  if (!rgba.length) return false;
+  const [r, g, b] = rgba;
+  const lo = Math.min(r, g, b);
+  const hi = Math.max(r, g, b);
+  if (lo < 250 - FILL_SPREAD && hi > 5 + FILL_SPREAD) return false;
   for (let i = 0; i < rgba.length; i += 4) {
-    if (!isNoData(rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3])) continue;
-    rgba[i + 3] = 0;
-    n++;
+    if (Math.abs(rgba[i] - r) > FILL_SPREAD || Math.abs(rgba[i + 1] - g) > FILL_SPREAD || Math.abs(rgba[i + 2] - b) > FILL_SPREAD) return false;
   }
-  return n;
+  return true;
+}
+
+/** How much of a source tile holds data: by alpha, or for an opaque source whole-tile fill only. */
+export function tileCoverage(rgba: Uint8ClampedArray, s: Pick<SatSource, 'opaque'>): Coverage {
+  if (s.opaque && uniformFill(rgba)) return Coverage.Empty;
+  return coverageOf(noDataShare(rgba, 4));
 }
 
 // --- credits and cache policy ------------------------------------------
@@ -558,7 +581,7 @@ export function fillBlank(out: Uint8ClampedArray, rgba: Uint8ClampedArray): numb
   let blank = 0;
   for (let i = 0; i < out.length; i += 4) {
     if (out[i + 3]) continue;
-    if (isNoData(rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3])) {
+    if (isNoData(rgba[i + 3])) {
       blank++;
       continue;
     }
@@ -568,11 +591,6 @@ export function fillBlank(out: Uint8ClampedArray, rgba: Uint8ClampedArray): numb
     out[i + 3] = 255;
   }
   return blank;
-}
-
-/** Offline tiles are JPEG, so blank pixels are stored white: no-data to the reader. */
-export function whitenBlank(out: Uint8ClampedArray): void {
-  for (let i = 0; i < out.length; i += 4) if (!out[i + 3]) out.fill(255, i, i + 4);
 }
 
 /** Offline pack sources for a tile, best first. */
