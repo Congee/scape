@@ -4,7 +4,7 @@ import { PrismGl } from '@core/viewfinder/gl/prismGl';
 import { RoofShape } from '@workers/buildings.protocol';
 import { batchOf, PIN, rect, square, type Box } from './batchFixture';
 import { buildPrisms } from './prismRaster';
-import { adoptPrismSurfaces, earClip, earClipAt, prismSurfaces, surfaceBuffers, tileSurfaces } from './surfaces';
+import { adoptPrismSurfaces, earClip, earClipAt, gpuOnly, isReleased, prismReleased, prismSurfaces, releaseUploaded, surfaceBuffers, tileSurfaces } from './surfaces';
 
 const CAM: Camera = { azimuthDeg: 20, elevationDeg: 2, focalMm: 50, frameWmm: 36, frameHmm: 24 };
 
@@ -28,9 +28,22 @@ const hash = (data: ArrayBufferView) => fnv(new Uint8Array(data.buffer, data.byt
 function uploads(draw: (gl: WebGL2RenderingContext) => void): Uint8Array[] {
   const out: Uint8Array[] = [];
   const take = (data: ArrayBufferView) => out.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice());
+  // A texture's bytes as the GPU holds them: zeroed storage, then every sub-image written into it.
+  let tex = new Float32Array(0);
+  let texW = 0;
   const calls: Record<string, (...a: never[]) => unknown> = {
     bufferData: (_t: never, data: never) => take(data as ArrayBufferView),
-    texSubImage2D: (...a: never[]) => take(a[8] as ArrayBufferView),
+    texStorage2D: (...a: never[]) => {
+      texW = a[3] as number;
+      tex = new Float32Array(texW * (a[4] as number) * 4);
+      out.push(new Uint8Array(tex.buffer));
+    },
+    texSubImage2D: (...a: never[]) => {
+      const [x, y, w, h] = a.slice(2, 6) as number[];
+      const data = a[8] as Float32Array;
+      expect(data.length).toBe(w * h * 4);
+      for (let r = 0; r < h; r++) tex.set(data.subarray(r * w * 4, (r + 1) * w * 4), ((y + r) * texW + x) * 4);
+    },
     getShaderParameter: () => true,
     getProgramParameter: () => true
   };
@@ -60,6 +73,33 @@ describe('prismSurfaces', () => {
     adoptPrismSurfaces(sent.t, sent.m);
     expect(tileSurfaces(sent.t)).toBe(sent.m);
     expect(uploads((gl) => new PrismGl(gl).bounds(CAM, cameraBasis(CAM), [sent.t])).map(hash)).toEqual(direct);
+  });
+
+  it('drops an adopted mesh once uploaded and rebuilds it for a new context', () => {
+    const direct = uploads((gl) => new PrismGl(gl).bounds(CAM, cameraBasis(CAM), [tile])).map(hash);
+    const t = buildPrisms(batchOf(BOXES), PIN, 3);
+    const m = prismSurfaces(t);
+    adoptPrismSurfaces(t, m);
+    const box = m.box;
+    uploads((g) => {
+      const gl = new PrismGl(g);
+      const before = gl.bounds(CAM, cameraBasis(CAM), [t]);
+      expect([m.pos.length, m.idx.length, m.plane.length, m.sphere.length]).toEqual([0, 0, 0, 0]);
+      expect(isReleased(m) && prismReleased(t)).toBe(true);
+      expect(m.box).toBe(box);
+      expect(gl.bounds(CAM, cameraBasis(CAM), [t])).toEqual(before);
+    });
+    expect(uploads((g) => new PrismGl(g).bounds(CAM, cameraBasis(CAM), [t])).map(hash)).toEqual(direct);
+    expect(prismReleased(t)).toBe(true);
+  });
+
+  it('keeps the arrays of a mesh the CPU still reads', () => {
+    const m = prismSurfaces(tile);
+    uploads((g) => new PrismGl(g).render(CAM, cameraBasis(CAM), [], { lightAzDeg: 0, hazeRgb: [0, 0, 0], night: 0, rangeM: 1000 }, 100, 100, [m]));
+    expect(isReleased(m)).toBe(false);
+    expect(m.idx.length).toBeGreaterThan(0);
+    releaseUploaded(gpuOnly(m));
+    expect(m.idx.length).toBe(0);
   });
 
   it('transfers every mesh array without a copy', () => {

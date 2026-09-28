@@ -39,7 +39,7 @@ import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
 import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
-import { buildingsStore, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
+import { buildingsStore, forgetUploads, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
 import { lod2HeldStats, lod2Store } from '@state/lod2';
 import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
@@ -1567,6 +1567,7 @@ export class ViewfinderController {
     this.photo = null;
     stopBuildings();
     this.sceneGl?.dispose();
+    forgetUploads();
     for (const u of this.unsubs) u();
     this.ro.disconnect();
     cancelAnimationFrame(this.raf);

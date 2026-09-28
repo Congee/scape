@@ -120,18 +120,46 @@ let scratchPx = new Float64Array(64);
 let scratchPy = new Float64Array(64);
 
 const built = new WeakMap<PrismTile, SurfaceMesh>();
+/** Meshes nothing on the CPU reads once uploaded, and those whose arrays already went. */
+const releasable = new WeakSet<SurfaceMesh>();
+const released = new WeakSet<SurfaceMesh>();
+const NO_F32 = new Float32Array(0);
+const NO_U32 = new Uint32Array(0);
 
 /** Adopts the mesh the buildings worker built for `tile`. */
 export function adoptPrismSurfaces(tile: PrismTile, mesh: SurfaceMesh): void {
-  built.set(tile, mesh);
+  built.set(tile, gpuOnly(mesh));
 }
 
-/** The adopted mesh of `tile`, else built here once. */
+/** The adopted mesh of `tile`, else built here once; a released one is rebuilt for a new context. */
 export function tileSurfaces(tile: PrismTile): SurfaceMesh {
   let m = built.get(tile);
-  if (!m) built.set(tile, (m = prismSurfaces(tile)));
+  if (!m || released.has(m)) built.set(tile, (m = gpuOnly(prismSurfaces(tile))));
   return m;
 }
+
+/** Marks `m` as drawn only by the GPU, so its upload can drop the CPU copy. */
+export function gpuOnly(m: SurfaceMesh): SurfaceMesh {
+  releasable.add(m);
+  return m;
+}
+
+/** Drops the arrays of a {@link gpuOnly} mesh the GPU now holds; `box`, `count` and the flags stay. */
+export function releaseUploaded(m: SurfaceMesh): void {
+  if (!releasable.has(m) || released.has(m)) return;
+  released.add(m);
+  m.pos = m.surfId = m.bldgId = m.plane = m.surf = m.sphere = m.size = NO_F32;
+  m.idx = NO_U32;
+}
+
+/** True once `m` gave its arrays to a GL context; another context has to ask for it again. */
+export const isReleased = (m: SurfaceMesh): boolean => released.has(m);
+
+/** Whether `tile`'s mesh went to a GL context and no longer exists here. */
+export const prismReleased = (tile: PrismTile): boolean => {
+  const m = built.get(tile);
+  return !!m && released.has(m);
+};
 
 /** Every typed array of `m`, for a transfer list. */
 export function surfaceBuffers(m: SurfaceMesh): ArrayBuffer[] {

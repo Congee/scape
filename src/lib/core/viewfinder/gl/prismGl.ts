@@ -1,7 +1,7 @@
 /** The building prisms drawn on the GPU with the viewfinder's pinhole projection. */
 
 import { HAZE_M, MIN_AREA_PX, MIN_PX, NEAR_M, ROOF_SHADE, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
-import { tileSurfaces, type SurfaceMesh } from '@core/geo/surfaces';
+import { releaseUploaded, tileSurfaces, type SurfaceMesh } from '@core/geo/surfaces';
 import type { Camera, CameraBasis } from '@core/optics/projection';
 import { SKY } from '@core/viewfinder/palette';
 import { boxCastsInto, coneDepthRange, type Cascade, type SceneBounds } from './shadowFit';
@@ -205,9 +205,12 @@ function table(gl: WebGL2RenderingContext, n: number, data: Float32Array): WebGL
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  const padded = new Float32Array(TEX_W * rows * 4);
-  padded.set(data.subarray(0, Math.min(data.length, padded.length)));
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEX_W, rows, gl.RGBA, gl.FLOAT, padded);
+  // Full rows, then the short last one, straight from `data`; the storage starts zeroed.
+  const texels = Math.min(data.length / 4, TEX_W * rows);
+  const full = Math.floor(texels / TEX_W);
+  if (full > 0) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEX_W, full, gl.RGBA, gl.FLOAT, data.subarray(0, full * TEX_W * 4));
+  const rest = texels - full * TEX_W;
+  if (rest > 0) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, full, rest, 1, gl.RGBA, gl.FLOAT, data.subarray(full * TEX_W * 4, texels * 4));
   return t;
 }
 
@@ -428,6 +431,7 @@ export class PrismGl {
       sizeTex: table(gl, nb, m.size)
     };
     this.meshes.set(m, mesh);
+    releaseUploaded(m);
     return mesh;
   }
 }

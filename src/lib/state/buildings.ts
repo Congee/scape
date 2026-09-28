@@ -5,10 +5,10 @@ import { tilePixelToLngLat } from '@core/terrain/tiles';
 import { grownRect, rectCovers, shadowDriftPx, type MaskRect } from '@core/geo/shadowMask';
 import { adoptPrismSlots } from '@core/geo/prismOcclude';
 import { prismFrameKey } from '@core/geo/prismRaster';
-import { adoptPrismSurfaces } from '@core/geo/surfaces';
+import { adoptPrismSurfaces, prismReleased } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
-import { addLod2Tile, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
+import { addLod2Tile, dropUploadedLod2, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
 
 /** Placed tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
@@ -219,6 +219,14 @@ export function stopBuildings(): void {
   if (buildingsStore.getState().busy) buildingsStore.setState({ busy: false });
   if (lod2Store.getState().busy) lod2Store.setState({ busy: false });
   worker?.postMessage({ kind: BuildingsKind.Stop, id: tilesId } satisfies StopRequest);
+}
+
+/** Forgets the meshes a disposed GL context held and no copy is kept of, so the next viewfinder is sent them again. */
+export function forgetUploads(): void {
+  const st = buildingsStore.getState();
+  const tiles = new Map([...st.tiles].filter(([, t]) => !prismReleased(t.prism)));
+  if (tiles.size < st.tiles.size) buildingsStore.setState({ tiles, version: st.version + 1 });
+  dropUploadedLod2();
 }
 
 /** Builds the map's ground-shadow mask; the same rect under a sun that moves no edge `SHADOW_DRIFT_PX` at `mPerPx` is ignored. */

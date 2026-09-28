@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { suppressRing, type SuppressRing } from '@core/geo/buildingTiles';
+import { gpuOnly, isReleased } from '@core/geo/surfaces';
 import { LOD2_REGIONS, lod2Credits, type Lod2Region } from '@core/lod2/regions';
 import type { Lod2Placed } from '@workers/buildings.protocol';
 
@@ -85,7 +86,15 @@ export function resetLod2(placeKey: string): void {
   lod2Store.setState((st) => ({ tiles: new Map(), placeKey, version: st.version + 1, buildMs: 0 }));
 }
 
-const view = (tile: Lod2Placed): Lod2View => ({ ...tile, rings: tile.hulls.map(suppressRing) });
+const view = (tile: Lod2Placed): Lod2View => ({ ...tile, mesh: gpuOnly(tile.mesh), rings: tile.hulls.map(suppressRing) });
+
+/** Forgets every tile whose mesh went to a GL context now gone, so the next request places it again. */
+export function dropUploadedLod2(): void {
+  for (const [url, t] of held) if (isReleased(t.mesh)) unhold(url);
+  const st = lod2Store.getState();
+  const tiles = new Map([...st.tiles].filter(([, t]) => !isReleased(t.mesh)));
+  if (tiles.size < st.tiles.size) lod2Store.setState({ tiles, version: st.version + 1 });
+}
 
 export function addLod2Tile(tile: Lod2Placed): void {
   unhold(tile.url);
