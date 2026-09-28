@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cameraBasis, dirFromAzAlt, type Camera, type CameraBasis, type Vec3 } from '@core/optics/projection';
-import { boxCastsInto, CASCADE_COUNT, CASCADE_RES, cascadeSplits, coneDepthRange, fitCascades, sphereMisses, lightBasis, mergeScene, type Cascade, type SceneBounds } from './shadowFit';
+import { boxCastsInto, CASCADE_COUNT, CASCADE_RES, cascadeSplits, coneDepthRange, fitCascades, fitViewShadows, shadowRes, sphereMisses, lightBasis, mergeScene, type Cascade, type SceneBounds } from './shadowFit';
 
 const CAM: Camera = { azimuthDeg: 120, elevationDeg: -2, focalMm: 50, frameWmm: 36, frameHmm: 24 };
 const BASIS = cameraBasis(CAM);
@@ -407,5 +407,81 @@ describe('mergeScene', () => {
     expect(mergeScene(SUMMIT_SEEN, null)).toEqual(SUMMIT_SEEN);
     expect(mergeScene(null, SUMMIT_SEEN)).toEqual(SUMMIT_SEEN);
     expect(mergeScene(null, null)).toBe(null);
+  });
+});
+
+describe('fitViewShadows', () => {
+  // A portrait frame in a landscape window: the filled view is over four times as wide.
+  const FRAME: Camera = { ...CAM, focalMm: 24, frameWmm: 24, frameHmm: 36 };
+  const VIEW: Camera = { ...FRAME, frameWmm: 24 * 4.2, frameHmm: 36 * 1.1 };
+  const B = cameraBasis(FRAME);
+  const LIGHT = lightBasis(250, 10, B.forward);
+  /** Points on the cone's edge at depth d, round its axis. */
+  const rim = (cam: Camera, d: number): Vec3[] => {
+    const tx = cam.frameWmm / (2 * cam.focalMm);
+    const ty = cam.frameHmm / (2 * cam.focalMm);
+    const all = [-1, 0, 1].flatMap((sx) => [-1, 0, 1].map((sy) => mix(mix(B.forward, B.right, d, sx * tx * d), B.up, 1, sy * ty * d)));
+    // Past the mesh box there is nothing to receive, and the fit clips to it.
+    return all.filter((p) => Math.abs(p.x) <= SCENE.halfM && Math.abs(p.y) <= SCENE.halfM && p.z >= SCENE.minU && p.z <= SCENE.maxU);
+  };
+  const inside = (c: Cascade, p: Vec3) => {
+    const q = project(c, p.x, p.y, p.z);
+    return Math.abs(q.x) <= 1 + 1e-6 && Math.abs(q.y) <= 1 + 1e-6;
+  };
+
+  it('is the frame fit itself when the view is the frame', () => {
+    const v = fitViewShadows(FRAME, FRAME, B, LIGHT, SCENE, RES, 4 * RES);
+    expect(v.res).toBe(RES);
+    expect(v.outer).toEqual([]);
+    expect(v.cascades).toEqual(fitCascades(FRAME, B, LIGHT, SCENE, RES));
+  });
+
+  it('grows the map so the frame keeps its texels while the cascades span the whole view', () => {
+    const v = fitViewShadows(FRAME, VIEW, B, LIGHT, SCENE, RES, 16 * RES);
+    expect(v.res).toBeGreaterThan(RES);
+    expect(v.outer).toEqual([]);
+    expect(v.cascades).toHaveLength(CASCADE_COUNT);
+    for (const [i, c] of v.cascades.entries()) {
+      expect(c.texelXM).toBeLessThanOrEqual(v.frameTexel[i][0] * (1 + 1e-9));
+      expect(c.texelYM).toBeLessThanOrEqual(v.frameTexel[i][1] * (1 + 1e-9));
+    }
+    const near = [1, ...v.cascades.map((c) => c.farM)];
+    for (const [i, c] of v.cascades.entries()) for (const d of [near[i], (near[i] + c.farM) / 2, c.farM]) for (const p of rim(VIEW, d)) expect(inside(c, p)).toBe(true);
+    expect(v.coverTan).toBeCloseTo(Math.hypot(VIEW.frameWmm, VIEW.frameHmm) / (2 * VIEW.focalMm), 12);
+  });
+
+  it('keeps the frame fit and hands the rest to a coarser outer set once the cap bites', () => {
+    const v = fitViewShadows(FRAME, VIEW, B, LIGHT, SCENE, RES, RES);
+    expect(v.res).toBe(RES);
+    expect(v.cascades).toEqual(fitCascades(FRAME, B, LIGHT, SCENE, RES));
+    expect(v.outer).toHaveLength(CASCADE_COUNT);
+    expect(v.outerRes).toBe(RES);
+    const near = [1, ...v.outer.map((c) => c.farM)];
+    for (const [i, c] of v.outer.entries()) {
+      expect(Math.max(c.texelXM / v.frameTexel[i][0], c.texelYM / v.frameTexel[i][1])).toBeGreaterThan(1);
+      for (const p of rim(VIEW, (near[i] + c.farM) / 2)) expect(inside(c, p)).toBe(true);
+    }
+  });
+
+  it('keeps the frame splits and only reaches the last one further for a wider cover', () => {
+    const frame = fitCascades(FRAME, B, LIGHT, SCENE, RES).map((c) => c.farM);
+    const wide = fitCascades(FRAME, B, LIGHT, SCENE, RES, VIEW).map((c) => c.farM);
+    expect(wide.slice(0, -1)).toEqual(frame.slice(0, -1));
+    expect(wide[wide.length - 1]).toBeGreaterThanOrEqual(frame[frame.length - 1]);
+  });
+});
+
+describe('shadowRes', () => {
+  it('never gives fewer texels than the growth asks, in steps a slow zoom cannot flicker', () => {
+    expect(shadowRes(2048, 1)).toBe(2048);
+    expect(shadowRes(2048, 0.5)).toBe(2048);
+    for (let g = 1.01; g < 4; g += 0.07) {
+      const r = shadowRes(2048, g);
+      expect(r).toBeGreaterThanOrEqual(2048 * g);
+      expect(r % 16).toBe(0);
+      expect(shadowRes(2048, g * 1.001)).toBeGreaterThanOrEqual(r);
+    }
+    expect(shadowRes(2048, 1.1)).toBe(shadowRes(2048, 1.15));
+    expect(shadowRes(2048, 2)).toBe(4096);
   });
 });

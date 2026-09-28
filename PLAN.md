@@ -1282,6 +1282,8 @@ visible errors are design choices, each waiting on a decision (recommendation in
     **Note:** viewfinder rebuild reuses buffers, released after long idle; viewfinder fills a
     maximized window (user, 2026-09-25).
     **Note:** viewfinder fills the available space; the sensor frame is marked by a border (user, 2026-09-25).
+    **Note:** Viewfinder shadows cover the whole view (user, 2026-09-28).
+    **Note:** Frame border stays a 1 px light line (user, 2026-09-28).
 
     **Fixed:** the map's shadow mask re-stamped terrain and buildings (about 0.5 s of worker time)
     on roughly every third live-clock minute, because the moving sun changed the shape of the padded

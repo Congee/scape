@@ -15,7 +15,7 @@ import { GROUND_HAZE_M, SKY } from '../palette';
 import { OverlayGl, type OverlayBatch } from './overlayGl';
 import { PhotoGl, type PhotoLayer } from './photoGl';
 import { linkProgram, PrismGl, uniforms, type PrismGlStats } from './prismGl';
-import { CASCADE_COUNT, fitCascades, lightBasis, mergeScene, type Cascade, type SceneBounds } from './shadowFit';
+import { CASCADE_COUNT, CASCADE_RES, coneTan, fitViewShadows, lightBasis, mergeScene, SHADOW_MAX_RES, type Cascade, type SceneBounds } from './shadowFit';
 import { SHADOW_GLSL, SHADOW_UNIFORMS, ShadowGl } from './shadowGl';
 import { TerrainGl, type TerrainGlStats } from './terrainGl';
 
@@ -92,12 +92,27 @@ export interface SceneGlStats {
   shadowModelTriangles: number;
   /** Per cascade: axial far edge and the two texel sizes, metres; a long lens makes them differ a lot. */
   cascadeInfo: { farM: number; texelXM: number; texelYM: number }[];
+  /** How the map was sized to the whole view; null without shadows. */
+  shadowFit: ShadowFitStats | null;
   /** Axial depth range the view cone touches, metres, when the terrain reported one. */
   viewRangeM: [number, number] | null;
   /** GPU time of the whole picture when EXT_disjoint_timer_query_webgl2 is present, else -1. */
   gpuMs: number;
   /** The same split by pass, when timed. */
   gpuPassMs: GpuPassMs | null;
+}
+
+export interface ShadowFitStats {
+  res: number;
+  baseRes: number;
+  maxRes: number;
+  /** The cap bit: the main set keeps the frame fit and an outer set covers the rest. */
+  capped: boolean;
+  /** Per cascade, the texel sizes a frame-only fit at the base side would give. */
+  frameTexel: [number, number][];
+  outer: { farM: number; texelXM: number; texelYM: number }[];
+  coverTan: number;
+  fillTan: number;
 }
 
 export interface GpuPassMs {
@@ -107,6 +122,20 @@ export interface GpuPassMs {
 }
 
 /** The only part of EXT_disjoint_timer_query_webgl2 this uses; it is not in lib.dom. */
+interface ShadowPass {
+  cascades: Cascade[];
+  res: number;
+  outer: Cascade[];
+  outerRes: number;
+  fit: ShadowFitStats | null;
+  triangles: number;
+  prismTriangles: number;
+  modelTriangles: number;
+  scene: SceneBounds | null;
+}
+
+const texelInfo = (c: Cascade) => ({ farM: c.farM, texelXM: c.texelXM, texelYM: c.texelYM });
+
 interface TimerExt {
   TIME_ELAPSED_EXT: number;
 }
@@ -398,8 +427,8 @@ export class SceneGl {
   private depthRb: WebGLRenderbuffer | null = null;
   private rw = 0;
   private rh = 0;
-  private readonly cascadeMats = new Float32Array(16 * CASCADE_COUNT);
-  private readonly cascadeInfo = new Float32Array(4 * CASCADE_COUNT);
+  private readonly cascadeMats = new Float32Array(32 * CASCADE_COUNT);
+  private readonly cascadeInfo = new Float32Array(8 * CASCADE_COUNT);
 
   /** Throws where the picture cannot be drawn at all; there is no CPU fallback behind it. */
   static create(canvas: HTMLCanvasElement): SceneGl {
@@ -424,6 +453,15 @@ export class SceneGl {
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 1, 1);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  }
+
+  /** Bytes the shadow maps hold now, and what they fall back to when idle. */
+  get shadowBytes(): number {
+    return this.shadowGl.bytes;
+  }
+
+  get shadowBaseBytes(): number {
+    return this.shadowGl.baseBytes;
   }
 
   get maxTextureSize(): number {
@@ -466,7 +504,7 @@ export class SceneGl {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.viewport(vx, vy, vw, vh);
-    this.composite(input, shadow.cascades, vx, vy, vw, vh);
+    this.composite(input, shadow.cascades, shadow.outer, shadow.res, shadow.outerRes, vx, vy, vw, vh);
     this.photoGl.render(input.photo);
     if (input.overlay && this.gPos) this.overlayGl.render(input.overlay.batch, this.gPos, input.overlay.dpr, vx, vy, vw, vh);
 
@@ -492,7 +530,8 @@ export class SceneGl {
       shadowTriangles: shadow.triangles,
       shadowPrismTriangles: shadow.prismTriangles,
       shadowModelTriangles: shadow.modelTriangles,
-      cascadeInfo: shadow.cascades.map((c) => ({ farM: c.farM, texelXM: c.texelXM, texelYM: c.texelYM })),
+      cascadeInfo: shadow.cascades.map(texelInfo),
+      shadowFit: shadow.fit,
       viewRangeM: shadow.scene?.viewNearM !== undefined && shadow.scene.viewFarM !== undefined ? [shadow.scene.viewNearM, shadow.scene.viewFarM] : null,
       gpuMs: this.lastGpuMs,
       gpuPassMs: this.lastPassMs
@@ -536,8 +575,8 @@ export class SceneGl {
     return terrain;
   }
 
-  private shadowPass(input: SceneGlInput): { cascades: Cascade[]; triangles: number; prismTriangles: number; modelTriangles: number; scene: SceneBounds | null } {
-    const none = { cascades: [], triangles: 0, prismTriangles: 0, modelTriangles: 0, scene: null };
+  private shadowPass(input: SceneGlInput): ShadowPass {
+    const none: ShadowPass = { cascades: [], res: CASCADE_RES, outer: [], outerRes: 0, fit: null, triangles: 0, prismTriangles: 0, modelTriangles: 0, scene: null };
     if (input.lightAltDeg < LIGHT_MIN_ALT_DEG || input.shadowGain <= 0) return none;
     if (!this.terrainGl.ready && !input.prism) return none;
     const gl = this.gl;
@@ -547,11 +586,12 @@ export class SceneGl {
     const terrainScene = this.terrainGl.ready ? this.terrainGl.bounds(cam, input.basis) : null;
     const prismScene = input.prism ? this.prismGl.bounds(cam, input.basis, input.prism.tiles, input.prism.models) : null;
     const scene = mergeScene(terrainScene, prismScene) ?? { halfM: 20000, minU: -1000, maxU: 1000 };
-    const cascades = fitCascades(cam, input.basis, light, scene, this.shadowGl.res);
+    const maxRes = Math.min(this.maxTextureSize, SHADOW_MAX_RES);
+    const view = fitViewShadows(cam, input.cam, input.basis, light, scene, this.shadowGl.baseRes, maxRes);
     let triangles = 0;
     let prismTriangles = 0;
     let modelTriangles = 0;
-    this.shadowGl.render(cascades, light, (c) => {
+    this.shadowGl.render(view.cascades, view.res, view.outer, view.outerRes, light, (c) => {
       triangles += this.terrainGl.renderDepth(c, light);
       if (!input.prism) return;
       const d = this.prismGl.renderDepth(c, light, input.prism.tiles, input.prism.models);
@@ -559,10 +599,20 @@ export class SceneGl {
       modelTriangles += d.modelTriangles;
     });
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return { cascades, triangles: triangles + prismTriangles + modelTriangles, prismTriangles, modelTriangles, scene };
+    const fit: ShadowFitStats = {
+      res: view.res,
+      baseRes: this.shadowGl.baseRes,
+      maxRes,
+      capped: view.outer.length > 0,
+      frameTexel: view.frameTexel,
+      outer: view.outer.map(texelInfo),
+      coverTan: view.coverTan,
+      fillTan: coneTan(input.cam)
+    };
+    return { cascades: view.cascades, res: view.res, outer: view.outer, outerRes: view.outerRes, fit, triangles: triangles + prismTriangles + modelTriangles, prismTriangles, modelTriangles, scene };
   }
 
-  private composite(input: SceneGlInput, cascades: readonly Cascade[], vx: number, vy: number, vw: number, vh: number): void {
+  private composite(input: SceneGlInput, cascades: readonly Cascade[], outer: readonly Cascade[], res: number, outerRes: number, vx: number, vy: number, vw: number, vh: number): void {
     const gl = this.gl;
     gl.useProgram(this.prog);
     const u = this.uni;
@@ -602,19 +652,24 @@ export class SceneGl {
     gl.uniform1f(u.uShadowGain, input.shadowGain);
     gl.uniform1f(u.uMoonlight, input.moonlight);
     if (cascades.length) {
-      for (const [i, c] of cascades.entries()) {
-        this.cascadeMats.set(c.matrix, i * 16);
-        this.cascadeInfo.set([c.texelXM, c.depthRangeM, c.farM, c.texelYM], i * 4);
-      }
+      for (const [set, base] of [[cascades, 0], [outer, CASCADE_COUNT]] as const)
+        for (const [k, c] of set.entries()) {
+          this.cascadeMats.set(c.matrix, (base + k) * 16);
+          this.cascadeInfo.set([c.texelXM, c.depthRangeM, c.farM, c.texelYM], (base + k) * 4);
+        }
       gl.uniformMatrix4fv(u.uCascade, false, this.cascadeMats);
       gl.uniform4fv(u.uCascadeInfo, this.cascadeInfo);
       gl.uniform1i(u.uCascadeCount, cascades.length);
+      gl.uniform1i(u.uOuterCount, outer.length);
+      gl.uniform2f(u.uShadowRes, res, outerRes || res);
       const s = cameraBasis({ azimuthDeg: input.lightAzDeg, elevationDeg: input.lightAltDeg }).forward;
       gl.uniform3f(u.uSunDir, s.x, s.y, s.z);
     }
-    this.shadowGl.bind(4, 5);
+    this.shadowGl.bind(4, 5, 7, 8);
     gl.uniform1i(u.uShadow, 4);
     gl.uniform1i(u.uShadowRaw, 5);
+    gl.uniform1i(u.uShadowOuter, 7);
+    gl.uniform1i(u.uShadowOuterRaw, 8);
 
     this.disc(u.uSun, input.sunDisc);
     this.disc(u.uMoon, input.moonDisc);
@@ -635,7 +690,7 @@ export class SceneGl {
     this.bind(6, u.uMoonMap, moonMap ?? this.dummy2d);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    this.shadowGl.unbind(4, 5);
+    this.shadowGl.unbind(4, 5, 7, 8);
   }
 
   private disc(loc: WebGLUniformLocation | null, d: BodyDisc | null): void {

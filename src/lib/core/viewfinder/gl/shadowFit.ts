@@ -33,7 +33,7 @@ const norm = (v: Vec3): Vec3 => {
 };
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 /** Half-angle tangent to the frame corner; the frustum is bounded by this cone, not by its corners. */
-const coneTan = (cam: Camera) => Math.hypot(cam.frameWmm, cam.frameHmm) / (2 * cam.focalMm);
+export const coneTan = (cam: Camera) => Math.hypot(cam.frameWmm, cam.frameHmm) / (2 * cam.focalMm);
 
 
 /**
@@ -182,11 +182,7 @@ export interface Cascade {
  */
 export function cascadeSplits(cam: Camera, basis: CameraBasis, scene: SceneBounds): number[] {
   const ty = cam.frameHmm / (2 * cam.focalMm);
-  const fz = basis.forward.z;
-  // Least-descending ray of the cone, so the bound cannot change when the camera rolls.
-  const dzMin = Math.max(0, Math.abs(fz) - coneTan(cam) * Math.sqrt(Math.max(0, 1 - fz * fz)));
-  const uLimit = Math.max(1, fz < 0 ? -scene.minU : scene.maxU);
-  const lensFar = clamp(dzMin > 1e-4 ? uLimit / dzMin : Infinity, 16, scene.halfM);
+  const lensFar = lensFarM(cam, basis, scene);
   const lensNear = clamp(NEAR_FRAME_HALF_M / ty, 1, lensFar / 16);
   // Looking up from a summit there is nothing in the first kilometres, so the lens bound alone
   // hands the last cascade a slab kilometres deep. Raising the near bound onto the first geometry
@@ -209,6 +205,14 @@ export function cascadeSplits(cam: Camera, basis: CameraBasis, scene: SceneBound
   return out;
 }
 
+/** Where the least-descending ray of the cone leaves the bottom (or top) of the mesh; roll cannot change it. */
+function lensFarM(cam: Camera, basis: CameraBasis, scene: SceneBounds): number {
+  const fz = basis.forward.z;
+  const dzMin = Math.max(0, Math.abs(fz) - coneTan(cam) * Math.sqrt(Math.max(0, 1 - fz * fz)));
+  const uLimit = Math.max(1, fz < 0 ? -scene.minU : scene.maxU);
+  return clamp(dzMin > 1e-4 ? uLimit / dzMin : Infinity, 16, scene.halfM);
+}
+
 /** Snapped to the split ladder, so the bound steps rather than tracking every block. */
 function rung(v: number, round: (x: number) => number): number {
   return 2 ** (round(Math.log2(Math.max(v, 1)) * SPLIT_RUNGS) / SPLIT_RUNGS);
@@ -226,9 +230,11 @@ function quantiseExtent(r: number): number {
  * long focal the slice is a needle whose length must not set the resolution across it. Extents are
  * quantised and the centre snapped to whole texels so the shadow edge cannot crawl.
  */
-export function fitCascades(cam: Camera, basis: CameraBasis, light: CameraBasis, scene: SceneBounds, res = CASCADE_RES): Cascade[] {
-  const tr = coneTan(cam);
+export function fitCascades(cam: Camera, basis: CameraBasis, light: CameraBasis, scene: SceneBounds, res = CASCADE_RES, cover: Camera = cam): Cascade[] {
+  const tr = Math.max(coneTan(cam), coneTan(cover));
   const splits = cascadeSplits(cam, basis, scene);
+  // Splits stay the lens's; a wider cover only reaches further out, and only past the last one.
+  if (cover !== cam) splits[splits.length - 1] = Math.max(splits[splits.length - 1], lensFarM(cover, basis, scene));
 
   // Light-space span of the mesh box: receivers cannot leave it, and it is the near-plane fallback.
   const bLo = { x: Infinity, y: Infinity, z: Infinity };
@@ -304,6 +310,46 @@ export function fitCascades(cam: Camera, basis: CameraBasis, light: CameraBasis,
     near = far;
   }
   return out;
+}
+
+/** Largest shadow layer side: four such layers already hold 256 MB. */
+export const SHADOW_MAX_RES = 4096;
+/** Map side steps per octave, so a zoom or a resize reallocates it only now and then. */
+const RES_STEPS = 4;
+
+export interface ViewShadows {
+  /** Cascades in the main map, at `res` a side. */
+  cascades: Cascade[];
+  res: number;
+  /** Where the cap bites: coarser cascades over the whole view, at `outerRes`, read where `cascades` miss. */
+  outer: Cascade[];
+  outerRes: number;
+  /** Texels a frame-only fit at the base side would have, per cascade; the frame must not get coarser. */
+  frameTexel: [number, number][];
+  coverTan: number;
+}
+
+/**
+ * Cascades over the whole filled view, their side grown so each texel is no coarser than a fit to
+ * the frame alone at `baseRes`. Past `maxRes` the frame keeps that fit and a second, coarser set
+ * covers the rest.
+ */
+export function fitViewShadows(frame: Camera, view: Camera, basis: CameraBasis, light: CameraBasis, scene: SceneBounds, baseRes = CASCADE_RES, maxRes = SHADOW_MAX_RES): ViewShadows {
+  const inFrame = fitCascades(frame, basis, light, scene, baseRes);
+  const frameTexel = inFrame.map((c): [number, number] => [c.texelXM, c.texelYM]);
+  const coverTan = Math.max(coneTan(frame), coneTan(view));
+  const wide = fitCascades(frame, basis, light, scene, baseRes, view);
+  const grow = Math.max(1, ...wide.map((c, i) => Math.max(c.halfXM / inFrame[i].halfXM, c.halfYM / inFrame[i].halfYM)));
+  const res = shadowRes(baseRes, grow);
+  if (res <= maxRes) return { cascades: fitCascades(frame, basis, light, scene, res, view), res, outer: [], outerRes: 0, frameTexel, coverTan };
+  return { cascades: inFrame, res: baseRes, outer: wide, outerRes: baseRes, frameTexel, coverTan };
+}
+
+/** Side at least `grow` times the base, stepped up the ladder and kept a multiple of 16. */
+export function shadowRes(baseRes: number, grow: number): number {
+  if (grow <= 1) return baseRes;
+  const k = 2 ** (Math.ceil(Math.log2(grow) * RES_STEPS - 1e-9) / RES_STEPS);
+  return Math.ceil((baseRes * k) / 16) * 16;
 }
 
 /**
