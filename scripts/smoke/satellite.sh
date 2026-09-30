@@ -61,9 +61,6 @@ r=$(scene 4.4792 51.9225 16)
 ab screenshot "$OUT/rotterdam.png" >/dev/null
 check "Rotterdam: PDOK, credited" "$([ "$(has "${r%%|*}" nl-pdok)" = 1 ] && [[ "$r" == *PDOK* ]] && echo 1 || echo 0)" "$r"
 
-r=$(scene -73.9855 40.758 16)
-ab screenshot "$OUT/manhattan.png" >/dev/null
-check "Manhattan: NAIP, credited" "$([ "$(has "${r%%|*}" us-naip)" = 1 ] && [[ "$r" == *"National Map"* ]] && echo 1 || echo 0)" "$r"
 
 r=$(scene 11.26 47.84 16)
 ab screenshot "$OUT/bavaria-rural.png" >/dev/null
@@ -113,6 +110,24 @@ r=$(scene 9.598 47.237 17)
 ab screenshot "$OUT/feldkirch-sharp.png" >/dev/null
 st=$(stats)
 check "Feldkirch z17: basemap.at, sharp (detail ≥ 9)" "$([ "$(has "${r%%|*}" at-basemap)" = 1 ] && awk "BEGIN { exit !(${st#*|} >= 9) }" && echo 1 || echo 0)" "detail ${st#*|}; ${r%%|*}"
+
+# US state and city orthos, and NAIP Plus off them, are sharp at z18 where stretched USGS gave detail 0.4–1.6.
+sharp() { # name, screenshot, want-id, credit, min-detail, lng, lat, zoom
+  local r st
+  r=$(scene "$6" "$7" "$8")
+  ab screenshot "$OUT/$2" >/dev/null
+  st=$(stats)
+  check "$1" "$([ "$(has "${r%%|*}" "$3")" = 1 ] && [[ "$r" == *"$4"* ]] && awk "BEGIN { exit !(${st#*|} >= $5) }" && echo 1 || echo 0)" "detail ${st#*|}; $r"
+}
+sharp "Hartford z18: CT ECO, sharp" us-hartford.png us-ct "CT ECO" 3 -72.6851 41.7637 18
+sharp "Manhattan z18: NYC orthos, sharp" us-manhattan.png us-nyc "NYC OTI" 3 -73.9855 40.758 18
+sharp "Boston z18: MassGIS, sharp" us-boston.png us-ma MassGIS 3 -71.0589 42.3601 18
+sharp "Louisville z18: KyFromAbove, credited" us-louisville.png us-ky3 KyFromAbove 3 -85.7585 38.2527 18
+sharp "rural Kansas z18: NAIP Plus, sharper than USGS" us-kansas.png us-naipplus "USGS, USDA" 1.2 -98.0 38.5 18
+sharp "Atlanta z18: Fulton exportImage" us-atlanta.png us-fulton "Fulton County" 3 -84.388 33.749 18
+# VT answers 200 JSON outside its data and exportImage IN transparent PNG: neither may leave a hole.
+border "Lake Champlain, where VT sends 200 JSON: USGS, no empty tile" us-vt-lake.png us-naip -73.33 44.48 14
+border "IN/KY on the Ohio at Louisville: no empty tile" us-in-ky.png us-in -85.75 38.275 16
 
 # Snow and white roofs are imagery: every tile comes whole from the national source.
 only() { js "String(Object.values(window.__scape.satellite.tiles).every((l) => l.join() === '$1'))"; }

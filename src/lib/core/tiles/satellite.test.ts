@@ -6,12 +6,14 @@ import {
   SatKind,
   type SatSource,
   SatTier,
+  ImageMime,
   candidates,
   clearFill,
   coverageOf,
   creditFor,
   creditsFor,
   detailOf,
+  exportImageUrl,
   fillBlank,
   fillMask,
   isNoData,
@@ -24,6 +26,7 @@ import {
   noDataShare,
   offlineCandidates,
   offlineSources,
+  sniffImage,
   sourceTileUrl,
   swCacheHosts,
   swCachePattern,
@@ -45,6 +48,10 @@ const lngLatTile = (lng: number, lat: number, z: number) => {
 };
 const ids = (z: number, x: number, y: number, keys = {}, online = true) => candidates(z, x, y, { keys, online }).map((c) => c.source.id);
 const KEYS = { maptiler: 'mt', esri: 'es' };
+const head = (...b: number[]) => new Uint8Array(b);
+const text = (t: string) => new TextEncoder().encode(t);
+/** XYZ sources that are transparent, not white, outside their data. */
+const unfilled = (s: SatSource) => s.id === 'es-pnoa' || (s.id.startsWith('us-') && s.id !== 'us-naip');
 
 describe('satellite index', () => {
   it('has unique ids, sane zooms and bboxes only', () => {
@@ -70,6 +77,8 @@ describe('satellite index', () => {
   it('marks cache policies as licensed', () => {
     for (const id of ['us-naip', 'nl-pdok', 'ch-swissimage', 'jp-gsi', 'maptiler']) expect(byId(id).cache).toBe(CachePolicy.DeviceCache);
     expect(byId('esri').cache).toBe(CachePolicy.None);
+    for (const id of ['us-sc', 'us-de', 'us-mo']) expect(byId(id).cache).toBe(CachePolicy.DeviceCache);
+    for (const id of ['us-naipplus', 'us-ct', 'us-dc', 'us-nyc', 'us-ma', 'us-nh', 'us-ky3', 'us-ky', 'us-nc', 'us-oh', 'us-nj', 'us-va', 'us-vt', 'us-in', 'us-fulton']) expect(byId(id).cache).toBe(CachePolicy.Offline);
     for (const id of ['fr-ign', 'de-nrw', 'de-bayern', 'at-basemap', 'es-pnoa', 'lu', 'be-brussels', 'pl-gugik', 'de-hamburg']) expect(byId(id).cache).toBe(CachePolicy.Offline);
   });
 
@@ -118,6 +127,25 @@ describe('tile geometry and URLs', () => {
     expect(wmsGetMapUrl('https://example.org/wms?map=a', 'x', 0, 0, 0)).toContain('?map=a&SERVICE=WMS');
   });
 
+  it('builds an ArcGIS exportImage for one 3857 tile', () => {
+    expect(exportImageUrl('https://example.org/ImageServer', 1, 1, 1)).toBe(
+      'https://example.org/ImageServer/exportImage?bbox=0.00,-20037508.34,20037508.34,0.00&bboxSR=3857&imageSR=3857&size=256,256&format=png32&f=image'
+    );
+    expect(sourceTileUrl(byId('us-in'), 18, 67890, 98765)).toMatch(/^https:\/\/di-ingov\.img\.arcgis\.com\/.*\/ImageServer\/exportImage\?bbox=/);
+    expect(sourceTileUrl(byId('us-nh'), 18, 77500, 94900)).toContain('LAYERS=NH_2021_2022_6in_RGB');
+    expect(sourceTileUrl(byId('us-naipplus'), 18, 60000, 100000)).toContain('LAYERS=USGSNAIPPlus');
+  });
+
+  it('types images by magic bytes, not by the server', () => {
+    expect(sniffImage(head(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))).toBe(ImageMime.Png);
+    expect(sniffImage(head(0xff, 0xd8, 0xff, 0xe0))).toBe(ImageMime.Jpeg);
+    expect(sniffImage(text('RIFF\0\0\0\0WEBP'))).toBe(ImageMime.Webp);
+    expect(sniffImage(text('RIFF\0\0\0\0WAVE'))).toBeNull();
+    expect(sniffImage(text('{"error":{"code":400'))).toBeNull();
+    expect(sniffImage(text('<?xml version="1.0"'))).toBeNull();
+    expect(sniffImage(head())).toBeNull();
+  });
+
   it('fills XYZ templates', () => {
     expect(sourceTileUrl(byId('us-naip'), 10, 300, 400)).toMatch(/\/tile\/10\/400\/300$/);
     expect(sourceTileUrl(byId('es-pnoa'), 3, 1, 2)).toMatch(/\/3\/1\/5\.jpeg$/);
@@ -139,7 +167,24 @@ describe('source choice', () => {
     const rotterdam = lngLatTile(4.48, 51.92, 16);
     expect(ids(...rotterdam, KEYS)).toEqual(['nl-pdok', 'maptiler', 'esri']);
     const manhattan = lngLatTile(-73.98, 40.76, 15);
-    expect(ids(...manhattan, KEYS)[0]).toBe('us-naip');
+    expect(ids(...manhattan, KEYS)[0]).toBe('us-nyc');
+  });
+
+  it('asks US state and city orthos before USGS, NAIP Plus from z17', () => {
+    const first = (lng: number, lat: number, z: number) => ids(...lngLatTile(lng, lat, z))[0];
+    expect(first(-72.6851, 41.7637, 18)).toBe('us-ct');
+    expect(first(-71.0589, 42.3601, 18)).toBe('us-ma');
+    expect(first(-77.0365, 38.8977, 18)).toBe('us-dc');
+    expect(first(-84.388, 33.749, 18)).toBe('us-fulton');
+    const louisville = ids(...lngLatTile(-85.7585, 38.2527, 18));
+    expect(louisville.indexOf('us-ky3')).toBe(louisville.indexOf('us-ky') - 1);
+    expect(louisville.indexOf('us-ky')).toBeLessThan(louisville.indexOf('us-naipplus'));
+    const hartford = ids(...lngLatTile(-72.6851, 41.7637, 16));
+    expect(hartford.indexOf('us-ct')).toBeLessThan(hartford.indexOf('us-naip'));
+    expect(ids(...lngLatTile(-72.6851, 41.7637, 13))).toEqual(['us-naip']);
+    expect(ids(...lngLatTile(-98, 38.5, 16))).toEqual(['us-naip']);
+    expect(ids(...lngLatTile(-98, 38.5, 18))).toEqual(['us-naipplus', 'us-naip']);
+    expect(ids(...lngLatTile(-72.6851, 41.7637, 18)).at(-2)).toBe('us-naipplus');
   });
 
   it('hides keyed sources without keys and Esri offline', () => {
@@ -161,7 +206,7 @@ describe('source choice', () => {
   it('asks transparent sources before opaque ones, which would hide what lies under their fill', () => {
     expect(ids(...lngLatTile(6.16, 51.37, 16)).slice(0, 2)).toEqual(['de-nrw', 'nl-pdok']);
     expect(ids(...lngLatTile(6.05, 51.9, 16)).slice(0, 2)).toEqual(['de-nrw', 'nl-pdok']);
-    for (const s of SAT_SOURCES) expect(!!s.opaque).toBe(s.kind === SatKind.Xyz && s.id !== 'es-pnoa');
+    for (const s of SAT_SOURCES) expect(!!s.opaque).toBe(s.kind === SatKind.Xyz && !unfilled(s));
   });
 
   it('takes SWISSIMAGE abroad only after the neighbour, and first inside Switzerland', () => {
@@ -186,10 +231,11 @@ describe('source choice', () => {
   });
 
   it('stretches a national source past its top zoom only as a last resort', () => {
-    const c = candidates(...lngLatTile(-73.98, 40.76, 18), { keys: KEYS, online: true });
-    expect(c.map((x) => x.source.id)).toEqual(['maptiler', 'esri', 'us-naip']);
+    const c = candidates(...lngLatTile(-98, 38.5, 19), { keys: KEYS, online: true });
+    expect(c.map((x) => x.source.id)).toEqual(['maptiler', 'esri', 'us-naipplus', 'us-naip']);
     expect(c.at(-1)?.overzoom).toBe(true);
-    expect(ids(...lngLatTile(-73.98, 40.76, 20))).toEqual([]);
+    expect(ids(...lngLatTile(-98, 38.5, 20))).toEqual(['us-naipplus']);
+    expect(ids(...lngLatTile(-98, 38.5, 22))).toEqual([]);
   });
 
   it('orders by tier', () => {
@@ -255,6 +301,15 @@ describe('credits', () => {
     for (const id of ['de-bayern', 'de-thueringen']) expect(creditFor(byId(id), 16)).toContain('CC BY 4.0');
   });
 
+  it('credits US states as their terms ask', () => {
+    expect(creditFor(byId('us-ky'), 18)).toContain('KyFromAbove');
+    expect(creditFor(byId('us-nj'), 18)).toContain('NJOGIS');
+    expect(creditFor(byId('us-va'), 18)).toMatch(/VGIN.*general information only/);
+    expect(creditFor(byId('us-naipplus'), 18)).toBe('USGS, USDA, The National Map');
+    const louisville = creditsFor({ west: -85.8, south: 38.2, east: -85.7, north: 38.3 }, 18, { keys: {}, online: true });
+    expect(louisville.filter((t) => t.includes('KyFromAbove'))).toHaveLength(1);
+  });
+
   it('credits every source that may draw in the view', () => {
     const venlo = { west: 6.05, south: 51.3, east: 6.3, north: 51.45 };
     const c = creditsFor(venlo, 15, { keys: {}, online: true });
@@ -282,7 +337,10 @@ describe('offline packs', () => {
     expect(offIds(4.48, 51.92)).toEqual([]);
     expect(offIds(6.16, 51.37)).toEqual(['de-nrw']);
     expect(offIds(11.5, 48.1)).toContain('de-bayern');
-    expect(offIds(-73.98, 40.76)).toEqual([]);
+    expect(offIds(-73.98, 40.76)).toEqual(['us-nyc', 'us-nj']);
+    expect(offIds(-79.93, 32.78)).toEqual([]);
+    expect(offIds(-92.3, 38.6)).toEqual([]);
+    expect(offlineCandidates(...lngLatTile(-98, 38.5, 17)).map((s) => s.id)).toEqual(['us-naipplus']);
   });
 });
 

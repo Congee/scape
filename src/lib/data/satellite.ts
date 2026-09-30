@@ -17,7 +17,7 @@ import {
   whiteRun
 } from '@core/tiles/satellite';
 import { localSatellite } from './localTiles';
-import { cut, fillMasks, imageType, pixels, SAT_PX } from './satelliteImage';
+import { asImage, cut, fillMasks, imageType, pixels, SAT_PX } from './satelliteImage';
 
 const TEMPLATE = 'scape-sat://{z}/{x}/{y}';
 const PX = SAT_PX;
@@ -59,9 +59,8 @@ async function load(url: string, noStore: boolean, signal?: AbortSignal): Promis
   }
   const res = await fetch(url, { signal, mode: 'cors', cache: noStore ? 'no-store' : 'default' }).catch(() => null);
   if (!res?.ok) return { status: res?.status ?? 0, bytes: 0, bitmap: null };
-  const blob = await res.blob().catch(() => null);
-  // A WMS error comes back as 200 XML.
-  if (!blob?.size || !blob.type.startsWith('image/')) return { status: res.status, bytes: 0, bitmap: null };
+  const blob = await asImage(await res.blob().catch(() => null));
+  if (!blob) return { status: res.status, bytes: 0, bitmap: null };
   return { status: res.status, bytes: blob.size, bitmap: await createImageBitmap(blob).catch(() => null) };
 }
 

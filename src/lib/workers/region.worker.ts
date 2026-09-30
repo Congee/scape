@@ -23,7 +23,7 @@ import { announceArchives, archiveName, archivesDir, assetsDirName, metaFromHead
 import { importGeoid } from '@data/geoid';
 import { importViirs } from '@data/viirs';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
-import { encodeTile, fillMasks, pixels, SAT_PX } from '@data/satelliteImage';
+import { asImage, encodeTile, fillMasks, pixels, SAT_PX } from '@data/satelliteImage';
 import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
 
@@ -401,8 +401,8 @@ async function downloadTiles(id: string, spec: RegionSpec, signal: AbortSignal):
 /** Per-zoom tile size sampled with a HEAD of the centre tile. */
 const clearFill = fillMasks(async (s, z, x, y) => {
   const res = await fetchRetry(sourceTileUrl(s, z, x, y), {}).catch(() => null);
-  const blob = res?.ok ? await res.blob().catch(() => null) : null;
-  const bmp = blob?.type.startsWith('image/') ? await createImageBitmap(blob).catch(() => null) : null;
+  const blob = res?.ok ? await asImage(await res.blob().catch(() => null)) : null;
+  const bmp = blob ? await createImageBitmap(blob).catch(() => null) : null;
   if (!bmp) return null;
   const rgba = pixels(bmp);
   bmp.close();
@@ -418,8 +418,8 @@ async function satelliteTileBytes(z: number, x: number, y: number, signal: Abort
     signal.throwIfAborted();
     if (!res?.ok) continue;
     // oxlint-disable-next-line no-await-in-loop
-    const blob = await res.blob();
-    if (!blob.size || !blob.type.startsWith('image/')) continue;
+    const blob = await asImage(await res.blob());
+    if (!blob) continue;
     // oxlint-disable-next-line no-await-in-loop
     const bmp = await createImageBitmap(blob).catch(() => null);
     if (!bmp) continue;

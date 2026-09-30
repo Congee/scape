@@ -1,6 +1,6 @@
 /** Decoding and cutting satellite tiles. Worker-safe. */
 
-import { clearFill, fillMask, maskTile, type NativeTile, needsFillMask, noDataShare, type SatSource } from '@core/tiles/satellite';
+import { clearFill, fillMask, maskTile, type NativeTile, needsFillMask, noDataShare, type SatSource, sniffImage } from '@core/tiles/satellite';
 
 export const SAT_PX = 256;
 /** Coarse masks kept: a z11 tile spans 64 z17 tiles. */
@@ -40,6 +40,14 @@ export async function encodeTile(rgba: Uint8ClampedArray, quality = 0.85): Promi
 
 /** An offline tile's type by its magic bytes; a satellite pack mixes JPEG and PNG. */
 export const imageType = (buf: ArrayBuffer): string => (buf.byteLength > 1 && new Uint8Array(buf, 0, 2).join() === '137,80' ? 'image/png' : 'image/jpeg');
+
+/** The blob typed by its magic bytes, or null when it holds no image (an error sent as 200 JSON or XML). */
+export async function asImage(blob: Blob | null | undefined): Promise<Blob | null> {
+  if (!blob?.size) return null;
+  const type = sniffImage(new Uint8Array(await blob.slice(0, 12).arrayBuffer()));
+  if (!type) return null;
+  return blob.type === type ? blob : new Blob([blob], { type });
+}
 
 /** RGBA of a source's 256 px map tile, or null when it can't be had. */
 export type MaskLoader = (s: SatSource, z: number, x: number, y: number) => Promise<Uint8ClampedArray | null>;

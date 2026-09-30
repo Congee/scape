@@ -9,7 +9,8 @@ export const CachePolicy = {
 } as const;
 export type CachePolicy = (typeof CachePolicy)[keyof typeof CachePolicy];
 
-export const SatKind = { Xyz: 'xyz', Wms: 'wms' } as const;
+/** Export: an ArcGIS ImageServer `exportImage` base URL. */
+export const SatKind = { Xyz: 'xyz', Wms: 'wms', Export: 'export' } as const;
 export type SatKind = (typeof SatKind)[keyof typeof SatKind];
 
 export const SatTier = { National: 'national', Global: 'global', Fallback: 'fallback' } as const;
@@ -39,7 +40,7 @@ export interface SatSource {
   name: string;
   tier: SatTier;
   kind: SatKind;
-  /** XYZ template ({z} {x} {y} {-y} {s} {key}) or the WMS base URL. */
+  /** XYZ template ({z} {x} {y} {-y} {s} {key}), or the WMS or ImageServer base URL. */
   url: string;
   /** WMS GetMap layer; version 1.3.0, EPSG:3857, transparent PNG. */
   layers?: string;
@@ -64,6 +65,14 @@ const DL_BY = '<a href="https://www.govdata.de/dl-de/by-2-0">dl-de/by-2-0</a>';
 // LGL-BW asks for the licence's full name and the year the data was fetched.
 const DL_BY_LONG = '<a href="https://www.govdata.de/dl-de/by-2-0">Datenlizenz Deutschland – Namensnennung – Version 2.0</a>';
 const GSI_LINK = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
+
+type UsOrtho = Pick<SatSource, 'id' | 'name' | 'url' | 'attribution'> & Partial<SatSource> & { bbox: SatBbox };
+/** A US state or city ortho: transparent (404 or alpha) outside its data. */
+const us = ({ bbox, ...s }: UsOrtho): SatSource => ({ tier: SatTier.National, kind: SatKind.Xyz, bboxes: [bbox], minZoom: 14, maxZoom: 20, tilePx: 256, cache: CachePolicy.Offline, ...s });
+const US_BOXES = [box(-125, 24, -66, 49.5), box(-170, 51, -129, 71.5), box(-160.5, 18.8, -154.7, 22.3), box(-67.5, 17.8, -65.2, 18.6)];
+const ARCGIS_TILE = '/tile/{z}/{y}/{x}';
+const KY_WM = 'https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/';
+const KY_CREDIT = 'KyFromAbove, Commonwealth of Kentucky, Division of Geographic Information';
 
 export const SAT_SOURCES: readonly SatSource[] = [
   {
@@ -303,13 +312,157 @@ export const SAT_SOURCES: readonly SatSource[] = [
     attribution: 'PNOA cedido por © IGN',
     cache: CachePolicy.Offline
   },
+  us({
+    id: 'us-dc',
+    name: 'DC Orthophoto 2025',
+    url: `https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Ortho2025_WebMercator/MapServer${ARCGIS_TILE}`,
+    bbox: box(-77.12, 38.79, -76.91, 39.0),
+    attribution: 'DC Office of the Chief Technology Officer (CC BY 4.0)'
+  }),
+  us({
+    id: 'us-nyc',
+    name: 'NYC Orthoimagery 2024',
+    url: `https://tiles.arcgis.com/tiles/yG5s3afENB5iO9fj/arcgis/rest/services/NYC_Orthos_2024/MapServer${ARCGIS_TILE}`,
+    bbox: box(-74.26, 40.49, -73.7, 40.92),
+    attribution: 'NYC OTI (CC BY 4.0)'
+  }),
+  us({
+    id: 'us-fulton',
+    name: 'Fulton County Imagery 2019',
+    kind: SatKind.Export,
+    url: 'https://alphagis.alpharetta.ga.us/imagery/rest/services/am2019_WM/ImageServer',
+    bbox: box(-84.86, 33.5, -84.09, 34.19),
+    attribution: 'Fulton County GIS / ARC (CC BY 4.0)'
+  }),
+  us({
+    id: 'us-ct',
+    name: 'CT Orthoimagery 2023',
+    url: `https://cteco.uconn.edu/ctraster/rest/services/images/Ortho_2023_tiled/ImageServer${ARCGIS_TILE}`,
+    bbox: box(-73.73, 40.95, -71.78, 42.06),
+    attribution: 'CT ECO / UConn (CC0)'
+  }),
+  us({
+    id: 'us-ma',
+    name: 'MassGIS Imagery 2025',
+    url: `https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer${ARCGIS_TILE}`,
+    bbox: box(-73.51, 41.23, -69.92, 42.89),
+    attribution: 'MassGIS'
+  }),
+  us({
+    id: 'us-nh',
+    name: 'NH GRANIT 2021–22',
+    kind: SatKind.Wms,
+    url: 'https://nhgeodata.unh.edu/image/services/ImageServices/NH_2021_2022_6in_RGB/ImageServer/WMSServer',
+    layers: 'NH_2021_2022_6in_RGB',
+    bbox: box(-72.56, 42.69, -70.61, 45.31),
+    attribution: 'NH GRANIT'
+  }),
+  us({
+    id: 'us-vt',
+    name: 'VCGI Imagery',
+    url: `https://maps.vcgi.vermont.gov/arcgis/rest/services/EGC_services/IMG_VCGI_CLR_WM_CACHE/ImageServer${ARCGIS_TILE}`,
+    bbox: box(-73.44, 42.73, -71.46, 45.02),
+    maxZoom: 19,
+    attribution: 'VCGI'
+  }),
+  us({
+    id: 'us-nj',
+    name: 'NJ Orthophoto 2020',
+    url: `https://maps.nj.gov/arcgis/rest/services/Basemap/Orthos_Natural_2020_NJ_WM/MapServer${ARCGIS_TILE}`,
+    bbox: box(-75.56, 38.93, -73.89, 41.36),
+    attribution: 'NJ Office of Information Technology, Office of GIS (NJOGIS), 2020'
+  }),
+  us({
+    id: 'us-de',
+    name: 'FirstMap Delaware 2022',
+    url: `https://imagery.firstmap.delaware.gov/imagery/rest/services/DE_Imagery/DE_Imagery_2022/ImageServer${ARCGIS_TILE}`,
+    bbox: box(-75.79, 38.45, -75.05, 39.84),
+    attribution: 'State of Delaware, Sanborn Map Company, Inc.',
+    cache: CachePolicy.DeviceCache
+  }),
+  us({
+    id: 'us-sc',
+    name: 'SC Imagery 2023',
+    url: `https://tiles.arcgis.com/tiles/RvqSyw3diI7dTKo5/arcgis/rest/services/SC_2023_RGB/MapServer${ARCGIS_TILE}`,
+    bbox: box(-83.36, 32.03, -78.54, 35.22),
+    attribution: 'SC Revenue and Fiscal Affairs Office; Kucera International (2023)',
+    cache: CachePolicy.DeviceCache
+  }),
+  us({
+    id: 'us-oh',
+    name: 'OSIP Ohio',
+    url: `https://maps.ohio.gov/image/rest/services/osip_most_current_cache/MapServer${ARCGIS_TILE}`,
+    bbox: box(-84.82, 38.4, -80.52, 41.98),
+    attribution: 'OGRIP / OSIP, State of Ohio'
+  }),
+  us({
+    id: 'us-in',
+    name: 'Indiana Current Imagery',
+    kind: SatKind.Export,
+    url: 'https://di-ingov.img.arcgis.com/arcgis/rest/services/DynamicWebMercator/Indiana_Current_Imagery/ImageServer',
+    bbox: box(-88.1, 37.77, -84.78, 41.77),
+    attribution: 'Indiana GIO (CC0)'
+  }),
+  // Same box: the 3-inch phase goes first and falls through to the 6-inch one where it has none.
+  us({
+    id: 'us-ky3',
+    name: 'KyFromAbove Phase 3',
+    url: `${KY_WM}Ky_Imagery_Phase3_3IN_WGS84WM/MapServer${ARCGIS_TILE}`,
+    bbox: box(-89.58, 36.49, -81.96, 39.15),
+    attribution: KY_CREDIT
+  }),
+  us({
+    id: 'us-ky',
+    name: 'KyFromAbove Phase 2',
+    url: `${KY_WM}Ky_Imagery_Phase2_6IN_WGS84WM/MapServer${ARCGIS_TILE}`,
+    bbox: box(-89.58, 36.49, -81.96, 39.15),
+    attribution: KY_CREDIT
+  }),
+  us({
+    id: 'us-va',
+    name: 'VBMP Most Recent',
+    url: `https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VBMP_Imagery/MostRecentImagery_WGS/MapServer${ARCGIS_TILE}`,
+    bbox: box(-83.68, 36.54, -75.24, 39.47),
+    maxZoom: 19,
+    attribution: 'Virginia Geographic Information Network (VGIN), VBMP; for general information only, not for design or flood plain determination'
+  }),
+  us({
+    id: 'us-mo',
+    name: 'MSDIS Missouri 2023–24',
+    kind: SatKind.Export,
+    url: 'https://stateimagery.msdis.missouri.edu/arcgis/rest/services/Missouri_6inch_Statewide_2023_2024_Dynamic/ImageServer',
+    bbox: box(-95.77, 35.99, -89.1, 40.61),
+    attribution: 'MSDIS, University of Missouri; Sanborn (2023–24)',
+    cache: CachePolicy.DeviceCache
+  }),
+  us({
+    id: 'us-nc',
+    name: 'NC OneMap Orthoimagery',
+    url: `https://services.nconemap.gov/secure/rest/services/Imagery/Orthoimagery_Latest_cached/ImageServer${ARCGIS_TILE}`,
+    bbox: box(-84.33, 33.84, -75.45, 36.59),
+    attribution: 'NC OneMap / NC CGIA'
+  }),
+  {
+    id: 'us-naipplus',
+    name: 'USGS NAIP Plus',
+    tier: SatTier.National,
+    kind: SatKind.Wms,
+    url: 'https://imagery.nationalmap.gov/arcgis/services/USGSNAIPPlus/ImageServer/WMSServer',
+    layers: 'USGSNAIPPlus',
+    bboxes: US_BOXES,
+    minZoom: 17,
+    maxZoom: 18,
+    tilePx: 256,
+    attribution: 'USGS, USDA, The National Map',
+    cache: CachePolicy.Offline
+  },
   {
     id: 'us-naip',
     name: 'USGS Imagery',
     tier: SatTier.National,
     kind: SatKind.Xyz,
     url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
-    bboxes: [box(-125, 24, -66, 49.5), box(-170, 51, -129, 71.5), box(-160.5, 18.8, -154.7, 22.3), box(-67.5, 17.8, -65.2, 18.6)],
+    bboxes: US_BOXES,
     minZoom: 5,
     maxZoom: 16,
     tilePx: 256,
@@ -405,9 +558,18 @@ export function wmsGetMapUrl(base: string, layers: string, z: number, x: number,
   return `${base}${base.includes('?') ? '&' : '?'}${q}`;
 }
 
+/** ArcGIS ImageServer exportImage for one web-mercator tile. */
+export function exportImageUrl(base: string, z: number, x: number, y: number, px = 256): string {
+  const bbox = tileBbox3857(z, x, y)
+    .map((v) => v.toFixed(2))
+    .join(',');
+  return `${base}/exportImage?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=${px},${px}&format=png32&f=image`;
+}
+
 /** URL of the source's own tile z/x/y. */
 export function sourceTileUrl(s: SatSource, z: number, x: number, y: number, keys: SatKeys = {}): string {
   if (s.kind === SatKind.Wms) return wmsGetMapUrl(s.url, s.layers ?? '', z, x, y, s.tilePx);
+  if (s.kind === SatKind.Export) return exportImageUrl(s.url, z, x, y, s.tilePx);
   const sub = s.subdomains?.length ? s.subdomains[(x + y) % s.subdomains.length] : '';
   return s.url
     .replace('{z}', String(z))
@@ -433,6 +595,19 @@ export function nativeTile(s: SatSource, z: number, x: number, y: number): Nativ
   const nz = Math.max(0, Math.min(z - shift, s.maxZoom));
   const d = z - nz;
   return { z: nz, x: x >> d, y: y >> d, n: 2 ** d, col: x - ((x >> d) << d), row: y - ((y >> d) << d) };
+}
+
+export const ImageMime = { Png: 'image/png', Jpeg: 'image/jpeg', Webp: 'image/webp' } as const;
+export type ImageMime = (typeof ImageMime)[keyof typeof ImageMime];
+
+const startsWith = (head: Uint8Array, magic: readonly number[], at = 0) => magic.every((b, i) => head[at + i] === b);
+
+/** An image's type by its magic bytes, or null: servers send JPEG as octet-stream and errors as 200 JSON. */
+export function sniffImage(head: Uint8Array): ImageMime | null {
+  if (startsWith(head, [0x89, 0x50, 0x4e, 0x47])) return ImageMime.Png;
+  if (startsWith(head, [0xff, 0xd8, 0xff])) return ImageMime.Jpeg;
+  if (startsWith(head, [0x52, 0x49, 0x46, 0x46]) && startsWith(head, [0x57, 0x45, 0x42, 0x50], 8)) return ImageMime.Webp;
+  return null;
 }
 
 // --- choice -------------------------------------------------------------
@@ -728,7 +903,8 @@ export function creditsFor(view: SatBbox, z: number, ctx: ChoiceContext): string
     if (!hasKey(s, ctx.keys) || (s.cache === CachePolicy.None && !ctx.online)) continue;
     if (zi < s.minZoom || zi > s.maxZoom + (s.tier === SatTier.National ? MAX_OVERZOOM : 99)) continue;
     if (!s.bboxes.some((b) => intersects(b, view))) continue;
-    out.push(creditFor(s, zi));
+    const text = creditFor(s, zi);
+    if (!out.includes(text)) out.push(text);
   }
   return out;
 }

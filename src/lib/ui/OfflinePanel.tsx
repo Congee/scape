@@ -336,7 +336,7 @@ export function OfflinePanel() {
         </select>
       </div>
       <p className="muted hint" title={SAT_OFFLINE_NAMES}>
-        Only national aerial photos whose licence allows offline copies are packed; MapTiler, Esri, and the Dutch, Swiss, US and Japanese photos stay online.
+        Only national aerial photos whose licence allows offline copies are packed; MapTiler, Esri, and the Dutch, Swiss, Japanese, USGS (to z16), SC, DE and MO photos stay online.
       </p>
       <div className="actions" data-offline="satellite">
         <button onClick={() => void runEstimate(ArchiveKind.Satellite)} disabled={!draft}>
