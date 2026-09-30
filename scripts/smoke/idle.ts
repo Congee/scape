@@ -245,6 +245,11 @@ async function measure(c: Case): Promise<Row> {
   if (c.input) {
     await drive(c);
     await Bun.sleep(1000);
+    // The mask worker may still be fetching tiles the new sun or view reaches; its answer paints once more.
+    if (await tab.eval<boolean>('!!window.__scape.shadowPending?.()')) {
+      await tab.until('!window.__scape.shadowPending()', 60_000, 100);
+      await Bun.sleep(1000);
+    }
   }
   if (c.hidden) {
     await tab.eval(HIDE(true));

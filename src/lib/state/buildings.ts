@@ -72,6 +72,8 @@ let lastPin: LngLat = { lat: 0, lng: 0 };
 let lastTiles: Parameters<typeof requestBuildings> | null = null;
 /** The map's mask keeps its own id, so a pan never cancels the viewfinder's shadow build. */
 let maskId = 0;
+/** Id of the newest mask request the worker has answered. */
+let maskAnswered = 0;
 let maskKey = '';
 let lastMask: Omit<MaskRequest, 'id'> | null = null;
 /** Height that throws the longest shadow in the last mask built; zero until one lands. */
@@ -155,6 +157,7 @@ function ensureMaskWorker(): Worker {
   maskWorker = new Worker(new URL('../workers/buildings.worker.ts', import.meta.url), { type: 'module', name: MASK_WORKER_NAME });
   maskWorker.addEventListener('message', (e: MessageEvent<BuildingsResponse>) => {
     const res = e.data;
+    if (res.id === maskId) maskAnswered = res.id;
     if (res.kind === BuildingsKind.Shade) {
       const { centre, originE, originN, nx, ny, cellM, mask, lod2 } = res;
       if (res.id !== maskId) return;
@@ -240,6 +243,11 @@ export function requestShadowMask(centre: LngLat, want: MaskRect, sunAzDeg: numb
   maskId = ++seq;
   lastMask = { kind: BuildingsKind.Mask, centre, ...rect, sunAzDeg, sunAltDeg, softM, buildings };
   ensureMaskWorker().postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);
+}
+
+/** True while the map's newest shadow mask is still being built, e.g. fetching the tiles a new sun reaches. */
+export function shadowMaskPending(): boolean {
+  return maskAnswered !== maskId;
 }
 
 /** Hands the workers the current models and rebuilds the map's mask around them. */
