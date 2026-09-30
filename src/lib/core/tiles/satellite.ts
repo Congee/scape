@@ -52,8 +52,10 @@ export interface SatSource {
   attribution: string | readonly ZoomCredit[];
   cache: CachePolicy;
   key?: SatKey;
-  /** Paints a flat colour outside its data, so only a uniform tile is no-data. */
+  /** JPEG with a white fill outside its data, cleared by the fill mask. */
   opaque?: true;
+  /** Blurry beyond its own country, so every other national source covering the tile goes first. */
+  coarseAbroad?: true;
 }
 
 const box = (west: number, south: number, east: number, north: number): SatBbox => ({ west, south, east, north });
@@ -231,7 +233,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     tilePx: 256,
     attribution: '© Data: swisstopo',
     cache: CachePolicy.DeviceCache,
-    opaque: true
+    opaque: true,
+    coarseAbroad: true
   },
   {
     id: 'at-basemap',
@@ -239,7 +242,8 @@ export const SAT_SOURCES: readonly SatSource[] = [
     tier: SatTier.National,
     kind: SatKind.Xyz,
     url: 'https://mapsneu.wien.gv.at/basemap/bmaporthofoto30cm/normal/google3857/{z}/{y}/{x}.jpeg',
-    bboxes: [box(9.5, 46.4, 17.2, 49.0)],
+    // Steps round Graubünden, where SWISSIMAGE would otherwise wait on basemap.at's fill.
+    bboxes: [box(9.5, 47.05, 17.2, 49.0), box(9.85, 46.8, 17.2, 47.05), box(10.35, 46.35, 17.2, 46.8)],
     minZoom: 5,
     maxZoom: 20,
     tilePx: 256,
@@ -267,7 +271,18 @@ export const SAT_SOURCES: readonly SatSource[] = [
     tier: SatTier.National,
     kind: SatKind.Xyz,
     url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=HR.ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
-    bboxes: [box(-5.5, 41, 10, 51.1), box(-61.9, 15.8, -61, 16.6), box(-61.3, 14.3, -60.8, 14.9), box(-54.7, 2.1, -51.5, 5.8), box(55.2, -21.4, 55.9, -20.8), box(45, -13.1, 45.3, -12.6)],
+    // Mainland boxes step round Switzerland, where SWISSIMAGE would otherwise wait on IGN's fill.
+    bboxes: [
+      box(-5.5, 42.3, 5.96, 51.1),
+      box(5.9, 42.9, 7.8, 46),
+      box(5.9, 46, 6.85, 46.42),
+      box(5.9, 46.4, 6.25, 46.7),
+      box(5.9, 46.7, 6.5, 46.95),
+      box(5.9, 46.95, 6.95, 47.4),
+      box(5.9, 47.35, 7.65, 49.6),
+      box(7.5, 48.2, 8.3, 49.1),
+      box(8.5, 41.3, 9.6, 43.1),
+      box(-61.9, 15.8, -61, 16.6), box(-61.3, 14.3, -60.8, 14.9), box(-54.7, 2.1, -51.5, 5.8), box(55.2, -21.4, 55.9, -20.8), box(45, -13.1, 45.3, -12.6)],
     minZoom: 6,
     maxZoom: 19,
     tilePx: 256,
@@ -436,7 +451,10 @@ export interface ChoiceContext {
 /** A keyed source without its key is hidden. */
 export const hasKey = (s: SatSource, keys: SatKeys) => !s.key || !!keys[s.key];
 
-/** National sources whose box meets the tile and zoom range: transparent before opaque, then the smallest box holding the tile's centre. */
+// Transparent sources leave gaps cleanly; a coarse-abroad source only fills what the others lack.
+const rank = (s: SatSource) => (s.coarseAbroad ? 2 : s.opaque ? 1 : 0);
+
+/** National sources whose box meets the tile and zoom range: transparent, opaque, then coarse-abroad; within each, the smallest box holding the tile's centre. */
 function nationals(z: number, x: number, y: number, keys: SatKeys): { exact: SatSource[]; stretched: SatSource[] } {
   const t = tileLngLatBbox(z, x, y);
   const cLng = (t.west + t.east) / 2;
@@ -454,8 +472,7 @@ function nationals(z: number, x: number, y: number, keys: SatKeys): { exact: Sat
   }
   const area = (s: SatSource) => Math.min(...s.bboxes.filter((b) => contains(b, cLng, cLat)).map((b) => (b.east - b.west) * (b.north - b.south)));
   inside.sort((a, b) => area(a) - area(b));
-  // An opaque tile ends a composite, so it goes under every source that can leave gaps.
-  const exact = [...inside, ...edge].toSorted((a, b) => Number(!!a.opaque) - Number(!!b.opaque));
+  const exact = [...inside, ...edge].toSorted((a, b) => rank(a) - rank(b));
   return { exact, stretched };
 }
 
@@ -527,6 +544,173 @@ export function uniformFill(rgba: Uint8ClampedArray): boolean {
 export function tileCoverage(rgba: Uint8ClampedArray, s: Pick<SatSource, 'opaque'>): Coverage {
   if (s.opaque && uniformFill(rgba)) return Coverage.Empty;
   return coverageOf(noDataShare(rgba, 4));
+}
+
+// --- opaque fill mask ---------------------------------------------------
+
+/** Zoom of the coarse tile whose broad white areas tell an opaque source's fill from snow or roofs. */
+export const MASK_ZOOM = 11;
+/** Near-white pixels a tile needs before its mask is looked up. */
+export const WHITE_CHECK_PX = 64;
+const MASK_PX = 256;
+const WHITE_MIN = 250;
+/** JPEG ringing at the fill's edge, peeled off in a few passes. */
+const FRINGE_MIN = 200;
+const FRINGE_PASSES = 3;
+/** Pixels the fill is followed past its seeds, so snow beside it keeps all but a band. */
+const FLOOD_MAX = 64;
+/** Mask pixels the eroded fill grows back by, past the ringing at its edge. */
+const MASK_GROW = 3;
+/** Mask pixels further out where only broad flat white is taken as fill: the coarse tile's edge lags the fine one's. */
+const MASK_NEAR = 7;
+/** Mask values: white is fill; broad flat white is fill. */
+export const MaskLevel = { Fill: 2, Near: 1 } as const;
+
+const isWhite = (rgba: Uint8ClampedArray, i: number, min = WHITE_MIN) => rgba[i] >= min && rgba[i + 1] >= min && rgba[i + 2] >= min;
+
+export function whiteCount(rgba: Uint8ClampedArray): number {
+  let n = 0;
+  for (let i = 0; i < rgba.length; i += 4) if (isWhite(rgba, i)) n++;
+  return n;
+}
+
+/** An opaque national tile with enough white to be worth masking. */
+export const needsFillMask = (s: Pick<SatSource, 'opaque' | 'tier'>, rgba: Uint8ClampedArray) =>
+  !!s.opaque && s.tier === SatTier.National && whiteCount(rgba) >= WHITE_CHECK_PX && !uniformFill(rgba);
+
+/** The coarse map tile a map tile's mask comes from, and the map tile's cell in its n×n grid. */
+export function maskTile(s: Pick<SatSource, 'minZoom'>, z: number, x: number, y: number): NativeTile {
+  const mz = Math.max(s.minZoom, Math.min(z, MASK_ZOOM));
+  const d = z - mz;
+  return { z: mz, x: x >> d, y: y >> d, n: 2 ** d, col: x - ((x >> d) << d), row: y - ((y >> d) << d) };
+}
+
+function dilate(m: Uint8Array, r: number): Uint8Array {
+  const h = new Uint8Array(m.length);
+  const out = new Uint8Array(m.length);
+  for (let y = 0; y < MASK_PX; y++) {
+    for (let x = 0; x < MASK_PX; x++) {
+      if (!m[y * MASK_PX + x]) continue;
+      for (let k = Math.max(0, x - r); k <= Math.min(MASK_PX - 1, x + r); k++) h[y * MASK_PX + k] = 1;
+    }
+  }
+  for (let y = 0; y < MASK_PX; y++) {
+    for (let x = 0; x < MASK_PX; x++) {
+      if (!h[y * MASK_PX + x]) continue;
+      for (let k = Math.max(0, y - r); k <= Math.min(MASK_PX - 1, y + r); k++) out[k * MASK_PX + x] = 1;
+    }
+  }
+  return out;
+}
+
+/** Fill of a coarse 256 px tile: white pixels whose whole 3×3 block is white, grown by MASK_GROW, then MASK_NEAR at level Near. */
+export function fillMask(rgba: Uint8ClampedArray): Uint8Array {
+  const w = new Uint8Array(MASK_PX * MASK_PX);
+  for (let i = 0; i < w.length; i++) w[i] = isWhite(rgba, i * 4) ? 1 : 0;
+  // Off-tile counts as white so fill touching the edge survives erosion.
+  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= MASK_PX || y >= MASK_PX ? 1 : w[y * MASK_PX + x]);
+  const core = new Uint8Array(w.length);
+  for (let y = 0; y < MASK_PX; y++) {
+    for (let x = 0; x < MASK_PX; x++) {
+      let all = 1;
+      for (let dy = -1; dy <= 1 && all; dy++) for (let dx = -1; dx <= 1 && all; dx++) all = at(x + dx, y + dy);
+      core[y * MASK_PX + x] = all;
+    }
+  }
+  const fill = dilate(core, MASK_GROW);
+  const near = dilate(core, MASK_NEAR);
+  for (let i = 0; i < near.length; i++) near[i] = fill[i] ? MaskLevel.Fill : near[i] ? MaskLevel.Near : 0;
+  return near;
+}
+
+/** Clears (alpha 0) a map tile's white inside its coarse tile's fill mask, and the bright ringing beside it; returns pixels cleared. */
+export function clearFill(rgba: Uint8ClampedArray, mask: Uint8Array, cell: Pick<NativeTile, 'n' | 'col' | 'row'>): number {
+  const side = Math.round(Math.sqrt(rgba.length / 4));
+  const white = (x: number, y: number) => x < 0 || y < 0 || x >= side || y >= side || isWhite(rgba, (y * side + x) * 4);
+  const flat = (x: number, y: number, r: number) => {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (!white(x + dx, y + dy)) return false;
+    return true;
+  };
+  const gone = new Uint8Array(side * side);
+  const depth = new Uint8Array(side * side);
+  const queue: number[] = [];
+  for (let y = 0; y < side; y++) {
+    const my = Math.floor(((cell.row + y / side) * MASK_PX) / cell.n);
+    for (let x = 0; x < side; x++) {
+      const mx = Math.floor(((cell.col + x / side) * MASK_PX) / cell.n);
+      const p = y * side + x;
+      const m = mask[my * MASK_PX + mx];
+      if (m === MaskLevel.Fill ? !white(x, y) : m !== MaskLevel.Near || !flat(x, y, 2)) continue;
+      gone[p] = 1;
+      queue.push(p);
+    }
+  }
+  // The coarse mask lags the fill's edge by a few blocks: flood on through flat white joined to it.
+  for (let i = 0; i < queue.length; i++) {
+    if (depth[queue[i]] >= FLOOD_MAX) continue;
+    const x = queue[i] % side;
+    const y = (queue[i] - x) / side;
+    for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+      const q = ny * side + nx;
+      if (nx < 0 || ny < 0 || nx >= side || ny >= side || gone[q] || !flat(nx, ny, 1)) continue;
+      gone[q] = 1;
+      depth[q] = depth[queue[i]] + 1;
+      queue.push(q);
+    }
+  }
+  for (let pass = 0; pass < FRINGE_PASSES; pass++) {
+    const edge: number[] = [];
+    for (let y = 0; y < side; y++) {
+      for (let x = 0; x < side; x++) {
+        const p = y * side + x;
+        if (gone[p] || !isWhite(rgba, p * 4, FRINGE_MIN)) continue;
+        if ((x > 0 && gone[p - 1]) || (x < side - 1 && gone[p + 1]) || (y > 0 && gone[p - side]) || (y < side - 1 && gone[p + side])) edge.push(p);
+      }
+    }
+    for (const p of edge) gone[p] = 1;
+  }
+  let n = 0;
+  for (let p = 0; p < gone.length; p++) {
+    if (!gone[p]) continue;
+    rgba[p * 4 + 3] = 0;
+    n++;
+  }
+  return n;
+}
+
+// --- debug stats --------------------------------------------------------
+
+/** Thickness of the thickest opaque white area: the side of the largest all-white square. */
+export function whiteRun(rgba: Uint8ClampedArray): number {
+  const side = Math.round(Math.sqrt(rgba.length / 4));
+  const sq = new Uint16Array(side * side);
+  let most = 0;
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const p = y * side + x;
+      if (!rgba[p * 4 + 3] || !isWhite(rgba, p * 4)) continue;
+      sq[p] = x && y ? 1 + Math.min(sq[p - 1], sq[p - side], sq[p - side - 1]) : 1;
+      most = Math.max(most, sq[p]);
+    }
+  }
+  return most;
+}
+
+/** Mean luminance step between opaque horizontal neighbours: low for blurry or blocky upsampled imagery. */
+export function detailOf(rgba: Uint8ClampedArray): number {
+  const side = Math.round(Math.sqrt(rgba.length / 4));
+  const lum = (i: number) => 0.2126 * rgba[i] + 0.7152 * rgba[i + 1] + 0.0722 * rgba[i + 2];
+  let sum = 0;
+  let n = 0;
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side - 1; x++) {
+      const i = (y * side + x) * 4;
+      if (!rgba[i + 3] || !rgba[i + 7]) continue;
+      sum += Math.abs(lum(i + 4) - lum(i));
+      n++;
+    }
+  }
+  return n ? sum / n : 0;
 }
 
 // --- credits and cache policy ------------------------------------------

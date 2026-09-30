@@ -49,7 +49,7 @@ check "Layers toggle adds the satellite layer" "$([ "$(js "String(!!$MAP.getLaye
 
 # Moves the map and prints "sources in view|tiles with no source|credits" once tiles settle.
 scene() { # lng, lat, zoom
-  js "(() => { window.__scape.satellite && (window.__scape.satellite.tiles = {}); $MAP.jumpTo({ center: [$1, $2], zoom: $3 }); })()" >/dev/null
+  js "(() => { window.__scape.satellite && (window.__scape.satellite.tiles = {}, window.__scape.satellite.stats = {}); $MAP.jumpTo({ center: [$1, $2], zoom: $3 }); })()" >/dev/null
   sleep 0.5
   wait_for "$MAP.areTilesLoaded() && window.__scape.satellite && Object.keys(window.__scape.satellite.tiles).length" 160
   sleep 1
@@ -84,8 +84,35 @@ border() { # name, screenshot, want-id, lng, lat, zoom
   check "$1" "$([ "$(has "$ids" "$3")" = 1 ] && [ "${rest%%/*}" = 0 ] && echo 1 || echo 0)" "$r"
 }
 border "NL/BE at Baarle-Nassau: PDOK, no empty tile" baarle-nl-be.png nl-pdok 4.93 51.445 16
-border "AT/CH on the Rhine at Feldkirch: SWISSIMAGE, no empty tile" feldkirch-at-ch.png ch-swissimage 9.56 47.25 15
 border "PL/DE on the Oder at Frankfurt: no empty tile" oder-pl-de.png de-brandenburg 14.55 52.34 15
+
+# Thickest white square and mean sharpness over the tiles in view, from the dev stats.
+stats() { js "(() => { const s = Object.values(window.__scape.satellite.stats || {}); const d = s.length ? s.reduce((a, v) => a + v.detail, 0) / s.length : 0; return Math.max(0, ...s.map((v) => v.white)) + '|' + d.toFixed(1); })()"; }
+WHITE_MAX=6
+# A JPEG-only source's white no-data fill must give way to what lies beyond it.
+fill() { # name, screenshot, want-ids (comma), lng, lat, zoom
+  local r st ok=1 id
+  r=$(scene "$4" "$5" "$6")
+  ab screenshot "$OUT/$2" >/dev/null
+  st=$(stats)
+  for id in ${3//,/ }; do [ "$(has "${r%%|*}" "$id")" = 1 ] || ok=0; done
+  [ "${st%%|*}" -le "$WHITE_MAX" ] || ok=0
+  check "$1" "$ok" "white ${st%%|*} px; ${r%%|*}"
+}
+fill "AT/CH on the Rhine at Feldkirch: both sides, no fill strip" feldkirch-at-ch.png at-basemap,ch-swissimage 9.51 47.25 15
+fill "NL/BE in Zeeland: no PDOK fill strip" fill-nl-be-zeeland.png nl-pdok 3.56 51.262 14
+fill "NL/BE at Hulst–Antwerp: no PDOK fill strip" fill-nl-be-antwerp.png nl-pdok 4.438 51.40 14
+fill "NL/Lower Saxony at Emlichheim: no PDOK fill strip" fill-nl-nds.png nl-pdok 7.075 52.723 14
+fill "LU/BE at Troisvierges: no geoportail.lu fill strip" fill-lu-be.png lu 5.845 50.036 14
+fill "LU/FR at Esch: no geoportail.lu fill, IGN beyond" fill-lu-fr.png lu,fr-ign 6.108 49.468 14
+fill "AT/SK/HU at Bratislava: no basemap.at fill strip" fill-at-east.png at-basemap 17.139 47.931 14
+fill "AT/SI at the Karawanks: no basemap.at fill strip" fill-at-south.png at-basemap 14.53 46.41 14
+
+# SWISSIMAGE is blocky outside Switzerland: Feldkirch must come sharp from basemap.at.
+r=$(scene 9.598 47.237 17)
+ab screenshot "$OUT/feldkirch-sharp.png" >/dev/null
+st=$(stats)
+check "Feldkirch z17: basemap.at, sharp (detail ≥ 9)" "$([ "$(has "${r%%|*}" at-basemap)" = 1 ] && awk "BEGIN { exit !(${st#*|} >= 9) }" && echo 1 || echo 0)" "detail ${st#*|}; ${r%%|*}"
 
 # Snow and white roofs are imagery: every tile comes whole from the national source.
 only() { js "String(Object.values(window.__scape.satellite.tiles).every((l) => l.join() === '$1'))"; }

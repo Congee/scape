@@ -23,7 +23,7 @@ import { announceArchives, archiveName, archivesDir, assetsDirName, metaFromHead
 import { importGeoid } from '@data/geoid';
 import { importViirs } from '@data/viirs';
 import { buildDateCandidates, buildUrl } from '@data/protomaps';
-import { encodeTile, pixels, SAT_PX } from '@data/satelliteImage';
+import { encodeTile, fillMasks, pixels, SAT_PX } from '@data/satelliteImage';
 import { demZoom, TERRAIN_ATTRIBUTION, terrainTileUrl, TERRAIN_TILE_BYTES, TERRAIN_TILE_MIME } from '@data/terrainTiles';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from './region.protocol';
 
@@ -399,6 +399,16 @@ async function downloadTiles(id: string, spec: RegionSpec, signal: AbortSignal):
 }
 
 /** Per-zoom tile size sampled with a HEAD of the centre tile. */
+const clearFill = fillMasks(async (s, z, x, y) => {
+  const res = await fetchRetry(sourceTileUrl(s, z, x, y), {}).catch(() => null);
+  const blob = res?.ok ? await res.blob().catch(() => null) : null;
+  const bmp = blob?.type.startsWith('image/') ? await createImageBitmap(blob).catch(() => null) : null;
+  if (!bmp) return null;
+  const rgba = pixels(bmp);
+  bmp.close();
+  return rgba;
+});
+
 /** The best offline-licensed source's JPEG, or a composite where it is partly transparent at a border. */
 async function satelliteTileBytes(z: number, x: number, y: number, signal: AbortSignal): Promise<Uint8Array | null> {
   let out: Uint8ClampedArray | null = null;
@@ -415,10 +425,12 @@ async function satelliteTileBytes(z: number, x: number, y: number, signal: Abort
     if (!bmp) continue;
     const rgba = pixels(bmp);
     bmp.close();
+    // oxlint-disable-next-line no-await-in-loop -- the mask is fetched only for a tile with white in it
+    const cleared = await clearFill(s, z, x, y, rgba);
     const cov = tileCoverage(rgba, s);
     if (cov === Coverage.Empty) continue;
     // oxlint-disable-next-line no-await-in-loop
-    if (cov === Coverage.Full && !out && blob.type === 'image/jpeg') return new Uint8Array(await blob.arrayBuffer());
+    if (cov === Coverage.Full && !out && !cleared && blob.type === 'image/jpeg') return new Uint8Array(await blob.arrayBuffer());
     out ??= new Uint8ClampedArray(SAT_PX * SAT_PX * 4);
     if (fillBlank(out, rgba) / (SAT_PX * SAT_PX) <= DONE_AT) break;
   }

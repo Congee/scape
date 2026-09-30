@@ -1,8 +1,10 @@
 /** Decoding and cutting satellite tiles. Worker-safe. */
 
-import { type NativeTile, noDataShare } from '@core/tiles/satellite';
+import { clearFill, fillMask, maskTile, type NativeTile, needsFillMask, noDataShare, type SatSource } from '@core/tiles/satellite';
 
 export const SAT_PX = 256;
+/** Coarse masks kept: a z11 tile spans 64 z17 tiles. */
+const MASKS_MAX = 32;
 
 let canvas: OffscreenCanvas | null = null;
 
@@ -38,3 +40,32 @@ export async function encodeTile(rgba: Uint8ClampedArray, quality = 0.85): Promi
 
 /** An offline tile's type by its magic bytes; a satellite pack mixes JPEG and PNG. */
 export const imageType = (buf: ArrayBuffer): string => (buf.byteLength > 1 && new Uint8Array(buf, 0, 2).join() === '137,80' ? 'image/png' : 'image/jpeg');
+
+/** RGBA of a source's 256 px map tile, or null when it can't be had. */
+export type MaskLoader = (s: SatSource, z: number, x: number, y: number) => Promise<Uint8ClampedArray | null>;
+
+/** Clears an opaque source's white fill from a map tile in place, by the fill of the coarse tile above it; returns pixels cleared. */
+export function fillMasks(load: MaskLoader): (s: SatSource, z: number, x: number, y: number, rgba: Uint8ClampedArray) => Promise<number> {
+  const cache = new Map<string, Promise<Uint8Array | null>>();
+  const maskOf = (s: SatSource, z: number, x: number, y: number) => {
+    const key = `${s.id}/${z}/${x}/${y}`;
+    const hit = cache.get(key);
+    if (hit) {
+      cache.delete(key);
+      cache.set(key, hit);
+      return hit;
+    }
+    const p = load(s, z, x, y).then((rgba) => (rgba ? fillMask(rgba) : null));
+    cache.set(key, p);
+    if (cache.size > MASKS_MAX) cache.delete(cache.keys().next().value as string);
+    // A failed mask is retried by the next tile; until then nothing is cleared.
+    void p.then((m) => m || cache.get(key) !== p || cache.delete(key));
+    return p;
+  };
+  return async (s, z, x, y, rgba) => {
+    if (!needsFillMask(s, rgba)) return 0;
+    const mt = maskTile(s, z, x, y);
+    const mask = mt.z === z ? fillMask(rgba) : await maskOf(s, mt.z, mt.x, mt.y).catch(() => null);
+    return mask ? clearFill(rgba, mask, mt) : 0;
+  };
+}

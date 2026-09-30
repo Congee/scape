@@ -7,13 +7,20 @@ import {
   type SatSource,
   SatTier,
   candidates,
+  clearFill,
   coverageOf,
   creditFor,
   creditsFor,
+  detailOf,
   fillBlank,
+  fillMask,
   isNoData,
   lacksDetail,
+  MASK_ZOOM,
+  MaskLevel,
+  maskTile,
   nativeTile,
+  needsFillMask,
   noDataShare,
   offlineCandidates,
   offlineSources,
@@ -24,6 +31,7 @@ import {
   tileCoverage,
   tileLngLatBbox,
   uniformFill,
+  whiteRun,
   wmsGetMapUrl
 } from './satellite';
 
@@ -156,6 +164,15 @@ describe('source choice', () => {
     for (const s of SAT_SOURCES) expect(!!s.opaque).toBe(s.kind === SatKind.Xyz && s.id !== 'es-pnoa');
   });
 
+  it('takes SWISSIMAGE abroad only after the neighbour, and first inside Switzerland', () => {
+    const feldkirch = ids(...lngLatTile(9.598, 47.237, 17));
+    expect(feldkirch.indexOf('at-basemap')).toBeGreaterThanOrEqual(0);
+    expect(feldkirch.indexOf('at-basemap')).toBeLessThan(feldkirch.indexOf('ch-swissimage'));
+    for (const [lng, lat] of [[7.44, 46.95], [8.54, 47.37], [9.53, 46.85], [9.83, 46.5], [7.985, 46.547]]) {
+      expect(ids(...lngLatTile(lng, lat, 16))[0]).toBe('ch-swissimage');
+    }
+  });
+
   it('prefers city sources inside their region', () => {
     expect(ids(...lngLatTile(13.4, 52.52, 16))[0]).toBe('de-berlin');
     expect(ids(...lngLatTile(13.4, 52.52, 16))).toContain('de-brandenburg');
@@ -266,5 +283,103 @@ describe('offline packs', () => {
     expect(offIds(6.16, 51.37)).toEqual(['de-nrw']);
     expect(offIds(11.5, 48.1)).toContain('de-bayern');
     expect(offIds(-73.98, 40.76)).toEqual([]);
+  });
+});
+
+const field = (x: number, y: number): [number, number, number] => [60 + ((x * 7 + y * 13) % 50), 90 + ((x * 3) % 40), 50];
+
+describe('opaque fill mask', () => {
+  const SIDE = 256;
+  /** A 256 px tile coloured by `f(x, y)`. */
+  const tile = (f: (x: number, y: number) => [number, number, number]) => {
+    const out = new Uint8ClampedArray(SIDE * SIDE * 4);
+    for (let y = 0; y < SIDE; y++) {
+      for (let x = 0; x < SIDE; x++) {
+        const [r, g, b] = f(x, y);
+        out.set([r, g, b, 255], (y * SIDE + x) * 4);
+      }
+    }
+    return out;
+  };
+  const alpha = (rgba: Uint8ClampedArray, x: number, y: number) => rgba[(y * SIDE + x) * 4 + 3];
+  const nl = byId('nl-pdok');
+
+  it('masks broad white at the coarse zoom, not snow noise', () => {
+    const coarse = fillMask(tile((x, y) => (x < 64 ? [255, 255, 255] : field(x, y))));
+    expect(coarse[10 * SIDE + 0]).toBe(MaskLevel.Fill);
+    expect(coarse[10 * SIDE + 65]).toBe(MaskLevel.Fill);
+    expect(coarse[10 * SIDE + 67]).toBe(MaskLevel.Near);
+    expect(coarse[10 * SIDE + 70]).toBe(0);
+    const snow = fillMask(tile((x, y) => [247 + ((x * 5 + y * 3) % 9), 252, 255]));
+    expect(snow.some(Boolean)).toBe(false);
+  });
+
+  it('clears the fill of a finer tile but keeps white roofs and snow outside it', () => {
+    // The z11 tile is white west of x = 64: all of cell (0, 0) of a 4×4 grid, whose east edge runs at x = 256.
+    const mask = fillMask(tile((x, y) => (x < 64 ? [255, 255, 255] : field(x, y))));
+    const inFill = tile(() => [255, 255, 255]);
+    expect(clearFill(inFill, mask, { n: 4, col: 0, row: 0 })).toBe(SIDE * SIDE);
+    const beside = tile((x, y) => (x > 100 && x < 160 && y > 100 && y < 160 ? [255, 255, 255] : field(x, y)));
+    expect(clearFill(beside, mask, { n: 4, col: 1, row: 0 })).toBe(0);
+    expect(alpha(beside, 130, 130)).toBe(255);
+  });
+
+  it('clears only the masked part of a border tile, with the JPEG ringing beside it', () => {
+    const mask = fillMask(tile((x, y) => (x < 128 ? [255, 255, 255] : field(x, y))));
+    const rgba = tile((x, y) => (x < 120 ? [255, 255, 255] : x === 120 ? [240, 242, 238] : x === 200 ? [240, 242, 238] : field(x, y)));
+    const cleared = clearFill(rgba, mask, { n: 1, col: 0, row: 0 });
+    expect(cleared).toBe(121 * SIDE);
+    expect(alpha(rgba, 119, 5)).toBe(0);
+    expect(alpha(rgba, 120, 5)).toBe(0);
+    expect(alpha(rgba, 125, 5)).toBe(255);
+    expect(alpha(rgba, 200, 5)).toBe(255);
+    expect(whiteRun(rgba)).toBe(0);
+  });
+
+  it('stops following the fill into snow flush against it after a band', () => {
+    const mask = fillMask(tile((x, y) => (x < 16 ? [255, 255, 255] : field(x, y))));
+    const rgba = tile((x, y) => (x < 250 ? [255, 255, 255] : field(x, y)));
+    clearFill(rgba, mask, { n: 1, col: 0, row: 0 });
+    expect(alpha(rgba, 10, 5)).toBe(0);
+    expect(alpha(rgba, 120, 5)).toBe(255);
+  });
+
+  it('follows the fill past the coarse mask through broad flat white only', () => {
+    const mask = fillMask(tile((x, y) => (x < 128 ? [255, 255, 255] : field(x, y))));
+    // Fill runs to x = 140 on the finer tile, and a white roof lies beyond it.
+    const rgba = tile((x, y) => (x < 140 || (x > 200 && x < 230 && y > 100 && y < 130) ? [255, 255, 255] : field(x, y)));
+    clearFill(rgba, mask, { n: 1, col: 0, row: 0 });
+    expect(alpha(rgba, 139, 50)).toBe(0);
+    expect(alpha(rgba, 215, 115)).toBe(255);
+    const dot = tile((x, y) => (x < 128 || (x === 131 && y === 200) ? [255, 255, 255] : field(x, y)));
+    clearFill(dot, mask, { n: 1, col: 0, row: 0 });
+    expect(alpha(dot, 131, 200)).toBe(255);
+  });
+
+  it('looks a mask up only for white-heavy, patchy opaque national tiles', () => {
+    const strip = tile((x, y) => (x < 20 ? [255, 255, 255] : field(x, y)));
+    expect(needsFillMask(nl, strip)).toBe(true);
+    expect(needsFillMask(byId('de-nrw'), strip)).toBe(false);
+    expect(needsFillMask(byId('esri'), strip)).toBe(false);
+    expect(needsFillMask(nl, tile(field))).toBe(false);
+    expect(needsFillMask(nl, tile(() => [255, 255, 255]))).toBe(false);
+  });
+
+  it('takes the mask from the coarse tile above, or the tile itself at low zoom', () => {
+    const [z, x, y] = lngLatTile(9.598, 47.237, 17);
+    const m = maskTile(byId('at-basemap'), z, x, y);
+    expect(m).toMatchObject({ z: MASK_ZOOM, x: x >> 6, y: y >> 6, n: 64, col: x % 64, row: y % 64 });
+    expect(maskTile(nl, 9, 3, 4)).toEqual({ z: 9, x: 3, y: 4, n: 1, col: 0, row: 0 });
+  });
+
+  it('measures white strips and sharpness', () => {
+    expect(whiteRun(tile((x, y) => (y >= 40 && y < 43 ? [255, 255, 255] : field(x, y))))).toBe(3);
+    expect(whiteRun(tile((x, y) => (x < 50 && y < 50 ? [255, 255, 255] : field(x, y))))).toBe(50);
+    expect(whiteRun(tile((x, y) => (x === 9 || y === 9 ? [255, 255, 255] : field(x, y))))).toBe(1);
+    const sharp = tile((x, y) => (((x + y) & 1) === 1 ? [200, 200, 200] : [60, 60, 60]));
+    const blocky = tile((x, y) => ((((x >> 3) + (y >> 3)) & 1) === 1 ? [200, 200, 200] : [60, 60, 60]));
+    expect(detailOf(sharp)).toBeGreaterThan(100);
+    expect(detailOf(blocky)).toBeLessThan(detailOf(sharp) / 4);
+    expect(detailOf(tile(() => [90, 90, 90]))).toBe(0);
   });
 });
