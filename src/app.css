@@ -1328,6 +1328,10 @@ label.file input {
   background: #07090c;
 }
 
+.vf-gl-host {
+  display: contents;
+}
+
 .vf-gl {
   position: absolute;
   inset: 0;

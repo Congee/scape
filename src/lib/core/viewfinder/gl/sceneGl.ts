@@ -538,6 +538,18 @@ export class SceneGl {
     };
   }
 
+  /** Keeps the uploaded meshes but frees the per-frame targets and the drawing buffer while nothing is shown. */
+  park(): void {
+    this.shadowGl.park();
+    this.dropTargets();
+    this.rw = this.rh = 0;
+    this.resize(1, 1);
+  }
+
+  get lost(): boolean {
+    return this.gl.isContextLost();
+  }
+
   dispose(): void {
     const gl = this.gl;
     this.prismGl.dispose();

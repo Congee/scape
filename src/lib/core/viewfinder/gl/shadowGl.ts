@@ -241,6 +241,13 @@ export class ShadowGl {
     gl.deleteSampler(this.plain);
   }
 
+  /** Frees both maps while the viewfinder is parked; the next frame allocates them again. */
+  park(): void {
+    this.idle.cancel();
+    this.main = this.drop(this.main);
+    this.outer = this.drop(this.outer);
+  }
+
   /** Back to what an idle viewfinder may hold: the main map at the base side, no outer set. */
   private trim(): void {
     if (this.main && this.main.res > this.baseRes) this.main = this.drop(this.main);

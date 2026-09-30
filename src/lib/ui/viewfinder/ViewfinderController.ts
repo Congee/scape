@@ -25,7 +25,7 @@ import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFa
 import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayGl';
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
-import { SceneGl, type BodyDisc, type MoonShading } from '@core/viewfinder/gl/sceneGl';
+import type { BodyDisc, MoonShading, SceneGl } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { borderRects, fitFrame, fitViewports, type FitViewports, type Rect } from '@core/viewfinder/frameFit';
 import { segmentHitsRect } from '@core/viewfinder/segmentRect';
@@ -39,7 +39,7 @@ import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
 import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
-import { buildingsStore, forgetUploads, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
+import { buildingsStore, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
 import { lod2HeldStats, lod2Store } from '@state/lod2';
 import { aimFor, compositionStore, type Aim } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
@@ -207,13 +207,10 @@ export class ViewfinderController {
   /** The reference photo decoded for the picture pass; `image` null while it decodes. */
   private photo: { url: string; image: ImageBitmap | null } | null = null;
 
-  constructor(private canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, sceneGl: SceneGl | null, glError: string) {
     this.ctx = canvas.getContext('2d')!;
-    try {
-      this.sceneGl = SceneGl.create(glCanvas);
-    } catch (err) {
-      this.glError = err instanceof Error ? err.message : String(err);
-    }
+    this.sceneGl = sceneGl;
+    this.glError = glError;
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(canvas);
     this.resize();
@@ -1566,8 +1563,6 @@ export class ViewfinderController {
     this.photo?.image?.close();
     this.photo = null;
     stopBuildings();
-    this.sceneGl?.dispose();
-    forgetUploads();
     for (const u of this.unsubs) u();
     this.ro.disconnect();
     cancelAnimationFrame(this.raf);
