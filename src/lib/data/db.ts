@@ -74,6 +74,32 @@ export function isScapeExport(v: unknown): v is ScapeExport {
   );
 }
 
+export type StoreCounts = Record<Store, number>;
+
+const STORES = ['locations', 'plans', 'markers', 'searches', 'models'] as const satisfies readonly Store[];
+
+export async function countAll(): Promise<StoreCounts> {
+  const d = await db();
+  const n = await Promise.all(STORES.map((s) => d.count(s)));
+  return Object.fromEntries(STORES.map((s, i) => [s, n[i]])) as StoreCounts;
+}
+
+const NOUN: Record<Store, [string, string]> = {
+  locations: ['location', 'locations'],
+  plans: ['plan', 'plans'],
+  markers: ['marker', 'markers'],
+  searches: ['search', 'searches'],
+  models: ['3D model', '3D models']
+};
+
+/** The question before a Replace import, naming what it wipes; null when there is nothing to lose. */
+export function replaceQuestion(c: StoreCounts): string | null {
+  const parts = STORES.filter((s) => c[s] > 0).map((s) => `${c[s]} ${NOUN[s][c[s] === 1 ? 0 : 1]}`);
+  if (!parts.length) return null;
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+  return `Replace ${list} with this file?`;
+}
+
 /** Merge keeps existing records with other ids; replace wipes every store first. */
 export async function importAll(data: ScapeExport, mode: ImportMode): Promise<void> {
   // Decoded first: a bad model fails the import before anything is written.

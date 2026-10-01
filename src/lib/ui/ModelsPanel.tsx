@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import { compass, distance, height } from '@core/format';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
 import { groundUnknown, modelBaseM, ModelSource, type ModelPart, type SavedModel } from '@core/model';
@@ -14,19 +14,11 @@ import { RoofShape } from '@workers/buildings.protocol';
 import { downloadBlob } from './download';
 import { ModelImportSheet } from './ModelImport';
 import { useMedia } from './useMedia';
-
-const onLine = (fn: () => void) => {
-  addEventListener('online', fn);
-  addEventListener('offline', fn);
-  return () => {
-    removeEventListener('online', fn);
-    removeEventListener('offline', fn);
-  };
-};
+import { useOnline } from './useOnline';
 
 /** Why a model stands at sea level, shown until its ground is read. */
 function GroundWarning({ id }: { id: string }) {
-  const online = useSyncExternalStore(onLine, () => navigator.onLine);
+  const online = useOnline();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   if (!online)

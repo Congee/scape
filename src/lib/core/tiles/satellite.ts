@@ -909,6 +909,11 @@ export function creditsFor(view: SatBbox, z: number, ctx: ChoiceContext): string
   return out;
 }
 
+/** Whether any usable source has imagery somewhere in the view, at some zoom. */
+export function hasImagery(view: SatBbox, ctx: ChoiceContext): boolean {
+  return SAT_SOURCES.some((s) => hasKey(s, ctx.keys) && (s.cache !== CachePolicy.None || ctx.online) && s.bboxes.some((b) => intersects(b, view)));
+}
+
 export const offlineSources = (): SatSource[] => SAT_SOURCES.filter((s) => s.cache === CachePolicy.Offline);
 
 const SUB = 'subdomain0';

@@ -5,6 +5,7 @@ import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
 import { CloudLegend } from '@ui/CloudLayerControls';
 import { MapLegend } from '@ui/map/MapLegend';
+import { MapNotice } from '@ui/map/MapNotice';
 import { DateBar } from '@ui/DateBar';
 import { Panel, PanelExpand, usePanelClass } from '@ui/Panel';
 import { Search } from '@ui/Search';
@@ -76,6 +77,7 @@ function MapPage() {
           <CloudLegend />
           <MapLegend />
         </div>
+        <MapNotice />
         <div className="map-badges">
           <Badges />
         </div>

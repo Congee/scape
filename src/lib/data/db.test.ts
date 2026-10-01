@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DB_VERSION, isScapeExport, upgradeScape, type Upgradable } from './db';
+import { DB_VERSION, isScapeExport, replaceQuestion, upgradeScape, type Upgradable } from './db';
 
 function recorder() {
   const made: string[] = [];
@@ -50,5 +50,17 @@ describe('isScapeExport', () => {
     expect(isScapeExport({ ...base, models: [record] })).toBe(true);
     expect(isScapeExport({ ...base, models: {} })).toBe(false);
     expect(isScapeExport({ ...base, models: [{ ...record, glb: 1 }] })).toBe(false);
+  });
+});
+
+describe('replaceQuestion', () => {
+  const none = { locations: 0, plans: 0, markers: 0, searches: 0, models: 0 };
+  it('names what a replace wipes', () => {
+    expect(replaceQuestion({ ...none, locations: 12, plans: 3, markers: 40 })).toBe('Replace 12 locations, 3 plans and 40 markers with this file?');
+    expect(replaceQuestion({ ...none, plans: 1 })).toBe('Replace 1 plan with this file?');
+    expect(replaceQuestion({ ...none, searches: 2, models: 1 })).toBe('Replace 2 searches and 1 3D model with this file?');
+  });
+  it('does not ask when nothing is saved', () => {
+    expect(replaceQuestion(none)).toBeNull();
   });
 });

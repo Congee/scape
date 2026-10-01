@@ -20,18 +20,18 @@ export function DateBar() {
 
   return (
     <div className="datebar">
-      <button onClick={() => addDays(-7)} title="Back one week">
+      <button onClick={() => addDays(-7)} title="Back one week" aria-label="Back one week">
         «
       </button>
-      <button onClick={() => addDays(-1)} title="Previous day">
+      <button onClick={() => addDays(-1)} title="Back one day" aria-label="Back one day">
         ‹
       </button>
       <input type="date" value={iso} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Date" />
       <Calendar />
-      <button onClick={() => addDays(1)} title="Next day">
+      <button onClick={() => addDays(1)} title="Forward one day" aria-label="Forward one day">
         ›
       </button>
-      <button onClick={() => addDays(7)} title="Forward one week">
+      <button onClick={() => addDays(7)} title="Forward one week" aria-label="Forward one week">
         »
       </button>
       <input

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { formatLngLat } from '@core/geo/coords';
 import { planOptics } from '@core/plan';
 import { formatDateTime } from '@core/time/format';
-import { exportAll, importAll, ImportMode, isScapeExport } from '@data/db';
+import { countAll, exportAll, importAll, ImportMode, isScapeExport, replaceQuestion } from '@data/db';
 import { libraryStore, useLibrary } from '@state/library';
 import { markersStore, useMarkers } from '@state/markers';
 import { applyPlan, capturePlan, plansStore, usePlans } from '@state/plans';
@@ -80,11 +80,18 @@ function LibraryPage() {
     void navigate({ to: '/' });
   };
 
-  const importEverything = async (file: File | undefined, mode: ImportMode) => {
+  const importEverything = async (input: HTMLInputElement, mode: ImportMode) => {
+    const file = input.files?.[0];
+    // Cleared so picking the same file again still fires change.
+    input.value = '';
     if (!file) return;
     try {
       const data: unknown = JSON.parse(await file.text());
       if (!isScapeExport(data)) throw new Error('Not a Scape export file');
+      if (mode === ImportMode.Replace) {
+        const q = replaceQuestion(await countAll());
+        if (q && !window.confirm(q)) return;
+      }
       await importAll(data, mode);
       await Promise.all([libraryStore.getState().load(), plansStore.getState().load(), markersStore.getState().load(), searchesStore.getState().load()]);
       setStatus({ ok: true, text: `Imported ${data.locations.length} locations, ${data.plans.length} plans, ${data.markers.length} markers and ${data.searches?.length ?? 0} searches.` });
@@ -193,12 +200,12 @@ function LibraryPage() {
           <button onClick={exportEverything}>Export everything (.scape.json)</button>
         </div>
         <label className="file">
-          <input type="file" accept=".json" onChange={(e) => void importEverything(e.target.files?.[0], ImportMode.Merge)} />
+          <input type="file" accept=".json" onChange={(e) => void importEverything(e.currentTarget, ImportMode.Merge)} />
           Import a Scape export, keeping what is already here
         </label>
-        <label className="file">
-          <input type="file" accept=".json" onChange={(e) => void importEverything(e.target.files?.[0], ImportMode.Replace)} />
-          Import a Scape export, replacing locations, plans and markers
+        <label className="file danger">
+          <input type="file" accept=".json" onChange={(e) => void importEverything(e.currentTarget, ImportMode.Replace)} />
+          Import a Scape export, <strong>replacing everything</strong> saved here
         </label>
         {status && <p className={status.ok ? 'muted ok' : 'error'}>{status.text}</p>}
       </section>

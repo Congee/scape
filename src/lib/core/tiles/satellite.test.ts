@@ -16,6 +16,7 @@ import {
   exportImageUrl,
   fillBlank,
   fillMask,
+  hasImagery,
   isNoData,
   lacksDetail,
   MASK_ZOOM,
@@ -319,6 +320,13 @@ describe('credits', () => {
     const withKeys = creditsFor(venlo, 15, { keys: KEYS, online: false });
     expect(withKeys.some((t) => t.includes('MapTiler'))).toBe(true);
     expect(withKeys.some((t) => t.includes('Esri'))).toBe(false);
+  });
+
+  it('knows where no keyless source has imagery', () => {
+    const pacific = { west: -150, south: -20, east: -149, north: -19 };
+    expect(hasImagery(pacific, { keys: {}, online: true })).toBe(false);
+    expect(hasImagery(pacific, { keys: KEYS, online: true })).toBe(true);
+    expect(hasImagery({ west: 6.05, south: 51.3, east: 6.3, north: 51.45 }, { keys: {}, online: true })).toBe(true);
   });
 });
 

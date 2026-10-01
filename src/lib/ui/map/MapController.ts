@@ -282,7 +282,8 @@ export class MapController {
       });
     }
     window.addEventListener('keydown', this.onKeyDown);
-    this.unsubs.push(() => window.removeEventListener('keydown', this.onKeyDown));
+    window.addEventListener('online', this.onOnline);
+    this.unsubs.push(() => window.removeEventListener('keydown', this.onKeyDown), () => window.removeEventListener('online', this.onOnline));
 
     this.map.on('click', 'markers-circle', (e) => {
       const id = e.features?.[0]?.properties?.id as string | undefined;
@@ -294,8 +295,14 @@ export class MapController {
     this.map.on('mouseleave', 'markers-circle', () => (this.map.getCanvas().style.cursor = ''));
     this.map.on('error', (e) => {
       const msg = e.error?.message || 'Map error';
-      mapStatusStore.getState().setError(msg);
       console.warn('[scape] map error:', msg);
+      // A missing tile is a source with nothing there, not a failure.
+      if ((e.error as { status?: number } | undefined)?.status === 404) return;
+      mapStatusStore.getState().setError(msg, (e as { sourceId?: string }).sourceId ?? null);
+    });
+    this.map.on('data', (e) => {
+      const st = mapStatusStore.getState();
+      if (st.error && st.errorSource && e.dataType === 'source' && 'tile' in e && e.tile && 'sourceId' in e && e.sourceId === st.errorSource) st.setError(null);
     });
     this.map.on('style.load', () => {
       this.styleReady = true;
@@ -329,6 +336,7 @@ export class MapController {
       () => this.drawer.dispose(),
       () => this.clouds.dispose(),
       modelsStore.subscribe((st) => st.rev, () => void this.refreshSuppression()),
+      mapStatusStore.subscribe((st) => st.retrySeq, () => this.retryTiles()),
       buildingsStore.subscribe((st) => st.shadowMask, () => this.paintShadowMask()),
       worldStore.subscribe(
         (st) => st.pin,
@@ -689,6 +697,24 @@ export class MapController {
   private draftFromView() {
     const b = this.map.getBounds();
     offlineStore.getState().setDraft(bboxFromCorners({ lng: b.getWest(), lat: b.getSouth() }, { lng: b.getEast(), lat: b.getNorth() }));
+  }
+
+  // MapLibre never refetches tiles that failed while offline.
+  private onOnline = () => this.retryTiles();
+
+  /** Refetches failed tiles, or the whole style when it never loaded. */
+  private retryTiles() {
+    if (!this.styleReady) {
+      this.basemapKey = '';
+      this.setBasemap(currentBasemap());
+      return;
+    }
+    // refreshTiles leaves errored tiles stuck loading, so their sources start over.
+    for (const tm of Object.values(this.map.style.tileManagers)) {
+      if (tm.getIds().some((id) => tm.getTileByID(id)?.state === 'errored')) tm.clearTiles();
+    }
+    // oxlint-disable-next-line no-underscore-dangle -- marks sources dirty so cleared tiles refetch
+    this.map._update();
   }
 
   private setBasemap(bm: Basemap) {

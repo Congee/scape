@@ -3,10 +3,11 @@ import { LightMode } from '@core/astro/lightSource';
 import { basemapGroup, BasemapGroup, BasemapKind, BUILTIN_BASEMAPS, offlineBasemaps, PmFlavor, type Basemap } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
 import { satKeys } from '@data/satellite';
-import { useMapStatus } from '@state/mapStatus';
+import { MapNoticeKind } from '@state/mapStatus';
 import { useOffline } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
 import { OrbitPivot, useUi } from '@state/ui';
+import { useMapNotice } from './map/MapNotice';
 import { CloudToggle, DayNightToggle, SettingLayer, TerrainTintToggles, type BoolKey } from './MapLayerToggles';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
@@ -22,7 +23,7 @@ export function LayersPanel() {
   const { update, addBasemap, removeBasemap } = settingsStore.getState();
   const [url, setUrl] = useState('');
   const [flavor, setFlavor] = useState<PmFlavor>(PmFlavor.Light);
-  const mapError = useMapStatus((s) => s.error);
+  const notice = useMapNotice();
   const terrain = useSettings((s) => s.terrain);
   const rangeKm = useSettings((s) => s.horizonRangeKm);
   const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
@@ -52,7 +53,7 @@ export function LayersPanel() {
   return (
     <div className="layers">
       <h3>Map type · {current?.name ?? 'none'}</h3>
-      {mapError && <p className="error">Basemap problem: {mapError}</p>}
+      {notice && <p className={notice.kind === MapNoticeKind.TilesFailed ? 'error' : 'muted hint'}>{notice.text}</p>}
       <div className="tree">
         {GROUPS.map((g) => {
           const items = all.filter((b) => basemapGroup(b) === g);
@@ -114,7 +115,7 @@ export function LayersPanel() {
       <h3>Map layers</h3>
       {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
       <SettingLayer k="showSatellite" label="Satellite">
-        <p className="muted hint">{satKeys().maptiler ? 'National aerial photos where available, MapTiler elsewhere.' : 'National aerial photos only: imagery elsewhere needs a MapTiler key.'}</p>
+        <p className="muted hint">{satKeys().maptiler ? 'National aerial photos where available, MapTiler elsewhere.' : 'National aerial photos only. Other places need a MapTiler key.'}</p>
       </SettingLayer>
       <DayNightToggle />
       <CloudToggle />

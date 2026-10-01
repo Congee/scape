@@ -1,7 +1,11 @@
 import type { IControl, Map as MlMap } from 'maplibre-gl';
-import { creditsFor } from '@core/tiles/satellite';
+import { bboxIntersects } from '@core/geo/bbox';
+import { creditsFor, hasImagery } from '@core/tiles/satellite';
 import { satelliteSource, satKeys } from '@data/satellite';
+import { mapStatusStore } from '@state/mapStatus';
+import { offlineStore } from '@state/offline';
 import { settingsStore } from '@state/settings';
+import { ArchiveKind } from '@workers/region.protocol';
 
 const SAT_SRC = 'satellite';
 const SAT_CREDIT_SRC = 'satellite-credit';
@@ -94,7 +98,10 @@ export class SatelliteLayer {
     const on = settingsStore.getState().showSatellite;
     const b = m.getBounds();
     const view = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() };
-    const text = on ? creditsFor(view, m.getZoom(), { keys: this.keys, online: navigator.onLine }).join(' · ') : '';
+    const ctx = { keys: this.keys, online: navigator.onLine };
+    const text = on ? creditsFor(view, m.getZoom(), ctx).join(' · ') : '';
+    const local = offlineStore.getState().archives.some((a) => a.kind === ArchiveKind.Satellite && bboxIntersects(a.bbox, view));
+    mapStatusStore.getState().setSatGap(on && !local && !hasImagery(view, ctx));
     const src = m.getSource(SAT_CREDIT_SRC);
     if ((src?.attribution ?? '') === text) return;
     if (src) {
@@ -108,6 +115,7 @@ export class SatelliteLayer {
 
   dispose() {
     for (const u of this.unsubs) u();
+    mapStatusStore.getState().setSatGap(false);
     if (this.logo) this.map.removeControl(this.logo);
   }
 }

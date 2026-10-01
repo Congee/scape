@@ -6,7 +6,7 @@
   --line: #2a333e;
   --fg: #e6edf3;
   --fg-2: #9aa7b4;
-  --fg-3: #66737f;
+  --fg-3: #808c98;
   --accent: #5aa9ff;
   --sun: #f5a524;
   --sun-rise: #ffd84d;
@@ -148,6 +148,34 @@ select {
   z-index: 5;
   top: 10px;
   left: 10px;
+}
+
+.map-notice-slot {
+  position: absolute;
+  z-index: 6;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 20px);
+  pointer-events: none;
+}
+
+.map-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.map-notice button.link {
+  color: var(--accent);
+  padding: 0;
 }
 
 .map-legends {
@@ -368,6 +396,15 @@ button:hover {
   border-color: var(--fg-3);
 }
 
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button:disabled:hover {
+  border-color: var(--line);
+}
+
 button.on {
   background: var(--accent);
   border-color: var(--accent);
@@ -547,6 +584,16 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+/* Screen-reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* Search */
 .search {
   position: relative;
@@ -573,6 +620,18 @@ button:focus-visible {
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
 }
 
+.search-results ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-status {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--fg-3);
+}
+
 .search-results li {
   display: flex;
   align-items: center;
@@ -589,7 +648,8 @@ button:focus-visible {
   min-width: 0;
 }
 
-.search-results li:hover {
+.search-results li:hover,
+.search-results li.active {
   background: var(--bg-3);
 }
 
@@ -760,6 +820,7 @@ button:focus-visible {
 }
 
 .timeline .tide-row button:disabled {
+  opacity: 1;
   color: inherit;
   cursor: default;
 }
@@ -884,6 +945,17 @@ label.file {
 label.file input {
   display: block;
   margin-bottom: 4px;
+}
+
+label.file.danger {
+  margin-top: 12px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--danger);
+}
+
+label.file.danger strong {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* Pages */
