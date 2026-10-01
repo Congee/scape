@@ -156,7 +156,7 @@ check "phone 390×844 map Moon line at totality: copper" "$([ "$c" = "#c0582e" ]
 ab set viewport 1400 900 >/dev/null
 
 # The Layers hint describes the grey moon shade.
-js '(() => { window.__scape.ui.getState().setPanelTab("Layers"); return "ok"; })()' >/dev/null
+js '(() => { window.__scape.ui.getState().setPanelTab("Map"); return "ok"; })()' >/dev/null
 sleep 0.5
 hint=$(js '[...document.querySelectorAll(".hint")].map((e) => e.textContent).find((t) => t.includes("moon")) ?? "none"')
 check "Layers hint: moon shade neutral grey" "$([[ $hint == *"neutral grey"* ]] && echo 1 || echo 0)" "$hint"

@@ -99,7 +99,7 @@ vp desktop
 go || { echo "page did not load"; exit 1; }
 js '(() => { window.__scape.weather.getState().setLayer("Off"); return "ok"; })()' >/dev/null
 set_s "$OFF"
-tab Layers
+tab Map
 open_tree
 ab screenshot "$OUT/desktop-layers-none.png" >/dev/null
 
@@ -121,7 +121,7 @@ check "map types: each of $N selectable, exactly one checked" "$pass" "${detail%
 for MAP in ofm-liberty opentopo; do
   set_s "{ basemapId: '$MAP' }"
   styled
-  tab Layers
+  tab Map
   for l in "${LAYERS[@]}"; do
     c=$(click_layer "$l")
     sleep 0.6
@@ -142,13 +142,13 @@ set_s "{ basemapId: 'ofm-liberty' }"
 styled
 
 # Cloud switch shared with the Weather tab.
-tab Layers
+tab Map
 click_layer cloud >/dev/null
 tab Weather
 w=$(js '(() => document.querySelector("select[aria-label=\"Map cloud layer\"]")?.value ?? "none")()')
 check "cloud on in Layers shows in Weather" "$([ "$w" != Off ] && [ "$w" != none ] && echo 1 || echo 0)" "Weather picker $w"
 js '(() => { const s = document.querySelector("select[aria-label=\"Map cloud layer\"]"); const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set; set.call(s, "Fog"); s.dispatchEvent(new Event("change", { bubbles: true })); return "ok"; })()' >/dev/null
-tab Layers
+tab Map
 r=$(js '(() => `${document.querySelector(".layer-row[data-layer=cloud] > label input").checked} ${document.querySelector("select[aria-label=\"Cloud layer kind\"]")?.value}`)()')
 check "Fog picked in Weather shows in Layers" "$([ "$r" = "true Fog" ] && echo 1 || echo 0)" "checkbox, kind: $r"
 ab screenshot "$OUT/desktop-layers-cloud.png" >/dev/null
@@ -157,7 +157,7 @@ tab Weather
 w=$(js '(() => document.querySelector("select[aria-label=\"Map cloud layer\"]")?.value ?? "none")()')
 check "cloud off in Layers shows Off in Weather" "$([ "$w" = Off ] && echo 1 || echo 0)" "Weather picker $w"
 js '(() => { const s = document.querySelector("select[aria-label=\"Map cloud layer\"]"); const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set; set.call(s, "Low"); s.dispatchEvent(new Event("change", { bubbles: true })); return "ok"; })()' >/dev/null
-tab Layers
+tab Map
 r=$(js '(() => `${document.querySelector(".layer-row[data-layer=cloud] > label input").checked} ${document.querySelector("select[aria-label=\"Cloud layer kind\"]")?.value}`)()')
 check "Low picked in Weather turns Layers on" "$([ "$r" = "true Low" ] && echo 1 || echo 0)" "checkbox, kind: $r"
 click_layer cloud >/dev/null
@@ -171,7 +171,7 @@ styled
 click_layer showSlope >/dev/null
 click_layer showDayNight >/dev/null
 reload
-tab Layers
+tab Map
 r=$(js '(() => { const s = window.__scape.settings.getState(), w = window.__scape.weather.getState(), c = (k) => document.querySelector(`.layer-row[data-layer=${k}] > label input`)?.checked; const radio = [...document.querySelectorAll(".layers input[name=basemap]")].filter((i) => i.checked).length; return `${s.basemapId} ${s.showSlope} ${s.showDayNight} ${w.layer} ${c("showSlope")} ${c("showDayNight")} ${c("cloud")} ${radio}`; })()')
 check "reload keeps map type, layers and cloud kind" "$([ "$r" = "opentopo true true Low true true true 1" ] && echo 1 || echo 0)" "$r"
 ab screenshot "$OUT/desktop-layers-reloaded.png" >/dev/null
@@ -207,7 +207,7 @@ js '(() => { document.querySelector(".cloud-legend .fold").click(); return "ok";
 sleep 0.3
 r=$(js '`${!!document.querySelector("button.cloud-legend")} ${document.documentElement.scrollWidth > innerWidth}`')
 check "phone legend folds again, no sideways scroll" "$([ "$r" = "true false" ] && echo 1 || echo 0)" "folded, overflow: $r"
-tab Layers
+tab Map
 set_s '{ showElevation: true }'
 open_tree
 sleep 0.5

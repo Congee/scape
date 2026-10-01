@@ -145,7 +145,7 @@ async function run(vp: 'desktop' | 'phone') {
   await tab.shot(`${out}/${vp}-model.png`);
 
   // Timeline row follows the clock.
-  if (!(await js<boolean>('!!document.querySelector(".cloud-row .extra")'))) await tabTo('Timeline');
+  if (!(await js<boolean>('!!document.querySelector(".cloud-row .extra")'))) await tabTo('Weather');
   await until('document.querySelector(".cloud-row .cloud-chart")');
   const r0 = await text('.cloud-row .extra');
   const x0 = await js(`document.querySelector('.cloud-row line.now')?.getAttribute('x1') ?? ''`);
@@ -274,7 +274,7 @@ async function run(vp: 'desktop' | 'phone') {
   await tabTo('Weather');
   await until('document.querySelector(\'[data-wx="off"]\')', 5000);
   const offWx = await text('[data-wx="off"]');
-  if (!(await js<boolean>('!!document.querySelector(".cloud-row")'))) await tabTo('Timeline');
+  if (!(await js<boolean>('!!document.querySelector(".cloud-row")'))) await tabTo('Weather');
   await until('document.querySelector(".cloud-row[data-off]")', 5000);
   const offRow = await text('.cloud-row .extra');
   await Bun.sleep(1500);

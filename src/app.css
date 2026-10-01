@@ -1,12 +1,13 @@
 :root {
   color-scheme: dark;
-  --bg: #0f1216;
-  --bg-2: #161b22;
-  --bg-3: #1d242d;
-  --line: #2a333e;
-  --fg: #e6edf3;
-  --fg-2: #9aa7b4;
-  --fg-3: #808c98;
+  --bg: #111111;
+  --bg-2: #151515;
+  --bg-3: #1f1f1f;
+  --bg-4: #282828;
+  --line: #363636;
+  --fg: #f1f1f1;
+  --fg-2: #ababab;
+  --fg-3: #9a9a9a;
   --accent: #5aa9ff;
   --sun: #f5a524;
   --sun-rise: #ffd84d;
@@ -24,8 +25,9 @@
   --rail: 56px;
   --panel: 340px;
   --chart: 150px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-size: 13px;
+  line-height: 1.35;
   font-variant-numeric: tabular-nums;
 }
 
@@ -670,41 +672,69 @@ button:focus-visible {
 }
 
 .tabs {
-  display: grid;
-  /* Five across in the default panel width keeps nine tabs to two rows. */
-  grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+  display: flex;
   border-bottom: 1px solid var(--line);
+}
+
+.tablist {
+  display: flex;
+  flex: 1;
+  min-width: 0;
 }
 
 .tabs button {
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
   border-radius: 0;
-  padding: 9px 2px;
-  font-size: 12px;
+  padding: 9px 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   white-space: nowrap;
   color: var(--fg-2);
 }
 
-.tabs button.active {
-  color: var(--fg);
-  border-bottom-color: var(--accent);
+.tablist button {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* The collapse handle sits in a gutter the tab grid leaves free. */
-.tabs {
-  position: relative;
-  padding-right: 24px;
+.tabs button.active {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+
+.tabs button:focus-visible {
+  outline-offset: -2px;
 }
 
 .tabs-collapse {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 24px;
-  padding: 9px 0;
+  flex: none;
+  width: 28px;
   color: var(--fg-3);
+}
+
+/* Place and date */
+.band {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px 8px;
+  min-width: 0;
+}
+
+.band-name {
+  font-size: 17px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.band small {
+  font-size: 12px;
+  color: var(--fg-2);
 }
 
 .tab-body {
@@ -713,34 +743,19 @@ button:focus-visible {
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 6px;
+  padding: 0 0 6px;
 }
 
 @media (max-width: 900px) {
-  /* One line, scrolling sideways, so the peek bar never grows a second row. */
-  .tabs {
-    display: flex;
-    overflow-x: auto;
-    scrollbar-width: none;
-    padding-right: 0;
-  }
-  .tabs button {
-    flex: 1 0 auto;
-    padding: 9px 10px;
-  }
   .tabs .tabs-collapse {
-    position: sticky;
-    flex: none;
-    margin-left: auto;
-    padding: 9px 0;
-    background: var(--bg-2);
     transform: rotate(90deg);
   }
   .panel-collapsed > .panel {
     display: flex;
   }
   .panel-collapsed .tab-body,
-  .panel-collapsed .vf-tools {
+  .panel-collapsed .vf-tools,
+  .panel-collapsed .band {
     display: none;
   }
   .panel-collapsed .tabs .tabs-collapse {
@@ -759,64 +774,112 @@ button:focus-visible {
   opacity: 0.6;
 }
 
+/* One row grammar: dial, label, time, azimuth, then a muted note. */
 .timeline li button,
-.timeline .tide-row button {
+.timeline .tide-row button,
+.timeline .cloud-row > .row,
+.readout-row,
+.brow {
   display: grid;
-  grid-template-columns: 14px 1fr auto auto;
+  grid-template-columns: 14px minmax(0, 1fr) minmax(64px, auto) minmax(56px, auto);
   grid-template-areas:
     'dot label time az'
-    'dot extra extra extra';
+    '. extra extra extra';
   align-items: center;
   column-gap: 8px;
   width: 100%;
   text-align: left;
   background: none;
   border: 0;
-  border-radius: 6px;
-  padding: 5px 6px;
+  border-bottom: 1px dotted var(--line);
+  border-radius: 0;
+  padding: 4px 6px;
 }
 
 .timeline li button:hover,
-.timeline .tide-row button:hover:enabled {
-  background: var(--bg-3);
+.timeline .tide-row button:hover:enabled,
+.brow:hover {
+  background: var(--bg-4);
 }
 
 .timeline li.active button {
-  background: var(--bg-3);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--bg-4);
 }
+
+.brg {
+  grid-area: dot;
+  display: block;
+  overflow: visible;
+  color: var(--fg);
+}
+
+.brg circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-opacity: 0.45;
+  stroke-width: 1;
+}
+
+.brg line {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* SVG paint attributes don't take var(), so the inks come from classes. */
+.brg.sun line { stroke: var(--sun); }
+.brg.sun.rise line { stroke: var(--sun-rise); }
+.brg.sun.set line { stroke: var(--sun-set); }
+.brg.moon line { stroke: var(--moon); }
+.brg.moon.rise line { stroke: var(--moon-rise); }
+.brg.moon.set line { stroke: var(--moon-set); }
+.brg.gc line { stroke: var(--gc); }
+.brg.terrain circle {
+  stroke: var(--terrain);
+  stroke-opacity: 1;
+}
+.brg.marker circle { stroke-opacity: 1; }
 
 .timeline .dot {
   grid-area: dot;
+  justify-self: center;
   width: 10px;
   height: 10px;
   border-radius: 50%;
 }
 
-.timeline .dot.sun.rise { background: var(--sun-rise); }
-.timeline .dot.sun.mid { background: var(--sun); }
-.timeline .dot.sun.set { background: var(--sun-set); }
-.timeline .dot.moon.rise { background: var(--moon-rise); }
-.timeline .dot.moon.mid { background: var(--moon); }
-.timeline .dot.moon.set { background: var(--moon-set); }
-.timeline .dot.gc { background: var(--gc); }
 .timeline .dot.tide { background: var(--tide); }
-.timeline .dot.terrain {
-  width: 8px;
-  height: 8px;
-  margin: 1px;
-  box-shadow: 0 0 0 2px var(--terrain);
+
+.now-line {
+  position: relative;
+  height: 0;
+  margin: 9px 6px;
+  border-top: 1px dashed var(--fg);
+}
+
+.now-line span {
+  position: absolute;
+  right: 0;
+  top: -8px;
+  padding: 0 4px;
+  background: var(--bg-3);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
 }
 
 .timeline .label { grid-area: label; }
-.timeline .time { grid-area: time; color: var(--fg-2); }
-.timeline .az { grid-area: az; min-width: 56px; text-align: right; color: var(--fg-2); }
-.timeline .extra { grid-area: extra; color: var(--fg-3); font-size: 12px; }
+.timeline .time,
+.brow .time { grid-area: time; text-align: right; color: var(--fg-2); white-space: nowrap; }
+.timeline .az,
+.brow .az { grid-area: az; text-align: right; color: var(--fg-2); white-space: nowrap; }
+.timeline .extra,
+.brow .note { grid-area: extra; color: var(--fg-3); font-size: 11.5px; }
+.brow .label { grid-area: label; min-width: 0; }
 
 .timeline .tide-row {
-  margin-bottom: 4px;
   padding-bottom: 4px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px dotted var(--line);
 }
 
 .timeline .tide-row button:disabled {
@@ -831,15 +894,8 @@ button:focus-visible {
   box-sizing: border-box;
 }
 
-.timeline .head {
-  display: flex;
-  justify-content: flex-end;
-  padding: 2px 6px;
-}
-
-.timeline .head .toggle {
-  font-size: 12px;
-  color: var(--fg-3);
+.psec-h .toggle {
+  padding: 0;
   gap: 6px;
 }
 
@@ -849,7 +905,7 @@ button:focus-visible {
   color: var(--fg-3);
 }
 
-.timeline li.detail .dot {
+.timeline li.detail .brg {
   opacity: 0.55;
 }
 
@@ -1022,35 +1078,14 @@ label.file.danger strong {
   white-space: nowrap;
 }
 
-.readout-row {
-  display: grid;
-  grid-template-columns: 14px 1fr auto auto;
-  grid-template-areas:
-    'dot label az alt'
-    'dot extra extra extra';
-  align-items: center;
-  column-gap: 8px;
-  padding: 3px 0;
-}
-
 .readout-row.below {
   opacity: 0.55;
 }
 
-.readout-row .dot {
-  grid-area: dot;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.readout-row .dot.sun { background: var(--sun); }
-.readout-row .dot.moon { background: var(--moon); }
-.readout-row .dot.gc { background: var(--gc); }
 .readout-row .label { grid-area: label; }
-.readout-row .val:nth-of-type(1) { grid-area: az; color: var(--fg-2); }
-.readout-row .val:nth-of-type(2) { grid-area: alt; min-width: 56px; text-align: right; color: var(--fg-2); }
-.readout-row .extra { grid-area: extra; color: var(--fg-3); font-size: 12px; }
+.readout-row .val[title='Altitude'] { grid-area: time; text-align: right; color: var(--fg-2); }
+.readout-row .val[title='Azimuth'] { grid-area: az; text-align: right; color: var(--fg-2); white-space: nowrap; }
+.readout-row .extra { grid-area: extra; color: var(--fg-3); font-size: 11.5px; }
 
 .error {
   margin: 4px;
@@ -1286,24 +1321,27 @@ label.file.danger strong {
 /* Markers */
 .marker-list li {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 14px minmax(0, 1fr) minmax(64px, auto) minmax(56px, auto);
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-bottom: 1px dotted var(--line);
   cursor: pointer;
 }
 
-.marker-list li:hover,
-.marker-list li.selected {
-  background: var(--bg-3);
+.marker-list li:hover {
+  background: var(--bg-4);
 }
 
-.marker-list li.selected {
-  box-shadow: inset 2px 0 0 var(--accent);
+.marker-list li.selected .name {
+  outline: 1.5px solid var(--fg);
+  outline-offset: 1px;
+  border-radius: 8px;
+  padding: 0 4px;
 }
 
 .marker-list .cat {
+  justify-self: center;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -1315,9 +1353,10 @@ label.file.danger strong {
   white-space: nowrap;
 }
 
-.marker-list .where {
-  color: var(--fg-3);
-  font-size: 12px;
+.marker-list .time,
+.marker-list .az {
+  text-align: right;
+  color: var(--fg-2);
   white-space: nowrap;
 }
 
@@ -2181,29 +2220,8 @@ label.file-pick input[type='file'] {
 .timeline .dot.cloud { background: var(--cloud); }
 
 .timeline .cloud-row {
-  margin-bottom: 4px;
   padding-bottom: 4px;
-  border-bottom: 1px solid var(--line);
-}
-
-.timeline .cloud-row > button {
-  display: grid;
-  grid-template-columns: 14px 1fr auto auto;
-  grid-template-areas:
-    'dot label time az'
-    'dot extra extra extra';
-  align-items: center;
-  column-gap: 8px;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: 0;
-  border-radius: 6px;
-  padding: 5px 6px;
-}
-
-.timeline .cloud-row > button:hover {
-  background: var(--bg-3);
+  border-bottom: 1px dotted var(--line);
 }
 
 .cloud-chart {
@@ -2344,3 +2362,155 @@ button.cloud-legend.folded {
 }
 
 .cloud-legend .fold:hover { color: var(--fg); }
+
+/* Panel sections */
+.psec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 10px 6px 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.psec-b {
+  margin: 0 6px 6px;
+}
+
+.psec:first-child > .psec-b:first-child {
+  margin-top: 8px;
+  background: var(--bg-3);
+}
+
+.psec-b:empty {
+  display: none;
+}
+
+.list li .brow {
+  display: grid;
+}
+
+.list li:has(> .brow) {
+  padding: 0;
+}
+
+/* Day phase strip */
+.zone {
+  margin: 10px 6px 0;
+}
+
+.zone-strip {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  height: 14px;
+}
+
+.zone-now {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg);
+}
+
+.zone-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--fg-3);
+}
+
+/* Hybrid look inside the panel: neutral, square, ruled. */
+.panel {
+  --accent: var(--fg);
+  accent-color: var(--fg);
+}
+
+.panel :is(button, input, select, textarea, details, summary, .profile, .verdict, .progress, .error, .seg button:first-child, .seg button:last-child) {
+  border-radius: 0;
+}
+
+.panel :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), select, textarea) {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 3px 2px;
+}
+
+.panel :is(input, select, textarea, button):focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+
+.panel select option {
+  background: var(--bg-3);
+}
+
+.panel button {
+  background: transparent;
+}
+
+.panel button:hover:enabled {
+  border-color: var(--fg-2);
+}
+
+/* Selection is an outline, never a fill. */
+.panel button.on,
+.panel .chips button.on,
+.panel .stars button.on {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg);
+  outline: 1.5px solid var(--fg);
+  outline-offset: 1px;
+}
+
+.panel .chips button.on {
+  border-radius: 50%;
+}
+
+.panel .seg button.on {
+  border-radius: 8px;
+}
+
+.panel :is(h3, .layers h3, .frame h3, .markers h3, .find h3, .night details h3) {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--fg-2);
+}
+
+.panel .kv {
+  grid-template-columns: 86px minmax(0, 1fr);
+}
+
+.panel .kv .k {
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.panel :is(.list li, .night details, .tree summary) {
+  border-bottom: 1px dotted var(--line);
+}
+
+.panel :is(.night details > summary:hover, .tree summary:hover) {
+  background: var(--bg-4);
+}
+
+.panel a {
+  color: var(--fg);
+}
+
+.panel .progress {
+  border-radius: 0;
+  background: var(--bg-4);
+}

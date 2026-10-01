@@ -225,12 +225,12 @@ async function run(vp: 'desktop' | 'phone') {
   check(`${vp}: target cleared, back to the pin from its cache`, cLabel.at === 'Pin' && /at the camera/.test(cLabel.label) && cSt === 'Ok' && glowHits(since).length === g2 && (await stats()).cacheHits === c0.cacheHits + 1 && cSea === 0, `${cLabel.label} · ${cSt} · +${glowHits(since).length - g2} requests · hits ${c0.cacheHits} → ${(await stats()).cacheHits} · ${cSea} badges`);
   await tab.shot(`${out}/${vp}-target-cleared.png`);
 
-  // Tools › Light at a point no longer carries the forecast.
-  await js(`(() => { const s = window.__scape; s.ui.getState().setPanelTab('Tools'); s.lightProbe.getState().setPoint(${JSON.stringify(SUMMIT)}); return 1; })()`);
+  // Sky › Light at a point no longer carries the forecast.
+  await js(`(() => { const s = window.__scape; s.ui.getState().setPanelTab('Sky'); s.lightProbe.getState().setPoint(${JSON.stringify(SUMMIT)}); return 1; })()`);
   await until('document.querySelector(".tools")');
   await js('(() => { document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); return 1; })()');
   const oldGone = await js<boolean>('!document.querySelector(".tools [data-glow-toggle], .tools [data-glow]") && /Light at a point/.test(document.querySelector(".tools")?.textContent ?? "")');
-  check(`${vp}: Tools › Light at a point has no forecast toggle`, oldGone, `gone ${oldGone}`);
+  check(`${vp}: Sky › Light at a point has no forecast toggle`, oldGone, `gone ${oldGone}`);
   await js('(() => { window.__scape.lightProbe.getState().setPoint(null); return 1; })()');
 
   // Fog at the point.

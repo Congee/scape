@@ -67,14 +67,14 @@ tab() { js "(() => { const u = window.__scape.ui.getState(); u.setPanelTab('$1')
 row() { js '(() => { const r = document.querySelector(".timeline .tide-row"); if (!r) return "none"; const t = (s) => r.querySelector(s)?.textContent ?? ""; return [/subordinate to /.test(t(".extra")) ? "subordinate" : /harmonic/.test(t(".extra")) ? "harmonic" : "?", r.querySelectorAll("circle.high, circle.low").length, r.querySelectorAll("polyline").length + r.querySelectorAll("polyline.interpolated").length, t(".label"), t(".time"), t(".extra")].join("|"); })()'; }
 
 tools() { # summary|station line
-  tab Tools
+  tab Weather
   sleep 0.3
   js '(() => { const d = [...document.querySelectorAll(".tools details")].find((g) => g.querySelector("summary").textContent.startsWith("Tides")); if (!d) return "missing"; d.open = true; d.scrollIntoView(); const v = d.querySelector(".kv .v"); return `${d.querySelector("summary").textContent}|${v ? v.textContent : ""}`; })()'
 }
 
 site() { # tag, camera, expected kind, viewport tag, [expected station name], [min marks], [expected reference name]
   go "$BASE/?camera=$2&t=$DAY"
-  tab Timeline
+  tab Weather
   if [ "$3" = none ]; then
     sleep 3
     local r; r=$(row)
@@ -115,7 +115,7 @@ site() { # tag, camera, expected kind, viewport tag, [expected station name], [m
 idle_case() { # viewport tag: idle rAF/timers with the row vs. inland without it
   local with="$IDLE_ROW"
   go "$BASE/?camera=$INLAND&t=$DAY"
-  tab Timeline
+  tab Weather
   sleep 1
   local without; without=$(quiet)
   read -r r1 t1 <<<"$with"

@@ -1,8 +1,25 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export const PanelTab = { Timeline: 'Timeline', Geodetics: 'Geodetics', Frame: 'Frame', Night: 'Night', Tools: 'Tools', Find: 'Find', Markers: 'Markers', Layers: 'Layers', Offline: 'Offline', Weather: 'Weather' } as const;
+export const PanelTab = { Plan: 'Plan', Frame: 'Frame', Sky: 'Sky', Weather: 'Weather', Map: 'Map', Markers: 'Markers' } as const;
 export type PanelTab = (typeof PanelTab)[keyof typeof PanelTab];
+
+/** The ten tabs before the regroup, so stored or scripted names still land somewhere. */
+const LEGACY_TAB: Record<string, PanelTab> = {
+  Timeline: PanelTab.Plan,
+  Geodetics: PanelTab.Plan,
+  Tools: PanelTab.Frame,
+  Night: PanelTab.Sky,
+  Find: PanelTab.Sky,
+  Layers: PanelTab.Map,
+  Offline: PanelTab.Map
+};
+
+export function toPanelTab(name: unknown): PanelTab {
+  if (typeof name !== 'string') return PanelTab.Plan;
+  if (Object.hasOwn(PanelTab, name)) return name as PanelTab;
+  return Object.hasOwn(LEGACY_TAB, name) ? LEGACY_TAB[name] : PanelTab.Plan;
+}
 
 /** Which list the Markers tab shows. */
 export const MarkersView = { Markers: 'Markers', Models: 'Models' } as const;
@@ -31,8 +48,8 @@ export interface UiState {
 export const uiStore = create<UiState>()(
   persist(
     (set) => ({
-      panelTab: PanelTab.Timeline,
-      setPanelTab: (panelTab) => set({ panelTab }),
+      panelTab: PanelTab.Plan,
+      setPanelTab: (tab) => set({ panelTab: toPanelTab(tab) }),
       markersView: MarkersView.Markers,
       setMarkersView: (markersView) => set({ markersView }),
       panelCollapsed: false,
@@ -43,7 +60,15 @@ export const uiStore = create<UiState>()(
       cloudLegendOpen: false,
       setCloudLegendOpen: (cloudLegendOpen) => set({ cloudLegendOpen })
     }),
-    { name: 'scape.ui', partialize: ({ panelTab, panelCollapsed, markersView, cloudLegendOpen }) => ({ panelTab, panelCollapsed, markersView, cloudLegendOpen }) }
+    {
+      name: 'scape.ui',
+      version: 1,
+      partialize: ({ panelTab, panelCollapsed, markersView, cloudLegendOpen }) => ({ panelTab, panelCollapsed, markersView, cloudLegendOpen }),
+      migrate: (stored) => {
+        const s = (stored ?? {}) as Partial<UiState>;
+        return { ...s, panelTab: toPanelTab(s.panelTab) } as UiState;
+      }
+    }
   )
 );
 

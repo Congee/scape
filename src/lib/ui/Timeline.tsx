@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
 import { degrees, distance, percent } from '@core/format';
@@ -7,6 +8,7 @@ import { tideDay, TideKind } from '@data/tides';
 import { useDayData } from '@state/dayData';
 import { settingsStore, useSettings } from '@state/settings';
 import { usePlanTime, useWorld, worldStore } from '@state/world';
+import { Dial } from './Dial';
 import { CloudRow } from './CloudChart';
 import { sightKey, useSightlines, VERDICT_TEXT } from './Sightlines';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
@@ -74,29 +76,57 @@ export function Timeline() {
 
   return (
     <div className={`timeline${loading ? ' loading' : ''}`}>
-      <div className="head">
-        <label className="toggle">
-          <input type="checkbox" checked={detail} onChange={(e) => settingsStore.getState().update({ timelineDetail: e.target.checked })} />
-          <span>Details</span>
-        </label>
-      </div>
-      <TideRow />
-      <CloudRow />
       {list.length === 0 && !loading && <p className="muted">No events on this day.</p>}
       <ul>
+        {activeIdx === -1 && list.length > 0 && <NowLine />}
         {list.map((ev, i) => (
-          <Row key={`${ev.body}-${ev.kind}-${ev.time}`} ev={ev} active={i === activeIdx} tz={tz} hour12={hour12} sight={sight.get(sightKey(ev))?.verdict} />
+          <Fragment key={`${ev.body}-${ev.kind}-${ev.time}`}>
+            <Row ev={ev} active={i === activeIdx} tz={tz} hour12={hour12} sight={sight.get(sightKey(ev))?.verdict} />
+            {i === activeIdx && <NowLine />}
+          </Fragment>
         ))}
       </ul>
     </div>
   );
 }
 
+/** The plan's clock between the events either side of it. */
+function NowLine() {
+  const hour12 = useSettings((s) => s.hour12);
+  const label = useWorld((s) => formatTime(s.time, s.tz, hour12));
+  return (
+    <li className="now-line" aria-hidden="true">
+      <span>{label}</span>
+    </li>
+  );
+}
+
+/** The Today section's header switch for the full event list. */
+export function DetailsToggle() {
+  const detail = useSettings((s) => s.timelineDetail);
+  return (
+    <label className="toggle">
+      <input type="checkbox" checked={detail} onChange={(e) => settingsStore.getState().update({ timelineDetail: e.target.checked })} />
+      <span>Details</span>
+    </label>
+  );
+}
+
+/** The pin's tide and cloud rows, styled as timeline rows. */
+export function TideCloud() {
+  return (
+    <div className="timeline">
+      <TideRow />
+      <CloudRow />
+    </div>
+  );
+}
+
 function Row({ ev, active, tz, hour12, sight }: { ev: DayEvent; active: boolean; tz: string; hour12: boolean; sight?: SightVerdict }) {
   return (
-    <li className={[isDetail(ev) ? 'detail' : '', active ? 'active' : ''].filter(Boolean).join(' ')}>
+    <li className={[isDetail(ev) ? 'detail' : '', active ? 'active' : ''].filter(Boolean).join(' ')} data-time={ev.time}>
       <button onClick={() => worldStore.getState().setTime(ev.time)} title="Set the clock to this event">
-        <span className={`dot ${ev.body.toLowerCase()} ${shade(ev.kind)}${TERRAIN.has(ev.kind) ? ' terrain' : ''}`} aria-hidden="true" />
+        <Dial az={ev.azimuth} ink={`${ev.body.toLowerCase()} ${shade(ev.kind)}${TERRAIN.has(ev.kind) ? ' terrain' : ''}`} />
         <span className="label">{LABELS[ev.body][ev.kind] ?? ev.kind}</span>
         <span className="time">{formatTime(ev.time, tz, hour12)}</span>
         <span className="az">{degrees(ev.azimuth)}</span>

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { depressionForHeightDeg, lastLightMs, litHeightM } from '@core/astro/earthShadow';
 import { lunarEclipseLight } from '@core/astro/eclipse';
@@ -68,7 +68,19 @@ const clipText = (s: number) => (s >= 60 ? `${Math.floor(s / 60)} min ${Math.rou
 // Which groups are open survives tab switches but not a reload.
 const openGroups = new Set<string>();
 
+/** Which panel tab hosts a slice of the calculators. */
+export const ToolsPart = { Frame: 'Frame', Weather: 'Weather', Sky: 'Sky' } as const;
+export type ToolsPart = (typeof ToolsPart)[keyof typeof ToolsPart];
+const PART_GROUPS: Record<ToolsPart, readonly string[]> = {
+  Frame: ['exposure', 'nd', 'timelapse'],
+  Weather: ['rainbow', 'clouds', 'tides'],
+  Sky: ['moon', 'light-point']
+};
+const PartContext = createContext<ToolsPart>(ToolsPart.Frame);
+
 function Group({ id, summary, children }: { id: string; summary: ReactNode; children: ReactNode }) {
+  const part = useContext(PartContext);
+  if (!PART_GROUPS[part].includes(id)) return null;
   return (
     <details
       open={openGroups.has(id)}
@@ -159,7 +171,7 @@ function TidesGroup() {
   );
 }
 
-export function ToolsPanel() {
+export function ToolsPanel({ part }: { part: ToolsPart }) {
   const time = usePlanTime();
   const tz = useWorld((s) => s.tz);
   const pin = useWorld((s) => s.pin);
@@ -272,263 +284,265 @@ export function ToolsPanel() {
   const lastLight = Number.isFinite(lightH) && lightH > 0 ? lastLightFor(pin, siteM, time, lightH) : null;
 
   return (
-    <div className="frame night tools">
-      <Group id="exposure" summary={`Exposure · ${solve === ExposureSolve.Ev ? solvedText : `EV ${evIn || '—'}`} · ${scenes[0] ? `scene ${scenes[0].label.toLowerCase()} EV ${evText(scenes[0].ev)}` : ''}`}>
-        <div className="kv">
-          <span className="k">Solve for</span>
-          <b className="v">
-            <select value={solve} onChange={(e) => setSolve(e.target.value as ExposureSolve)} aria-label="Exposure term to solve for">
-              <option value={ExposureSolve.Ev}>Exposure value</option>
-              <option value={ExposureSolve.Aperture}>Aperture</option>
-              <option value={ExposureSolve.Shutter}>Shutter</option>
-              <option value={ExposureSolve.Iso}>ISO</option>
-            </select>
-          </b>
-          <span className="k">Aperture</span>
-          {field(
-            ExposureSolve.Aperture,
-            <>
-              <span className="muted">f/</span>
-              <input type="number" min={0.7} step={0.1} placeholder={String(opt.fNumber)} value={apText} onChange={(e) => setApText(e.target.value)} aria-label="Aperture, f-number" />
-              {apText === '' && <span className="muted">from the lens</span>}
-            </>
-          )}
-          <span className="k">Shutter</span>
-          {field(ExposureSolve.Shutter, <input type="text" value={shText} onChange={(e) => setShText(e.target.value)} aria-label="Shutter time, like 1/250 or 30s" />)}
-          <span className="k">ISO</span>
-          {field(ExposureSolve.Iso, <input type="number" min={1} step={1} value={isoText} onChange={(e) => setIsoText(e.target.value)} aria-label="ISO" />)}
-          <span className="k">EV100</span>
-          {field(ExposureSolve.Ev, <input type="number" step={0.5} value={evIn} onChange={(e) => setEvIn(e.target.value)} aria-label="Exposure value at ISO 100" />)}
-        </div>
-        <p className="muted hint">Light now, by sun {signed(sun.altitude)} and moon {signed(moon.altitude)} · pick a row to use its EV.</p>
-        <ul className="list">
-          {scenes.map((r) => (
-            <li key={r.label}>
-              <button
-                className="primary"
-                onClick={() => {
-                  setEvIn(evText(r.ev));
-                  if (solve === ExposureSolve.Ev) setSolve(ExposureSolve.Shutter);
-                }}
-              >
-                <span className="name">{r.label}</span>
-                <span className="detail">
-                  EV100 {r.lo === r.hi ? evText(r.lo) : `${evText(r.lo)} to ${evText(r.hi)}`}
-                  {r.estimate ? ' (estimate)' : ''}
-                  {ok(iso) && iso !== 100 ? ` · EV ${evText(evAtIso(r.ev, iso))} at ISO ${iso}` : ''}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </Group>
+    <PartContext value={part}>
+      <div className="frame night tools">
+        <Group id="exposure" summary={`Exposure · ${solve === ExposureSolve.Ev ? solvedText : `EV ${evIn || '—'}`} · ${scenes[0] ? `scene ${scenes[0].label.toLowerCase()} EV ${evText(scenes[0].ev)}` : ''}`}>
+          <div className="kv">
+            <span className="k">Solve for</span>
+            <b className="v">
+              <select value={solve} onChange={(e) => setSolve(e.target.value as ExposureSolve)} aria-label="Exposure term to solve for">
+                <option value={ExposureSolve.Ev}>Exposure value</option>
+                <option value={ExposureSolve.Aperture}>Aperture</option>
+                <option value={ExposureSolve.Shutter}>Shutter</option>
+                <option value={ExposureSolve.Iso}>ISO</option>
+              </select>
+            </b>
+            <span className="k">Aperture</span>
+            {field(
+              ExposureSolve.Aperture,
+              <>
+                <span className="muted">f/</span>
+                <input type="number" min={0.7} step={0.1} placeholder={String(opt.fNumber)} value={apText} onChange={(e) => setApText(e.target.value)} aria-label="Aperture, f-number" />
+                {apText === '' && <span className="muted">from the lens</span>}
+              </>
+            )}
+            <span className="k">Shutter</span>
+            {field(ExposureSolve.Shutter, <input type="text" value={shText} onChange={(e) => setShText(e.target.value)} aria-label="Shutter time, like 1/250 or 30s" />)}
+            <span className="k">ISO</span>
+            {field(ExposureSolve.Iso, <input type="number" min={1} step={1} value={isoText} onChange={(e) => setIsoText(e.target.value)} aria-label="ISO" />)}
+            <span className="k">EV100</span>
+            {field(ExposureSolve.Ev, <input type="number" step={0.5} value={evIn} onChange={(e) => setEvIn(e.target.value)} aria-label="Exposure value at ISO 100" />)}
+          </div>
+          <p className="muted hint">Light now, by sun {signed(sun.altitude)} and moon {signed(moon.altitude)} · pick a row to use its EV.</p>
+          <ul className="list">
+            {scenes.map((r) => (
+              <li key={r.label}>
+                <button
+                  className="primary"
+                  onClick={() => {
+                    setEvIn(evText(r.ev));
+                    if (solve === ExposureSolve.Ev) setSolve(ExposureSolve.Shutter);
+                  }}
+                >
+                  <span className="name">{r.label}</span>
+                  <span className="detail">
+                    EV100 {r.lo === r.hi ? evText(r.lo) : `${evText(r.lo)} to ${evText(r.hi)}`}
+                    {r.estimate ? ' (estimate)' : ''}
+                    {ok(iso) && iso !== 100 ? ` · EV ${evText(evAtIso(r.ev, iso))} at ISO ${iso}` : ''}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Group>
 
-      <Group id="nd" summary={`ND filter · ${ndStopsV !== null ? `${ndStopsV} stops` : '—'} · ${ok(base) && ndStopsV !== null ? `${formatShutter(base)} → ${formatShutter(ndShutter(base, ndStopsV))}` : ''}`}>
-        <div className="kv">
-          <span className="k">Stops</span>
-          <b className="v">
-            <input type="number" min={0} max={30} step={1 / 3} value={ndText} onChange={(e) => setNdText(e.target.value)} aria-label="Filter strength, stops" />
-          </b>
-          <span className="k">ND number</span>
-          <b className="v">
-            <span className="muted">ND</span>
-            <input type="number" min={1} step={1} value={ndStopsV !== null ? Math.round(ndFactor(ndStopsV)) : ''} onChange={(e) => ok(num(e.target.value)) && setStops(ndStops(num(e.target.value) as number))} aria-label="Filter factor, ND number" />
-          </b>
-          <span className="k">Optical density</span>
-          <b className="v">
-            <input type="number" min={0} step={0.3} value={ndStopsV !== null ? ndOpticalDensity(ndStopsV).toFixed(1) : ''} onChange={(e) => num(e.target.value) !== null && setStops(ndStopsFromDensity(num(e.target.value) as number))} aria-label="Optical density" />
-          </b>
-          <span className="k">Base shutter</span>
-          <b className="v">
-            <input type="text" value={ndBase} onChange={(e) => setNdBase(e.target.value)} aria-label="Shutter without the filter" />
-          </b>
-          <span className="k">With filter</span>
-          <b className="v">{ok(base) && ndStopsV !== null ? formatShutter(ndShutter(base, ndStopsV)) : '—'}</b>
-        </div>
-        <table className="nd-table">
-          <thead>
-            <tr>
-              <th>Filter</th>
-              <th>OD</th>
-              <th>Stops</th>
-              <th>{ok(base) ? formatShutter(base) : 'Base'} →</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ND_FILTERS.map((f) => {
-              const s = ndStops(f.factor);
-              return (
-                <tr key={f.name} className={ndStopsV !== null && Math.abs(s - ndStopsV) < 0.05 ? 'on' : ''} onClick={() => setStops(s)}>
-                  <td>{f.name}</td>
-                  <td>{ndOpticalDensity(s).toFixed(1)}</td>
-                  <td>{s.toFixed(s % 1 ? 1 : 0)}</td>
-                  <td>{ok(base) ? formatShutter(ndShutter(base, s)) : '—'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Group>
+        <Group id="nd" summary={`ND filter · ${ndStopsV !== null ? `${ndStopsV} stops` : '—'} · ${ok(base) && ndStopsV !== null ? `${formatShutter(base)} → ${formatShutter(ndShutter(base, ndStopsV))}` : ''}`}>
+          <div className="kv">
+            <span className="k">Stops</span>
+            <b className="v">
+              <input type="number" min={0} max={30} step={1 / 3} value={ndText} onChange={(e) => setNdText(e.target.value)} aria-label="Filter strength, stops" />
+            </b>
+            <span className="k">ND number</span>
+            <b className="v">
+              <span className="muted">ND</span>
+              <input type="number" min={1} step={1} value={ndStopsV !== null ? Math.round(ndFactor(ndStopsV)) : ''} onChange={(e) => ok(num(e.target.value)) && setStops(ndStops(num(e.target.value) as number))} aria-label="Filter factor, ND number" />
+            </b>
+            <span className="k">Optical density</span>
+            <b className="v">
+              <input type="number" min={0} step={0.3} value={ndStopsV !== null ? ndOpticalDensity(ndStopsV).toFixed(1) : ''} onChange={(e) => num(e.target.value) !== null && setStops(ndStopsFromDensity(num(e.target.value) as number))} aria-label="Optical density" />
+            </b>
+            <span className="k">Base shutter</span>
+            <b className="v">
+              <input type="text" value={ndBase} onChange={(e) => setNdBase(e.target.value)} aria-label="Shutter without the filter" />
+            </b>
+            <span className="k">With filter</span>
+            <b className="v">{ok(base) && ndStopsV !== null ? formatShutter(ndShutter(base, ndStopsV)) : '—'}</b>
+          </div>
+          <table className="nd-table">
+            <thead>
+              <tr>
+                <th>Filter</th>
+                <th>OD</th>
+                <th>Stops</th>
+                <th>{ok(base) ? formatShutter(base) : 'Base'} →</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ND_FILTERS.map((f) => {
+                const s = ndStops(f.factor);
+                return (
+                  <tr key={f.name} className={ndStopsV !== null && Math.abs(s - ndStopsV) < 0.05 ? 'on' : ''} onClick={() => setStops(s)}>
+                    <td>{f.name}</td>
+                    <td>{ndOpticalDensity(s).toFixed(1)}</td>
+                    <td>{s.toFixed(s % 1 ? 1 : 0)}</td>
+                    <td>{ok(base) ? formatShutter(ndShutter(base, s)) : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Group>
 
-      <Group id="timelapse" summary={`Time-lapse · ${tlOk ? `${tl.shots} shots, ${tl.intervalS.toFixed(1)} s apart, ${clipText(tl.clipS)} clip` : '—'}`}>
-        <div className="kv">
-          <span className="k">Solve for</span>
-          <b className="v">
-            <select value={tlSolve} onChange={(e) => setTlSolve(e.target.value as TimelapseSolve)} aria-label="Time-lapse term to solve for">
-              <option value={TimelapseSolve.Interval}>Interval</option>
-              <option value={TimelapseSolve.Clip}>Clip length</option>
-              <option value={TimelapseSolve.Event}>Event duration</option>
-            </select>
-          </b>
-          <span className="k">Interval</span>
-          <b className="v">
-            {tlSolve === TimelapseSolve.Interval ? (
-              `${tl.intervalS.toFixed(2)} s`
-            ) : (
-              <>
-                <input type="number" min={0.1} step={0.5} value={tlInterval} onChange={(e) => setTlInterval(e.target.value)} aria-label="Interval, seconds" />
-                <span className="muted">s</span>
-              </>
-            )}
-          </b>
-          <span className="k">Clip length</span>
-          <b className="v">
-            {tlSolve === TimelapseSolve.Clip ? (
-              clipText(tl.clipS)
-            ) : (
-              <>
-                <input type="number" min={1} step={1} value={tlClip} onChange={(e) => setTlClip(e.target.value)} aria-label="Clip length, seconds" />
-                <span className="muted">s</span>
-              </>
-            )}
-          </b>
-          <span className="k">Event</span>
-          <b className="v">
-            {tlSolve === TimelapseSolve.Event ? (
-              `${(tl.eventS / 60).toFixed(1)} min`
-            ) : (
-              <>
-                <input type="number" min={1} step={5} value={tlEvent} onChange={(e) => setTlEvent(e.target.value)} aria-label="Event duration, minutes" />
-                <span className="muted">min</span>
-              </>
-            )}
-          </b>
-          <span className="k">Frame rate</span>
-          <b className="v">
-            <input type="number" min={1} max={120} step={1} value={tlFps} onChange={(e) => setTlFps(e.target.value)} aria-label="Frames per second" />
-            <span className="muted">fps</span>
-          </b>
-          <span className="k">Shots</span>
-          <b className="v">{tlOk ? `${tl.shots} · ${Math.round(tl.speedup)}× speed-up` : '—'}</b>
-          <span className="k">Per shot</span>
-          <b className="v">
-            <input type="number" min={0.1} step={1} placeholder={pixels ? (rawBytesPerShot(pixels) / 1e6).toFixed(0) : 'MB'} value={tlMb} onChange={(e) => setTlMb(e.target.value)} aria-label="Megabytes per shot" />
-            <span className="muted">MB{tlMb === '' && pixels ? `, 14-bit raw of ${(pixels / 1e6).toFixed(1)} MP` : tlMb === '' ? ' (pick the camera in Frame)' : ''}</span>
-          </b>
-          <span className="k">Card space</span>
-          <b className="v">{tlOk && perShot ? bytes(perShot * tl.shots) : '—'}</b>
-        </div>
-        <div className="tl-sim">
-          <button disabled={!tlOk} onClick={() => (sim.playing ? timelapseStore.getState().pause() : timelapseStore.getState().play(tl.intervalS, tl.shots, tl.fps))} aria-label={sim.playing ? 'Pause the simulation' : 'Play the simulation'}>
-            {sim.playing ? 'Pause' : 'Play'}
-          </button>
-          <button disabled={sim.startMs === null} onClick={() => timelapseStore.getState().reset()}>
-            Reset
-          </button>
-          <span className="muted">{sim.startMs !== null ? `Shot ${(sim.k % Math.max(1, tl.shots)) + 1} of ${tl.shots} · ${formatTime(time, tz, hour12, true)}` : 'Steps the clock by the interval from now'}</span>
-        </div>
-      </Group>
+        <Group id="timelapse" summary={`Time-lapse · ${tlOk ? `${tl.shots} shots, ${tl.intervalS.toFixed(1)} s apart, ${clipText(tl.clipS)} clip` : '—'}`}>
+          <div className="kv">
+            <span className="k">Solve for</span>
+            <b className="v">
+              <select value={tlSolve} onChange={(e) => setTlSolve(e.target.value as TimelapseSolve)} aria-label="Time-lapse term to solve for">
+                <option value={TimelapseSolve.Interval}>Interval</option>
+                <option value={TimelapseSolve.Clip}>Clip length</option>
+                <option value={TimelapseSolve.Event}>Event duration</option>
+              </select>
+            </b>
+            <span className="k">Interval</span>
+            <b className="v">
+              {tlSolve === TimelapseSolve.Interval ? (
+                `${tl.intervalS.toFixed(2)} s`
+              ) : (
+                <>
+                  <input type="number" min={0.1} step={0.5} value={tlInterval} onChange={(e) => setTlInterval(e.target.value)} aria-label="Interval, seconds" />
+                  <span className="muted">s</span>
+                </>
+              )}
+            </b>
+            <span className="k">Clip length</span>
+            <b className="v">
+              {tlSolve === TimelapseSolve.Clip ? (
+                clipText(tl.clipS)
+              ) : (
+                <>
+                  <input type="number" min={1} step={1} value={tlClip} onChange={(e) => setTlClip(e.target.value)} aria-label="Clip length, seconds" />
+                  <span className="muted">s</span>
+                </>
+              )}
+            </b>
+            <span className="k">Event</span>
+            <b className="v">
+              {tlSolve === TimelapseSolve.Event ? (
+                `${(tl.eventS / 60).toFixed(1)} min`
+              ) : (
+                <>
+                  <input type="number" min={1} step={5} value={tlEvent} onChange={(e) => setTlEvent(e.target.value)} aria-label="Event duration, minutes" />
+                  <span className="muted">min</span>
+                </>
+              )}
+            </b>
+            <span className="k">Frame rate</span>
+            <b className="v">
+              <input type="number" min={1} max={120} step={1} value={tlFps} onChange={(e) => setTlFps(e.target.value)} aria-label="Frames per second" />
+              <span className="muted">fps</span>
+            </b>
+            <span className="k">Shots</span>
+            <b className="v">{tlOk ? `${tl.shots} · ${Math.round(tl.speedup)}× speed-up` : '—'}</b>
+            <span className="k">Per shot</span>
+            <b className="v">
+              <input type="number" min={0.1} step={1} placeholder={pixels ? (rawBytesPerShot(pixels) / 1e6).toFixed(0) : 'MB'} value={tlMb} onChange={(e) => setTlMb(e.target.value)} aria-label="Megabytes per shot" />
+              <span className="muted">MB{tlMb === '' && pixels ? `, 14-bit raw of ${(pixels / 1e6).toFixed(1)} MP` : tlMb === '' ? ' (pick the camera in Frame)' : ''}</span>
+            </b>
+            <span className="k">Card space</span>
+            <b className="v">{tlOk && perShot ? bytes(perShot * tl.shots) : '—'}</b>
+          </div>
+          <div className="tl-sim">
+            <button disabled={!tlOk} onClick={() => (sim.playing ? timelapseStore.getState().pause() : timelapseStore.getState().play(tl.intervalS, tl.shots, tl.fps))} aria-label={sim.playing ? 'Pause the simulation' : 'Play the simulation'}>
+              {sim.playing ? 'Pause' : 'Play'}
+            </button>
+            <button disabled={sim.startMs === null} onClick={() => timelapseStore.getState().reset()}>
+              Reset
+            </button>
+            <span className="muted">{sim.startMs !== null ? `Shot ${(sim.k % Math.max(1, tl.shots)) + 1} of ${tl.shots} · ${formatTime(time, tz, hour12, true)}` : 'Steps the clock by the interval from now'}</span>
+          </div>
+        </Group>
 
-      <Group id="rainbow" summary={bowSummary}>
-        <div className="kv">
-          <span className="k">Sun</span>
-          <b className="v">
-            {signed(sun.altitude)} at {degrees(sun.azimuth, 0)} {compass(sun.azimuth)}
-          </b>
-          <span className="k">Primary top</span>
-          <b className="v">{bow.possible ? `${signed(bow.altitudeDeg)} at ${degrees(bow.azimuthDeg, 0)} ${compass(bow.azimuthDeg)}` : '—'}</b>
-          <span className="k">Feet</span>
-          <b className="v">{bow.possible ? `${degrees(bow.halfSpanDeg, 0)} either side of the top` : '—'}</b>
-          <span className="k">Secondary top</span>
-          <b className="v">{bow2.possible ? `${signed(bow2.altitudeDeg)}, 51° from the antisolar point` : '—'}</b>
-        </div>
-        <label className="toggle">
-          <input type="checkbox" checked={c.showRainbow} onChange={(e) => comp({ showRainbow: e.target.checked })} />
-          <span>Rainbow arcs in the viewfinder</span>
-        </label>
-        <p className="muted hint">A bow needs rain in front of you and sun behind, below 42° (51° for the secondary).</p>
-      </Group>
+        <Group id="rainbow" summary={bowSummary}>
+          <div className="kv">
+            <span className="k">Sun</span>
+            <b className="v">
+              {signed(sun.altitude)} at {degrees(sun.azimuth, 0)} {compass(sun.azimuth)}
+            </b>
+            <span className="k">Primary top</span>
+            <b className="v">{bow.possible ? `${signed(bow.altitudeDeg)} at ${degrees(bow.azimuthDeg, 0)} ${compass(bow.azimuthDeg)}` : '—'}</b>
+            <span className="k">Feet</span>
+            <b className="v">{bow.possible ? `${degrees(bow.halfSpanDeg, 0)} either side of the top` : '—'}</b>
+            <span className="k">Secondary top</span>
+            <b className="v">{bow2.possible ? `${signed(bow2.altitudeDeg)}, 51° from the antisolar point` : '—'}</b>
+          </div>
+          <label className="toggle">
+            <input type="checkbox" checked={c.showRainbow} onChange={(e) => comp({ showRainbow: e.target.checked })} />
+            <span>Rainbow arcs in the viewfinder</span>
+          </label>
+          <p className="muted hint">A bow needs rain in front of you and sun behind, below 42° (51° for the secondary).</p>
+        </Group>
 
-      <Group id="clouds" summary={`Clouds · ${cloudSolve === CloudSolve.Distance ? 'distance' : cloudSolve === CloudSolve.Height ? 'height' : 'angle'} ${cloudOut} · ${sun.altitude < 0 ? `lit above ${height(litNow, units)}` : 'sun up'}`}>
-        <div className="kv">
-          <span className="k">Solve for</span>
-          <b className="v">
-            <select value={cloudSolve} onChange={(e) => setCloudSolve(e.target.value as CloudSolve)} aria-label="Cloud term to solve for">
-              <option value={CloudSolve.Distance}>Distance</option>
-              <option value={CloudSolve.Height}>Height</option>
-              <option value={CloudSolve.Angle}>Angle</option>
-            </select>
-          </b>
-          <span className="k">Cloud base</span>
-          <b className="v">
-            {cloudSolve === CloudSolve.Height ? (
-              cloudOut
-            ) : (
-              <>
-                <input type="number" min={0} step={100} value={cloudH} onChange={(e) => setCloudH(e.target.value)} aria-label="Cloud base above the ground" />
-                <span className="muted">{units === Units.Imperial ? 'ft' : 'm'} above the ground</span>
-              </>
-            )}
-          </b>
-          <span className="k">Angle up</span>
-          <b className="v">
-            {cloudSolve === CloudSolve.Angle ? (
-              cloudOut
-            ) : (
-              <>
-                <input type="number" min={-10} max={90} step={0.5} value={cloudA} onChange={(e) => setCloudA(e.target.value)} aria-label="Angle up to the cloud, degrees" />
-                <span className="muted">°</span>
-              </>
-            )}
-          </b>
-          <span className="k">Distance</span>
-          <b className="v">
-            {cloudSolve === CloudSolve.Distance ? (
-              cloudOut
-            ) : (
-              <>
-                <input type="number" min={0} step={1} value={cloudD} onChange={(e) => setCloudD(e.target.value)} aria-label="Ground distance to the cloud" />
-                <span className="muted">{units === Units.Imperial ? 'mi' : 'km'}</span>
-              </>
-            )}
-          </b>
-        </div>
-        <h3>Sunlit clouds</h3>
-        <div className="kv">
-          <span className="k">Sunlit now above</span>
-          <b className="v">{sun.altitude >= 0 ? 'every height · sun up' : Number.isFinite(litNow) ? height(litNow, units) : '—'}</b>
-          <span className="k">Stays lit until</span>
-          <b className="v">
-            {Number.isFinite(lightH) && lightH > 0 ? (
-              <>
-                sun {signed(-depressionForHeightDeg(lightH))}
-                {lastLight !== null && <span className="muted"> · {formatTime(lastLight, tz, hour12)}</span>}
-              </>
-            ) : (
-              '—'
-            )}
-          </b>
-        </div>
-        <p className="muted hint">For a cloud overhead; clouds toward the sunset stay lit a little longer. Geometric, without refraction.</p>
-      </Group>
+        <Group id="clouds" summary={`Clouds · ${cloudSolve === CloudSolve.Distance ? 'distance' : cloudSolve === CloudSolve.Height ? 'height' : 'angle'} ${cloudOut} · ${sun.altitude < 0 ? `lit above ${height(litNow, units)}` : 'sun up'}`}>
+          <div className="kv">
+            <span className="k">Solve for</span>
+            <b className="v">
+              <select value={cloudSolve} onChange={(e) => setCloudSolve(e.target.value as CloudSolve)} aria-label="Cloud term to solve for">
+                <option value={CloudSolve.Distance}>Distance</option>
+                <option value={CloudSolve.Height}>Height</option>
+                <option value={CloudSolve.Angle}>Angle</option>
+              </select>
+            </b>
+            <span className="k">Cloud base</span>
+            <b className="v">
+              {cloudSolve === CloudSolve.Height ? (
+                cloudOut
+              ) : (
+                <>
+                  <input type="number" min={0} step={100} value={cloudH} onChange={(e) => setCloudH(e.target.value)} aria-label="Cloud base above the ground" />
+                  <span className="muted">{units === Units.Imperial ? 'ft' : 'm'} above the ground</span>
+                </>
+              )}
+            </b>
+            <span className="k">Angle up</span>
+            <b className="v">
+              {cloudSolve === CloudSolve.Angle ? (
+                cloudOut
+              ) : (
+                <>
+                  <input type="number" min={-10} max={90} step={0.5} value={cloudA} onChange={(e) => setCloudA(e.target.value)} aria-label="Angle up to the cloud, degrees" />
+                  <span className="muted">°</span>
+                </>
+              )}
+            </b>
+            <span className="k">Distance</span>
+            <b className="v">
+              {cloudSolve === CloudSolve.Distance ? (
+                cloudOut
+              ) : (
+                <>
+                  <input type="number" min={0} step={1} value={cloudD} onChange={(e) => setCloudD(e.target.value)} aria-label="Ground distance to the cloud" />
+                  <span className="muted">{units === Units.Imperial ? 'mi' : 'km'}</span>
+                </>
+              )}
+            </b>
+          </div>
+          <h3>Sunlit clouds</h3>
+          <div className="kv">
+            <span className="k">Sunlit now above</span>
+            <b className="v">{sun.altitude >= 0 ? 'every height · sun up' : Number.isFinite(litNow) ? height(litNow, units) : '—'}</b>
+            <span className="k">Stays lit until</span>
+            <b className="v">
+              {Number.isFinite(lightH) && lightH > 0 ? (
+                <>
+                  sun {signed(-depressionForHeightDeg(lightH))}
+                  {lastLight !== null && <span className="muted"> · {formatTime(lastLight, tz, hour12)}</span>}
+                </>
+              ) : (
+                '—'
+              )}
+            </b>
+          </div>
+          <p className="muted hint">For a cloud overhead; clouds toward the sunset stay lit a little longer. Geometric, without refraction.</p>
+        </Group>
 
-      <TidesGroup />
-      <Group id="moon" summary={<MoonSummary />}>
-        <MoonTools />
-      </Group>
-      <Group id="light-point" summary={<LightPointSummary />}>
-        <LightPointTools />
-      </Group>
-    </div>
+        {part === ToolsPart.Weather && <TidesGroup />}
+        <Group id="moon" summary={<MoonSummary />}>
+          <MoonTools />
+        </Group>
+        <Group id="light-point" summary={<LightPointSummary />}>
+          <LightPointTools />
+        </Group>
+      </div>
+    </PartContext>
   );
 }

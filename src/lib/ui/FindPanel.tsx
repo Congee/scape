@@ -1,7 +1,7 @@
 import { SkyBody } from '@core/astro/bodies';
 import { SkyFilter } from '@core/astro/finder';
 import { compass, degrees, distance, percent } from '@core/format';
-import { formatDateTime } from '@core/time/format';
+import { formatDate, formatDateTime, formatTime } from '@core/time/format';
 import { formatLngLat } from '@core/geo/coords';
 import { useAlign, alignStore } from '@state/align';
 import { finderStore, useFinder } from '@state/finder';
@@ -9,6 +9,7 @@ import { searchesStore } from '@state/searches';
 import { useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 import { HeatMode } from '@workers/align.protocol';
+import { Dial } from './Dial';
 import { downloadText } from './download';
 
 const BODY_LABEL: Record<SkyBody, string> = { Sun: 'Sun', Moon: 'Moon', Gc: 'Galactic Centre' };
@@ -216,13 +217,18 @@ export function FindPanel() {
       <ul className="list">
         {hits.map((h) => (
           <li key={h.bestMs}>
-            <button className="primary" onClick={() => worldStore.getState().setTime(h.bestMs)} title="Set the clock to this moment">
-              <span className="name">
-                {formatDateTime(h.bestMs, tz, s.hour12)}
+            <button className="primary brow" onClick={() => worldStore.getState().setTime(h.bestMs)} title="Set the clock to this moment">
+              <Dial az={h.azDeg} ink={`${f.body.toLowerCase()} mid`} />
+              <span className="label">
+                {formatDate(h.bestMs, tz)}
                 {(h.clippedStart || h.clippedEnd) && <span className="meta">{h.clippedStart ? '⇤' : ''}{h.clippedEnd ? '⇥' : ''}</span>}
               </span>
-              <span className="detail">
-                {degrees(h.azDeg, 0)} {compass(h.azDeg)} · {signed(h.altDeg)} · sun {signed(h.sunAltDeg, 0)} · moon {percent(h.moonIllumination, 0)} {h.moonPhase.toLowerCase()}
+              <span className="time">{formatTime(h.bestMs, tz, s.hour12)}</span>
+              <span className="az">
+                {degrees(h.azDeg, 0)} {compass(h.azDeg)}
+              </span>
+              <span className="note">
+                alt {signed(h.altDeg)} · sun {signed(h.sunAltDeg, 0)} · moon {percent(h.moonIllumination, 0)} {h.moonPhase.toLowerCase()}
               </span>
             </button>
           </li>

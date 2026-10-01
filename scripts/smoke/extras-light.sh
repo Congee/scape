@@ -120,7 +120,7 @@ set_light Auto
 
 # 3. First and last light at a valley point.
 set_time "$DAY"
-js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Tools")?.click(); "ok"' >/dev/null
+js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Sky")?.click(); "ok"' >/dev/null
 js "(() => { window.__scape.lightProbe.getState().setPoint({ lat: ${VALLEY%,*}, lng: ${VALLEY#*,} }); return 'ok'; })()" >/dev/null
 wait_for 'window.__scape.lightProbe.getState().light || window.__scape.lightProbe.getState().error' 120
 probe=$(js '(() => { const p = window.__scape.lightProbe.getState(); const l = p.light; if (!l) return "error " + p.error; return `${l.first} ${l.last} ${l.litMs} ${l.litNow}`; })()')
@@ -130,10 +130,10 @@ check "first/last light at the valley point, terrain-late and early" "$(awk -v a
 js 'document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); "ok"' >/dev/null
 sleep 0.3
 cells=$(js '(() => { const f = document.querySelector("[data-probe=first]"); const l = document.querySelector("[data-probe=last]"); return f && l ? `${f.textContent} / ${l.textContent}` : "missing"; })()')
-check "first/last light readout in Tools" "$([[ $cells == *[0-9]:[0-9][0-9]*/*[0-9]:[0-9][0-9]* ]] && echo 1 || echo 0)" "$cells"
+check "first/last light readout in Sky" "$([[ $cells == *[0-9]:[0-9][0-9]*/*[0-9]:[0-9][0-9]* ]] && echo 1 || echo 0)" "$cells"
 frames "$OUT/probe-tools.png" 2
 moon=$(js '(() => { const g = [...document.querySelectorAll(".tools details")].find((d) => d.querySelector("summary").textContent.startsWith("Moon")); return g ? g.querySelector("summary").textContent : "missing"; })()')
-check "moon simulator group in Tools" "$([[ $moon == Moon*lit* ]] && echo 1 || echo 0)" "$moon"
+check "moon simulator group in Sky" "$([[ $moon == Moon*lit* ]] && echo 1 || echo 0)" "$moon"
 
 # 4. Viewfinder moon at 2400 mm: crescent, quarter, full × landscape, portrait.
 moon_disc() { # tag, instant, expected lit fraction class (thin|half|full), orientation
@@ -190,7 +190,7 @@ done
 orbit() { # tag
   go "$BASE/?camera=$CAM&target=$TGT&t=$DAY"
   wait_for 'window.__scapeMapCtl && window.__scape.terrain.getState().pin2GroundM' 120
-  js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Layers")?.click(); "ok"' >/dev/null
+  js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Map")?.click(); "ok"' >/dev/null
   sleep 0.5
   local via=store
   if [ "$(js '!!document.querySelector("select[aria-label=\"Orbit the 3D map\"]")')" = true ]; then
@@ -221,15 +221,15 @@ orbit desktop
 ab set viewport 390 844 >/dev/null
 orbit phone
 
-# Phone Tools panel with the new groups.
+# Phone Sky panel with the new groups.
 go "$BASE/?camera=$CAM&target=$TGT&t=$DAY"
-js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Tools")?.click(); "ok"' >/dev/null
+js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Sky")?.click(); "ok"' >/dev/null
 sleep 0.5
 js 'document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); "ok"' >/dev/null
 js '(() => { const d = [...document.querySelectorAll(".tools details")].find((g) => g.querySelector("summary").textContent.startsWith("Light at")); d?.scrollIntoView(); return "ok"; })()' >/dev/null
 frames "$OUT/phone-tools.png" 2
 wide=$(js 'document.documentElement.scrollWidth > window.innerWidth')
-check "phone 390×844 Tools: no sideways page scroll" "$([ "$wide" = false ] && echo 1 || echo 0)" "overflow $wide"
+check "phone 390×844 Sky: no sideways page scroll" "$([ "$wide" = false ] && echo 1 || echo 0)" "overflow $wide"
 
 restore
 echo "| Check | Result | Detail |"

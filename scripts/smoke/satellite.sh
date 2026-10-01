@@ -41,7 +41,7 @@ wait_for "window.__scape && $MAP && $MAP.isStyleLoaded()" 120 || { echo "app did
 off=$(js "String(!$MAP.getSource('satellite') && !window.__scape.settings.getState().showSatellite && !(window.__scape.satellite && window.__scape.satellite.fetches))")
 check "off by default, nothing fetched" "$([ "$off" = true ] && echo 1 || echo 0)" "$off"
 
-js "window.__scape.ui.getState().setPanelTab('Layers')" >/dev/null
+js "window.__scape.ui.getState().setPanelTab('Map')" >/dev/null
 wait_for "document.querySelector('.layer-row[data-layer=showSatellite] input')" 40
 js "document.querySelector('.layer-row[data-layer=showSatellite] input').click()" >/dev/null
 wait_for "$MAP.getLayer('satellite')" 40

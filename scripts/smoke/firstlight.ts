@@ -36,7 +36,7 @@ async function run(vp: 'desktop' | 'phone') {
   await tab.navigate(`${BASE}/`);
   await tab.until('window.__scape && document.querySelector(".tabs button")', 30_000, 250);
   // Midsummer noon, so the day's first and last light both fall inside it.
-  await js(`(() => { const s = window.__scape; s.world.getState().setTz('Europe/Zurich'); s.world.getState().setTime(Date.UTC(2026, 5, 21, 11)); const u = s.ui.getState(); u.setPanelTab('Tools'); u.setPanelCollapsed(false); s.lightProbe.getState().setPoint(${JSON.stringify(POINT)}); return 1; })()`);
+  await js(`(() => { const s = window.__scape; s.world.getState().setTz('Europe/Zurich'); s.world.getState().setTime(Date.UTC(2026, 5, 21, 11)); const u = s.ui.getState(); u.setPanelTab('Sky'); u.setPanelCollapsed(false); s.lightProbe.getState().setPoint(${JSON.stringify(POINT)}); return 1; })()`);
   // The coarse skyline answers first; check against the refined one.
   await tab.until('window.__scape.lightProbe.getState().light && window.__scape.lightProbe.getState().horizon?.refined', 120_000, 250);
   await js('(() => { document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); document.querySelector("[data-probe=first]")?.scrollIntoView({ block: "center" }); return 1; })()');

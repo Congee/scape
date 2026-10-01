@@ -90,7 +90,7 @@ const pin = (p: { lat: number; lng: number }) => `window.__scape.world.getState(
 /** Night tab open with the sky group expanded and in view. */
 const openNight = () =>
   ev(`(async () => {
-  const u = window.__scape.ui; u.getState().setPanelTab('Night'); u.setState({ panelCollapsed: false });
+  const u = window.__scape.ui; u.getState().setPanelTab('Sky'); u.setState({ panelCollapsed: false });
   for (let i = 0; i < 40 && !document.querySelector('[data-sky]'); i++) await new Promise((r) => setTimeout(r, 100));
   const d = document.querySelector('[data-sky]')?.closest('details'); if (!d) return false;
   d.open = true; d.scrollIntoView({ block: 'start' }); return true;
@@ -155,7 +155,7 @@ for (const v of views) {
 await tab.viewport(1400, 900);
 
 // 2. Offline tab: Check LAADS lists the year from the stub.
-await ev(`window.__scape.ui.getState().setPanelTab('Offline')`);
+await ev(`window.__scape.ui.getState().setPanelTab('Map')`);
 const tabNow = await ev<string>('window.__scape.ui.getState().panelTab');
 await tab.until(`[...document.querySelectorAll('button')].some((b) => /Check LAADS|Recheck LAADS/.test(b.textContent))`, 20_000);
 await ev(`(() => {
@@ -168,7 +168,7 @@ await ev(`[...document.querySelectorAll('button')].find((b) => /Check LAADS|Rech
 const listed = await tab.until<string>(`(() => { const l = window.__scape.offline.getState().viirs.listings[${YEAR}]; return l ? l.join(' ') : ''; })()`, 20_000);
 const chips = await ev<string>(`[...document.querySelectorAll('.viirs-need [data-tile]')].map((c) => c.dataset.tile + ':' + c.className.replace('chip ', '')).join(' ')`);
 await tab.shot(join(shots, 'desktop-offline-listing.png'));
-check('Offline tab; stubbed LAADS listing stored', tabNow === 'Offline' && stubbed >= 1 && listed === LISTED.join(' ') && chips.includes('h18v03:viirs-missing') && chips.includes('h17v04:viirs-ocean'), `tab ${tabNow}, ${stubbed} stubbed, chips ${chips}`);
+check('Map tab; stubbed LAADS listing stored', tabNow === 'Map' && stubbed >= 1 && listed === LISTED.join(' ') && chips.includes('h18v03:viirs-missing') && chips.includes('h17v04:viirs-ocean'), `tab ${tabNow}, ${stubbed} stubbed, chips ${chips}`);
 
 // 3. Import the synthetic tiles through the Offline file input.
 const files = readdirSync(tiles)

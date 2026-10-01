@@ -41,7 +41,7 @@ night() { # camera, instant, moon rule
     ab open "$BASE/?camera=$1&t=$2" >/dev/null 2>&1 && wait_for 'window.__scape && document.querySelector(".tabs button")' && break
     sleep 1
   done
-  js "(() => { const s = window.__scape; s.settings.getState().update({ mwMoonRule: '$3' }); s.ui.getState().setPanelTab('Night'); s.ui.setState({ panelCollapsed: false }); return 'ok'; })()" >/dev/null
+  js "(() => { const s = window.__scape; s.settings.getState().update({ mwMoonRule: '$3' }); s.ui.getState().setPanelTab('Sky'); s.ui.setState({ panelCollapsed: false }); return 'ok'; })()" >/dev/null
   wait_for 'document.querySelector(".frame.night details")'
   js '(() => { const ds = document.querySelectorAll(".frame.night > details"); ds[1].open = true; ds[1].scrollIntoView({ block: "start" }); return "ok"; })()' >/dev/null
   sleep 0.5

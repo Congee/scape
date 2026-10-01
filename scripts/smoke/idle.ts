@@ -93,7 +93,7 @@ const HIDE = (hidden: boolean) =>
 
 type Scene = (typeof Scene)[keyof typeof Scene];
 
-const Tabs = ['Timeline', 'Geodetics', 'Frame', 'Night', 'Tools', 'Find', 'Markers', 'Models', 'Layers', 'Offline'] as const;
+const Tabs = ['Plan', 'Frame', 'Sky', 'Weather', 'Map', 'Markers', 'Models'] as const;
 type TabName = (typeof Tabs)[number];
 
 const Route = { Map: '', Viewfinder: 'viewfinder' } as const;
@@ -115,21 +115,21 @@ interface Case {
 
 const cases: Case[] = [
   ...Tabs.flatMap((tab) => [Route.Map, Route.Viewfinder].map((route) => ({ scene: Scene.Rotterdam, route, tab }))),
-  ...[Scene.RotterdamDay, Scene.Manhattan, Scene.Zermatt, Scene.Night].flatMap((scene) => [Route.Map, Route.Viewfinder].map((route) => ({ scene, route, tab: 'Timeline' as TabName }))),
-  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Timeline', phone: true },
+  ...[Scene.RotterdamDay, Scene.Manhattan, Scene.Zermatt, Scene.Night].flatMap((scene) => [Route.Map, Route.Viewfinder].map((route) => ({ scene, route, tab: 'Plan' as TabName }))),
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Plan', phone: true },
   { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', phone: true },
-  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Timeline', input: Input.Drag },
-  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Timeline', input: Input.Zoom },
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Plan', input: Input.Drag },
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Plan', input: Input.Zoom },
   // Scrubs start from a pinned instant, so every run sweeps the same sky.
-  { scene: Scene.RotterdamDay, route: Route.Map, tab: 'Timeline', input: Input.Scrub },
+  { scene: Scene.RotterdamDay, route: Route.Map, tab: 'Plan', input: Input.Scrub },
   { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', input: Input.Drag },
   { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', input: Input.Zoom },
   { scene: Scene.RotterdamDay, route: Route.Viewfinder, tab: 'Frame', input: Input.Scrub },
-  ...[Scene.Rotterdam, Scene.Zermatt, Scene.Night].flatMap((scene) => [Route.Map, Route.Viewfinder].map((route) => ({ scene, route, tab: (route === Route.Map ? 'Timeline' : 'Frame') as TabName, hidden: true }))),
-  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Night', hidden: true },
-  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Tools', hidden: true },
+  ...[Scene.Rotterdam, Scene.Zermatt, Scene.Night].flatMap((scene) => [Route.Map, Route.Viewfinder].map((route) => ({ scene, route, tab: (route === Route.Map ? 'Plan' : 'Frame') as TabName, hidden: true }))),
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Sky', hidden: true },
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Weather', hidden: true },
   // The one real minute tick, under a low sun: its budget allows a mask re-stamp.
-  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Timeline', clock: '2026-06-21T19:00Z' }
+  { scene: Scene.Rotterdam, route: Route.Map, tab: 'Plan', clock: '2026-06-21T19:00Z' }
 ];
 
 const label = (c: Case) => `${c.scene.name} · ${c.route || 'map'} · ${c.tab}${c.phone ? ' · phone' : ''}${c.input ? ` · after ${c.input}` : ''}${c.hidden ? ' · hidden' : ''}${c.clock ? ` · live tick ${c.clock}` : ''}`;
@@ -236,7 +236,7 @@ async function measure(c: Case): Promise<Row> {
   const q = [`camera=${c.scene.camera}`, `target=${c.scene.target}`, `z=${c.scene.z}`, ...(t ? [`t=${t}`] : [])].join('&');
   await tab.send('Emulation.setDeviceMetricsOverride', c.phone ? { width: 390, height: 844, deviceScaleFactor: 3, mobile: true } : { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
   await tab.eval(c.clock ? `localStorage.setItem('scape.idle.clockAt', '${Date.parse(c.clock)}')` : `localStorage.removeItem('scape.idle.clockAt')`).catch(() => {});
-  await tab.eval(`localStorage.setItem('scape.ui', JSON.stringify({ state: { panelTab: ${JSON.stringify(c.tab === 'Models' ? 'Markers' : c.tab)}, panelCollapsed: false, markersView: ${JSON.stringify(c.tab === 'Models' ? 'Models' : 'Markers')} }, version: 0 }))`).catch(() => {});
+  await tab.eval(`localStorage.setItem('scape.ui', JSON.stringify({ state: { panelTab: ${JSON.stringify(c.tab === 'Models' ? 'Markers' : c.tab)}, panelCollapsed: false, markersView: ${JSON.stringify(c.tab === 'Models' ? 'Models' : 'Markers')} }, version: 1 }))`).catch(() => {});
   await tab.navigate(`${BASE}/${c.route}?${q}`);
   await tab.until('window.__scape?.idle', 30_000);
   // A pinned instant persists live=false; a scene without one is the live clock.

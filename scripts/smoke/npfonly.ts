@@ -49,7 +49,7 @@ const views = [
 type Read = { stars: string; kv: string; pxInput: boolean; sky: string; missing: string; missingButton: boolean; readout: boolean; panel: string; fits: boolean };
 const read = () =>
   ev<Read | null>(`(async () => {
-  const u = window.__scape.ui; u.getState().setPanelTab('Night'); u.setState({ panelCollapsed: false });
+  const u = window.__scape.ui; u.getState().setPanelTab('Sky'); u.setState({ panelCollapsed: false });
   for (let i = 0; i < 40 && !document.querySelector('input[aria-label="Trail duration, minutes"]'); i++) await new Promise((r) => setTimeout(r, 100));
   const st = document.querySelector('input[aria-label="Trail duration, minutes"]')?.closest('details');
   const sk = document.querySelector('[data-sky]')?.closest('details');
@@ -100,7 +100,7 @@ const run = async (sky: 'NoData' | 'Ready') => {
 await run('NoData');
 
 // Import the synthetic tiles through the Offline file input.
-await ev(`window.__scape.ui.getState().setPanelTab('Offline')`);
+await ev(`window.__scape.ui.getState().setPanelTab('Map')`);
 await tab.until(`!!document.querySelector('input[aria-label="Import VNP46A4 tiles"]')`, 20_000);
 const files = readdirSync(tiles)
   .filter((f) => f.endsWith('.h5'))

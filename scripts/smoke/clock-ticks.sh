@@ -55,7 +55,7 @@ pass() { # viewport label, width, height
   js '(() => { window.__scape.world.getState().setNow(); return "ok"; })()' >/dev/null
 
   # Away from the Timeline, live time moves only on the minute.
-  js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Geodetics"); document.activeElement?.blur(); return "ok"; })()' >/dev/null
+  js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Plan"); document.activeElement?.blur(); return "ok"; })()' >/dev/null
   ab mouse move 1 1 >/dev/null
   sleep 0.3
   local c0 c1 t0 t1
@@ -68,7 +68,7 @@ pass() { # viewport label, width, height
   check "$tag no tick within the minute" "$([ "$t0" = "$t1" ] || [ "$c0" != "$c1" ] && echo 1 || echo 0)" "time $([ "$t0" = "$t1" ] && echo held || echo 'rolled over')"
   ab screenshot "$OUT/$tag-live-minutes.png" >/dev/null
 
-  js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Timeline"); u.setPanelCollapsed(false); return "ok"; })()' >/dev/null
+  js '(() => { const u = window.__scape.ui.getState(); u.setPanelTab("Plan"); u.setPanelCollapsed(false); return "ok"; })()' >/dev/null
   sleep 0.3
   c0=$(hm)
   check "$tag Timeline tab shows minutes" "$([ "$(colons "$c0")" = 1 ] && echo 1 || echo 0)" "$c0"

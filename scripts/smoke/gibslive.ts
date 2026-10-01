@@ -40,7 +40,7 @@ const go = async (u: string) => {
 
 const openNight = () =>
   ev(`(async () => {
-  const u = window.__scape.ui; u.getState().setPanelTab('Night'); u.setState({ panelCollapsed: false });
+  const u = window.__scape.ui; u.getState().setPanelTab('Sky'); u.setState({ panelCollapsed: false });
   for (let i = 0; i < 40 && !document.querySelector('[data-sky]'); i++) await new Promise((r) => setTimeout(r, 100));
   const d = document.querySelector('[data-sky]')?.closest('details'); if (!d) return false;
   d.open = true; d.scrollIntoView({ block: 'start' }); return true;
@@ -84,7 +84,7 @@ await go(url('cherry'));
 await Bun.sleep(3000);
 const idleStatus = await ev<string>('window.__scape.skyglow.getState().camera.status');
 const tabNow = await ev<string>('window.__scape.ui.getState().panelTab');
-check('Night tab closed: sky Idle, no GIBS requests', idleStatus === 'Idle' && tabNow !== 'Night' && gibsRequests() === 0, `tab ${tabNow}, status ${idleStatus}, ${gibsRequests()} GIBS requests`);
+check('Sky tab closed: sky Idle, no GIBS requests', idleStatus === 'Idle' && tabNow !== 'Sky' && gibsRequests() === 0, `tab ${tabNow}, status ${idleStatus}, ${gibsRequests()} GIBS requests`);
 
 // 2. Live fetch at each site, desktop.
 const bortles: Record<string, number> = {};

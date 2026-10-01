@@ -200,7 +200,7 @@ three_d() { # viewport tag: day/night drapes on 3D terrain; slope and aspect say
   set_s '{ showDayNight: true, showElevation: true, showSlope: true, terrain3d: true }'
   js '(() => { window.__scapeMap.jumpTo({ pitch: 60, bearing: 200 }); return "ok"; })()' >/dev/null
   settle
-  tab Layers
+  tab Map
   sleep 0.5
   ab screenshot "$OUT/$1-3d.png" >/dev/null
   local s hint; s=$(has_layer slope-tint)
@@ -212,7 +212,7 @@ three_d() { # viewport tag: day/night drapes on 3D terrain; slope and aspect say
 all_on() { # viewport tag: every layer on, idle and layout
   go "$ZERMATT" 12 "$DAY"
   set_s '{ showDayNight: true, showElevation: true, showSlope: true, showAspect: true, terrain: true, terrain3d: false }'
-  tab Layers
+  tab Map
   settle
   ab screenshot "$OUT/$1-all-layers.png" >/dev/null
   local q; q=$(quiet)

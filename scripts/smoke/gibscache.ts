@@ -39,14 +39,14 @@ const go = async () => {
 };
 const setTab = (t: string) => ev(`(() => { const u = window.__scape.ui; u.getState().setPanelTab('${t}'); u.setState({ panelCollapsed: false }); })()`);
 const openNight = async () => {
-  await setTab('Night');
+  await setTab('Sky');
   await tab.until(`(() => { const d = document.querySelector('[data-sky]')?.closest('details'); if (!d) return false; d.open = true; d.scrollIntoView({ block: 'start' }); return true; })()`, 10_000, 100);
   const ok = await tab.until(`(() => { const g = window.__scape.skyglow.getState(); return g.camera.status === 'Ready' && g.target.status === 'Ready'; })()`, 120_000);
   await Bun.sleep(500);
   return !!ok;
 };
 const openOffline = async () => {
-  await setTab('Offline');
+  await setTab('Map');
   await tab.until(`(() => { const e = document.querySelector('[data-gibs]'); if (!e) return false; e.scrollIntoView({ block: 'center' }); return true; })()`, 10_000, 100);
   await Bun.sleep(400);
 };

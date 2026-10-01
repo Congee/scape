@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the Tools tab calculators and the viewfinder rainbow.
+# Smoke test for the Frame and Weather calculators and the viewfinder rainbow.
 # Usage: scripts/smoke/extras-calc.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port and a browser with remote debugging on the CDP port.
 set -uo pipefail
@@ -63,23 +63,25 @@ put() { # fill|select, aria-label, value
   echo "could not $1 $2" >&2
 }
 
-open_tools() {
-  wait_for '[...document.querySelectorAll(".tabs button")].some((b) => b.textContent === "Tools")'
-  js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Tools")?.click(); "ok"' >/dev/null
-  wait_for 'document.querySelectorAll(".tools details").length >= 5'
+TOOLS_TAB=Frame
+open_tools() { # [tab]; Frame holds exposure, ND, time-lapse; Weather holds rainbow, clouds, tides
+  TOOLS_TAB=${1:-$TOOLS_TAB}
+  wait_for "[...document.querySelectorAll('.tabs button')].some((b) => b.textContent === '$TOOLS_TAB')"
+  js "[...document.querySelectorAll('.tabs button')].find((b) => b.textContent === '$TOOLS_TAB')?.click(); 'ok'" >/dev/null
+  wait_for 'document.querySelectorAll(".tools details").length >= 3'
   # Open every group once; the panel remembers them across tab switches.
   js 'document.querySelectorAll(".tools details").forEach((d) => { d.open = true; }); "ok"' >/dev/null
   sleep 0.3
 }
 
 kv() { # value cell after a key label inside a group
-  wait_for "document.querySelectorAll('.tools details').length >= 5" 8 || { echo "no panel ($(js 'location.href + " scape " + !!window.__scape + " mark " + !!window.__smokeMark'))"; return; }
+  wait_for "document.querySelectorAll('.tools details').length >= 3" 8 || { echo "no panel ($(js 'location.href + " scape " + !!window.__scape + " mark " + !!window.__smokeMark'))"; return; }
   js "(() => { const g = [...document.querySelectorAll('.tools details')][$1]; const k = [...g.querySelectorAll('.kv .k')].find((e) => e.textContent === '$2'); return k ? k.nextElementSibling.textContent : 'missing'; })()"
 }
 
 panel_checks() { # label
   local tag=$1
-  open_tools
+  open_tools Frame
   js 'window.__smokeMark = 1; "ok"' >/dev/null
   put select 'Exposure term to solve for' Shutter
   put fill 'Aperture, f-number' 16
@@ -112,16 +114,17 @@ panel_checks() { # label
   local shots clip card; shots=$(kv 2 Shots); clip=$(kv 2 'Clip length'); card=$(kv 2 'Card space')
   check "$tag time-lapse: 1 s over 20 min at 25 fps, 50 MB → 1200 shots, 48 s, 60 GB" "$([[ $shots == 1200* && $clip == '48.0 s' && $card == '60'*GB ]] && echo 1 || echo 0)" "$shots; $clip; card $card"
 
+  open_tools Weather
   put select 'Cloud term to solve for' Distance
   put fill 'Cloud base above the ground' 2000
   put fill 'Angle up to the cloud, degrees' 5
-  local cd; cd=$(kv 4 Distance)
+  local cd; cd=$(kv 1 Distance)
   local km; km=$(echo "$cd" | sed -E 's/ km//')
   check "$tag clouds: 2000 m at 5° → about 21 km" "$(awk -v d="$km" 'BEGIN { print (d > 19 && d < 23) ? 1 : 0 }')" "$cd"
-  local lit; lit=$(kv 4 'Stays lit until')
+  local lit; lit=$(kv 1 'Stays lit until')
   check "$tag clouds: 2000 m stays lit until sun -1.4°" "$([[ $lit == *-1.4°* ]] && echo 1 || echo 0)" "$lit"
 
-  local bow; bow=$(js "document.querySelectorAll('.tools details')[3].querySelector('summary').textContent")
+  local bow; bow=$(js "document.querySelectorAll('.tools details')[0].querySelector('summary').textContent")
   check "$tag rainbow group summary" "$([[ $bow == 'Rainbow possible'* ]] && echo 1 || echo 0)" "$bow"
   local wide; wide=$(js 'document.documentElement.scrollWidth > window.innerWidth')
   check "$tag no sideways page scroll" "$([ "$wide" = false ] && echo 1 || echo 0)" "overflow $wide"
@@ -149,6 +152,7 @@ bow_count() { # focal, orientation, instant, aim az, aim alt, screenshot → cle
 ab set viewport 1400 900 >/dev/null
 go "$BASE/viewfinder?camera=$CAM&t=$LATE&f=24"
 panel_checks desktop
+open_tools Frame
 
 # Time-lapse simulation steps the clock by the interval.
 put fill 'Interval, seconds' 60

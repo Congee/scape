@@ -44,7 +44,7 @@ go() {
 # Opens a spot, waits for the map to judge it, and prints "urban|link hrefs".
 spot() { # lat,lng
   go "$BASE/?camera=$1&z=14" 'window.__scapeMap' || { echo "load failed|"; return; }
-  js "window.__scape.ui.getState().setPanelTab('Timeline')" >/dev/null
+  js "window.__scape.ui.getState().setPanelTab('Plan')" >/dev/null
   wait_for "(() => { const u = window.__scape.mapStatus.getState().urban, p = window.__scape.world.getState().pin; return u && u.p.lat === p.lat && u.p.lng === p.lng; })()" 120
   sleep 0.5
   js '(() => { const u = window.__scape.mapStatus.getState().urban; const a = [...document.querySelectorAll("[data-testid=parking] a")]; return String(u && u.urban) + "|" + a.map((e) => e.href + (e.target === "_blank" ? "" : "!self")).join(" "); })()'

@@ -59,8 +59,8 @@ TIDES='[...document.querySelectorAll(".tools details")].find((d) => d.querySelec
 
 open_tides() { # camera
   go "$BASE/viewfinder?camera=$1&t=2026-10-15T15:00Z&f=24"
-  wait_for '[...document.querySelectorAll(".tabs button")].some((b) => b.textContent === "Tools")'
-  js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Tools")?.click(); "ok"' >/dev/null
+  wait_for '[...document.querySelectorAll(".tabs button")].some((b) => b.textContent === "Weather")'
+  js '[...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Weather")?.click(); "ok"' >/dev/null
   wait_for "$TIDES"
   js "(() => { const g = $TIDES; g.open = true; g.scrollIntoView(); return 'ok'; })()" >/dev/null
   wait_for "!$TIDES.querySelector('summary').textContent.includes('loading')" 60

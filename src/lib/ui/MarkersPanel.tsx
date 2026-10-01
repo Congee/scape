@@ -8,6 +8,7 @@ import { markersStore, useMarkers } from '@state/markers';
 import { useSettings } from '@state/settings';
 import { MarkersView, useUi } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
+import { Dial } from './Dial';
 import { downloadText } from './download';
 import { CATEGORY_COLORS } from './map/overlays';
 import { ModelsPanel } from './ModelsPanel';
@@ -83,14 +84,13 @@ function MarkerList() {
       <ul className="list marker-list">
         {sorted.map(({ m, d }) => (
           <li key={m.id} className={m.id === selectedId ? 'selected' : ''} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
-            <span className="cat" style={{ background: CATEGORY_COLORS[m.category] }} aria-hidden="true" />
+            {d > 0 ? <Dial az={bearingDeg(pin, m)} ink="marker" color={CATEGORY_COLORS[m.category]} /> : <span className="cat" style={{ background: CATEGORY_COLORS[m.category] }} aria-hidden="true" />}
             <span className="name">
               {m.name}
               {m.rating > 0 && <span className="muted"> {'★'.repeat(m.rating)}</span>}
             </span>
-            <span className="where">
-              {distance(d, units)} {compass(bearingDeg(pin, m))}
-            </span>
+            <span className="time">{distance(d, units)}</span>
+            <span className="az">{d > 0 ? `${degrees(bearingDeg(pin, m), 0)} ${compass(bearingDeg(pin, m))}` : ''}</span>
           </li>
         ))}
       </ul>

@@ -95,7 +95,7 @@ DIFF="(async () => { $HELPERS const l = await imp('/src/lib/state/lod2.ts'); let
 HASH="(async () => { $HELPERS const l = await imp('/src/lib/state/lod2.ts'); let h = 0, v = 0; for (const [, t] of [...l.lod2Store.getState().tiles].sort(([a], [b]) => (a < b ? -1 : 1))) { const w = new Uint32Array(t.mesh.pos.buffer, t.mesh.pos.byteOffset, t.mesh.pos.length); for (let i = 0; i < w.length; i++) h = (Math.imul(h, 31) + w[i]) | 0; v += w.length / 3; } return \`\${l.lod2Store.getState().tiles.size} \${v} \${(h >>> 0).toString(16)}\`; })()"
 GEOID_META="(async () => { $HELPERS const o = await imp('/src/lib/state/offline.ts'); const g = o.offlineStore.getState().geoid; return g ? \`\${g.version.replaceAll(' ', '_')} \${g.rows}x\${g.cols} \${g.fileName}\` : 'none'; })()"
 TEXT_OF() { echo "(() => document.querySelector('$1')?.textContent.trim().replaceAll(' ', '_') ?? 'absent')()"; }
-OFFLINE_TAB="(async () => { $HELPERS const u = await imp('/src/lib/state/ui.ts'); u.uiStore.getState().setPanelTab('Offline'); u.uiStore.setState({ panelCollapsed: false }); return 'ok'; })()"
+OFFLINE_TAB="(async () => { $HELPERS const u = await imp('/src/lib/state/ui.ts'); u.uiStore.getState().setPanelTab('Map'); u.uiStore.setState({ panelCollapsed: false }); return 'ok'; })()"
 INPUT='input[aria-label="Import the GSI geoid"]'
 NO_SIDEWAYS='(() => document.documentElement.scrollWidth <= innerWidth)()'
 REMOVE="(() => { window.confirm = () => true; const b = [...document.querySelectorAll('[data-geoid=\"imported\"] button')].find((e) => e.textContent.trim() === 'Remove'); b?.click(); return !!b; })()"

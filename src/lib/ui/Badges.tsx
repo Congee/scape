@@ -36,7 +36,7 @@ export function Badges() {
         </span>
       )}
       {sky && (
-        <button className="badge sky-badge" onClick={() => uiStore.getState().setPanelTab(PanelTab.Night)} title={`Sky ≈ ${sky.mag.toFixed(2)} mag/arcsec² at the camera, ${glow.source ? sourceText(glow.source) : 'VIIRS'}. ${SKY_TOOLTIP}`}>
+        <button className="badge sky-badge" onClick={() => uiStore.getState().setPanelTab(PanelTab.Sky)} title={`Sky ≈ ${sky.mag.toFixed(2)} mag/arcsec² at the camera, ${glow.source ? sourceText(glow.source) : 'VIIRS'}. ${SKY_TOOLTIP}`}>
           ✦ Bortle ≈ {sky.bortle.label}
         </button>
       )}

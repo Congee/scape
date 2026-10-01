@@ -71,7 +71,7 @@ async function walk(tab: Tab, tag: string, width: number, height: number) {
 }
 
 const tab = await Tab.open(Number(cdp), BASE);
-await tab.eval(`localStorage.setItem('scape.ui', JSON.stringify({ state: { panelTab: 'Timeline', panelCollapsed: false, markersView: 'Markers' }, version: 0 }))`).catch(() => {});
+await tab.eval(`localStorage.setItem('scape.ui', JSON.stringify({ state: { panelTab: 'Plan', panelCollapsed: false, markersView: 'Markers' }, version: 1 }))`).catch(() => {});
 await walk(tab, 'desktop', 1400, 900);
 await walk(tab, 'phone', 390, 844);
 tab.close();

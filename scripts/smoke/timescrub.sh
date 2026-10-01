@@ -130,7 +130,7 @@ pass() { # tag, width, height
   now=$(js '[...document.querySelectorAll(".datebar button")].find((b) => b.textContent.trim() === "Now")?.getAttribute("aria-pressed")')
   check "$tag set time releases Now" "$([ "$now" = false ] && echo 1 || echo 0)" "Now pressed=$now"
 
-  tab Timeline
+  tab Weather
   scrub "$tag" ".timeline .tide-row .tide-curve" "timeline tide"
   # A press on a high/low mark snaps to it.
   local mark t
@@ -143,7 +143,7 @@ pass() { # tag, width, height
   t=$(js 'window.__scape.world.getState().time')
   check "$tag tide mark snaps to its time" "$([ -n "$mark" ] && [ "$t" = "$mark" ] && echo 1 || echo 0)" "$(date -u -r $((t / 1000)) +%H:%MZ)"
   scrub "$tag" ".timeline .cloud-row .cloud-chart" "timeline cloud"
-  tab Tools
+  tab Weather
   js '(() => { const d = [...document.querySelectorAll(".tools details")].find((g) => g.querySelector("summary").textContent.startsWith("Tides")); if (d) d.open = true; return "ok"; })()' >/dev/null
   scrub "$tag" ".tools .tide-curve" "tools tide"
 
@@ -155,7 +155,7 @@ night() { # tag, width, height: Night moon chart; needs a moonlit night toward t
   local tag=$1
   ab set viewport "$2" "$3" >/dev/null
   go "$BASE/?camera=$CAMERA&t=$DAY" || return
-  tab Night
+  tab Sky
   js '(() => { document.querySelectorAll(".night details").forEach((d) => (d.open = true)); return "ok"; })()' >/dev/null
   if wait_for 'document.querySelector(".night .moon-chart svg")' 20; then
     scrub "$tag" ".night .moon-chart svg" "night moon" 5 10 25

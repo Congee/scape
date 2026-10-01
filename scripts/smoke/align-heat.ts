@@ -29,7 +29,7 @@ const S = 'window.__scape';
 // The URL the app loaded, so a module import shares its stores.
 const imp = (path: string) => `import(performance.getEntriesByType('resource').map((e) => e.name).find((n) => new URL(n).pathname === '${path}') ?? '${path}')`;
 await tab.eval(`(() => { ${S}.settings.getState().update({ terrain: true }); ${S}.world.getState().setPin(${JSON.stringify(PIN)}); ${S}.world.getState().setPin2(${JSON.stringify(TARGET)}); ${S}.world.getState().setTime(${Date.parse(TIME)}); ${S}.align.getState().update({ rangeKm: 10, cells: 64 }); window.__scapeMap.jumpTo({ center: [${PIN.lng}, ${PIN.lat}], zoom: 11, pitch: 0, bearing: 0 }); return true; })()`);
-await tab.eval(`(async () => { const ui = await ${imp('/src/lib/state/ui.ts')}; ui.uiStore.getState().setPanelTab('Find'); return true; })()`);
+await tab.eval(`(async () => { const ui = await ${imp('/src/lib/state/ui.ts')}; ui.uiStore.getState().setPanelTab('Sky'); return true; })()`);
 await tab.until(`[...document.querySelectorAll('[aria-label="Heat mode"] button')].length > 0`, 10_000);
 
 for (const mode of MODES) {

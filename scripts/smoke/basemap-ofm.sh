@@ -34,7 +34,7 @@ removeRegion() {
   js "(async()=>{const o=__scape.offline.getState(); for (const a of o.archives.filter(a=>a.name==='$NAME')) await o.remove(a.id); return __scape.offline.getState().archives.filter(a=>a.name==='$NAME').length})()"
 }
 offlineTab() {
-  poll "(()=>{[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Offline')?.click(); return !!document.querySelector('select[aria-label=\"Basemap source\"]')})()" 20
+  poll "(()=>{[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Map')?.click(); return !!document.querySelector('select[aria-label=\"Basemap source\"]')})()" 20
 }
 # Rendered labels: symbol features that carry text.
 LABELS="__scapeMap.queryRenderedFeatures().filter(f=>f.layer.type==='symbol'&&f.layer.layout?.['text-field']).length"

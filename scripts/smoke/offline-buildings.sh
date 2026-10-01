@@ -51,7 +51,7 @@ poll "!!window.__scape && __scape.offline.getState().loaded" 30
 
 # Download through the panel: terrain, with buildings on by default for a small region.
 js "(()=>{__scape.offline.getState().setDraft({west:-74.035,south:40.735,east:-73.995,north:40.76}); return 1})()" >/dev/null
-poll "(()=>{[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Offline')?.click(); return !!document.querySelector('input[aria-label=\"Name for the region\"]')})()" 20
+poll "(()=>{[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Map')?.click(); return !!document.querySelector('input[aria-label=\"Name for the region\"]')})()" 20
 ab fill "input[aria-label='Name for the region']" "$NAME" >/dev/null
 on=$(js "document.querySelector('input[type=checkbox][aria-label^=\"Download with the terrain\"]')?.checked ?? [...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('Download with the terrain'))?.querySelector('input')?.checked")
 check "buildings on by default (6 tiles)" "$([ "$on" = true ] && echo 1 || echo 0)" "checkbox=$on"
@@ -119,7 +119,7 @@ done
 ab set viewport 390 844 >/dev/null
 js "(()=>{document.querySelector('a[href=\"/\"]').click(); return 1})()" >/dev/null
 ab wait 1500 >/dev/null
-js "(()=>{[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Offline')?.click(); return 1})()" >/dev/null
+js "(()=>{[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Map')?.click(); return 1})()" >/dev/null
 ab wait 800 >/dev/null
 js "(()=>{document.querySelector('input[type=checkbox]')?.closest('section,div')?.scrollIntoView(); return 1})()" >/dev/null
 over=$(js "document.documentElement.scrollWidth > innerWidth")

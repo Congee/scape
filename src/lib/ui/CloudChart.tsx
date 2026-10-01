@@ -9,7 +9,6 @@ import { windyMapUrl, windyUrl } from '@core/weather/windy';
 import { forecastPoints, ForecastStatus, type ForecastResult } from '@data/weather';
 import { useDayData } from '@state/dayData';
 import { useSettings } from '@state/settings';
-import { PanelTab, uiStore } from '@state/ui';
 import { useWeather } from '@state/weather';
 import { useWorld } from '@state/world';
 import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
@@ -139,12 +138,12 @@ export function CloudRow() {
   if (off)
     return (
       <div className="cloud-row" data-off="">
-        <button onClick={() => uiStore.getState().setPanelTab(PanelTab.Weather)} title="Forecasts are off in Settings">
+        <div className="row" title="Forecasts are off in Settings">
           <span className="dot cloud" aria-hidden="true" />
           <span className="label">Cloud forecast</span>
           <span className="az" />
           <span className="extra">off for privacy</span>
-        </button>
+        </div>
       </div>
     );
   const r = results?.[0] ?? null;
@@ -163,7 +162,7 @@ export function CloudRow() {
   const spanText = (cls: typeof FogClass.Fog | typeof FogClass.Mist, name: string) => (spans[cls][0] >= 0 ? `${name} signs ${formatTime(spans[cls][0], tz, hour12)}–${formatTime(spans[cls][1], tz, hour12)}` : '');
   return (
     <div className="cloud-row">
-      <button onClick={() => uiStore.getState().setPanelTab(PanelTab.Weather)} title="Open the Weather tab">
+      <div className="row">
         <span className="dot cloud" aria-hidden="true" />
         <span className="label">Cloud forecast</span>
         <span className="az">{s && !empty ? pct(valueAt(s, HourlyVar.Cloud, time)) : ''}</span>
@@ -180,7 +179,7 @@ export function CloudRow() {
                 .filter(Boolean)
                 .join(' · ')}
         </span>
-      </button>
+      </div>
       {s && r?.status !== ForecastStatus.OutOfRange && <CloudChart series={s} startMs={dayStart} endMs={dayEnd} time={time} h={34} />}
       {s && <Credit>{` · ${fetchedText(r!, now)}`}</Credit>}
     </div>

@@ -1,4 +1,4 @@
-// Touch half of timescrub.sh: on the tab already on the app, a vertical swipe over the Timeline tide curve leaves the time, a tap and a sideways drag set it.
+// Touch half of timescrub.sh: on the tab already on the app, a vertical swipe over the Weather tide curve leaves the time, a tap and a sideways drag set it.
 // Usage: bun scripts/smoke/timescrub-touch.ts <cdp> <port> <tag> <shot-dir>; prints table rows, exits 1 on a failure.
 /* oxlint-disable no-await-in-loop -- touch steps are sequential */
 import { Tab } from './cdp';
@@ -24,7 +24,7 @@ const touch = (type: string, x?: number, y?: number) => tab.send('Input.dispatch
 const xAt = (b: Box, f: number) => Math.round(b.left + b.width * f);
 
 await tab.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-await tab.eval(`(() => { const u = __scape.ui.getState(); u.setPanelTab('Timeline'); u.setPanelCollapsed(false); __scape.world.getState().setTime(Date.parse('${process.env.DAY}')); return 1; })()`);
+await tab.eval(`(() => { const u = __scape.ui.getState(); u.setPanelTab('Weather'); u.setPanelCollapsed(false); __scape.world.getState().setTime(Date.parse('${process.env.DAY}')); return 1; })()`);
 for (let i = 0; i < 60 && !(await tab.eval<boolean>(`!!document.querySelector('${SEL}')`)); i++) await sleep(250);
 await tab.eval(`(() => { document.querySelector('${SEL}').scrollIntoView({ block: 'center' }); return 1; })()`);
 await sleep(300);
