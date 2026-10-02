@@ -3,7 +3,7 @@ import { formatLngLat, parseLngLat } from '@core/geo/coords';
 import { geocode, type GeocodeHit } from '@data/geocode';
 import { useSettings } from '@state/settings';
 import { worldStore } from '@state/world';
-import { Icon } from './icons';
+import { Icon } from './Icon';
 import { SearchAction, searchKey, searchStatus } from './searchKeys';
 import { useOnline } from './useOnline';
 

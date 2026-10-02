@@ -10,7 +10,7 @@ import { isoDate, localMidnight, localParts } from '@core/time/localDay';
 import { settingsStore, useSettings } from '@state/settings';
 import { horizonKeyFor, usePinSiteHeightM, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
-import { Icon } from './icons';
+import { Icon } from './Icon';
 
 const DAY_MS = 86_400_000;
 const POP_W = 268;

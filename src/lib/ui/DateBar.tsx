@@ -1,7 +1,7 @@
 import { isoDate, localParts, offsetLabel, withLocalTime } from '@core/time/localDay';
 import { useWorld, worldStore } from '@state/world';
 import { Calendar } from './Calendar';
-import { Icon } from './icons';
+import { Icon } from './Icon';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const ZONES: string[] = Intl.supportedValuesOf('timeZone');

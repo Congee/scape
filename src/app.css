@@ -147,14 +147,11 @@ textarea {
   outline-offset: 1px;
 }
 
-.icon {
+:is(.btn-icon, .search) > .icon {
   flex: none;
   width: var(--size-icon);
   height: var(--size-icon);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: var(--stroke-icon);
-  stroke-linecap: square;
+  vertical-align: middle;
 }
 
 .shell {

@@ -8,7 +8,7 @@ import { useUi } from '@state/ui';
 import { useWeather, weatherStore } from '@state/weather';
 import { useWorld } from '@state/world';
 import { Credit, WindyLink } from './CloudChart';
-import { Icon } from './icons';
+import { Icon } from './Icon';
 import { useMedia } from './useMedia';
 
 const HOUR_MS = 3_600_000;
