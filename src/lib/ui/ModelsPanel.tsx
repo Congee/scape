@@ -15,6 +15,7 @@ import { downloadBlob } from './download';
 import { ModelImportSheet } from './ModelImport';
 import { useMedia } from './useMedia';
 import { useOnline } from './useOnline';
+import { useOnMap } from './panelPage';
 
 /** Why a model stands at sea level, shown until its ground is read. */
 function GroundWarning({ id }: { id: string }) {
@@ -87,16 +88,21 @@ export function ModelsPanel() {
   const selected = models.find((m) => m.id === selectedId) ?? null;
   const sorted = models.map((m) => ({ m, d: distanceM(pin, m.anchor) })).toSorted((a, b) => a.d - b.d);
   const [files, setFiles] = useState<File[] | null>(null);
+  const onMap = useOnMap();
 
   return (
     <div className="models">
       <div className="actions">
-        <button className={picking ? 'on' : ''} aria-pressed={picking} onClick={() => ms.setPicking(!picking)} title="Then click an Overture building on the map to model it from its footprints">
-          {picking ? 'Click a building…' : 'Model this building'}
-        </button>
-        <button className={draft ? 'on' : ''} aria-pressed={!!draft} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
-          Draw a building
-        </button>
+        {onMap && (
+          <>
+            <button className={picking ? 'on' : ''} aria-pressed={picking} onClick={() => ms.setPicking(!picking)} title="Then click an Overture building on the map to model it from its footprints">
+              {picking ? 'Click a building…' : 'Model this building'}
+            </button>
+            <button className={draft ? 'on' : ''} aria-pressed={!!draft} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
+              Draw a building
+            </button>
+          </>
+        )}
         <label className="button file-pick" title="A .glb, a .gltf, or a .gltf with its .bin files picked together">
           Import GLB…
           <input
@@ -114,7 +120,7 @@ export function ModelsPanel() {
       </div>
       {files && <ModelImportSheet key={files.map((f) => f.name + f.lastModified).join('|')} files={files} onClose={() => setFiles(null)} />}
       {pickError && <p className="error">{pickError}</p>}
-      {draft && (
+      {onMap && draft && (
         <div className="model-draft">
           <p className="muted hint">Tap the map to add corners; tap the first corner to close. Drag a corner to move it, hold it to delete it. On a phone the sheet folds away while you draw; tap the tab row to bring it back.</p>
           <div className="actions">
@@ -278,6 +284,7 @@ function EdgeTable({ m, part }: { m: SavedModel; part: ModelPart }) {
 
 function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
   const units = useSettings((s) => s.units);
+  const onMap = useOnMap();
   const selectedPartId = useModels((s) => s.selectedPartId);
   const ms = modelsStore.getState();
   const patch = (p: Partial<SavedModel>) => void ms.update(m.id, p);
@@ -455,7 +462,7 @@ function ModelEditor({ m, compact }: { m: SavedModel; compact: boolean }) {
         <button onClick={targetTop} title="Put the target on this model's highest point">
           Set target to model top
         </button>
-        <button onClick={() => worldStore.getState().flyTo(m.anchor, Math.max(worldStore.getState().view.zoom, 15))}>Show on map</button>
+        {onMap && <button onClick={() => worldStore.getState().flyTo(m.anchor, Math.max(worldStore.getState().view.zoom, 15))}>Show on map</button>}
         <button className="link" onClick={() => void ms.remove(m.id)}>
           Delete model
         </button>

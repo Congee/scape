@@ -93,7 +93,7 @@ const HIDE = (hidden: boolean) =>
 
 type Scene = (typeof Scene)[keyof typeof Scene];
 
-const Tabs = ['Plan', 'Frame', 'Sky', 'Weather', 'Map', 'Markers', 'Models'] as const;
+const Tabs = ['Plan', 'Frame', 'Sky', 'Weather', 'Map', 'View', 'Markers', 'Models'] as const;
 type TabName = (typeof Tabs)[number];
 
 const Route = { Map: '', Viewfinder: 'viewfinder' } as const;
@@ -114,7 +114,8 @@ interface Case {
 }
 
 const cases: Case[] = [
-  ...Tabs.flatMap((tab) => [Route.Map, Route.Viewfinder].map((route) => ({ scene: Scene.Rotterdam, route, tab }))),
+  // Map is the map page's tab, View the viewfinder's.
+  ...Tabs.flatMap((tab) => [Route.Map, Route.Viewfinder].filter((route) => tab !== (route === Route.Map ? 'View' : 'Map')).map((route) => ({ scene: Scene.Rotterdam, route, tab }))),
   ...[Scene.RotterdamDay, Scene.Manhattan, Scene.Zermatt, Scene.Night].flatMap((scene) => [Route.Map, Route.Viewfinder].map((route) => ({ scene, route, tab: 'Plan' as TabName }))),
   { scene: Scene.Rotterdam, route: Route.Map, tab: 'Plan', phone: true },
   { scene: Scene.Rotterdam, route: Route.Viewfinder, tab: 'Frame', phone: true },
@@ -236,11 +237,15 @@ async function measure(c: Case): Promise<Row> {
   const q = [`camera=${c.scene.camera}`, `target=${c.scene.target}`, `z=${c.scene.z}`, ...(t ? [`t=${t}`] : [])].join('&');
   await tab.send('Emulation.setDeviceMetricsOverride', c.phone ? { width: 390, height: 844, deviceScaleFactor: 3, mobile: true } : { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
   await tab.eval(c.clock ? `localStorage.setItem('scape.idle.clockAt', '${Date.parse(c.clock)}')` : `localStorage.removeItem('scape.idle.clockAt')`).catch(() => {});
-  await tab.eval(`localStorage.setItem('scape.ui', JSON.stringify({ state: { panelTab: ${JSON.stringify(c.tab === 'Models' ? 'Markers' : c.tab)}, panelCollapsed: false, markersView: ${JSON.stringify(c.tab === 'Models' ? 'Models' : 'Markers')} }, version: 1 }))`).catch(() => {});
+  const panelPage = c.route === Route.Map ? 'map' : 'viewfinder';
+  const panelTabs = { map: 'Plan', viewfinder: 'View', [panelPage]: c.tab === 'Models' ? 'Markers' : c.tab };
+  await tab.eval(`localStorage.setItem('scape.ui', JSON.stringify({ state: { panelTabs: ${JSON.stringify(panelTabs)}, panelCollapsed: false, markersView: ${JSON.stringify(c.tab === 'Models' ? 'Models' : 'Markers')} }, version: 2 }))`).catch(() => {});
   await tab.navigate(`${BASE}/${c.route}?${q}`);
   await tab.until('window.__scape?.idle', 30_000);
   // A pinned instant persists live=false; a scene without one is the live clock.
   if (!t) await tab.eval('window.__scape.world.getState().setNow()');
+  // A first visit under load can still be sweeping terrain at the settle mark; the budget starts once it is in.
+  await tab.until('!Object.values(window.__scape.terrain.getState().busy).some(Boolean)', 120_000);
   await Bun.sleep(SETTLE_MS);
   if (c.input) {
     await drive(c);

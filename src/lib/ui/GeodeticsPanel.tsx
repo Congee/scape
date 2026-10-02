@@ -7,6 +7,7 @@ import { EYE_HEIGHT_M, profileKeyFor, horizonKeyFor, useTerrain } from '@state/t
 import { useWorld, worldStore } from '@state/world';
 import type { ProfileResult } from '@workers/terrain.protocol';
 import { ProfileChart } from './ProfileChart';
+import { useOnMap } from './panelPage';
 
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg)}`;
 
@@ -37,6 +38,7 @@ export function GeodeticsPanel() {
   const ground = useTerrain((s) => s.pinGroundM);
   const ground2 = useTerrain((s) => s.pin2GroundM);
   const error = useTerrain((s) => s.error);
+  const onMap = useOnMap();
   const w = worldStore.getState();
 
   const place = () => {
@@ -50,7 +52,7 @@ export function GeodeticsPanel() {
         <div className="actions">
           <button onClick={place}>Place target</button>
         </div>
-        <p className="muted hint">or Shift-click the map</p>
+        {onMap && <p className="muted hint">or Shift-click the map</p>}
         <HorizonStatus />
       </div>
     );
@@ -106,9 +108,11 @@ export function GeodeticsPanel() {
         <button onClick={() => w.swapPins()} title="Look the other way">
           Swap camera and target
         </button>
-        <button onClick={showBoth} title="Fit camera and target on the map">
-          Show both
-        </button>
+        {onMap && (
+          <button onClick={showBoth} title="Fit camera and target on the map">
+            Show both
+          </button>
+        )}
         <button className="link" onClick={() => w.setPin2(null)}>
           Remove target
         </button>

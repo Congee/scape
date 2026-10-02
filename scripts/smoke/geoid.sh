@@ -95,7 +95,9 @@ DIFF="(async () => { $HELPERS const l = await imp('/src/lib/state/lod2.ts'); let
 HASH="(async () => { $HELPERS const l = await imp('/src/lib/state/lod2.ts'); let h = 0, v = 0; for (const [, t] of [...l.lod2Store.getState().tiles].sort(([a], [b]) => (a < b ? -1 : 1))) { const w = new Uint32Array(t.mesh.pos.buffer, t.mesh.pos.byteOffset, t.mesh.pos.length); for (let i = 0; i < w.length; i++) h = (Math.imul(h, 31) + w[i]) | 0; v += w.length / 3; } return \`\${l.lod2Store.getState().tiles.size} \${v} \${(h >>> 0).toString(16)}\`; })()"
 GEOID_META="(async () => { $HELPERS const o = await imp('/src/lib/state/offline.ts'); const g = o.offlineStore.getState().geoid; return g ? \`\${g.version.replaceAll(' ', '_')} \${g.rows}x\${g.cols} \${g.fileName}\` : 'none'; })()"
 TEXT_OF() { echo "(() => document.querySelector('$1')?.textContent.trim().replaceAll(' ', '_') ?? 'absent')()"; }
-OFFLINE_TAB="(async () => { $HELPERS const u = await imp('/src/lib/state/ui.ts'); u.uiStore.getState().setPanelTab('Map'); u.uiStore.setState({ panelCollapsed: false }); return 'ok'; })()"
+# Offline lives on the map page; the rail links keep the page, so the tiles and the snapshot survive.
+OFFLINE_TAB="(async () => { $HELPERS const u = await imp('/src/lib/state/ui.ts'); u.uiStore.getState().setPanelTab('Map', 'map'); u.uiStore.setState({ panelCollapsed: false }); document.querySelector('a.rail-link[aria-label=Map]').click(); return 'ok'; })()"
+TO_VF="(() => { document.querySelector('a.rail-link[aria-label=Viewfinder]').click(); return 'ok'; })()"
 INPUT='input[aria-label="Import the GSI geoid"]'
 NO_SIDEWAYS='(() => document.documentElement.scrollWidth <= innerWidth)()'
 REMOVE="(async () => { const b = [...document.querySelectorAll('[data-geoid=\"imported\"] button')].find((e) => e.textContent.trim() === 'Remove'); b?.click(); await new Promise(requestAnimationFrame); const y = document.querySelector('[data-geoid=\"imported\"] .confirm .btn.danger'); y?.click(); return !!y; })()"
@@ -134,6 +136,7 @@ meta=$(js "$GEOID_META")
 status=$(js "$(TEXT_OF '[data-geoid="imported"]')")
 ab screenshot "$OUT/offline-imported.png" >/dev/null
 check "Offline: import shows the grid's status" "$([[ $meta == *60x60* ]] && [[ $status == *GSIGEO2011* ]] && echo 1 || echo 0)" "store $meta; panel ${status//_/ }"
+js "$TO_VF" >/dev/null
 
 # 5. Tokyo's tiles re-place on the grid, exactly $OFFSET m lower.
 wait_for "$(settled all)" 120
@@ -163,6 +166,7 @@ js "$OFFLINE_TAB" >/dev/null
 wait_for "document.querySelector('[data-geoid=\"imported\"]')" 20
 js "$REMOVE" >/dev/null
 wait_for "document.querySelector('[data-geoid=\"none\"]')" 40
+js "$TO_VF" >/dev/null
 wait_for "$(settled none)" 120
 read -r n v lo hi en <<<"$(js "$DIFF")"
 note=$(js "$(TEXT_OF '[data-geoid-note]')")

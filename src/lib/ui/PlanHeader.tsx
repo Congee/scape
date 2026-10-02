@@ -2,6 +2,7 @@ import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
 import { height } from '@core/format';
 import { formatLngLat } from '@core/geo/coords';
+import type { LngLat } from '@core/geo/geodesy';
 import { formatDate, formatTime } from '@core/time/format';
 import { useDayData } from '@state/dayData';
 import { libraryStore, useLibrary } from '@state/library';
@@ -15,6 +16,16 @@ import { phaseLightness, phaseStep } from './dayPhase';
 const NEAR_DEG = 0.0005;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+/** Name of the saved location at `p`, if any. */
+export function useSavedName(p: LngLat | null): string | undefined {
+  const loaded = useLibrary((s) => s.loaded);
+  const name = useLibrary((s) => (p ? s.locations.find((l) => Math.abs(l.lat - p.lat) < NEAR_DEG && Math.abs(l.lng - p.lng) < NEAR_DEG)?.name : undefined));
+  useEffect(() => {
+    if (!loaded) void libraryStore.getState().load().catch(() => {});
+  }, [loaded]);
+  return name;
+}
+
 /** Place and date: the saved location's name, else the coordinates. */
 export function PlaceBand() {
   const pin = useWorld((s) => s.pin);
@@ -24,11 +35,7 @@ export function PlaceBand() {
   const format = useSettings((s) => s.coordFormat);
   const units = useSettings((s) => s.units);
   const ground = useTerrain((s) => s.pinGroundM);
-  const loaded = useLibrary((s) => s.loaded);
-  const saved = useLibrary((s) => s.locations.find((l) => Math.abs(l.lat - pin.lat) < NEAR_DEG && Math.abs(l.lng - pin.lng) < NEAR_DEG)?.name);
-  useEffect(() => {
-    if (!loaded) void libraryStore.getState().load().catch(() => {});
-  }, [loaded]);
+  const saved = useSavedName(pin);
   const coords = formatLngLat(pin, format);
   const parts = [formatDate(time, tz), formatTime(time, tz, hour12), saved ? coords : null, ground == null || Number.isNaN(ground) ? null : height(ground, units)];
   return (

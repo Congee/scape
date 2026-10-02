@@ -6,6 +6,7 @@ import { useLightProbe } from '@state/lightProbe';
 import { useSettings } from '@state/settings';
 import { usePinSiteHeightM } from '@state/terrain';
 import { usePlanTime, useWorld } from '@state/world';
+import { useOnMap } from './panelPage';
 
 const wrap360 = (d: number) => ((d % 360) + 360) % 360;
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg, 2)}`;
@@ -83,13 +84,16 @@ export function LightPointTools() {
   const pin2 = useWorld((s) => s.pin2);
   const hour12 = useSettings((s) => s.hour12);
   const l = p.light;
+  const onMap = useOnMap();
   const at = (ms: number | null) => (ms !== null ? formatTime(ms, tz, hour12) : '—');
   return (
     <>
       <div className="tool-row">
-        <button onClick={() => p.setPicking(!p.picking)} aria-pressed={p.picking}>
-          {p.picking ? 'Click the map…' : 'Pick on map'}
-        </button>
+        {onMap && (
+          <button onClick={() => p.setPicking(!p.picking)} aria-pressed={p.picking}>
+            {p.picking ? 'Click the map…' : 'Pick on map'}
+          </button>
+        )}
         <button disabled={!pin2} onClick={() => pin2 && p.setPoint(pin2)}>
           Use target
         </button>

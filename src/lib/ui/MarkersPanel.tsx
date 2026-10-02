@@ -12,6 +12,7 @@ import { Dial } from './Dial';
 import { downloadText } from './download';
 import { CATEGORY_COLORS } from './map/overlays';
 import { ModelsPanel } from './ModelsPanel';
+import { useOnMap } from './panelPage';
 
 const CATEGORIES = Object.values(MarkerCategory);
 const SHAPES = Object.values(MarkerShape);
@@ -41,6 +42,7 @@ function MarkerList() {
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const units = useSettings((s) => s.units);
+  const onMap = useOnMap();
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
@@ -70,10 +72,14 @@ function MarkerList() {
   return (
     <div className="markers">
       <div className="actions">
-        <button className={placing ? 'on' : ''} aria-pressed={placing} onClick={() => ms.setPlacing(!placing)} title="Then click the map where the marker goes (or Alt-click the map any time)">
-          {placing ? 'Click the map…' : 'Add by clicking the map'}
-        </button>
-        <button onClick={() => addAt(worldStore.getState().view.center)}>Add at map centre</button>
+        {onMap && (
+          <>
+            <button className={placing ? 'on' : ''} aria-pressed={placing} onClick={() => ms.setPlacing(!placing)} title="Then click the map where the marker goes (or Alt-click the map any time)">
+              {placing ? 'Click the map…' : 'Add by clicking the map'}
+            </button>
+            <button onClick={() => addAt(worldStore.getState().view.center)}>Add at map centre</button>
+          </>
+        )}
         {pin2 && <button onClick={() => addAt(pin2)}>Add at target</button>}
       </div>
       {selected && <MarkerEditor m={selected} />}
@@ -120,6 +126,7 @@ function MarkerEditor({ m }: { m: SavedMarker }) {
   const ms = markersStore.getState();
   const patch = (p: Partial<SavedMarker>) => void ms.save({ ...m, ...p });
   const shape = m.shape ?? MarkerShape.Bar;
+  const onMap = useOnMap();
   return (
     <div className="kv">
       <span className="k">Name</span>
@@ -199,7 +206,7 @@ function MarkerEditor({ m }: { m: SavedMarker }) {
         <button onClick={() => worldStore.getState().setPin({ lat: m.lat, lng: m.lng })} title="Move the camera to this marker">
           Camera here
         </button>
-        <button onClick={() => worldStore.getState().flyTo(m, Math.max(worldStore.getState().view.zoom, 13))}>Show on map</button>
+        {onMap && <button onClick={() => worldStore.getState().flyTo(m, Math.max(worldStore.getState().view.zoom, 13))}>Show on map</button>}
         <button className="link" onClick={() => void ms.remove(m.id)}>
           Delete
         </button>

@@ -15,6 +15,7 @@ import { AlpenglowSection } from './Alpenglow';
 import { CloudLayerControls } from './CloudLayerControls';
 import { Sightlines } from './Sightlines';
 import { Credit, fetchedText, WindyLink, fogAt, missingText, noDataAt, useForecast } from './CloudChart';
+import { useOnMap } from './panelPage';
 
 /** Latest run start of a single-domain model; blends report none. */
 function useModelRun(model: WeatherModel, on: boolean): { ms: number | null; now: number } | undefined {
@@ -33,6 +34,7 @@ function useModelRun(model: WeatherModel, on: boolean): { ms: number | null; now
 }
 
 export function WeatherPanel() {
+  const onMap = useOnMap();
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const time = useWorld((s) => s.time);
@@ -75,7 +77,7 @@ export function WeatherPanel() {
       {pin2 && <Card title="Target" at={pin2} result={loading ? undefined : (results?.[1] ?? null)} time={time} now={now} onRetry={retry} />}
       <Sightlines />
       <AlpenglowSection />
-      <CloudLayerControls />
+      {onMap && <CloudLayerControls />}
       <Credit />
     </div>
   );

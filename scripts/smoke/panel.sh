@@ -138,6 +138,42 @@ wide desktop
 tab Plan
 ab screenshot "$OUT/panel-1600.png" >/dev/null
 
+# Viewfinder: View replaces Map, its toggles drive their flags, and each page keeps its own tab.
+VF="$BASE/viewfinder?camera=51.9225,4.4792&target=51.9055,4.4886&t=2026-06-21T19:00Z"
+vfgo() {
+  ab open "$VF" >/dev/null
+  wait_for 'window.__scape && document.querySelector("[role=tablist]")' 80
+}
+vfrow() { # tag
+  local r; r=$(js '(() => { const t = [...document.querySelectorAll(".tablist [role=tab]")]; return `${t.length} ${new Set(t.map((b) => b.offsetTop)).size} ${t.map((b) => b.textContent).join(",")}`; })()')
+  check "$1 viewfinder six tabs on one row, View for Map" "$([[ $r == '6 1 Plan,Frame,Sky,Weather,View,Markers' ]] && echo 1 || echo 0)" "$r"
+}
+# An earlier run's viewfinder tab persists; no name falls back to the page default.
+js "(() => { window.__scape.ui.getState().setPanelTab('', 'viewfinder'); return 'ok'; })()" >/dev/null
+tab Frame
+vfgo
+vfrow desktop
+t=$(js '`${document.querySelector("[role=tab][aria-selected=true]")?.textContent} ${document.querySelectorAll(".vf-tools").length}`')
+check "viewfinder opens on View, no old tool strip" "$([ "$t" = 'View 0' ] && echo 1 || echo 0)" "$t"
+# Started here and polled: one long eval outlasts the agent-browser read timeout under load. Timeouts, not rAF: the tab may be hidden.
+js '(() => { window.__flags = null; (async () => { const c = window.__scape.composition, frame = () => new Promise((r) => setTimeout(r, 50)); const bs = [...document.querySelectorAll("#ptabpanel button[data-flag]:not(:disabled)")]; const bad = []; for (const b of bs) { const k = b.dataset.flag, v = c.getState()[k]; b.click(); await frame(); const ok = c.getState()[k] === !v && b.getAttribute("aria-pressed") === String(!v); b.click(); await frame(); if (!(ok && c.getState()[k] === v)) bad.push(k); } window.__flags = `${bs.length} ${bad.join(",") || "ok"}`; })(); return "ok"; })()' >/dev/null
+flags=$(wait_for 'window.__flags' 120 >/dev/null; js 'window.__flags')
+check "every View toggle flips its own flag" "$([[ $flags =~ ^1[0-9]\ ok$ ]] && echo 1 || echo 0)" "$flags"
+tab Sky
+ab open "$BASE/?camera=$CAMERA&t=$DAY" >/dev/null
+wait_for 'window.__scape && document.querySelector("[role=tablist]")' 80
+mp=$(js 'document.querySelector("[role=tab][aria-selected=true]")?.textContent')
+tab Map
+vfgo
+vp=$(js 'document.querySelector("[role=tab][aria-selected=true]")?.textContent')
+check "each page keeps its own tab" "$([ "$mp|$vp" = 'Frame|Sky' ] && echo 1 || echo 0)" "map $mp, viewfinder $vp"
+tab Markers
+wait_for 'document.querySelector("#ptabpanel .markers")' 20
+mo=$(js '[...document.querySelectorAll("#ptabpanel button")].filter((b) => /map centre|clicking the map|Show on map/.test(b.textContent)).length')
+check "map-only controls absent on the viewfinder" "$([ "$mo" = 0 ] && echo 1 || echo 0)" "$mo found"
+tab View
+ab screenshot "$OUT/panel-vf-1600.png" >/dev/null
+
 ab set viewport 390 844 >/dev/null
 go
 row phone
@@ -157,6 +193,13 @@ c=$(js '`${window.__scape.ui.getState().panelCollapsed} ${!!document.querySelect
 check "phone expand shows the body again" "$([ "$c" = 'false true' ] && echo 1 || echo 0)" "$c"
 tab Plan
 ab screenshot "$OUT/panel-390.png" >/dev/null
+vfgo
+vfrow phone
+for t in View Sky; do
+  tab "$t"
+  wide "phone viewfinder $t"
+done
+ab screenshot "$OUT/panel-vf-390.png" >/dev/null
 ab set viewport 1400 900 >/dev/null
 
 [ "$BRAVE" = 1 ] && brave_stop "$PROFILE" && rm -rf "$PROFILE"

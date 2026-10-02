@@ -11,6 +11,7 @@ import { useWorld, worldStore } from '@state/world';
 import { HeatMode } from '@workers/align.protocol';
 import { Dial } from './Dial';
 import { downloadText } from './download';
+import { useOnMap } from './panelPage';
 
 const BODY_LABEL: Record<SkyBody, string> = { Sun: 'Sun', Moon: 'Moon', Gc: 'Galactic Centre' };
 
@@ -75,6 +76,7 @@ export function FindPanel() {
   const error = useFinder((s) => s.error);
   const resultPin = useFinder((s) => s.pin);
   const a = useAlign();
+  const onMap = useOnMap();
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
   const tz = useWorld((s) => s.tz);
@@ -235,136 +237,140 @@ export function FindPanel() {
       </ul>
       {!running && hits.length === 0 && progress > 0 && <p className="muted hint">Nothing matched; widen the window, the date range or the sky filter.</p>}
 
-      <h3>Visibility &amp; alignment</h3>
-      <div className="seg" role="group" aria-label="Heat mode">
-        {MODES.map((m) => (
-          <button key={m} className={a.mode === m ? 'on' : ''} onClick={() => align.update({ mode: m })}>
-            {MODE_LABEL[m]}
-          </button>
-        ))}
-      </div>
-      <p className="muted hint">{MODE_HELP[a.mode]}</p>
-      {a.mode !== HeatMode.Off && (
+      {onMap && (
         <>
-          {a.mode !== HeatMode.Viewshed && (
-            <div className="seg" role="group" aria-label="Body for the heat layer">
-              {BODIES.map((b) => (
-                <button key={b} className={a.body === b ? 'on' : ''} onClick={() => align.update({ body: b })}>
-                  {BODY_LABEL[b]}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="kv">
-            {needsTarget && (
-              <>
-                <span className="k">Tolerance</span>
-                <b className="v">
-                  <input type="number" min={0.05} max={20} step={0.05} value={a.toleranceDeg} onChange={(e) => align.update({ toleranceDeg: num(e.target.value, 1) })} aria-label="Angular tolerance, degrees" />
-                  <span className="muted">°</span>
-                </b>
-                <span className="k">Window</span>
-                <b className="v">
-                  <input type="number" min={1} max={240} step={1} value={a.windowMin} onChange={(e) => align.update({ windowMin: num(e.target.value, 20) })} aria-label="Time window, minutes" />
-                  <span className="muted">± min around the clock</span>
-                </b>
-              </>
-            )}
-            {a.mode === HeatMode.Visible && (
-              <>
-                <span className="k">Clearance</span>
-                <b className="v">
-                  <input type="number" min={0} max={45} step={0.5} value={a.minAltAboveTerrainDeg} onChange={(e) => align.update({ minAltAboveTerrainDeg: num(e.target.value, 0) })} aria-label="Minimum altitude above the terrain, degrees" />
-                  <span className="muted">° above the skyline</span>
-                </b>
-              </>
-            )}
-            <span className="k">Range</span>
-            <b className="v">
-              <input type="range" min={5} max={50} step={5} value={a.rangeKm} onChange={(e) => align.update({ rangeKm: Number(e.target.value) })} aria-label="Range, kilometres" />
-              <span className="muted"> {a.rangeKm} km</span>
-            </b>
-            <span className="k">Cells</span>
-            <b className="v">
-              <select value={a.cells} onChange={(e) => align.update({ cells: Number(e.target.value) })} aria-label="Grid cells">
-                {[32, 64, 96].map((n) => (
-                  <option key={n} value={n}>
-                    {n} × {n}
-                  </option>
-                ))}
-              </select>
-            </b>
-            <span className="k">Opacity</span>
-            <b className="v">
-              <input type="range" min={0.1} max={1} step={0.05} value={a.opacity} onChange={(e) => align.update({ opacity: Number(e.target.value) })} aria-label="Heat layer opacity" />
-              <span className="muted"> {Math.round(a.opacity * 100)}%</span>
-            </b>
-          </div>
-          {needsTarget && (
-            <details className="offset">
-              <summary>Offset from the target</summary>
-              <div className="kv">
-                <span className="k">Right</span>
-                <b className="v">
-                  <input type="number" step={0.1} value={a.offsetAzDeg} onChange={(e) => align.update({ offsetAzDeg: num(e.target.value, 0) })} aria-label="Offset right, degrees" />
-                  <span className="muted">°</span>
-                </b>
-                <span className="k">Up</span>
-                <b className="v">
-                  <input type="number" step={0.1} value={a.offsetAltDeg} onChange={(e) => align.update({ offsetAltDeg: num(e.target.value, 0) })} aria-label="Offset up, degrees" />
-                  <span className="muted">°</span>
-                </b>
-              </div>
-            </details>
-          )}
-          <p className="muted hint">
-            {!s.terrain
-              ? 'Elevation data is switched off in Settings.'
-              : needsTarget && !pin2
-                ? 'Place a target location to align.'
-                : a.computing
-                  ? 'Computing…'
-                  : a.result
-                    ? `${a.result.grid.n} × ${a.result.grid.n} cells in ${(a.result.elapsedMs / 1000).toFixed(1)} s · click the map to inspect a point`
-                    : 'No heat layer yet.'}
-          </p>
-          {a.error && <p className="error">{a.error}</p>}
-          {c && (
-            <div className="candidate">
-              <div className="kv">
-                <span className="k">From here</span>
-                <b className="v">
-                  {distance(c.distM, s.units)} at {degrees(c.bearingDeg, 0)} {compass(c.bearingDeg)}
-                </b>
-                <span className="k">Ground</span>
-                <b className="v">
-                  {Math.round(c.groundM)} m <span className="muted">· target {signed(c.landmarkAngleDeg)} up</span>
-                </b>
-                <span className="k">Separation</span>
-                <b className="v">{Number.isFinite(c.sepDeg) ? degrees(c.sepDeg) : '—'}</b>
-                <span className="k">Moment</span>
-                <b className="v">
-                  {formatDateTime(c.bestMs, tz, s.hour12)} <span className="muted">· {offset}</span>
-                </b>
-              </div>
-              {c.blocked && <p className="error">The target is behind terrain from here.</p>}
-              <div className="actions">
-                <button className="on" onClick={() => align.applyCandidate()}>
-                  Move camera here
-                </button>
-                <button onClick={() => align.clearCandidate()}>Clear</button>
-              </div>
-            </div>
-          )}
-          <ul className="legend">
-            {LEGEND[a.mode].map((l) => (
-              <li key={l.label}>
-                <i style={{ background: l.color }} />
-                {l.label}
-              </li>
+          <h3>Visibility &amp; alignment</h3>
+          <div className="seg" role="group" aria-label="Heat mode">
+            {MODES.map((m) => (
+              <button key={m} className={a.mode === m ? 'on' : ''} onClick={() => align.update({ mode: m })}>
+                {MODE_LABEL[m]}
+              </button>
             ))}
-          </ul>
-          <p className="muted hint">Terrain data is ~30 m; confirm the framing in the viewfinder.</p>
+          </div>
+          <p className="muted hint">{MODE_HELP[a.mode]}</p>
+          {a.mode !== HeatMode.Off && (
+            <>
+              {a.mode !== HeatMode.Viewshed && (
+                <div className="seg" role="group" aria-label="Body for the heat layer">
+                  {BODIES.map((b) => (
+                    <button key={b} className={a.body === b ? 'on' : ''} onClick={() => align.update({ body: b })}>
+                      {BODY_LABEL[b]}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="kv">
+                {needsTarget && (
+                  <>
+                    <span className="k">Tolerance</span>
+                    <b className="v">
+                      <input type="number" min={0.05} max={20} step={0.05} value={a.toleranceDeg} onChange={(e) => align.update({ toleranceDeg: num(e.target.value, 1) })} aria-label="Angular tolerance, degrees" />
+                      <span className="muted">°</span>
+                    </b>
+                    <span className="k">Window</span>
+                    <b className="v">
+                      <input type="number" min={1} max={240} step={1} value={a.windowMin} onChange={(e) => align.update({ windowMin: num(e.target.value, 20) })} aria-label="Time window, minutes" />
+                      <span className="muted">± min around the clock</span>
+                    </b>
+                  </>
+                )}
+                {a.mode === HeatMode.Visible && (
+                  <>
+                    <span className="k">Clearance</span>
+                    <b className="v">
+                      <input type="number" min={0} max={45} step={0.5} value={a.minAltAboveTerrainDeg} onChange={(e) => align.update({ minAltAboveTerrainDeg: num(e.target.value, 0) })} aria-label="Minimum altitude above the terrain, degrees" />
+                      <span className="muted">° above the skyline</span>
+                    </b>
+                  </>
+                )}
+                <span className="k">Range</span>
+                <b className="v">
+                  <input type="range" min={5} max={50} step={5} value={a.rangeKm} onChange={(e) => align.update({ rangeKm: Number(e.target.value) })} aria-label="Range, kilometres" />
+                  <span className="muted"> {a.rangeKm} km</span>
+                </b>
+                <span className="k">Cells</span>
+                <b className="v">
+                  <select value={a.cells} onChange={(e) => align.update({ cells: Number(e.target.value) })} aria-label="Grid cells">
+                    {[32, 64, 96].map((n) => (
+                      <option key={n} value={n}>
+                        {n} × {n}
+                      </option>
+                    ))}
+                  </select>
+                </b>
+                <span className="k">Opacity</span>
+                <b className="v">
+                  <input type="range" min={0.1} max={1} step={0.05} value={a.opacity} onChange={(e) => align.update({ opacity: Number(e.target.value) })} aria-label="Heat layer opacity" />
+                  <span className="muted"> {Math.round(a.opacity * 100)}%</span>
+                </b>
+              </div>
+              {needsTarget && (
+                <details className="offset">
+                  <summary>Offset from the target</summary>
+                  <div className="kv">
+                    <span className="k">Right</span>
+                    <b className="v">
+                      <input type="number" step={0.1} value={a.offsetAzDeg} onChange={(e) => align.update({ offsetAzDeg: num(e.target.value, 0) })} aria-label="Offset right, degrees" />
+                      <span className="muted">°</span>
+                    </b>
+                    <span className="k">Up</span>
+                    <b className="v">
+                      <input type="number" step={0.1} value={a.offsetAltDeg} onChange={(e) => align.update({ offsetAltDeg: num(e.target.value, 0) })} aria-label="Offset up, degrees" />
+                      <span className="muted">°</span>
+                    </b>
+                  </div>
+                </details>
+              )}
+              <p className="muted hint">
+                {!s.terrain
+                  ? 'Elevation data is switched off in Settings.'
+                  : needsTarget && !pin2
+                    ? 'Place a target location to align.'
+                    : a.computing
+                      ? 'Computing…'
+                      : a.result
+                        ? `${a.result.grid.n} × ${a.result.grid.n} cells in ${(a.result.elapsedMs / 1000).toFixed(1)} s · click the map to inspect a point`
+                        : 'No heat layer yet.'}
+              </p>
+              {a.error && <p className="error">{a.error}</p>}
+              {c && (
+                <div className="candidate">
+                  <div className="kv">
+                    <span className="k">From here</span>
+                    <b className="v">
+                      {distance(c.distM, s.units)} at {degrees(c.bearingDeg, 0)} {compass(c.bearingDeg)}
+                    </b>
+                    <span className="k">Ground</span>
+                    <b className="v">
+                      {Math.round(c.groundM)} m <span className="muted">· target {signed(c.landmarkAngleDeg)} up</span>
+                    </b>
+                    <span className="k">Separation</span>
+                    <b className="v">{Number.isFinite(c.sepDeg) ? degrees(c.sepDeg) : '—'}</b>
+                    <span className="k">Moment</span>
+                    <b className="v">
+                      {formatDateTime(c.bestMs, tz, s.hour12)} <span className="muted">· {offset}</span>
+                    </b>
+                  </div>
+                  {c.blocked && <p className="error">The target is behind terrain from here.</p>}
+                  <div className="actions">
+                    <button className="on" onClick={() => align.applyCandidate()}>
+                      Move camera here
+                    </button>
+                    <button onClick={() => align.clearCandidate()}>Clear</button>
+                  </div>
+                </div>
+              )}
+              <ul className="legend">
+                {LEGEND[a.mode].map((l) => (
+                  <li key={l.label}>
+                    <i style={{ background: l.color }} />
+                    {l.label}
+                  </li>
+                ))}
+              </ul>
+              <p className="muted hint">Terrain data is ~30 m; confirm the framing in the viewfinder.</p>
+            </>
+          )}
         </>
       )}
     </div>

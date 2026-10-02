@@ -9,7 +9,7 @@ import { markersStore, useMarkers } from '@state/markers';
 import { applyPlan, capturePlan, plansStore, usePlans } from '@state/plans';
 import { searchesStore, useSearches } from '@state/searches';
 import { useSettings } from '@state/settings';
-import { PanelTab, uiStore } from '@state/ui';
+import { PanelPage, PanelTab, uiStore } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
 import { Confirm, ConfirmAsk } from '@ui/Confirm';
 import { downloadText } from '@ui/download';
@@ -74,7 +74,7 @@ function LibraryPage() {
 
   const runSearch = (id: string, here: boolean) => {
     searchesStore.getState().apply(id, { here });
-    uiStore.getState().setPanelTab(PanelTab.Sky);
+    uiStore.getState().setPanelTab(PanelTab.Sky, PanelPage.Map);
     void navigate({ to: '/' });
   };
 

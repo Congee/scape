@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { compositionStore } from '@state/composition';
 import { orientationFor, parseInstant, parsePoint, teleconvertersFor, validateScene, viewfinderSearchFor, type SceneSearch } from '@state/urlState';
+import { PanelPage } from '@state/ui';
 import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
 import { DateBar } from '@ui/DateBar';
@@ -9,7 +10,6 @@ import { Panel, PanelExpand, usePanelClass } from '@ui/Panel';
 import { AltitudeChart } from '@ui/chart/AltitudeChart';
 import { BodyStrip } from '@ui/viewfinder/BodyStrip';
 import { Viewfinder } from '@ui/viewfinder/Viewfinder';
-import { ViewTools } from '@ui/viewfinder/ViewTools';
 
 export const Route = createFileRoute('/viewfinder')({
   validateSearch: (raw: Record<string, unknown>): SceneSearch => validateScene(raw),
@@ -85,9 +85,8 @@ function ViewfinderPage() {
       <div className="chart-wrap">
         <AltitudeChart />
       </div>
-      <aside className="panel vf-panel">
-        <ViewTools />
-        <Panel />
+      <aside className="panel">
+        <Panel page={PanelPage.Viewfinder} />
       </aside>
     </div>
   );

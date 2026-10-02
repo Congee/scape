@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from 'react';
+import { useLayoutEffect, type KeyboardEvent } from 'react';
 import { FindPanel } from './FindPanel';
 import { FramePanel } from './FramePanel';
 import { GeodeticsPanel } from './GeodeticsPanel';
@@ -12,24 +12,11 @@ import { ToolsPanel, ToolsPart } from './ToolsPanel';
 import { OfflinePanel } from './OfflinePanel';
 import { DetailsToggle, TideCloud, Timeline } from './Timeline';
 import { WeatherPanel } from './WeatherPanel';
-import { PanelTab, uiStore, useUi } from '@state/ui';
+import { PAGE_TABS, PanelPage, PanelTab, uiStore, useUi } from '@state/ui';
 import { Icon } from './Icon';
-
-const TABS: PanelTab[] = [PanelTab.Plan, PanelTab.Frame, PanelTab.Sky, PanelTab.Weather, PanelTab.Map, PanelTab.Markers];
-
-function Section({ title, aside, children }: { title?: string; aside?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="psec">
-      {title && (
-        <h2 className="psec-h">
-          <span>{title}</span>
-          {aside}
-        </h2>
-      )}
-      <div className="psec-b">{children}</div>
-    </section>
-  );
-}
+import { PanelPageContext } from './panelPage';
+import { Section } from './Section';
+import { ViewBand, ViewTools } from './viewfinder/ViewTools';
 
 /** Page roots take this class so the grid drops the panel column. */
 export function usePanelClass(base: string): string {
@@ -47,12 +34,15 @@ export function PanelExpand() {
   );
 }
 
-export function Panel() {
-  const tab = useUi((s) => s.panelTab);
+export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
+  const TABS = PAGE_TABS[page];
+  const tab = useUi((s) => s.panelTabs[page]);
+  // Outside callers (badges, links) then switch this page's tab.
+  useLayoutEffect(() => uiStore.getState().setPanelPage(page), [page]);
   const collapsed = useUi((s) => s.panelCollapsed);
   const ui = uiStore.getState();
   const pick = (t: PanelTab) => {
-    ui.setPanelTab(t);
+    ui.setPanelTab(t, page);
     // On narrow screens the tab row stays as a peek bar; a tap opens the sheet.
     ui.setPanelCollapsed(false);
   };
@@ -65,88 +55,91 @@ export function Panel() {
     document.getElementById(`ptab-${next}`)?.focus();
   };
   return (
-    <div className="panel-inner">
-      <PlaceBand />
-      <div className="tabs">
-        <div className="tablist" role="tablist" aria-label="Panel" onKeyDown={onKey}>
-          {TABS.map((t) => (
-            <button key={t} id={`ptab-${t}`} role="tab" aria-selected={tab === t} aria-controls="ptabpanel" tabIndex={tab === t ? 0 : -1} className={tab === t ? 'active' : ''} onClick={() => pick(t)}>
-              {t}
-            </button>
-          ))}
+    <PanelPageContext.Provider value={page}>
+      <div className="panel-inner">
+        {page === PanelPage.Viewfinder ? <ViewBand /> : <PlaceBand />}
+        <div className="tabs">
+          <div className="tablist" role="tablist" aria-label="Panel" onKeyDown={onKey}>
+            {TABS.map((t) => (
+              <button key={t} id={`ptab-${t}`} role="tab" aria-selected={tab === t} aria-controls="ptabpanel" tabIndex={tab === t ? 0 : -1} className={tab === t ? 'active' : ''} onClick={() => pick(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <button className="tabs-collapse" title={collapsed ? 'Show panel' : 'Hide panel'} aria-label={collapsed ? 'Show panel' : 'Hide panel'} onClick={() => ui.setPanelCollapsed(!collapsed)}>
+            <Icon name="right" />
+          </button>
         </div>
-        <button className="tabs-collapse" title={collapsed ? 'Show panel' : 'Hide panel'} aria-label={collapsed ? 'Show panel' : 'Hide panel'} onClick={() => ui.setPanelCollapsed(!collapsed)}>
-          <Icon name="right" />
-        </button>
+        <div className="tab-body" id="ptabpanel" role="tabpanel" aria-labelledby={`ptab-${tab}`}>
+          {tab === PanelTab.Plan && (
+            <>
+              <DayStrip />
+              <Section title="Now">
+                <LiveReadout />
+                <ParkingLinks />
+              </Section>
+              <Section title="Today" aside={<DetailsToggle />}>
+                <Timeline />
+              </Section>
+              <Section title="Target">
+                <GeodeticsPanel />
+              </Section>
+            </>
+          )}
+          {tab === PanelTab.Frame && (
+            <>
+              <Section>
+                <FramePanel />
+              </Section>
+              <Section title="Calculators">
+                <ToolsPanel part={ToolsPart.Frame} />
+              </Section>
+            </>
+          )}
+          {tab === PanelTab.Sky && (
+            <>
+              <Section title="Night">
+                <NightPanel />
+              </Section>
+              <Section title="Find">
+                <FindPanel />
+              </Section>
+              <Section title="Moon & light">
+                <ToolsPanel part={ToolsPart.Sky} />
+              </Section>
+            </>
+          )}
+          {tab === PanelTab.Weather && (
+            <>
+              <Section>
+                <WeatherPanel />
+              </Section>
+              <Section title="Tide & cloud">
+                <TideCloud />
+              </Section>
+              <Section title="Calculators">
+                <ToolsPanel part={ToolsPart.Weather} />
+              </Section>
+            </>
+          )}
+          {tab === PanelTab.Map && (
+            <>
+              <Section>
+                <LayersPanel />
+              </Section>
+              <Section title="Offline">
+                <OfflinePanel />
+              </Section>
+            </>
+          )}
+          {tab === PanelTab.View && <ViewTools />}
+          {tab === PanelTab.Markers && (
+            <Section>
+              <MarkersPanel />
+            </Section>
+          )}
+        </div>
       </div>
-      <div className="tab-body" id="ptabpanel" role="tabpanel" aria-labelledby={`ptab-${tab}`}>
-        {tab === PanelTab.Plan && (
-          <>
-            <DayStrip />
-            <Section title="Now">
-              <LiveReadout />
-              <ParkingLinks />
-            </Section>
-            <Section title="Today" aside={<DetailsToggle />}>
-              <Timeline />
-            </Section>
-            <Section title="Target">
-              <GeodeticsPanel />
-            </Section>
-          </>
-        )}
-        {tab === PanelTab.Frame && (
-          <>
-            <Section>
-              <FramePanel />
-            </Section>
-            <Section title="Calculators">
-              <ToolsPanel part={ToolsPart.Frame} />
-            </Section>
-          </>
-        )}
-        {tab === PanelTab.Sky && (
-          <>
-            <Section title="Night">
-              <NightPanel />
-            </Section>
-            <Section title="Find">
-              <FindPanel />
-            </Section>
-            <Section title="Moon & light">
-              <ToolsPanel part={ToolsPart.Sky} />
-            </Section>
-          </>
-        )}
-        {tab === PanelTab.Weather && (
-          <>
-            <Section>
-              <WeatherPanel />
-            </Section>
-            <Section title="Tide & cloud">
-              <TideCloud />
-            </Section>
-            <Section title="Calculators">
-              <ToolsPanel part={ToolsPart.Weather} />
-            </Section>
-          </>
-        )}
-        {tab === PanelTab.Map && (
-          <>
-            <Section>
-              <LayersPanel />
-            </Section>
-            <Section title="Offline">
-              <OfflinePanel />
-            </Section>
-          </>
-        )}
-        {tab === PanelTab.Markers && (
-          <Section>
-            <MarkersPanel />
-          </Section>
-        )}
-      </div>
-    </div>
+    </PanelPageContext.Provider>
   );
 }
