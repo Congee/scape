@@ -72,7 +72,7 @@ tide_checks() { # label
   local sum rows curve hint wide
   sum=$(js "$TIDES.querySelector('summary').textContent")
   check "$1 tides at Hoboken: The Battery is nearest" "$([[ $sum == *'NEW YORK (The Battery)'* ]] && echo 1 || echo 0)" "$sum"
-  rows=$(js "$TIDES.querySelectorAll('.nd-table tr').length")
+  rows=$(js "$TIDES.querySelectorAll('.tide-extremes .brow').length")
   check "$1 tides: 3–4 highs and lows today" "$([ "${rows:-0}" -ge 3 ] && [ "${rows:-0}" -le 4 ] && echo 1 || echo 0)" "$rows rows"
   curve=$(js "$TIDES.querySelectorAll('.tide-curve polyline').length")
   check "$1 tides: day curve drawn" "$([ "${curve:-0}" -ge 1 ] && echo 1 || echo 0)" "$curve polyline"

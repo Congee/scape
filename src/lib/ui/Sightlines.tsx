@@ -1,6 +1,6 @@
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
-import { degrees } from '@core/format';
+import { compass, degrees } from '@core/format';
 import { formatTime } from '@core/time/format';
 import { pct } from '@core/weather/format';
 import { CLOUD_VARS } from '@core/weather/openMeteo';
@@ -9,6 +9,7 @@ import { useDayData } from '@state/dayData';
 import { useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 import { missingText, useForecast } from './CloudChart';
+import { Dial } from './Dial';
 
 const NAMES: Partial<Record<SkyBody, Partial<Record<EventKind, string>>>> = {
   Sun: { Rise: 'Sunrise', Set: 'Sunset' },
@@ -67,14 +68,20 @@ export function Sightlines() {
           if (!l) return null;
           return (
             <details key={sightKey(e)} data-event={`${e.body}-${e.kind}`.toLowerCase()} data-verdict={l.verdict}>
-              <summary>
-                <button className="link" onClick={() => worldStore.getState().setTime(e.time)}>
-                  {NAMES[e.body]?.[e.kind]} {formatTime(e.time, tz, hour12)}
-                </button>{' '}
-                <span className="muted">{degrees(e.azimuth)}</span> · <b className={`verdict ${l.verdict.toLowerCase()}`}>{VERDICT_TEXT[l.verdict]}</b>
-                <span className="muted">
-                  {' '}
-                  · low {pct(l.blockLow)} · mid {pct(l.blockMid)} · canvas mid {pct(l.canvasMid)} · high {pct(l.canvasHigh)}
+              <summary className="brow">
+                <Dial az={e.azimuth} ink={`${e.body.toLowerCase()} ${e.kind === EventKind.Rise ? 'rise' : 'set'}`} />
+                <span className="label">
+                  <button className="link" onClick={() => worldStore.getState().setTime(e.time)} title="Set the clock to this moment">
+                    {NAMES[e.body]?.[e.kind]}
+                  </button>{' '}
+                  <b className={`verdict ${l.verdict.toLowerCase()}`}>{VERDICT_TEXT[l.verdict]}</b>
+                </span>
+                <span className="time">{formatTime(e.time, tz, hour12)}</span>
+                <span className="az">
+                  {degrees(e.azimuth, 0)} {compass(e.azimuth)}
+                </span>
+                <span className="note">
+                  low {pct(l.blockLow)} · mid {pct(l.blockMid)} · canvas mid {pct(l.canvasMid)} · high {pct(l.canvasHigh)}
                 </span>
               </summary>
               <table className="wx-dist">

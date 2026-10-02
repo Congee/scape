@@ -82,9 +82,8 @@ export function FramePanel() {
 
   return (
     <div className="frame">
-      <h3>Camera</h3>
       {(kits.length > 0 || isBody) && (
-        <div className="chips kits" aria-label="Kits">
+        <div className="chips one kits" aria-label="Kits">
           <span className="k">Kits</span>
           {kits.map((k) => (
             <button key={k.id} className={kitMatches(k, c) ? 'on' : ''} title={k.name} onClick={() => applyKit(k)}>
@@ -182,7 +181,7 @@ export function FramePanel() {
         )}
       </div>
       {!prime && (
-        <div className="chips" aria-label="Focal length presets">
+        <div className="chips one" aria-label="Focal length presets">
           {(lens ? lensFocals(lens, focals) : focals).map((f) => (
             <button key={f} className={Math.abs(f - c.focalMm) < 0.05 ? 'on' : ''} onClick={() => setFocal(f)}>
               {f}
@@ -278,7 +277,7 @@ export function FramePanel() {
       </div>
       <label className="toggle">
         <input type="checkbox" checked={c.showFov} onChange={(e) => update({ showFov: e.target.checked })} />
-        <span>Show the field-of-view cone on the map (drag its tip to aim, its edge to zoom)</span>
+        <span>FOV cone</span>
       </label>
       <div className="kv">
         <span className="k">Cone length</span>

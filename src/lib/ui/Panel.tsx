@@ -13,6 +13,7 @@ import { OfflinePanel } from './OfflinePanel';
 import { DetailsToggle, TideCloud, Timeline } from './Timeline';
 import { WeatherPanel } from './WeatherPanel';
 import { PanelTab, uiStore, useUi } from '@state/ui';
+import { Icon } from './Icon';
 
 const TABS: PanelTab[] = [PanelTab.Plan, PanelTab.Frame, PanelTab.Sky, PanelTab.Weather, PanelTab.Map, PanelTab.Markers];
 
@@ -41,7 +42,7 @@ export function PanelExpand() {
   if (!collapsed) return null;
   return (
     <button className="panel-expand" title="Show panel" aria-label="Show panel" onClick={() => uiStore.getState().setPanelCollapsed(false)}>
-      «
+      <Icon name="left" />
     </button>
   );
 }
@@ -75,7 +76,7 @@ export function Panel() {
           ))}
         </div>
         <button className="tabs-collapse" title={collapsed ? 'Show panel' : 'Hide panel'} aria-label={collapsed ? 'Show panel' : 'Hide panel'} onClick={() => ui.setPanelCollapsed(!collapsed)}>
-          »
+          <Icon name="right" />
         </button>
       </div>
       <div className="tab-body" id="ptabpanel" role="tabpanel" aria-labelledby={`ptab-${tab}`}>
@@ -119,7 +120,7 @@ export function Panel() {
         )}
         {tab === PanelTab.Weather && (
           <>
-            <Section title="Forecast">
+            <Section>
               <WeatherPanel />
             </Section>
             <Section title="Tide & cloud">
@@ -132,7 +133,7 @@ export function Panel() {
         )}
         {tab === PanelTab.Map && (
           <>
-            <Section title="Layers">
+            <Section>
               <LayersPanel />
             </Section>
             <Section title="Offline">

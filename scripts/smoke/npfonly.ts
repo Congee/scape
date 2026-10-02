@@ -90,7 +90,7 @@ const run = async (sky: 'NoData' | 'Ready') => {
         c.name === 'known-px'
           ? /^NPF \d+\.\d s at 24 mm/.test(r.stars) && /NPF rule ?\d+\.\d s/.test(r.kv) && !r.pxInput
           : r.stars.startsWith('NPF needs the camera or pixel count') && /NPF rule ?needs the pixel count/.test(r.kv) && r.pxInput;
-      const skyOk = sky === 'NoData' ? r.sky === 'Sky brightness · no data here' && /^no sky data here( · .+)? · More on DarkHours ↗$/.test(r.missing) && !r.missingButton : r.readout && r.sky.startsWith('Sky ≈ ');
+      const skyOk = sky === 'NoData' ? r.sky === 'Sky brightness · no data here' && /^no sky data here( · .+)? · More on DarkHours$/.test(r.missing) && !r.missingButton : r.readout && r.sky.startsWith('Sky ≈ ');
       check(tag, ok && no500 && starsOk && skyOk && r.fits, `stars "${r.stars}" · sky "${r.sky}"${r.missing ? ` · "${r.missing}"` : ''} · fits ${r.fits}${no500 && starsOk && skyOk ? '' : ` · no500 ${no500} stars ${starsOk} sky ${skyOk} · ok ${ok} · kv "${r.kv}"`}`);
     }
   }

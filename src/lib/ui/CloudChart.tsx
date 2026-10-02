@@ -12,6 +12,7 @@ import { useSettings } from '@state/settings';
 import { useWeather } from '@state/weather';
 import { useWorld } from '@state/world';
 import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
+import { Icon } from './Icon';
 
 const HOUR_MS = 3_600_000;
 
@@ -69,7 +70,7 @@ export const fetchedText = (r: ForecastResult, now: number) => `fetched ${ageTex
 export function WindyLink({ lat, lng, mapZoom }: { lat: number; lng: number; mapZoom?: number }) {
   return (
     <a className="wx-windy" href={mapZoom === undefined ? windyUrl(lat, lng) : windyMapUrl(lat, lng, mapZoom)} target="_blank" rel="noopener noreferrer">
-      More on Windy ↗
+      More on Windy <Icon name="out" />
     </a>
   );
 }

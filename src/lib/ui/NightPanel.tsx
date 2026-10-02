@@ -27,6 +27,8 @@ import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { GlowStatus, skyglowStore, useSkyglow, type GlowPoint } from '@state/skyglow';
 import type { LngLat } from '@core/geo/geodesy';
 import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
+import { Dial } from './Dial';
+import { Icon } from './Icon';
 
 const DAY_MS = 86_400_000;
 const R2D = 180 / Math.PI;
@@ -94,6 +96,19 @@ function Group({ id, summary, summaryClass, children }: { id: string; summary: R
   );
 }
 
+/** Dial, label, time, azimuth; a tap sets the clock. */
+function SkyRow({ label, ink, ms, az, note, tz, hour12, title }: { label: ReactNode; ink: string; ms: number | null; az: number | null; note?: ReactNode; tz: string; hour12: boolean; title?: string }) {
+  return (
+    <button className="brow" disabled={ms === null} onClick={() => ms !== null && worldStore.getState().setTime(ms)} title={title ?? 'Set the clock to this moment'}>
+      {az !== null ? <Dial az={az} ink={ink} /> : <span />}
+      <span className="label">{label}</span>
+      <span className="time">{ms !== null ? formatTime(ms, tz, hour12) : '—'}</span>
+      <span className="az">{az !== null ? `${degrees(az, 0)} ${compass(az)}` : ''}</span>
+      {note && <span className="note">{note}</span>}
+    </button>
+  );
+}
+
 /** Declination of the sky the camera points at; star trails run fastest at 0°. */
 function aimDeclination(time: number, obs: ReturnType<typeof makeObserver>, azDeg: number, altDeg: number): number {
   const d = dirFromAzAlt(azDeg, altDeg);
@@ -146,7 +161,7 @@ function MoonChart({ curve, time, tz, hour12 }: { curve: MoonSample[]; time: num
 function PointSky({ label, p, g, heightM, skyline, time, tz }: { label: string; p: LngLat; g: GlowPoint; heightM: number; skyline?: (az: number) => number; time: number; tz: string }) {
   const link = (
     <a className="darkhours" href={darkHoursUrl(p, new Date(time), tz)} target="_blank" rel="noopener noreferrer" title="DarkHours: nightly dark-sky forecast for this spot">
-      More on DarkHours ↗
+      More on DarkHours <Icon name="out" />
     </a>
   );
   if (g.status === GlowStatus.NoData)
@@ -283,9 +298,14 @@ export function NightPanel() {
   const tonight = tonightFor(time, tz, pin, pinGroundM, pinHeightM + EYE_HEIGHT_M, s.goldenAltitude);
   const night = nightWindow(tonight.events, time);
   const hasNight = night.endMs > night.startMs;
+  const ev = (body: SkyBody, kind: EventKind) => tonight.events.find((e) => e.body === body && e.kind === kind);
   const at = (body: SkyBody, kind: EventKind) => {
-    const ev = tonight.events.find((e) => e.body === body && e.kind === kind);
-    return ev ? formatTime(ev.time, tz, s.hour12) : '—';
+    const e = ev(body, kind);
+    return e ? formatTime(e.time, tz, s.hour12) : '—';
+  };
+  const moonRow = (label: string, kind: EventKind, shade: string) => {
+    const e = ev(SkyBody.Moon, kind);
+    return <SkyRow label={label} ink={`moon ${shade}`} ms={e?.time ?? null} az={e?.azimuth ?? null} tz={tz} hour12={s.hour12} />;
   };
   const nightSummary =
     night.kind === NightKind.None
@@ -329,13 +349,10 @@ export function NightPanel() {
       </Group>
 
       <Group id="moon" summary={moonSummary}>
+        {moonRow('Moonrise', EventKind.Rise, 'rise')}
+        {moonRow('Transit', EventKind.Transit, 'mid')}
+        {moonRow('Moonset', EventKind.Set, 'set')}
         <div className="kv">
-          <span className="k">Moonrise</span>
-          <b className="v">{at(SkyBody.Moon, EventKind.Rise)}</b>
-          <span className="k">Transit</span>
-          <b className="v">{at(SkyBody.Moon, EventKind.Transit)}</b>
-          <span className="k">Moonset</span>
-          <b className="v">{at(SkyBody.Moon, EventKind.Set)}</b>
           <span className="k">Illumination</span>
           <b className="v">
             {percent(moon.illumination, 0)} <span className="muted">· {moon.name}</span>
@@ -374,26 +391,19 @@ export function NightPanel() {
         summaryClass={`verdict${mw.visible ? '' : ' off'}`}
         summary={
           <>
-            {mw.visible ? 'Core visible now' : 'Core not visible now'} · {signed(mw.altitudeDeg)} at {degrees(mw.azimuthDeg, 0)} {compass(mw.azimuthDeg)}
+            {mw.visible ? 'Core visible now' : 'Core not visible now'}
             {reasons.length > 0 && <span className="why"> · {reasons.join(', ')}</span>}
           </>
         }
       >
         {windows.length === 0 && <p className="muted hint">No core window on this day under the rules below.</p>}
-        <ul className="list">
-          {windows.map((w) => (
-            <li key={w.startMs}>
-              <button className="primary" onClick={() => setTime(w.peakMs)} title="Set the clock to the best moment">
-                <span className="name">
-                  {w.clippedStart ? '…' : formatTime(w.startMs, tz, s.hour12)} – {w.clippedEnd ? '…' : formatTime(w.endMs, tz, s.hour12)}
-                </span>
-                <span className="detail">
-                  {duration(w.endMs - w.startMs)} · peak {signed(w.peakAltDeg, 0)} at {formatTime(w.peakMs, tz, s.hour12)} · {degrees(w.azStartDeg, 0)} → {degrees(w.azEndDeg, 0)}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        {windows.map((w) => (
+          <div key={w.startMs} className="mw-window">
+            <SkyRow label={w.clippedStart ? 'Core up' : 'Core rises'} ink="gc rise" ms={w.startMs} az={w.azStartDeg} note={`${duration(w.endMs - w.startMs)} · peak ${signed(w.peakAltDeg, 0)} at ${formatTime(w.peakMs, tz, s.hour12)}`} tz={tz} hour12={s.hour12} />
+            <SkyRow label={w.clippedEnd ? 'Core still up' : 'Core sets'} ink="gc set" ms={w.endMs} az={w.azEndDeg} note={signed(w.altEndDeg, 0)} tz={tz} hour12={s.hour12} />
+          </div>
+        ))}
+        <SkyRow label="Core now" ink="gc mid" ms={time} az={mw.azimuthDeg} note={signed(mw.altitudeDeg)} tz={tz} hour12={s.hour12} />
         <div className="kv">
           <span className="k">Core above</span>
           <b className="v">
@@ -482,15 +492,25 @@ export function NightPanel() {
             const h = radiantHorizontal(st, time, obs);
             return (
               <li key={st.shower.code}>
-                <button className="primary" onClick={() => setTime(st.peakMs)} title="Set the clock to the maximum">
-                  <span className="name">
-                    {st.shower.name} <span className="meta">ZHR {st.shower.zhr ?? 'variable'}</span>
-                  </span>
-                  <span className="detail">
-                    radiant {h.altitudeDeg >= 0 ? `${signed(h.altitudeDeg, 0)} at ${degrees(h.azimuthDeg, 0)} ${compass(h.azimuthDeg)}` : 'below the horizon'} · peak {formatDateShort(st.peakMs, tz)}
-                    {Math.abs(st.daysFromPeak) < 1 ? ' (now)' : st.daysFromPeak < 0 ? ` in ${Math.round(-st.daysFromPeak)} d` : ` ${Math.round(st.daysFromPeak)} d ago`}
-                  </span>
-                </button>
+                <SkyRow
+                  label={
+                    <>
+                      {st.shower.name} <span className="meta">ZHR {st.shower.zhr ?? 'variable'}</span>
+                    </>
+                  }
+                  ink="radiant"
+                  ms={st.peakMs}
+                  az={h.azimuthDeg}
+                  note={
+                    <>
+                      radiant {h.altitudeDeg >= 0 ? signed(h.altitudeDeg, 0) : 'below the horizon'} · peak {formatDateShort(st.peakMs, tz)}
+                      {Math.abs(st.daysFromPeak) < 1 ? ' (now)' : st.daysFromPeak < 0 ? ` in ${Math.round(-st.daysFromPeak)} d` : ` ${Math.round(st.daysFromPeak)} d ago`}
+                    </>
+                  }
+                  tz={tz}
+                  hour12={s.hour12}
+                  title="Set the clock to the maximum"
+                />
               </li>
             );
           })}
@@ -513,8 +533,6 @@ export function NightPanel() {
           </>
         )}
       </Group>
-
-      <p className="muted hint">Stars, constellation figures, the Milky Way, trails and meteor radiants are drawn in the viewfinder; its layer chips switch them on and off.</p>
     </div>
   );
 }

@@ -47,13 +47,10 @@ export function GeodeticsPanel() {
   if (!pin2) {
     return (
       <div className="geo">
-        <p className="muted">
-          The target location measures a sightline from the camera location: distance, bearing, elevation angle, an elevation profile and whether terrain blocks the view.
-        </p>
         <div className="actions">
           <button onClick={place}>Place target</button>
         </div>
-        <p className="muted hint">Or Shift-click the map. Drag the camera or the target to update everything live.</p>
+        <p className="muted hint">or Shift-click the map</p>
         <HorizonStatus />
       </div>
     );

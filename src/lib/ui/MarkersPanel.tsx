@@ -70,7 +70,7 @@ function MarkerList() {
   return (
     <div className="markers">
       <div className="actions">
-        <button className={placing ? 'on' : ''} onClick={() => ms.setPlacing(!placing)} title="Then click the map where the marker goes (or Alt-click the map any time)">
+        <button className={placing ? 'on' : ''} aria-pressed={placing} onClick={() => ms.setPlacing(!placing)} title="Then click the map where the marker goes (or Alt-click the map any time)">
           {placing ? 'Click the map…' : 'Add by clicking the map'}
         </button>
         <button onClick={() => addAt(worldStore.getState().view.center)}>Add at map centre</button>
@@ -80,7 +80,7 @@ function MarkerList() {
       <h3>
         {markers.length} marker{markers.length === 1 ? '' : 's'}
       </h3>
-      {loaded && markers.length === 0 && <p className="muted hint">Markers are landmarks you want to see in the viewfinder: peaks, buildings, trees. Import a KML, GPX or GeoJSON file or drop them on the map.</p>}
+      {loaded && markers.length === 0 && <p className="muted hint">No markers yet</p>}
       <ul className="list marker-list">
         {sorted.map(({ m, d }) => (
           <li key={m.id} className={m.id === selectedId ? 'selected' : ''} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
@@ -95,9 +95,9 @@ function MarkerList() {
         ))}
       </ul>
       <h3>Import &amp; export</h3>
-      <label className="file">
+      <label className="button file-pick">
+        Import GeoJSON, KML or GPX
         <input type="file" accept=".geojson,.json,.kml,.gpx" onChange={(e) => void importFile(e.target.files?.[0])} />
-        Import points from GeoJSON, KML or GPX
       </label>
       <div className="actions">
         <button onClick={() => exportAs('geojson')} disabled={!markers.length}>

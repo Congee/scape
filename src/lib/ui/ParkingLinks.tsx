@@ -1,6 +1,7 @@
 import { parkingServices, parkingUrl } from '@core/geo/parking';
 import { useMapStatus } from '@state/mapStatus';
 import { useWorld } from '@state/world';
+import { Icon } from './Icon';
 
 /** Parking search links for a city camera spot; nothing is fetched until one is clicked. */
 export function ParkingLinks() {
@@ -14,7 +15,7 @@ export function ParkingLinks() {
       <span className="label">Parking</span>
       {services.map((s) => (
         <a key={s} href={parkingUrl(s, pin)} target="_blank" rel="noopener noreferrer" title={`Parking near the camera spot on ${s}`}>
-          {s} ↗
+          {s} <Icon name="out" />
         </a>
       ))}
     </div>

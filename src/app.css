@@ -4,7 +4,9 @@
   --bg-2: #151515;
   --bg-3: #1f1f1f;
   --bg-4: #282828;
+  --bg-deep: #0a0a0a;
   --line: #363636;
+  --scrim: #151515eb;
   --fg: #f1f1f1;
   --fg-2: #ababab;
   --fg-3: #9a9a9a;
@@ -14,18 +16,85 @@
   --sun-set: #ff7a1a;
   --moon: #5aa9ff;
   --moon-rise: #9ccbff;
-  --moon-set: #2a63b8;
+  --moon-set: #4f80d8;
   --gc: #b48cff;
+  --gc-rise: #d2bcff;
+  --gc-set: #8a5cf0;
+  --eclipse: #c0582e;
   --terrain: #8fd18c;
   --tide: #3cc6c0;
   --cloud: #dfe6ee;
   --sky-clear: #1f4a78;
-  --fog: #e8c547;
+  --caution: #e8c547;
+  --fog: var(--caution);
   --danger: #ff5c5c;
-  --rail: 56px;
-  --panel: 340px;
-  --chart: 150px;
-  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --los-clear: var(--terrain);
+  --los-marginal: var(--caution);
+  --los-blocked: var(--danger);
+  --los-unknown: var(--fg-2);
+  --pin: #e5322d;
+  --pin-target: var(--terrain);
+  --edit: var(--fg);
+  --chart-night: #0e0e0e;
+  --chart-astro: #151515;
+  --chart-nautical: #1c1c1c;
+  --chart-civil: #242424;
+  --chart-day: #2e2e2e;
+  --chart-horizon: #5c5c5c;
+  --phase-0: #141414;
+  --phase-1: #2a2a2a;
+  --phase-2: #404040;
+  --phase-3: #555555;
+  --phase-4: #6b6b6b;
+  --phase-5: #818181;
+  --phase-6: #969696;
+  --phase-7: #acacac;
+  --phase-8: #c2c2c2;
+  --phase-9: #d7d7d7;
+  --marker-peak: #c9a26b;
+  --marker-building: var(--fg-2);
+  --marker-tree: var(--terrain);
+  --marker-lighthouse: #ff6b6b;
+  --marker-bridge: #7fb3ff;
+  --marker-waterfall: #4dd0e1;
+  --marker-viewpoint: var(--sun);
+  --marker-other: #d0b8ff;
+  --font-sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 16px;
+  --space-8: 24px;
+  --radius-0: 0;
+  --radius-round: 50%;
+  --shadow-float: 0 8px 24px #00000080;
+  --shadow-halo: 0 0 0 2px #00000059;
+  --stroke-hair: 1px;
+  --stroke-mark: 2px;
+  --stroke-icon: 1.6;
+  --z-overlay: 5;
+  --z-menu: 6;
+  --z-popover: 20;
+  --z-calendar: 30;
+  --size-rail: 56px;
+  --size-panel: 340px;
+  --size-chart: 150px;
+  --size-chart-narrow: 80px;
+  --size-breakpoint: 900px;
+  --size-target: 44px;
+  --size-control: 28px;
+  --size-mapctl: 32px;
+  --size-dial: 14px;
+  --size-box: 9px;
+  --size-icon: 16px;
+  --size-icon-rail: 22px;
+  --rail: var(--size-rail);
+  --panel: var(--size-panel);
+  --chart: var(--size-chart);
+  font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.35;
   font-variant-numeric: tabular-nums;
@@ -719,13 +788,17 @@ button:focus-visible {
 .band {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 10px 8px 8px;
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-6) var(--space-5);
+  border-bottom: var(--stroke-hair) solid var(--line);
+  background: var(--bg);
   min-width: 0;
 }
 
 .band-name {
   font-size: 17px;
+  line-height: 20px;
+  letter-spacing: -0.01em;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -734,6 +807,7 @@ button:focus-visible {
 
 .band small {
   font-size: 12px;
+  line-height: 16px;
   color: var(--fg-2);
 }
 
@@ -747,7 +821,12 @@ button:focus-visible {
 }
 
 @media (max-width: 900px) {
+  .tabs button {
+    min-width: 44px;
+    min-height: 44px;
+  }
   .tabs .tabs-collapse {
+    min-width: 44px;
     transform: rotate(90deg);
   }
   .panel-collapsed > .panel {
@@ -802,10 +881,6 @@ button:focus-visible {
   background: var(--bg-4);
 }
 
-.timeline li.active button {
-  background: var(--bg-4);
-}
-
 .brg {
   grid-area: dot;
   display: block;
@@ -840,7 +915,8 @@ button:focus-visible {
 }
 .brg.marker circle { stroke-opacity: 1; }
 
-.timeline .dot {
+.timeline .dot,
+.brow .dot {
   grid-area: dot;
   justify-self: center;
   width: 10px;
@@ -848,7 +924,13 @@ button:focus-visible {
   border-radius: 50%;
 }
 
-.timeline .dot.tide { background: var(--tide); }
+.timeline .dot.tide,
+.brow .dot.tide { background: var(--tide); }
+
+.timeline li.active button,
+.brow.next {
+  box-shadow: inset 2px 0 0 var(--fg);
+}
 
 .now-line {
   position: relative;
@@ -905,8 +987,8 @@ button:focus-visible {
   color: var(--fg-3);
 }
 
-.timeline li.detail .brg {
-  opacity: 0.55;
+.timeline li.detail .brg line {
+  stroke: var(--fg-3);
 }
 
 /* Layers */
@@ -1078,8 +1160,13 @@ label.file.danger strong {
   white-space: nowrap;
 }
 
-.readout-row.below {
-  opacity: 0.55;
+.readout-row.below,
+.readout-row.below :is(.label, .val, .extra) {
+  color: var(--fg-3);
+}
+
+.readout-row.below .brg line {
+  stroke: var(--fg-3);
 }
 
 .readout-row .label { grid-area: label; }
@@ -1170,6 +1257,11 @@ label.file.danger strong {
   background: var(--accent);
   border-color: var(--accent);
   color: #08111c;
+}
+
+.panel :is(.chips, .seg) button {
+  border-color: transparent;
+  color: var(--fg-2);
 }
 
 .seg {
@@ -1666,16 +1758,6 @@ label.file.danger strong {
   display: none;
 }
 
-.night details > summary::before {
-  content: '▸';
-  display: inline-block;
-  width: 12px;
-  color: var(--fg-3);
-}
-
-.night details[open] > summary::before {
-  transform: rotate(90deg);
-}
 
 .night details > summary:hover {
   background: var(--bg-3);
@@ -2310,8 +2392,9 @@ label.file-pick input[type='file'] {
 .sight.clear,
 .verdict.clear { color: var(--fg-2); }
 
-.wx-sight details { margin: 6px; }
-.wx-sight summary { cursor: pointer; line-height: 1.5; }
+.wx-sight details { margin: 0; }
+.wx-sight summary { cursor: pointer; }
+.panel summary.brow::before { display: none; }
 .wx-dist { margin: 4px 0 4px 16px; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 .wx-dist th,
 .wx-dist td { padding: 1px 10px 1px 0; text-align: right; }
@@ -2379,11 +2462,11 @@ button.cloud-legend.folded {
 
 .psec-b {
   margin: 0 6px 6px;
+  background: var(--bg-3);
 }
 
 .psec:first-child > .psec-b:first-child {
   margin-top: 8px;
-  background: var(--bg-3);
 }
 
 .psec-b:empty {
@@ -2440,7 +2523,7 @@ button.cloud-legend.folded {
 .panel :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), select, textarea) {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--fg-3);
   padding: 3px 2px;
 }
 
@@ -2449,35 +2532,274 @@ button.cloud-legend.folded {
   outline-offset: 1px;
 }
 
-.panel select option {
-  background: var(--bg-3);
-}
-
 .panel button {
   background: transparent;
 }
 
+.panel :is(.chips, .seg, .radio-list) :is(button, label):hover {
+  color: var(--fg);
+}
+
+.icon {
+  vertical-align: -0.125em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: square;
+}
+
+.panel summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.panel summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Same chevron as Icon 'right'. */
+.panel summary::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  background: var(--fg-3);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 3l5 5-5 5' fill='none' stroke='black' stroke-width='2'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.panel details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.panel label.file-pick {
+  display: inline-block;
+  margin: 4px 6px;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* State grammar: box = on/off, bar under = one-of, left bar on bg-3 = cursor, bg-4 = hover. */
+.panel :is(.actions, .field-row, .tl-sim, .tool-row) > button:not([aria-pressed], .link) {
+  min-height: var(--size-control);
+  padding: 0 var(--space-5);
+  border: var(--stroke-hair) solid var(--line);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .panel button:hover:enabled {
+  background: var(--bg-4);
+}
+
+/* Primary: one per surface. */
+.panel button.on:not([aria-pressed], .seg button, .chips button, .stars button) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+.panel button.on:not([aria-pressed], .seg button, .chips button, .stars button):hover:enabled {
+  background: var(--fg-2);
   border-color: var(--fg-2);
 }
 
-/* Selection is an outline, never a fill. */
-.panel button.on,
-.panel .chips button.on,
 .panel .stars button.on {
   background: transparent;
-  border-color: transparent;
+  color: var(--sun);
+}
+
+.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.seg button)) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+}
+
+.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.seg button))::before,
+.panel input[type='checkbox'] {
+  content: '';
+  flex: none;
+  width: var(--size-box);
+  height: var(--size-box);
+  border: var(--stroke-hair) solid var(--fg-2);
+}
+
+.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.seg button)),
+.panel label:has(> input[type='checkbox']:checked) {
   color: var(--fg);
-  outline: 1.5px solid var(--fg);
+  font-weight: 700;
+}
+
+.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.seg button))::before,
+.panel input[type='checkbox']:checked {
+  background: var(--fg);
+  border-color: var(--fg);
+}
+
+.panel input[type='checkbox'] {
+  appearance: none;
+  margin: 0 var(--space-3) 0 0;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.panel :is(.seg, .chips.one) {
+  gap: var(--space-5);
+}
+
+.panel :is(.seg, .chips.one) button {
+  border: 0;
+  padding: 0 var(--space-1);
+  background: none;
+  color: var(--fg-2);
+}
+
+.panel .seg button {
+  min-height: var(--size-control);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel :is(.seg, .chips.one) button.on {
+  color: var(--fg);
+  font-weight: 700;
+  box-shadow: inset 0 calc(-1 * var(--stroke-mark)) 0 var(--fg);
+}
+
+.panel button:disabled {
+  opacity: 1;
+  color: var(--fg-3);
+  border-color: var(--line);
+  background: transparent;
+}
+
+.panel button.link {
+  padding: 0;
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--fg-3);
+  text-underline-offset: 3px;
+}
+
+.panel button.link:hover:enabled {
+  background: none;
+  color: var(--fg);
+  text-decoration-color: var(--fg);
+}
+
+.panel :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), select, textarea):hover:enabled {
+  border-bottom-color: var(--fg);
+}
+
+.panel select {
+  appearance: none;
+  padding-right: 16px;
+  background: linear-gradient(45deg, transparent 50%, var(--fg-2) 50%) right 6px center / 5px 5px no-repeat, linear-gradient(-45deg, transparent 50%, var(--fg-2) 50%) right 1px center / 5px 5px no-repeat;
+}
+
+.panel select option {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+
+.panel :is(.chip, .tree .dot.active) {
+  border-radius: 0;
+}
+
+.panel .radio-list input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panel .radio-list label > span {
+  color: var(--fg-2);
+}
+
+.panel .radio-list label:has(> input:checked) > span {
+  color: var(--fg);
+  font-weight: 700;
+  box-shadow: inset 0 calc(-1 * var(--stroke-mark)) 0 var(--fg);
+}
+
+.panel .radio-list label:has(> input:focus-visible) > span {
+  outline: var(--stroke-mark) solid var(--fg);
   outline-offset: 1px;
 }
 
-.panel .chips button.on {
-  border-radius: 50%;
+.panel input[type='range'] {
+  appearance: none;
+  height: 20px;
+  margin: 0;
+  background: transparent;
 }
 
-.panel .seg button.on {
-  border-radius: 8px;
+.panel input[type='range']::-webkit-slider-runnable-track {
+  height: var(--stroke-hair);
+  background: var(--fg-3);
+}
+
+.panel input[type='range']::-moz-range-track {
+  height: var(--stroke-hair);
+  background: var(--fg-3);
+}
+
+.panel input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 14px;
+  margin-top: -7px;
+  border: 0;
+  border-radius: 0;
+  background: var(--fg);
+}
+
+.panel input[type='range']::-moz-range-thumb {
+  width: 10px;
+  height: 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--fg);
+}
+
+.panel .progress {
+  border-radius: 0;
+  background: var(--bg-4);
+}
+
+.panel .progress i {
+  background: var(--fg);
+}
+
+.panel .dot {
+  width: var(--size-box);
+  height: var(--size-box);
+  border-radius: 0;
+}
+
+.panel .brow .time {
+  color: var(--fg);
+}
+
+.panel .brow .note {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.panel .psec-h {
+  padding: var(--space-4) var(--space-6) var(--space-2);
+}
+
+.panel .psec-b {
+  margin: 0 var(--space-3) var(--space-3);
+  padding: var(--space-3);
 }
 
 .panel :is(h3, .layers h3, .frame h3, .markers h3, .find h3, .night details h3) {
@@ -2487,13 +2809,34 @@ button.cloud-legend.folded {
   color: var(--fg-2);
 }
 
+/* Sub-heads share the section head's left edge. */
+.panel .psec-b h3 {
+  margin-left: 0;
+  margin-right: 0;
+}
+
 .panel .kv {
-  grid-template-columns: 86px minmax(0, 1fr);
+  grid-template-columns: 104px minmax(0, 1fr);
+  row-gap: 0;
+}
+
+.panel .kv > :is(.k, .v) {
+  padding: var(--space-2) 0;
+  border-bottom: var(--stroke-hair) dotted var(--line);
+}
+
+.panel .kv > :is(.k, .v):nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.panel .kv .v {
+  text-align: right;
 }
 
 .panel .kv .k {
   font-size: 10.5px;
-  letter-spacing: 0.05em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--fg-2);
 }

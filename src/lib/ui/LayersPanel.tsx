@@ -139,9 +139,7 @@ export function LayersPanel() {
           </label>
         )}
       </SettingLayer>
-      <SettingLayer k="showBuildings" label="3D buildings (Overture, in place of the basemap's own)">
-        <p className="muted hint">Buildings appear from zoom 14.</p>
-      </SettingLayer>
+      <SettingLayer k="showBuildings" label="3D buildings (Overture, from zoom 14)" />
       <SettingLayer k="showSunShadows" label="Shadows on the ground (terrain and buildings)">
         <label className="toggle">
           <span>Light from</span>
@@ -153,7 +151,6 @@ export function LayersPanel() {
             ))}
           </select>
         </label>
-        <p className="muted hint">Shadows follow the timeline time; buildings cast them once their layer is on. Shade cast by the moon is drawn a darker neutral grey.</p>
       </SettingLayer>
       <SettingLayer k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
       <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />
@@ -187,7 +184,6 @@ export function LayersPanel() {
           ))}
         </select>
       </label>
-      <p className="muted hint">Elevation from Terrain Tiles (Mapzen, AWS Open Data), fetched per tile as needed and cached by the browser.</p>
     </div>
   );
 }

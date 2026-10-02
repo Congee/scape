@@ -219,7 +219,7 @@ export function OfflinePanel() {
       )}
       <div className="actions">
         <button onClick={() => o.takeMapView()}>Use the map view</button>
-        <button className={drawing ? 'on' : ''} onClick={() => o.setDrawing(!drawing)}>
+        <button className={drawing ? 'on' : ''} aria-pressed={drawing} onClick={() => o.setDrawing(!drawing)}>
           Draw on the map
         </button>
         <button onClick={() => o.setDraft(null)} disabled={!draft}>

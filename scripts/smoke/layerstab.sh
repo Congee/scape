@@ -90,7 +90,7 @@ map_js() {
     *) echo "$(state_js "$1")" ;;
   esac
 }
-has_opts() { case $1 in showDayNight | cloud | showElevation | showSlope | showAspect | terrain3d | showBuildings | showSunShadows | showShadow) echo 1 ;; *) echo 0 ;; esac; }
+has_opts() { case $1 in showDayNight | cloud | showElevation | showSlope | showAspect | terrain3d | showSunShadows | showShadow) echo 1 ;; *) echo 0 ;; esac; }
 click_layer() { js "(() => { const i = document.querySelector('.layer-row[data-layer=\"$1\"] > label input'); if (!i) return 'none'; i.click(); return 'ok'; })()"; }
 
 vp() { if [ "$1" = desktop ]; then ab set viewport 1400 900 >/dev/null; else ab set viewport 390 844 >/dev/null; fi; sleep 0.3; }

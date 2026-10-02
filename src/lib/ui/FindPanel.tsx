@@ -102,7 +102,6 @@ export function FindPanel() {
 
   return (
     <div className="frame find">
-      <h3>Search</h3>
       <div className="seg" role="group" aria-label="Body">
         {BODIES.map((b) => (
           <button key={b} className={f.body === b ? 'on' : ''} onClick={() => update({ body: b })}>
@@ -169,7 +168,7 @@ export function FindPanel() {
           <span className="muted">%</span>
         </b>
       </div>
-      <div className="chips">
+      <div className="chips one">
         <button onClick={() => update({ moonIllumMin: 0.9, moonIllumMax: 1 })}>Full moon</button>
         <button onClick={() => update({ moonIllumMin: 0, moonIllumMax: 0.2 })}>Dark sky</button>
         <button onClick={() => update({ moonIllumMin: 0, moonIllumMax: 1 })}>Any</button>

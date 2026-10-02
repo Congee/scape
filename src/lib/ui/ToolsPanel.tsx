@@ -36,6 +36,7 @@ import { compositionStore, useComposition } from '@state/composition';
 import { sensorById, useGear } from '@state/gear';
 import { useSettings } from '@state/settings';
 import { usePinSiteHeightM } from '@state/terrain';
+import { Dial } from './Dial';
 import { LightPointSummary, LightPointTools, MoonSummary, MoonTools } from './LightTools';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
 import { timelapseStore, useTimelapse } from '@state/timelapse';
@@ -97,6 +98,22 @@ function Group({ id, summary, children }: { id: string; summary: ReactNode; chil
 
 // The shadow search is a root find; the panel re-renders every clock tick.
 let lightCache: { key: string; ms: number | null } | null = null;
+/** Readout row: dial, label, altitude, azimuth. */
+function AltAzRow({ label, ink, alt, az }: { label: string; ink: string; alt: number; az: number }) {
+  return (
+    <div className="readout-row">
+      <Dial az={az} ink={ink} />
+      <span className="label">{label}</span>
+      <span className="val" title="Altitude">
+        {signed(alt)}
+      </span>
+      <span className="val" title="Azimuth">
+        {degrees(az, 0)} {compass(az)}
+      </span>
+    </div>
+  );
+}
+
 function lastLightFor(pin: LngLat, siteM: number, time: number, heightM: number): number | null {
   const key = [Math.floor(time / 60_000), pin.lat.toFixed(4), pin.lng.toFixed(4), siteM, heightM].join('|');
   if (!lightCache || lightCache.key !== key) lightCache = { key, ms: lastLightMs(makeObserver(pin, siteM), time, heightM) };
@@ -149,17 +166,16 @@ function TidesGroup() {
             </b>
           </div>
           <TideChart day={today} startMs={startMs} endMs={endMs} time={time} interpolated={site.kind === TideKind.Subordinate} />
-          <table className="nd-table">
-            <tbody>
-              {today.extremes.map((e) => (
-                <tr key={e.timeMs} className={e === next ? 'on' : ''} onClick={() => worldStore.getState().setTime(e.timeMs)}>
-                  <td>{e.high ? 'High' : 'Low'}</td>
-                  <td>{formatTime(e.timeMs, tz, hour12)}</td>
-                  <td>{tideText(e.heightM, units)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="tide-extremes">
+            {today.extremes.map((e) => (
+              <button key={e.timeMs} className={`brow${e === next ? ' next' : ''}`} onClick={() => worldStore.getState().setTime(e.timeMs)} title="Set the clock to this moment">
+                <span className="dot tide" aria-hidden="true" />
+                <span className="label">{e.high ? 'High' : 'Low'}</span>
+                <span className="time">{formatTime(e.timeMs, tz, hour12)}</span>
+                <span className="az">{tideText(e.heightM, units)}</span>
+              </button>
+            ))}
+          </div>
           <p className="muted hint">
             {site.kind === TideKind.Harmonic
               ? `Heights above MLLW from NOAA CO-OPS harmonic constants, at the nearest station within ${distance(NEAREST_STATION_MAX_M, units)}.`
@@ -258,11 +274,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
   // Rainbow.
   const bow = rainbowTop(sun.azimuth, sun.altitude);
   const bow2 = rainbowTop(sun.azimuth, sun.altitude, SECONDARY_DEG);
-  const bowSummary = bow.possible
-    ? `Rainbow possible · top ${signed(bow.altitudeDeg)} at ${degrees(bow.azimuthDeg, 0)} ${compass(bow.azimuthDeg)}`
-    : sun.altitude <= 0
-      ? 'No rainbow · sun below the horizon'
-      : `No rainbow · sun at ${signed(sun.altitude)}, above 42°`;
+  const bowSummary = bow.possible ? 'Rainbow possible' : sun.altitude <= 0 ? 'No rainbow · sun below the horizon' : 'No rainbow · sun above 42°';
 
   // Clouds, in display units.
   const hUnit = units === Units.Imperial ? FT : 1;
@@ -282,6 +294,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
   const litNow = litHeightM(sun.altitude);
   const lightH = cloudSolve === CloudSolve.Height ? (Number.isFinite(dM) && Number.isFinite(aDeg) ? cloudHeightM(dM, aDeg, 0) : NaN) : hM;
   const lastLight = Number.isFinite(lightH) && lightH > 0 ? lastLightFor(pin, siteM, time, lightH) : null;
+  const lastLightAz = lastLight !== null ? position(SkyBody.Sun, new Date(lastLight), obs).azimuth : 0;
 
   return (
     <PartContext value={part}>
@@ -453,13 +466,9 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
         </Group>
 
         <Group id="rainbow" summary={bowSummary}>
+          <AltAzRow label="Sun" ink="sun mid" alt={sun.altitude} az={sun.azimuth} />
+          {bow.possible && <AltAzRow label="Primary top" ink="rainbow" alt={bow.altitudeDeg} az={bow.azimuthDeg} />}
           <div className="kv">
-            <span className="k">Sun</span>
-            <b className="v">
-              {signed(sun.altitude)} at {degrees(sun.azimuth, 0)} {compass(sun.azimuth)}
-            </b>
-            <span className="k">Primary top</span>
-            <b className="v">{bow.possible ? `${signed(bow.altitudeDeg)} at ${degrees(bow.azimuthDeg, 0)} ${compass(bow.azimuthDeg)}` : '—'}</b>
             <span className="k">Feet</span>
             <b className="v">{bow.possible ? `${degrees(bow.halfSpanDeg, 0)} either side of the top` : '—'}</b>
             <span className="k">Secondary top</span>
@@ -521,17 +530,18 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
             <span className="k">Sunlit now above</span>
             <b className="v">{sun.altitude >= 0 ? 'every height · sun up' : Number.isFinite(litNow) ? height(litNow, units) : '—'}</b>
             <span className="k">Stays lit until</span>
-            <b className="v">
-              {Number.isFinite(lightH) && lightH > 0 ? (
-                <>
-                  sun {signed(-depressionForHeightDeg(lightH))}
-                  {lastLight !== null && <span className="muted"> · {formatTime(lastLight, tz, hour12)}</span>}
-                </>
-              ) : (
-                '—'
-              )}
-            </b>
+            <b className="v">{Number.isFinite(lightH) && lightH > 0 ? `sun ${signed(-depressionForHeightDeg(lightH))}` : '—'}</b>
           </div>
+          {lastLight !== null && (
+            <button className="brow" onClick={() => worldStore.getState().setTime(lastLight)} title="Set the clock to this moment">
+              <Dial az={lastLightAz} ink="sun set" />
+              <span className="label">Last light on the cloud</span>
+              <span className="time">{formatTime(lastLight, tz, hour12)}</span>
+              <span className="az">
+                {degrees(lastLightAz, 0)} {compass(lastLightAz)}
+              </span>
+            </button>
+          )}
           <p className="muted hint">For a cloud overhead; clouds toward the sunset stay lit a little longer. Geometric, without refraction.</p>
         </Group>
 

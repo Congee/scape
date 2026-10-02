@@ -149,6 +149,7 @@ export function ModelImportSheet({ files, onClose }: { files: File[]; onClose: (
           <>
             <button
               className={importPick ? 'on' : ''}
+              aria-pressed={importPick}
               onClick={() => (importPick ? clearPick() : modelsStore.getState().setImportPick(true))}
               title="Then click an Overture building on the map"
             >

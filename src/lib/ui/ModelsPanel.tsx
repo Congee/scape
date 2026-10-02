@@ -91,10 +91,10 @@ export function ModelsPanel() {
   return (
     <div className="models">
       <div className="actions">
-        <button className={picking ? 'on' : ''} onClick={() => ms.setPicking(!picking)} title="Then click an Overture building on the map to model it from its footprints">
+        <button className={picking ? 'on' : ''} aria-pressed={picking} onClick={() => ms.setPicking(!picking)} title="Then click an Overture building on the map to model it from its footprints">
           {picking ? 'Click a building…' : 'Model this building'}
         </button>
-        <button className={draft ? 'on' : ''} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
+        <button className={draft ? 'on' : ''} aria-pressed={!!draft} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
           Draw a building
         </button>
         <label className="button file-pick" title="A .glb, a .gltf, or a .gltf with its .bin files picked together">

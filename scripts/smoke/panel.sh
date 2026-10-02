@@ -101,6 +101,24 @@ nl=$(js '(() => { const n = document.querySelector(".timeline li.now-line"); con
 check "now line between the events around now" "$([[ $nl == true* ]] && echo 1 || echo 0)" "$nl"
 dials=$(js '`${document.querySelectorAll(".timeline li[data-time]").length} ${document.querySelectorAll(".timeline li[data-time] svg.brg").length}`')
 check "one dial per event" "$(awk -v a="${dials% *}" -v b="${dials#* }" 'BEGIN { print (a > 0 && a == b) ? 1 : 0 }')" "$dials events, dials"
+
+# Row grammar on the other tabs, on the timeline's grid; a tidal camera for the tide rows (tides and sightlines need live data).
+AREAS=$(js 'getComputedStyle(document.querySelector(".timeline li[data-time] button")).gridTemplateAreas')
+grammar() { # tab, name, row selector, min rows
+  tab "$1"
+  wait_for "document.querySelectorAll('#ptabpanel $3').length >= $4" 60
+  local r; r=$(js "(() => { const rs = [...document.querySelectorAll('#ptabpanel $3')]; const ok = rs.filter((e) => { const s = getComputedStyle(e); return s.display === 'grid' && s.gridTemplateAreas === \`$AREAS\` && e.querySelector('.label') && e.querySelector('svg.brg, .dot'); }); return \`\${rs.length} \${ok.length}\`; })()")
+  check "$1 $2 use the row grammar" "$(awk -v a="${r% *}" -v b="${r#* }" -v m="$4" 'BEGIN { print (a >= m && a == b) ? 1 : 0 }')" "$r rows, on grid"
+}
+ab open "$BASE/?camera=40.7359,-74.0286&t=2026-08-12T23:00Z" >/dev/null
+wait_for 'window.__scape && document.querySelector("[role=tablist]")' 80
+grammar Sky 'moon and core rows' '.night .brow' 3
+grammar Weather 'rainbow readouts' '.tools .readout-row' 1
+grammar Weather 'tide extremes' '.tide-extremes .brow' 2
+grammar Weather 'sightlines' '.wx-sight summary.brow' 1
+sec=$(js '(() => { const p = document.createElement("i"); p.style.color = "var(--bg-3)"; document.body.append(p); const want = getComputedStyle(p).color; p.remove(); const b = [...document.querySelectorAll("#ptabpanel .psec-b")]; return `${b.length} ${b.filter((e) => getComputedStyle(e).backgroundColor === want).length}`; })()')
+check "section bodies sit on bg-3" "$(awk -v a="${sec% *}" -v b="${sec#* }" 'BEGIN { print (a > 0 && a == b) ? 1 : 0 }')" "$sec"
+go
 font=$(js 'getComputedStyle(document.querySelector(".panel")).fontFamily')
 check "panel font is Helvetica" "$([[ $font == *Helvetica* ]] && echo 1 || echo 0)" "$font"
 
@@ -112,6 +130,10 @@ for t in Plan Frame Sky Weather Map Markers; do
   [ "$n" = none ] || blue="$blue; $t: $n"
 done
 check "no blue accent on panel chrome" "$([ "$blue" = 0 ] && echo 1 || echo 0)" "$blue"
+# Selections: underline bar for one-of, 9 px square box for toggles; no rings, no radius.
+tab Frame
+sel=$(js '(() => { const one = [...document.querySelectorAll("#ptabpanel :is(.seg, .chips.one) button.on")]; const box = [...document.querySelectorAll("#ptabpanel input[type=checkbox]")]; const u = one.filter((b) => { const s = getComputedStyle(b); return /inset$|0px -2px 0px 0px/.test(s.boxShadow) && s.boxShadow.includes("-2px") && s.borderTopLeftRadius === "0px" && s.outlineStyle === "none" && s.fontWeight === "700"; }).length; const q = box.filter((b) => { const s = getComputedStyle(b); return s.appearance === "none" && s.width === "9px" && s.height === "9px" && s.borderTopLeftRadius === "0px"; }).length; return `${one.length} ${u} ${box.length} ${q}`; })()')
+check "selections are underline bars and square boxes" "$(echo "$sel" | awk '{ print ($1 > 0 && $1 == $2 && $3 > 0 && $3 == $4) ? 1 : 0 }')" "$sel (one-of, underlined, boxes, square)"
 wide desktop
 tab Plan
 ab screenshot "$OUT/panel-1600.png" >/dev/null
@@ -119,6 +141,8 @@ ab screenshot "$OUT/panel-1600.png" >/dev/null
 ab set viewport 390 844 >/dev/null
 go
 row phone
+t44=$(js '[...document.querySelectorAll(".tablist [role=tab], .tabs-collapse")].map((b) => { const r = b.getBoundingClientRect(); return Math.round(Math.min(r.width, r.height)); }).join(",")')
+check "phone tabs and collapse handle are 44 px" "$(echo "$t44" | tr , '\n' | awk '$1 < 44 { bad = 1 } END { print bad ? 0 : 1 }')" "$t44"
 for t in Plan Frame Sky Weather Map Markers; do
   tab "$t"
   wide "phone $t"
