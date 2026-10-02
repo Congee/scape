@@ -124,7 +124,7 @@ export async function flows(d: Driver, base: string, files: { glb: string; photo
   await run(d, `S.settings.getState().update({ showDayNight: false, showElevation: false, showSlope: false, showAspect: false, showLightPollution: false })`);
   await sleep(1000);
 
-  for (const tab of ['Plan', 'Frame', 'Sky', 'Weather', 'Map', 'Markers']) {
+  for (const tab of ['Now', 'Shot', 'Sky', 'Find', 'Weather', 'Map', 'Markers']) {
     step(`panel ${tab}`);
     await run(d, `const u = S.ui.getState(); u.setPanelCollapsed(false); u.setPanelTab('${tab}')`);
     await sleep(2000);

@@ -1,6 +1,6 @@
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
-import { compass, degrees } from '@core/format';
+import { azimuth } from '@core/format';
 import { formatTime } from '@core/time/format';
 import { pct } from '@core/weather/format';
 import { CLOUD_VARS } from '@core/weather/openMeteo';
@@ -78,7 +78,7 @@ export function Sightlines() {
                 </span>
                 <span className="time">{formatTime(e.time, tz, hour12)}</span>
                 <span className="az">
-                  {degrees(e.azimuth, 0)} {compass(e.azimuth)}
+                  {azimuth(e.azimuth)}
                 </span>
                 <span className="note">
                   low {pct(l.blockLow)} · mid {pct(l.blockMid)} · canvas mid {pct(l.canvasMid)} · high {pct(l.canvasHigh)}

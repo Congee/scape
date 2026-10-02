@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { LightMode } from '@core/astro/lightSource';
 import { basemapGroup, BasemapGroup, BasemapKind, BUILTIN_BASEMAPS, offlineBasemaps, PmFlavor, type Basemap } from '@data/basemaps';
 import { registerLocalPmtiles } from '@data/pmtiles';
 import { satKeys } from '@data/satellite';
@@ -9,10 +8,10 @@ import { settingsStore, useSettings } from '@state/settings';
 import { OrbitPivot, useUi } from '@state/ui';
 import { useMapNotice } from './map/MapNotice';
 import { CloudToggle, DayNightToggle, SettingLayer, TerrainTintToggles, type BoolKey } from './MapLayerToggles';
+import { LightSeg } from './LightSeg';
 import { Section } from './Section';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
-const LIGHT_LABEL: Record<LightMode, string> = { [LightMode.Auto]: 'Sun by day, moon by night', [LightMode.Sun]: 'Sun only', [LightMode.Moon]: 'Moon only' };
 const ORBIT_LABEL: Record<OrbitPivot, string> = { [OrbitPivot.Off]: 'Off', [OrbitPivot.Target]: 'Around the target', [OrbitPivot.Camera]: 'Around the camera' };
 const GROUPS: BasemapGroup[] = [BasemapGroup.Vector, BasemapGroup.Raster, BasemapGroup.Downloaded, BasemapGroup.Custom];
 
@@ -28,7 +27,6 @@ export function LayersPanel() {
   const terrain = useSettings((s) => s.terrain);
   const rangeKm = useSettings((s) => s.horizonRangeKm);
   const shadowHeight = useSettings((s) => s.shadowObjectHeightM);
-  const lightSource = useSettings((s) => s.lightSource);
   const orbit = useUi((s) => s.orbit);
   const orbitSpin = useUi((s) => s.orbitSpin);
   const setOrbit = useUi((s) => s.setOrbit);
@@ -142,16 +140,10 @@ export function LayersPanel() {
         </SettingLayer>
         <SettingLayer k="showBuildings" label="3D buildings (Overture, from zoom 14)" />
         <SettingLayer k="showSunShadows" label="Shadows on the ground (terrain and buildings)">
-          <label className="toggle">
-            <span>Light from</span>
-            <select value={lightSource} onChange={(e) => update({ lightSource: e.target.value as LightMode })} aria-label="Light source for shadows" title="The moon takes over once it is up and the sun is 6° below the horizon; the viewfinder follows too">
-              {Object.values(LightMode).map((m) => (
-                <option key={m} value={m}>
-                  {LIGHT_LABEL[m]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="toggle">
+            <span>Light</span>
+            <LightSeg />
+          </div>
         </SettingLayer>
         <SettingLayer k="showLightPollution" label="Light pollution" />
         <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />

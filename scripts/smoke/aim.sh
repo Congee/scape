@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Aim smoke: one Aim control (Target / Sun / Moon / GC / Free) on the map's Frame tab and the viewfinder's View tab;
+# Aim smoke: one Aim control (Target / Sun / Moon / GC / Free) on both pages' Now tab;
 # a GC lock follows the time, a drag frees it, and both pages show the same lock.
 # Usage: scripts/smoke/aim.sh [port] [cdp-port] [screenshot-dir] [shot-tag] [shots]
 # Needs a dev server on the port; launches a headless Brave on the CDP port unless one answers, and stops only what it started.
@@ -77,15 +77,15 @@ shot() { # name
 for vp in "desktop 1600 1000" "390 390 844"; do
   read -r name w h <<<"$vp"
   ab set viewport "$w" "$h" >/dev/null
-  setup "" Frame
+  setup "" Now
   shot "map-$name"
-  setup viewfinder View
+  setup viewfinder Now
   shot "viewfinder-$name"
 done
 
 if [ "$ONLY" != shots ]; then
   ab set viewport 1600 1000 >/dev/null
-  setup viewfinder View
+  setup viewfinder Now
   wait_for '!!document.querySelector("canvas.vf")' 80
   opts=$(js "(() => [...($AIM_SEC).querySelectorAll('[role=radio]')].map((b) => b.textContent).join(','))()")
   check "one Aim radiogroup with five locks" "$([ "$opts" = 'Target,Sun,Moon,GC,Free' ] && echo 1 || echo 0)" "$opts"
@@ -105,14 +105,14 @@ if [ "$ONLY" != shots ]; then
   ab open "$BASE/" >/dev/null
   wait_for '!!document.querySelector(".panel-inner .tablist")' 80
   js '(() => { document.querySelector(".panel-expand")?.click(); return "ok"; })()' >/dev/null
-  tab Frame
+  tab Now
   l=$(js "$LOCK")
   check "map shows the viewfinder's lock" "$([ "$l" = Gc ] && echo 1 || echo 0)" "$l"
 
   ab open "$BASE/viewfinder" >/dev/null
   wait_for '!!document.querySelector("canvas.vf")' 80
   js '(() => { document.querySelector(".panel-expand")?.click(); return "ok"; })()' >/dev/null
-  tab View
+  tab Now
   read -r x y <<<"$(js '(() => { const r = document.querySelector("canvas.vf").getBoundingClientRect(); return `${Math.round(r.left + r.width / 2)} ${Math.round(r.top + r.height / 2)}`; })()')"
   ab mouse move "$x" "$y" >/dev/null
   ab mouse down >/dev/null
@@ -134,7 +134,7 @@ if [ "$ONLY" != shots ]; then
   ab open "$BASE/" >/dev/null
   wait_for '!!document.querySelector(".panel-inner .tablist")' 80
   js '(() => { document.querySelector(".panel-expand")?.click(); return "ok"; })()' >/dev/null
-  tab Frame
+  tab Now
   l=$(js "$LOCK")
   check "map shows Free after the drag" "$([ "$l" = Free ] && echo 1 || echo 0)" "$l"
   js "(() => { window.__scape.world.getState().setPin2(null); return 'ok'; })()" >/dev/null

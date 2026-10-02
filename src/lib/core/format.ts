@@ -8,8 +8,18 @@ export function degrees(n: number, digits = 2): string {
 
 const POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
 
-export function compass(azimuth: number): string {
-  return POINTS[Math.round((((azimuth % 360) + 360) % 360) / 22.5) % 16];
+export function compass(deg: number): string {
+  return POINTS[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+}
+
+/** A body's azimuth with its compass point; one precision app-wide. */
+export function azimuth(deg: number): string {
+  return `${degrees(deg, 1)} ${compass(deg)}`;
+}
+
+/** Moon phase name and lit fraction; one format app-wide. */
+export function moonPhase(name: string, illumination: number): string {
+  return `${name} · ${percent(illumination, illumination < 0.1 ? 2 : 1)}`;
 }
 
 export function percent(fraction: number, digits = 1): string {

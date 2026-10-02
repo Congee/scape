@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Panel smoke: six tabs on one row, keyboard switching, every former panel reachable, Today's now line and dials, neutral look, phone width.
+# Panel smoke: seven tabs on one row, keyboard switching, every former panel reachable, Today's now line and dials, neutral look, phone width.
 # Usage: scripts/smoke/panel.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port; launches a headless Brave on the CDP port unless one answers, and stops only what it started.
 set -uo pipefail
@@ -52,11 +52,11 @@ reach() { # tab, name, selector
 go() {
   ab open "$BASE/?camera=$CAMERA&t=$DAY" >/dev/null
   wait_for 'window.__scape && document.querySelector("[role=tablist]")' 80
-  tab Plan
+  tab Now
 }
 row() { # tag
   local r; r=$(js '(() => { const t = [...document.querySelectorAll(".tablist [role=tab]")]; return `${t.length} ${new Set(t.map((b) => b.offsetTop)).size} ${t.map((b) => b.textContent).join(",")}`; })()')
-  check "$1 six tabs on one row" "$([[ $r == '6 1 Plan,Frame,Sky,Weather,Map,Markers' ]] && echo 1 || echo 0)" "$r"
+  check "$1 seven tabs on one row" "$([[ $r == '7 1 Now,Shot,Sky,Find,Weather,Map,Markers' ]] && echo 1 || echo 0)" "$r"
 }
 wide() { # tag
   local w; w=$(js 'document.documentElement.scrollWidth > window.innerWidth || document.querySelector("#ptabpanel").scrollWidth > document.querySelector("#ptabpanel").clientWidth')
@@ -68,23 +68,23 @@ go
 row desktop
 
 # Keyboard: arrows wrap, Home and End jump, focus follows.
-js 'document.getElementById("ptab-Plan").focus(); "ok"' >/dev/null
+js 'document.getElementById("ptab-Now").focus(); "ok"' >/dev/null
 ab press ArrowRight >/dev/null; k1=$(active)
 ab press End >/dev/null; k2=$(active)
 ab press ArrowRight >/dev/null; k3=$(active)
 ab press ArrowLeft >/dev/null; k4=$(active)
 ab press Home >/dev/null; k5=$(active)
-check "keyboard → End → (wrap) ← Home" "$([[ "$k1|$k2|$k3|$k4|$k5" == 'Frame ptab-Frame|Markers ptab-Markers|Plan ptab-Plan|Markers ptab-Markers|Plan ptab-Plan' ]] && echo 1 || echo 0)" "$k1 / $k2 / $k3 / $k4 / $k5"
-aria=$(js '(() => { const t = document.getElementById("ptab-Plan"), p = document.getElementById("ptabpanel"); return `${t.getAttribute("aria-controls")} ${p.getAttribute("role")} ${p.getAttribute("aria-labelledby")} ${[...document.querySelectorAll("[role=tab]")].map((b) => b.tabIndex).join("")}`; })()')
-check "tablist ARIA and roving tabindex" "$([ "$aria" = 'ptabpanel tabpanel ptab-Plan 0-1-1-1-1-1' ] && echo 1 || echo 0)" "$aria"
+check "keyboard → End → (wrap) ← Home" "$([[ "$k1|$k2|$k3|$k4|$k5" == 'Shot ptab-Shot|Markers ptab-Markers|Now ptab-Now|Markers ptab-Markers|Now ptab-Now' ]] && echo 1 || echo 0)" "$k1 / $k2 / $k3 / $k4 / $k5"
+aria=$(js '(() => { const t = document.getElementById("ptab-Now"), p = document.getElementById("ptabpanel"); return `${t.getAttribute("aria-controls")} ${p.getAttribute("role")} ${p.getAttribute("aria-labelledby")} ${[...document.querySelectorAll("[role=tab]")].map((b) => b.tabIndex).join("")}`; })()')
+check "tablist ARIA and roving tabindex" "$([ "$aria" = 'ptabpanel tabpanel ptab-Now 0-1-1-1-1-1-1' ] && echo 1 || echo 0)" "$aria"
 
 # Every former panel's key control.
-reach Plan Timeline '.timeline li[data-time]'
-reach Plan Geodetics '.geo'
-reach Frame Frame '.frame select, .frame input'
-reach Frame 'Tools exposure' 'input[aria-label="Aperture, f-number"]'
+reach Now Timeline '.timeline li[data-time]'
+reach Now Geodetics '.geo'
+reach Shot Shot '.frame select, .frame input'
+reach Shot 'Tools exposure' 'input[aria-label="Aperture, f-number"]'
 reach Sky Night '.moon-chart, .night'
-reach Sky Find '.find .seg button'
+reach Find Find '.find .seg button'
 reach Sky 'Tools moon' '.tools details'
 reach Weather Weather '.weather'
 reach Weather 'tide and cloud rows' '.cloud-row'
@@ -95,7 +95,7 @@ reach Markers Markers '.markers .actions button'
 reach Markers Models '.markers-switch button'
 
 # Today: the now line sits between the events around now, and every event has a dial.
-tab Plan
+tab Now
 wait_for 'document.querySelector(".timeline li.now-line")' 40
 nl=$(js '(() => { const n = document.querySelector(".timeline li.now-line"); const t = window.__scape.world.getState().time; const p = n.previousElementSibling?.dataset.time, q = n.nextElementSibling?.dataset.time; return `${(p === undefined || +p <= t) && (q === undefined || +q > t)} ${p ?? "-"} ${t} ${q ?? "-"} ${n.textContent}`; })()')
 check "now line between the events around now" "$([[ $nl == true* ]] && echo 1 || echo 0)" "$nl"
@@ -124,18 +124,18 @@ check "panel font is Helvetica" "$([[ $font == *Helvetica* ]] && echo 1 || echo 
 
 # No old blue accent on panel chrome; the sky inks and dials keep their colours.
 blue=0
-for t in Plan Frame Sky Weather Map Markers; do
+for t in Now Shot Sky Find Weather Map Markers; do
   tab "$t"
   n=$(js '(() => { const blue = /rgba?\(90, 169, 255/; return [...document.querySelectorAll(".panel *")].filter((e) => !e.closest("svg") && !/\b(moon|sun|mw|gc|ink|swatch|cat)\b/.test(e.className)).filter((e) => { const s = getComputedStyle(e); return [s.color, s.backgroundColor, s.borderTopColor, s.borderBottomColor, s.outlineColor, s.accentColor].some((c) => blue.test(c)); }).map((e) => e.tagName + "." + e.className).slice(0, 3).join(" ") || "none"; })()')
   [ "$n" = none ] || blue="$blue; $t: $n"
 done
 check "no blue accent on panel chrome" "$([ "$blue" = 0 ] && echo 1 || echo 0)" "$blue"
 # Selections: underline bar for one-of, 9 px square box for toggles; no rings, no radius.
-tab Frame
+tab Shot
 sel=$(js '(() => { const one = [...document.querySelectorAll("#ptabpanel :is(.seg, .chips.one) button.on")]; const box = [...document.querySelectorAll("#ptabpanel input[type=checkbox]")]; const u = one.filter((b) => { const s = getComputedStyle(b); return /inset$|0px -2px 0px 0px/.test(s.boxShadow) && s.boxShadow.includes("-2px") && s.borderTopLeftRadius === "0px" && s.outlineStyle === "none" && s.fontWeight === "700"; }).length; const q = box.filter((b) => { const s = getComputedStyle(b); return s.appearance === "none" && s.width === "9px" && s.height === "9px" && s.borderTopLeftRadius === "0px"; }).length; return `${one.length} ${u} ${box.length} ${q}`; })()')
 check "selections are underline bars and square boxes" "$(echo "$sel" | awk '{ print ($1 > 0 && $1 == $2 && $3 > 0 && $3 == $4) ? 1 : 0 }')" "$sel (one-of, underlined, boxes, square)"
 wide desktop
-tab Plan
+tab Now
 ab screenshot "$OUT/panel-1600.png" >/dev/null
 
 # Viewfinder: View replaces Map, its toggles drive their flags, and each page keeps its own tab.
@@ -146,11 +146,11 @@ vfgo() {
 }
 vfrow() { # tag
   local r; r=$(js '(() => { const t = [...document.querySelectorAll(".tablist [role=tab]")]; return `${t.length} ${new Set(t.map((b) => b.offsetTop)).size} ${t.map((b) => b.textContent).join(",")}`; })()')
-  check "$1 viewfinder six tabs on one row, View for Map" "$([[ $r == '6 1 Plan,Frame,Sky,Weather,View,Markers' ]] && echo 1 || echo 0)" "$r"
+  check "$1 viewfinder seven tabs on one row, View for Map" "$([[ $r == '7 1 Now,Shot,Sky,Find,Weather,View,Markers' ]] && echo 1 || echo 0)" "$r"
 }
 # An earlier run's viewfinder tab persists; no name falls back to the page default.
 js "(() => { window.__scape.ui.getState().setPanelTab('', 'viewfinder'); return 'ok'; })()" >/dev/null
-tab Frame
+tab Shot
 vfgo
 vfrow desktop
 t=$(js '`${document.querySelector("[role=tab][aria-selected=true]")?.textContent} ${document.querySelectorAll(".vf-tools").length}`')
@@ -166,7 +166,7 @@ mp=$(js 'document.querySelector("[role=tab][aria-selected=true]")?.textContent')
 tab Map
 vfgo
 vp=$(js 'document.querySelector("[role=tab][aria-selected=true]")?.textContent')
-check "each page keeps its own tab" "$([ "$mp|$vp" = 'Frame|Sky' ] && echo 1 || echo 0)" "map $mp, viewfinder $vp"
+check "each page keeps its own tab" "$([ "$mp|$vp" = 'Shot|Sky' ] && echo 1 || echo 0)" "map $mp, viewfinder $vp"
 tab Markers
 wait_for 'document.querySelector("#ptabpanel .markers")' 20
 mo=$(js '[...document.querySelectorAll("#ptabpanel button")].filter((b) => /map centre|clicking the map|Show on map/.test(b.textContent)).length')
@@ -179,7 +179,7 @@ go
 row phone
 t44=$(js '[...document.querySelectorAll(".tablist [role=tab], .tabs-collapse")].map((b) => { const r = b.getBoundingClientRect(); return Math.round(Math.min(r.width, r.height)); }).join(",")')
 check "phone tabs and collapse handle are 44 px" "$(echo "$t44" | tr , '\n' | awk '$1 < 44 { bad = 1 } END { print bad ? 0 : 1 }')" "$t44"
-for t in Plan Frame Sky Weather Map Markers; do
+for t in Now Shot Sky Find Weather Map Markers; do
   tab "$t"
   wide "phone $t"
 done
@@ -191,7 +191,7 @@ js '(() => { document.querySelector(".tabs-collapse").click(); return "ok"; })()
 sleep 0.3
 c=$(js '`${window.__scape.ui.getState().panelCollapsed} ${!!document.querySelector("#ptabpanel")?.offsetParent}`')
 check "phone expand shows the body again" "$([ "$c" = 'false true' ] && echo 1 || echo 0)" "$c"
-tab Plan
+tab Now
 ab screenshot "$OUT/panel-390.png" >/dev/null
 vfgo
 vfrow phone

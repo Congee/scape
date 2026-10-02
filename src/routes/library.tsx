@@ -76,7 +76,7 @@ function LibraryPage() {
 
   const runSearch = (id: string, here: boolean) => {
     searchesStore.getState().apply(id, { here });
-    uiStore.getState().setPanelTab(PanelTab.Sky, PanelPage.Map);
+    uiStore.getState().setPanelTab(PanelTab.Find, PanelPage.Map);
     void navigate({ to: '/' });
   };
 

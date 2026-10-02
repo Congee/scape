@@ -132,7 +132,7 @@ const typeTop = async (v: number) => {
 const typed = await typeTop(400);
 await tab.shot(`${shots}/editor-typed-400.png`);
 const restored = await typeTop(395);
-await js(`ui.uiStore.getState().setPanelTab('Plan'); return true;`);
+await js(`ui.uiStore.getState().setPanelTab('Now'); return true;`);
 await settle(500);
 const label = await tab.eval<string>(`document.body.innerText.match(/from model «[^»]*»/)?.[0] ?? ''`);
 await tab.shot(`${shots}/geodetics-from-model.png`);

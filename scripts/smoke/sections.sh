@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Panel sections smoke: every tab of the map and viewfinder panels, desktop and 390 px. Section heads in fg, field labels in fg-2,
-# a 1px line rule on every section after the first, no section inside a section, and Frame's Aim and Depth of field as their own sections.
+# a 1px line rule on every section after the first, no section inside a section, and Aim heading the Now tab.
 # Usage: scripts/smoke/sections.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port; launches a headless Brave on the CDP port unless one answers, and stops only what it started.
 set -uo pipefail
@@ -74,12 +74,12 @@ for vp in "desktop 1600 1000" "390 390 844"; do
   ab set viewport "$w" "$h" >/dev/null
   open_panel /
   scan_tabs "map $name"
-  # The reported case: Aim and Depth of field are separate, ruled sections.
-  js '(() => { document.getElementById("ptab-Frame").click(); return "ok"; })()' >/dev/null
+  # Aim heads the Now tab; Today follows as its own ruled section.
+  js '(() => { document.getElementById("ptab-Now").click(); return "ok"; })()' >/dev/null
   wait_for '!!document.querySelector(".tab-body .psec-h")' 40
-  f=$(js '(() => { const hs = [...document.querySelectorAll(".tab-body .psec-h")]; const s = (t) => hs.find((h) => h.textContent === t)?.closest(".psec"); const a = s("Aim"), d = s("Depth of field"); return `${!!a && !!d && a !== d} ${d ? getComputedStyle(d).borderTopWidth : "none"} ${hs.map((h) => h.textContent).join(",")}`; })()')
-  check "map $name Frame: Aim and Depth of field are ruled sections" "$([[ "$f" == "true 1px "* ]] && echo 1 || echo 0)" "$f"
-  ab screenshot "$OUT/sections-frame-$name.png" >/dev/null
+  f=$(js '(() => { const hs = [...document.querySelectorAll(".tab-body .psec-h")]; const s = (t) => hs.find((h) => h.textContent.startsWith(t))?.closest(".psec"); const a = s("Aim"), d = s("Today"); return `${!!a && !!d && hs[0]?.textContent === "Aim"} ${d ? getComputedStyle(d).borderTopWidth : "none"} ${hs.map((h) => h.textContent).join(",")}`; })()')
+  check "map $name Now: Aim first, Today a ruled section" "$([[ "$f" == "true 1px "* ]] && echo 1 || echo 0)" "$f"
+  ab screenshot "$OUT/sections-now-$name.png" >/dev/null
   open_panel /viewfinder
   scan_tabs "viewfinder $name"
   ab screenshot "$OUT/sections-viewfinder-$name.png" >/dev/null

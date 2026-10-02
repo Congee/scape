@@ -8,10 +8,10 @@ import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, 
 import { capturePlan, plansStore } from '@state/plans';
 import { settingsStore, useSettings } from '@state/settings';
 import { useWorld } from '@state/world';
-import { AimControl } from './AimControl';
 import { GearSearch } from './GearSearch';
 import { useOnMap } from './panelPage';
-import { Section } from './Section';
+import { Disclosure, Section } from './Section';
+import { ToolsPanel, ToolsPart } from './ToolsPanel';
 
 const megapixels = (s: SensorFormat) => {
   const p = sensorPixels(s);
@@ -72,33 +72,6 @@ export function FramePanel() {
   return (
     <>
       <Section className="frame">
-        {(kits.length > 0 || isBody) && (
-          <div className="chips one kits" aria-label="Kits">
-            <span className="k">Kits</span>
-            {kits.map((k) => (
-              <button key={k.id} className={kitMatches(k, c) ? 'on' : ''} title={k.name} onClick={() => applyKit(k)}>
-                {k.name}
-              </button>
-            ))}
-            {isBody && kitName === null && !kits.some((k) => kitMatches(k, c)) && (
-              <button onClick={() => setKitName(defaultKitName(sensor.name, lens?.name ?? null))}>+ Save kit</button>
-            )}
-          </div>
-        )}
-        {kitName !== null && (
-          <div className="field-row kit-name">
-            <input
-              autoFocus
-              value={kitName}
-              onChange={(e) => setKitName(e.target.value)}
-              onKeyDown={(e) => (e.key === 'Enter' ? saveKit() : e.key === 'Escape' ? setKitName(null) : undefined)}
-              aria-label="Kit name"
-            />
-            <button onClick={saveKit} disabled={!kitName.trim()}>
-              Save
-            </button>
-          </div>
-        )}
         <GearSearch />
         <div className="kv">
           <span className="k">Camera</span>
@@ -180,148 +153,187 @@ export function FramePanel() {
           </div>
         )}
         <div className="kv">
-          <span className="k">Teleconverter</span>
-          <b className="v">
-            <span className="seg">
-              <button className={tc ? '' : 'on'} onClick={() => update({ teleconverters: [] })} title="No teleconverter">
-                None
-              </button>
-              {[Teleconverter.X14, Teleconverter.X20].map((t) => (
-                <button
-                  key={t}
-                  className={c.teleconverters.includes(t) ? 'on' : ''}
-                  aria-pressed={c.teleconverters.includes(t)}
-                  onClick={() => toggleTc(t)}
-                  title={`${t}× teleconverter: ${t}× the focal length, ${t}× the f-number. Stacks with the other one.`}
-                >
-                  {t}×
-                </button>
-              ))}
-            </span>
-            {tc && <span className="muted">· {tcf}× in total</span>}
-          </b>
-          <span className="k">Aperture</span>
-          <b className="v">
-            <select value={c.fNumber} onChange={(e) => update({ fNumber: Number(e.target.value) })} aria-label="Aperture">
-              {aperturesFor(lens, c.focalMm, [...F_STOPS, c.fNumber]).map((f) => (
-                <option key={f} value={f}>
-                  f/{f}
-                </option>
-              ))}
-            </select>
-            {lens?.maxApertureLong != null && (
-              <span className="muted">
-                · f/{lens.maxAperture}–{lens.maxApertureLong} zoom, f/{maxApertureAt(lens, c.focalMm)} widest at {c.focalMm} mm
-              </span>
-            )}
-            {tc && <span className="muted">· f/{opt.fNumber} with the {tcf}×</span>}
-          </b>
           <span className="k">Field of view</span>
           <b className="v">
             {fov.hDeg.toFixed(1)}° × {fov.vDeg.toFixed(1)}° <span className="muted">· diagonal {fov.dDeg.toFixed(1)}°</span>
           </b>
         </div>
-      </Section>
-      <Section title="Aim" className="frame">
-        {onMap && <AimControl />}
-        <label className="toggle">
-          <input type="checkbox" checked={c.showFov} onChange={(e) => update({ showFov: e.target.checked })} />
-          <span>FOV cone</span>
-        </label>
-        <div className="kv">
-          <span className="k">Cone length</span>
-          <b className="v">
-            <input
-              type="number"
-              min={50}
-              step={100}
-              value={Math.round(c.fovRangeM ?? targetM ?? 5000)}
-              onChange={(e) => update({ fovRangeM: Math.max(50, Number(e.target.value) || 50) })}
-              aria-label="Cone length, metres"
-            />
-            <span className="muted">m </span>
-            {c.fovRangeM != null && (
-              <button className="link" onClick={() => update({ fovRangeM: null })}>
-                auto
-              </button>
-            )}
-          </b>
-        </div>
-      </Section>
-      <Section title="Depth of field" className="frame">
-        <div className="kv">
-          <span className="k">Focus at</span>
-          <b className="v">
-            <input
-              type="number"
-              min={0.1}
-              step={1}
-              value={focusM ? Number(focusM.toFixed(focusM < 10 ? 1 : 0)) : ''}
-              placeholder="target"
-              onChange={(e) => update({ focusDistM: e.target.value ? Math.max(0.1, Number(e.target.value)) : null })}
-              aria-label="Focus distance, metres"
-            />
-            <span className="muted">m </span>
-            {c.focusDistM != null && (
-              <button className="link" onClick={() => update({ focusDistM: null })}>
-                target
-              </button>
-            )}
-          </b>
-          <span className="k">Sharp from</span>
-          <b className="v">{dof ? `${dist(dof.nearM, units)} to ${dist(dof.farM, units)}` : 'set a focus distance'}</b>
-          <span className="k">Hyperfocal</span>
-          <b className="v">
-            {dist(dof?.hyperfocalM ?? depthOfField(opt.focalMm, opt.fNumber, coc, 1).hyperfocalM, units)}{' '}
-            <span className="muted">
-              · CoC {coc.toFixed(3)} mm{cocRule === CocRule.PixelPitch && (pixels ? ' · pixel pitch' : ' · needs the pixel count')}
-            </span>
-          </b>
-          <span className="k">CoC rule</span>
-          <b className="v">
-            <span className="seg">
-              <button className={cocRule === CocRule.Standard ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.Standard })} title="Zeiss 0.03 mm scaled by the crop factor">
-                Standard
-              </button>
-              <button className={cocRule === CocRule.PixelPitch ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.PixelPitch })} title="Twice the pixel pitch, for large prints">
-                Pixel pitch
-              </button>
-            </span>
-          </b>
-        </div>
-      </Section>
-      <Section title="Panorama" className="frame">
-        <label className="toggle">
-          <input type="checkbox" checked={c.panoTotalDeg != null} onChange={(e) => update({ panoTotalDeg: e.target.checked ? Math.max(fov.hDeg, 120) : null })} />
-          <span>Plan a stitched panorama</span>
-        </label>
-        {pano && c.panoTotalDeg != null && (
-          <div className="kv">
-            <span className="k">Total angle</span>
-            <b className="v">
-              <input type="number" min={1} max={360} step={5} value={Math.round(c.panoTotalDeg)} onChange={(e) => update({ panoTotalDeg: Math.min(360, Math.max(1, Number(e.target.value) || 1)) })} aria-label="Panorama total angle" />
-              <span className="muted">°</span>
-            </b>
-            <span className="k">Overlap</span>
-            <b className="v">
-              <input type="number" min={0} max={80} step={5} value={Math.round(c.panoOverlap * 100)} onChange={(e) => update({ panoOverlap: Math.min(0.8, Math.max(0, Number(e.target.value) / 100)) })} aria-label="Frame overlap, percent" />
-              <span className="muted">%</span>
-            </b>
-            <span className="k">Frames</span>
-            <b className="v">
-              {pano.shots} {c.orientation === Orientation.Portrait ? 'portrait' : 'landscape'} frames, {pano.stepDeg.toFixed(1)}° apart
-            </b>
-          </div>
+        {onMap && (
+          <>
+            <label className="toggle">
+              <input type="checkbox" checked={c.showFov} onChange={(e) => update({ showFov: e.target.checked })} />
+              <span>FOV cone</span>
+            </label>
+            <div className="kv">
+              <span className="k">Cone length</span>
+              <b className="v">
+                <input
+                  type="number"
+                  min={50}
+                  step={100}
+                  value={Math.round(c.fovRangeM ?? targetM ?? 5000)}
+                  onChange={(e) => update({ fovRangeM: Math.max(50, Number(e.target.value) || 50) })}
+                  aria-label="Cone length, metres"
+                />
+                <span className="muted">m </span>
+                {c.fovRangeM != null && (
+                  <button className="link" onClick={() => update({ fovRangeM: null })}>
+                    auto
+                  </button>
+                )}
+              </b>
+            </div>
+          </>
         )}
       </Section>
-      <Section title="Plan" className="frame">
-        <div className="field-row" style={{ padding: '0 6px' }}>
-          <input placeholder="Plan name" value={planName} onChange={(e) => setPlanName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && planName.trim() && savePlan()} aria-label="Plan name" />
-          <button onClick={savePlan} disabled={!planName.trim()}>
-            Save plan
-          </button>
-        </div>
-        {saved && <p className="muted hint ok">Saved “{saved}” to the Library.</p>}
+      <Section className="frame">
+        <Disclosure id="shot-tc" summary={`Teleconverter · ${tc ? `${c.teleconverters.map((t) => `${t}×`).join(' + ')}, f/${opt.fNumber} at ${opt.focalMm} mm` : 'None'}`}>
+          <div className="kv">
+            <span className="k">Teleconverter</span>
+            <b className="v">
+              <span className="seg">
+                <button className={tc ? '' : 'on'} onClick={() => update({ teleconverters: [] })} title="No teleconverter">
+                  None
+                </button>
+                {[Teleconverter.X14, Teleconverter.X20].map((t) => (
+                  <button
+                    key={t}
+                    className={c.teleconverters.includes(t) ? 'on' : ''}
+                    aria-pressed={c.teleconverters.includes(t)}
+                    onClick={() => toggleTc(t)}
+                    title={`${t}× teleconverter: ${t}× the focal length, ${t}× the f-number. Stacks with the other one.`}
+                  >
+                    {t}×
+                  </button>
+                ))}
+              </span>
+              {tc && <span className="muted">· {tcf}× in total</span>}
+            </b>
+          </div>
+        </Disclosure>
+        <Disclosure id="shot-aperture" summary={`Aperture & DOF · f/${opt.fNumber} · ${dof ? `sharp ${dist(dof.nearM, units)} to ${dist(dof.farM, units)}` : `hyperfocal ${dist(depthOfField(opt.focalMm, opt.fNumber, coc, 1).hyperfocalM, units)}`}`}>
+          <div className="kv">
+            <span className="k">Aperture</span>
+            <b className="v">
+              <select value={c.fNumber} onChange={(e) => update({ fNumber: Number(e.target.value) })} aria-label="Aperture">
+                {aperturesFor(lens, c.focalMm, [...F_STOPS, c.fNumber]).map((f) => (
+                  <option key={f} value={f}>
+                    f/{f}
+                  </option>
+                ))}
+              </select>
+              {lens?.maxApertureLong != null && (
+                <span className="muted">
+                  · f/{lens.maxAperture}–{lens.maxApertureLong} zoom, f/{maxApertureAt(lens, c.focalMm)} widest at {c.focalMm} mm
+                </span>
+              )}
+              {tc && <span className="muted">· f/{opt.fNumber} with the {tcf}×</span>}
+            </b>
+          </div>
+          <div className="kv">
+            <span className="k">Focus at</span>
+            <b className="v">
+              <input
+                type="number"
+                min={0.1}
+                step={1}
+                value={focusM ? Number(focusM.toFixed(focusM < 10 ? 1 : 0)) : ''}
+                placeholder="target"
+                onChange={(e) => update({ focusDistM: e.target.value ? Math.max(0.1, Number(e.target.value)) : null })}
+                aria-label="Focus distance, metres"
+              />
+              <span className="muted">m </span>
+              {c.focusDistM != null && (
+                <button className="link" onClick={() => update({ focusDistM: null })}>
+                  target
+                </button>
+              )}
+            </b>
+            <span className="k">Sharp from</span>
+            <b className="v">{dof ? `${dist(dof.nearM, units)} to ${dist(dof.farM, units)}` : 'set a focus distance'}</b>
+            <span className="k">Hyperfocal</span>
+            <b className="v">
+              {dist(dof?.hyperfocalM ?? depthOfField(opt.focalMm, opt.fNumber, coc, 1).hyperfocalM, units)}{' '}
+              <span className="muted">
+                · CoC {coc.toFixed(3)} mm{cocRule === CocRule.PixelPitch && (pixels ? ' · pixel pitch' : ' · needs the pixel count')}
+              </span>
+            </b>
+            <span className="k">CoC rule</span>
+            <b className="v">
+              <span className="seg">
+                <button className={cocRule === CocRule.Standard ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.Standard })} title="Zeiss 0.03 mm scaled by the crop factor">
+                  Standard
+                </button>
+                <button className={cocRule === CocRule.PixelPitch ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.PixelPitch })} title="Twice the pixel pitch, for large prints">
+                  Pixel pitch
+                </button>
+              </span>
+            </b>
+          </div>
+          <ToolsPanel part={ToolsPart.Frame} />
+        </Disclosure>
+        <Disclosure id="shot-pano" summary={`Panorama · ${pano && c.panoTotalDeg != null ? `${pano.shots} frames, ${pano.stepDeg.toFixed(1)}° apart` : 'off'}`}>
+          <label className="toggle">
+            <input type="checkbox" checked={c.panoTotalDeg != null} onChange={(e) => update({ panoTotalDeg: e.target.checked ? Math.max(fov.hDeg, 120) : null })} />
+            <span>Plan a stitched panorama</span>
+          </label>
+          {pano && c.panoTotalDeg != null && (
+            <div className="kv">
+              <span className="k">Total angle</span>
+              <b className="v">
+                <input type="number" min={1} max={360} step={5} value={Math.round(c.panoTotalDeg)} onChange={(e) => update({ panoTotalDeg: Math.min(360, Math.max(1, Number(e.target.value) || 1)) })} aria-label="Panorama total angle" />
+                <span className="muted">°</span>
+              </b>
+              <span className="k">Overlap</span>
+              <b className="v">
+                <input type="number" min={0} max={80} step={5} value={Math.round(c.panoOverlap * 100)} onChange={(e) => update({ panoOverlap: Math.min(0.8, Math.max(0, Number(e.target.value) / 100)) })} aria-label="Frame overlap, percent" />
+                <span className="muted">%</span>
+              </b>
+              <span className="k">Frames</span>
+              <b className="v">
+                {pano.shots} {c.orientation === Orientation.Portrait ? 'portrait' : 'landscape'} frames, {pano.stepDeg.toFixed(1)}° apart
+              </b>
+            </div>
+          )}
+        </Disclosure>
+        {(kits.length > 0 || isBody) && (
+          <Disclosure id="shot-kits" summary={`Kits · ${kits.find((k) => kitMatches(k, c))?.name ?? (kits.length > 0 ? `${kits.length} saved` : 'none')}`}>
+            <div className="chips one kits" aria-label="Kits">
+              <span className="k">Kits</span>
+              {kits.map((k) => (
+                <button key={k.id} className={kitMatches(k, c) ? 'on' : ''} title={k.name} onClick={() => applyKit(k)}>
+                  {k.name}
+                </button>
+              ))}
+              {isBody && kitName === null && !kits.some((k) => kitMatches(k, c)) && (
+                <button onClick={() => setKitName(defaultKitName(sensor.name, lens?.name ?? null))}>+ Save kit</button>
+              )}
+            </div>
+            {kitName !== null && (
+              <div className="field-row kit-name">
+                <input
+                  autoFocus
+                  value={kitName}
+                  onChange={(e) => setKitName(e.target.value)}
+                  onKeyDown={(e) => (e.key === 'Enter' ? saveKit() : e.key === 'Escape' ? setKitName(null) : undefined)}
+                  aria-label="Kit name"
+                />
+                <button onClick={saveKit} disabled={!kitName.trim()}>
+                  Save
+                </button>
+              </div>
+            )}
+          </Disclosure>
+        )}
+        <Disclosure id="shot-save" summary="Save setup">
+          <div className="field-row" style={{ padding: '0 6px' }}>
+            <input placeholder="Setup name" value={planName} onChange={(e) => setPlanName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && planName.trim() && savePlan()} aria-label="Setup name" />
+            <button onClick={savePlan} disabled={!planName.trim()}>
+              Save setup
+            </button>
+          </div>
+          {saved && <p className="muted hint ok">Saved “{saved}” to the Library.</p>}
+        </Disclosure>
       </Section>
     </>
   );

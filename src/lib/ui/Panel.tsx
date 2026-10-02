@@ -1,4 +1,5 @@
 import { useLayoutEffect, type KeyboardEvent } from 'react';
+import { AimControl } from './AimControl';
 import { FindPanel } from './FindPanel';
 import { FramePanel } from './FramePanel';
 import { GeodeticsPanel } from './GeodeticsPanel';
@@ -71,41 +72,43 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
           </button>
         </div>
         <div className="tab-body" id="ptabpanel" role="tabpanel" aria-labelledby={`ptab-${tab}`}>
-          {tab === PanelTab.Plan && (
+          {tab === PanelTab.Now && (
             <>
               <DayStrip />
-              <Section title="Now">
-                <LiveReadout />
-                <ParkingLinks />
+              <Section title="Aim">
+                <AimControl />
               </Section>
+              {/* The viewfinder's BodyStrip is its live readout. */}
+              {page === PanelPage.Map && (
+                <Section title="Now">
+                  <LiveReadout />
+                  <ParkingLinks />
+                </Section>
+              )}
               <Section title="Today" aside={<DetailsToggle />}>
                 <Timeline />
               </Section>
               <Section title="Target">
                 <GeodeticsPanel />
+                {page !== PanelPage.Map && <ParkingLinks />}
               </Section>
             </>
           )}
-          {tab === PanelTab.Frame && (
-            <>
-              <FramePanel />
-              <Section title="Calculators">
-                <ToolsPanel part={ToolsPart.Frame} />
-              </Section>
-            </>
-          )}
+          {tab === PanelTab.Shot && <FramePanel />}
           {tab === PanelTab.Sky && (
             <>
               <Section title="Night">
                 <NightPanel />
               </Section>
-              <Section title="Find">
-                <FindPanel />
-              </Section>
               <Section title="Moon & light">
                 <ToolsPanel part={ToolsPart.Sky} />
               </Section>
             </>
+          )}
+          {tab === PanelTab.Find && (
+            <Section>
+              <FindPanel />
+            </Section>
           )}
           {tab === PanelTab.Weather && (
             <>
@@ -115,7 +118,7 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
               <Section title="Tide & cloud">
                 <TideCloud />
               </Section>
-              <Section title="Calculators">
+              <Section>
                 <ToolsPanel part={ToolsPart.Weather} />
               </Section>
             </>

@@ -170,9 +170,9 @@ export function CloudRow() {
         <span className="extra">
           {loading
             ? 'loading…'
-            : missing ||
+            : // The Weather tab says "no forecast" once, above.
               [
-                empty ? 'no forecast for this hour' : `low ${pct(valueAt(s!, HourlyVar.CloudLow, time))} · mid ${pct(valueAt(s!, HourlyVar.CloudMid, time))} · high ${pct(valueAt(s!, HourlyVar.CloudHigh, time))}`,
+                missing || empty ? '' : `low ${pct(valueAt(s!, HourlyVar.CloudLow, time))} · mid ${pct(valueAt(s!, HourlyVar.CloudMid, time))} · high ${pct(valueAt(s!, HourlyVar.CloudHigh, time))}`,
                 spanText(FogClass.Fog, 'fog'),
                 spanText(FogClass.Mist, 'mist'),
                 modelInfo(model).label

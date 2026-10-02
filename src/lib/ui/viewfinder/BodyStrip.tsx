@@ -1,11 +1,11 @@
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { moonInfo, position } from '@core/astro/positions';
-import { compass, degrees, percent } from '@core/format';
+import { azimuth, degrees, moonPhase } from '@core/format';
 import { useSettings } from '@state/settings';
 import { usePinSiteHeightM } from '@state/terrain';
 import { useWorld } from '@state/world';
 
-const altAz = (p: { altitude: number; azimuth: number }) => `${p.altitude >= 0 ? '+' : ''}${degrees(p.altitude, 1)} · ${degrees(p.azimuth, 1)} ${compass(p.azimuth)}`;
+const altAz = (p: { altitude: number; azimuth: number }) => `${p.altitude >= 0 ? '+' : ''}${degrees(p.altitude, 1)} · ${azimuth(p.azimuth)}`;
 
 /** Sun, moon and Galactic Centre readout for the composed moment, PlanIt's viewfinder header. */
 export function BodyStrip() {
@@ -15,7 +15,7 @@ export function BodyStrip() {
   const sun = useWorld((s) => altAz(position(SkyBody.Sun, new Date(s.time), makeObserver(s.pin, siteM))));
   const moon = useWorld((s) => {
     const m = moonInfo(new Date(s.time));
-    return `${altAz(position(SkyBody.Moon, new Date(s.time), makeObserver(s.pin, siteM)))} · ${percent(m.illumination, 0)} ${m.name}`;
+    return `${altAz(position(SkyBody.Moon, new Date(s.time), makeObserver(s.pin, siteM)))} · ${moonPhase(m.name, m.illumination)}`;
   });
   const gc = useWorld((s) => (showGc ? altAz(position(SkyBody.Gc, new Date(s.time), makeObserver(s.pin, siteM))) : ''));
   return (

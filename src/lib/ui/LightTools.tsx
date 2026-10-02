@@ -1,6 +1,6 @@
 import { makeObserver } from '@core/astro/bodies';
 import { moonView, type MoonView } from '@core/astro/moonSim';
-import { degrees } from '@core/format';
+import { degrees, moonPhase } from '@core/format';
 import { formatTime } from '@core/time/format';
 import { useLightProbe } from '@state/lightProbe';
 import { useSettings } from '@state/settings';
@@ -30,7 +30,7 @@ function useMoon(): MoonView {
 
 export function MoonSummary() {
   const v = useMoon();
-  return `Moon · ${phaseName(v).toLowerCase()} · ${(v.illumination * 100).toFixed(0)}% lit · ${(v.semidiameterDeg * 120).toFixed(1)}′`;
+  return `Moon · ${moonPhase(phaseName(v), v.illumination)} · ${(v.semidiameterDeg * 120).toFixed(1)}′`;
 }
 
 export function MoonTools() {
@@ -40,7 +40,7 @@ export function MoonTools() {
       <div className="kv">
         <span className="k">Phase</span>
         <b className="v">
-          {phaseName(v)} · {(v.illumination * 100).toFixed(1)}% lit
+          {moonPhase(phaseName(v), v.illumination)}
         </b>
         <span className="k">Libration</span>
         <b className="v">

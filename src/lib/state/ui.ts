@@ -1,24 +1,25 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export const PanelTab = { Plan: 'Plan', Frame: 'Frame', Sky: 'Sky', Weather: 'Weather', Map: 'Map', View: 'View', Markers: 'Markers' } as const;
+export const PanelTab = { Now: 'Now', Shot: 'Shot', Sky: 'Sky', Find: 'Find', Weather: 'Weather', Map: 'Map', View: 'View', Markers: 'Markers' } as const;
 export type PanelTab = (typeof PanelTab)[keyof typeof PanelTab];
 
-/** The ten tabs before the regroup, so stored or scripted names still land somewhere. */
+/** Names from earlier layouts, so stored or scripted names still land somewhere. */
 const LEGACY_TAB: Record<string, PanelTab> = {
-  Timeline: PanelTab.Plan,
-  Geodetics: PanelTab.Plan,
-  Tools: PanelTab.Frame,
+  Plan: PanelTab.Now,
+  Frame: PanelTab.Shot,
+  Timeline: PanelTab.Now,
+  Geodetics: PanelTab.Now,
+  Tools: PanelTab.Shot,
   Night: PanelTab.Sky,
-  Find: PanelTab.Sky,
   Layers: PanelTab.Map,
   Offline: PanelTab.Map
 };
 
 export function toPanelTab(name: unknown): PanelTab {
-  if (typeof name !== 'string') return PanelTab.Plan;
+  if (typeof name !== 'string') return PanelTab.Now;
   if (Object.hasOwn(PanelTab, name)) return name as PanelTab;
-  return Object.hasOwn(LEGACY_TAB, name) ? LEGACY_TAB[name] : PanelTab.Plan;
+  return Object.hasOwn(LEGACY_TAB, name) ? LEGACY_TAB[name] : PanelTab.Now;
 }
 
 /** The pages that show the panel; each remembers its own tab. */
@@ -27,11 +28,11 @@ export type PanelPage = (typeof PanelPage)[keyof typeof PanelPage];
 
 /** Map and View hold the same slot: the page's own layers. */
 export const PAGE_TABS: Record<PanelPage, readonly PanelTab[]> = {
-  [PanelPage.Map]: [PanelTab.Plan, PanelTab.Frame, PanelTab.Sky, PanelTab.Weather, PanelTab.Map, PanelTab.Markers],
-  [PanelPage.Viewfinder]: [PanelTab.Plan, PanelTab.Frame, PanelTab.Sky, PanelTab.Weather, PanelTab.View, PanelTab.Markers]
+  [PanelPage.Map]: [PanelTab.Now, PanelTab.Shot, PanelTab.Sky, PanelTab.Find, PanelTab.Weather, PanelTab.Map, PanelTab.Markers],
+  [PanelPage.Viewfinder]: [PanelTab.Now, PanelTab.Shot, PanelTab.Sky, PanelTab.Find, PanelTab.Weather, PanelTab.View, PanelTab.Markers]
 };
 
-const PAGE_DEFAULT: Record<PanelPage, PanelTab> = { [PanelPage.Map]: PanelTab.Plan, [PanelPage.Viewfinder]: PanelTab.View };
+const PAGE_DEFAULT: Record<PanelPage, PanelTab> = { [PanelPage.Map]: PanelTab.Now, [PanelPage.Viewfinder]: PanelTab.View };
 
 /** A tab name as this page shows it; the other page's layers tab lands on this page's. */
 export function tabFor(page: PanelPage, name: unknown): PanelTab {
@@ -52,7 +53,7 @@ function toPanelTabs(raw: unknown): PanelTabs {
 /** Stored ui state from any version; v1 kept one tab, which stays the map page's. */
 export function migrateUi(stored: unknown, version: number): Record<string, unknown> {
   const { panelTab, ...rest } = (stored ?? {}) as Record<string, unknown>;
-  const panelTabs = version < 2 ? { [PanelPage.Map]: tabFor(PanelPage.Map, panelTab ?? PanelTab.Plan), [PanelPage.Viewfinder]: PanelTab.View } : toPanelTabs(rest.panelTabs);
+  const panelTabs = version < 2 ? { [PanelPage.Map]: tabFor(PanelPage.Map, panelTab ?? PanelTab.Now), [PanelPage.Viewfinder]: PanelTab.View } : toPanelTabs(rest.panelTabs);
   return { ...rest, panelTabs };
 }
 

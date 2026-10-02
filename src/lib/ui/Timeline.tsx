@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import { SkyBody } from '@core/astro/bodies';
 import { EventKind, type DayEvent } from '@core/astro/dayEvents';
-import { degrees, distance, percent } from '@core/format';
+import { azimuth, distance, moonPhase } from '@core/format';
 import { formatTime } from '@core/time/format';
 import type { SightVerdict } from '@core/weather/sightline';
 import { tideDay, TideKind } from '@data/tides';
@@ -129,10 +129,10 @@ function Row({ ev, active, tz, hour12, sight }: { ev: DayEvent; active: boolean;
         <Dial az={ev.azimuth} ink={`${ev.body.toLowerCase()} ${shade(ev.kind)}${TERRAIN.has(ev.kind) ? ' terrain' : ''}`} />
         <span className="label">{LABELS[ev.body][ev.kind] ?? ev.kind}</span>
         <span className="time">{formatTime(ev.time, tz, hour12)}</span>
-        <span className="az">{degrees(ev.azimuth)}</span>
+        <span className="az">{azimuth(ev.azimuth)}</span>
         {(ev.moon || sight) && (
           <span className="extra">
-            {ev.moon && `${ev.moon.name} · ${percent(ev.moon.illumination, ev.moon.illumination < 0.1 ? 2 : 1)}`}
+            {ev.moon && moonPhase(ev.moon.name, ev.moon.illumination)}
             {ev.moon && sight && ' · '}
             {sight && (
               <span className={`sight ${sight.toLowerCase()}`} data-sight={sight}>

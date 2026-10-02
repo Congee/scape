@@ -3,7 +3,7 @@ import { makeObserver } from '@core/astro/bodies';
 import { calendarMarks, CalendarMarkKind, ECLIPSE_LABEL, type CalendarMark } from '@core/astro/calendar';
 import type { BesselianElements } from '@core/astro/besselian';
 import { lunarCircumstances, solarCircumstances, type EclipseContact } from '@core/astro/eclipse';
-import { compass, degrees } from '@core/format';
+import { azimuth, degrees } from '@core/format';
 import { formatTime } from '@core/time/format';
 import { besselianElements } from '@data/besselian';
 import { isoDate, localMidnight, localParts } from '@core/time/localDay';
@@ -87,7 +87,7 @@ function EclipseDetail({ mark, lat, lng }: { mark: CalendarMark; lat: number; ln
               <td>{formatTime(x.timeMs, tz, hour12, true)}</td>
               <td>{signed(x.altitude)}</td>
               <td>
-                {degrees(x.azimuth, 0)} {compass(x.azimuth)}
+                {azimuth(x.azimuth)}
               </td>
               <td className="muted">{contactNote(x)}</td>
             </tr>

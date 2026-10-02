@@ -35,7 +35,7 @@ export function GearSettings() {
     <section>
       <h2>Gear</h2>
       <p className="muted">
-        Built in: {SENSORS.map((s) => s.name).join(' · ')}. Search the camera and lens catalogue in the Frame tab, or add a sensor size by hand below.
+        Built in: {SENSORS.map((s) => s.name).join(' · ')}. Search the camera and lens catalogue in the Shot tab, or add a sensor size by hand below.
       </p>
       <ul className="list">
         {cameras.map((c) => (
@@ -61,7 +61,7 @@ export function GearSettings() {
         </button>
       </div>
       <h3>Lenses</h3>
-      {lenses.length === 0 && <p className="muted">No lenses yet; pick them from the search in the Frame tab.</p>}
+      {lenses.length === 0 && <p className="muted">No lenses yet; pick them from the search in the Shot tab.</p>}
       <ul className="list">
         {lenses.map((l) => (
           <li key={l.id}>
@@ -79,7 +79,7 @@ export function GearSettings() {
         ))}
       </ul>
       <h3>Kits</h3>
-      {kits.length === 0 && <p className="muted">No kits yet; save a camera and lens pairing from the Frame tab.</p>}
+      {kits.length === 0 && <p className="muted">No kits yet; save a camera and lens pairing from the Shot tab.</p>}
       <ul className="list">
         {kits.map((k) => {
           const cam = cameras.find((x) => x.id === k.cameraId);

@@ -23,3 +23,24 @@ export function FormRow({ label, children }: { label: string; children: ReactNod
     </div>
   );
 }
+
+// Which rows are open survives tab switches but not a reload.
+const openRows = new Set<string>();
+
+/** A collapsed row whose summary carries the current value; ids are panel-wide. */
+export function Disclosure({ id, summary, summaryClass, children }: { id: string; summary: ReactNode; summaryClass?: string; children: ReactNode }) {
+  return (
+    <details
+      className="disc"
+      data-disc={id}
+      open={openRows.has(id)}
+      onToggle={(e) => {
+        if (e.currentTarget.open) openRows.add(id);
+        else openRows.delete(id);
+      }}
+    >
+      <summary className={summaryClass}>{summary}</summary>
+      {children}
+    </details>
+  );
+}

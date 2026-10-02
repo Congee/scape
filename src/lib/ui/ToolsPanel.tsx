@@ -4,7 +4,7 @@ import { depressionForHeightDeg, lastLightMs, litHeightM } from '@core/astro/ear
 import { lunarEclipseLight } from '@core/astro/eclipse';
 import { moonInfo, position } from '@core/astro/positions';
 import { rainbowTop, SECONDARY_DEG } from '@core/astro/rainbow';
-import { bytes, compass, degrees, distance, height, Units } from '@core/format';
+import { azimuth, bytes, degrees, distance, height, Units } from '@core/format';
 import { cloudAngleDeg, cloudDistanceM, cloudHeightM } from '@core/geo/clouds';
 import {
   APERTURE_THIRDS,
@@ -37,6 +37,8 @@ import { sensorById, useGear } from '@state/gear';
 import { useSettings } from '@state/settings';
 import { usePinSiteHeightM } from '@state/terrain';
 import { Dial } from './Dial';
+import { useOnMap } from './panelPage';
+import { Disclosure } from './Section';
 import { LightPointSummary, LightPointTools, MoonSummary, MoonTools } from './LightTools';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
 import { timelapseStore, useTimelapse } from '@state/timelapse';
@@ -66,9 +68,6 @@ const snapped = (v: number, table: readonly number[]) => {
 };
 const clipText = (s: number) => (s >= 60 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${s.toFixed(1)} s`);
 
-// Which groups are open survives tab switches but not a reload.
-const openGroups = new Set<string>();
-
 /** Which panel tab hosts a slice of the calculators. */
 export const ToolsPart = { Frame: 'Frame', Weather: 'Weather', Sky: 'Sky' } as const;
 export type ToolsPart = (typeof ToolsPart)[keyof typeof ToolsPart];
@@ -83,16 +82,9 @@ function Group({ id, summary, children }: { id: string; summary: ReactNode; chil
   const part = useContext(PartContext);
   if (!PART_GROUPS[part].includes(id)) return null;
   return (
-    <details
-      open={openGroups.has(id)}
-      onToggle={(e) => {
-        if (e.currentTarget.open) openGroups.add(id);
-        else openGroups.delete(id);
-      }}
-    >
-      <summary>{summary}</summary>
+    <Disclosure id={`tools-${id}`} summary={summary}>
       {children}
-    </details>
+    </Disclosure>
   );
 }
 
@@ -108,7 +100,7 @@ function AltAzRow({ label, ink, alt, az }: { label: string; ink: string; alt: nu
         {signed(alt)}
       </span>
       <span className="val" title="Azimuth">
-        {degrees(az, 0)} {compass(az)}
+        {azimuth(az)}
       </span>
     </div>
   );
@@ -191,6 +183,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
   const time = usePlanTime();
   const tz = useWorld((s) => s.tz);
   const pin = useWorld((s) => s.pin);
+  const onMap = useOnMap();
   const siteM = usePinSiteHeightM();
   const units = useSettings((s) => s.units);
   const hour12 = useSettings((s) => s.hour12);
@@ -449,7 +442,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
             <span className="k">Per shot</span>
             <b className="v">
               <input type="number" min={0.1} step={1} placeholder={pixels ? (rawBytesPerShot(pixels) / 1e6).toFixed(0) : 'MB'} value={tlMb} onChange={(e) => setTlMb(e.target.value)} aria-label="Megabytes per shot" />
-              <span className="muted">MB{tlMb === '' && pixels ? `, 14-bit raw of ${(pixels / 1e6).toFixed(1)} MP` : tlMb === '' ? ' (pick the camera in Frame)' : ''}</span>
+              <span className="muted">MB{tlMb === '' && pixels ? `, 14-bit raw of ${(pixels / 1e6).toFixed(1)} MP` : tlMb === '' ? ' (pick the camera above)' : ''}</span>
             </b>
             <span className="k">Card space</span>
             <b className="v">{tlOk && perShot ? bytes(perShot * tl.shots) : '—'}</b>
@@ -538,7 +531,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
               <span className="label">Last light on the cloud</span>
               <span className="time">{formatTime(lastLight, tz, hour12)}</span>
               <span className="az">
-                {degrees(lastLightAz, 0)} {compass(lastLightAz)}
+                {azimuth(lastLightAz)}
               </span>
             </button>
           )}
@@ -549,9 +542,11 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
         <Group id="moon" summary={<MoonSummary />}>
           <MoonTools />
         </Group>
-        <Group id="light-point" summary={<LightPointSummary />}>
-          <LightPointTools />
-        </Group>
+        {onMap && (
+          <Group id="light-point" summary={<LightPointSummary />}>
+            <LightPointTools />
+          </Group>
+        )}
       </div>
     </PartContext>
   );

@@ -17,6 +17,8 @@ import { Sightlines } from './Sightlines';
 import { Credit, fetchedText, WindyLink, fogAt, missingText, noDataAt, useForecast } from './CloudChart';
 import { useOnMap } from './panelPage';
 
+const NO_HOUR = "No forecast for this hour: outside the model's range.";
+
 /** Latest run start of a single-domain model; blends report none. */
 function useModelRun(model: WeatherModel, on: boolean): { ms: number | null; now: number } | undefined {
   const metaId = modelInfo(model).metaId;
@@ -47,6 +49,8 @@ export function WeatherPanel() {
   const on = useSettings((s) => s.weather);
   const run = useModelRun(model, on);
   const { loading, results, retry, now } = useForecast([pin, pin2], dayStart, dayEnd);
+  const r0 = loading ? undefined : (results?.[0] ?? null);
+  const none = r0 === undefined ? '' : missingText(r0) || (r0?.series && noDataAt(r0.series, time) ? NO_HOUR : '');
   if (!on)
     return (
       <div className="weather">
@@ -73,9 +77,19 @@ export function WeatherPanel() {
         {run === undefined ? 'run not reported (blend)' : run.ms === null ? 'run time unknown' : `run ${formatDateTime(run.ms, tz, hour12)}, ${ageText(run.now - run.ms)} old`}
       </p>
       <p className="muted wx-caveat">Model forecasts for {formatTime(time, tz, hour12)}: guidance, not observations.</p>
-      <Card title="Camera" at={pin} result={loading ? undefined : (results?.[0] ?? null)} time={time} now={now} onRetry={retry} />
-      {pin2 && <Card title="Target" at={pin2} result={loading ? undefined : (results?.[1] ?? null)} time={time} now={now} onRetry={retry} />}
-      <Sightlines />
+      {none && (
+        <p className="wx-missing" data-wx="none">
+          {none}
+          {r0?.status !== ForecastStatus.OutOfRange && none !== NO_HOUR && (
+            <button className="link" onClick={retry}>
+              Retry
+            </button>
+          )}
+        </p>
+      )}
+      <Card title="Camera" at={pin} result={r0} time={time} now={now} onRetry={retry} quiet={!!none} />
+      {pin2 && <Card title="Target" at={pin2} result={loading ? undefined : (results?.[1] ?? null)} time={time} now={now} onRetry={retry} quiet={!!none} />}
+      {!none && <Sightlines />}
       <AlpenglowSection />
       {onMap && <CloudLayerControls />}
       <Credit />
@@ -83,10 +97,11 @@ export function WeatherPanel() {
   );
 }
 
-function Card({ title, at, result, time, now, onRetry }: { title: string; at: LngLat; result: ForecastResult | null | undefined; time: number; now: number; onRetry(): void }) {
+// The tab-level empty state stands in for every card's own.
+function Card({ title, at, result, time, now, onRetry, quiet }: { title: string; at: LngLat; result: ForecastResult | null | undefined; time: number; now: number; onRetry(): void; quiet: boolean }) {
   const units = useSettings((s) => s.units);
   const s = result?.series ?? null;
-  const missing = result === undefined ? '' : missingText(result);
+  const missing = result === undefined || quiet ? '' : missingText(result);
   return (
     <section className="wx-card" data-card={title.toLowerCase()}>
       <h3>
@@ -104,7 +119,7 @@ function Card({ title, at, result, time, now, onRetry }: { title: string; at: Ln
           )}
         </p>
       )}
-      {s && (noDataAt(s, time) ? <p className="wx-missing">No forecast for this hour: outside the model's range.</p> : <Values s={s} time={time} units={units} />)}
+      {s && (noDataAt(s, time) ? !quiet && <p className="wx-missing">{NO_HOUR}</p> : <Values s={s} time={time} units={units} />)}
       {s && result?.status === ForecastStatus.Cached && (
         <button className="link" onClick={onRetry}>
           Refresh

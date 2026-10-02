@@ -2227,12 +2227,12 @@ label.file.danger strong {
   margin: 0 4px;
 }
 
-.night details {
+:is(.night details, details.disc) {
   border-bottom: 1px solid var(--line);
 }
 
 /* A block, not a flex row, so an over-long summary can ellipsize. */
-.night details > summary {
+:is(.night details, details.disc) > summary {
   display: block;
   list-style: none;
   padding: 7px 8px;
@@ -2242,12 +2242,12 @@ label.file.danger strong {
   text-overflow: ellipsis;
 }
 
-.night details > summary::-webkit-details-marker {
+:is(.night details, details.disc) > summary::-webkit-details-marker {
   display: none;
 }
 
 
-.night details > summary:hover {
+:is(.night details, details.disc) > summary:hover {
   background: var(--bg-3);
 }
 
@@ -2257,7 +2257,7 @@ label.file.danger strong {
   border-radius: 0;
 }
 
-.night details[open] > summary {
+:is(.night details, details.disc)[open] > summary {
   border-bottom: 1px solid var(--line);
 }
 
@@ -2301,7 +2301,7 @@ label.file.danger strong {
   font-size: 11px;
 }
 
-.night details h3 {
+:is(.night details, details.disc) h3 {
   margin: 10px 6px 4px;
   font-size: 12px;
   text-transform: uppercase;
@@ -3322,7 +3322,7 @@ button.cloud-legend.folded:hover {
   padding: var(--space-3);
 }
 
-.panel :is(h3, .layers h3, .frame h3, .markers h3, .find h3, .night details h3) {
+.panel :is(h3, .layers h3, .frame h3, .markers h3, .find h3, .night details h3, details.disc h3) {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.1em;
@@ -3365,11 +3365,11 @@ button.cloud-legend.folded:hover {
   color: var(--fg-2);
 }
 
-.panel :is(.list li, .night details, .tree summary) {
+.panel :is(.list li, .night details, details.disc, .tree summary) {
   border-bottom: 1px dotted var(--line);
 }
 
-.panel :is(.night details > summary:hover, .tree summary:hover) {
+.panel :is(.night details > summary:hover, details.disc > summary:hover, .tree summary:hover) {
   background: var(--bg-4);
 }
 

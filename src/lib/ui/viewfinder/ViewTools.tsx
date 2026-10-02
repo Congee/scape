@@ -1,5 +1,4 @@
 import { useNavigate } from '@tanstack/react-router';
-import { LightMode } from '@core/astro/lightSource';
 import { BUILDINGS_ATTRIBUTION } from '@data/buildingTiles';
 import { GEOID_DOWNLOAD_URL, geoidCredit } from '@data/geoid';
 import { compositionStore, useComposition, type Composition } from '@state/composition';
@@ -8,7 +7,7 @@ import { useOffline } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
 import { PanelPage, PanelTab, uiStore } from '@state/ui';
 import { useShallow } from 'zustand/react/shallow';
-import { AimControl } from '../AimControl';
+import { LightSeg } from '../LightSeg';
 import { FormRow, Section } from '../Section';
 import { PhotoTools } from './PhotoTools';
 
@@ -19,15 +18,15 @@ const BODIES: Chip[] = [
   ['showSun', 'Sun', 'The sun disc, its label and its path'],
   ['showMoon', 'Moon', 'The moon disc, its label and its path'],
   ['showMilkyWay', 'Milky Way', 'NASA Milky Way map'],
-  ['showPaths', 'Paths', 'Sun, moon and Galactic Centre paths for the day'],
+  ['showPaths', 'Sun & moon paths', 'Sun, moon and Galactic Centre paths for the day'],
   ['showRainbow', 'Rainbow', 'Where a rainbow would stand: the 42° and 51° arcs opposite the sun']
 ];
 const NIGHT: Chip[] = [
   ['showStars', 'Stars', 'Star field (HYG, to magnitude 6.5) with the celestial pole'],
-  ['showStarNames', 'Names', 'Names of the brightest stars'],
-  ['showConstellations', 'Lines', 'Constellation figures'],
+  ['showStarNames', 'Star names', 'Names of the brightest stars'],
+  ['showConstellations', 'Constellations', 'Constellation figures'],
   ['showTrails', 'Trails', 'Star trails over the duration set alongside'],
-  ['showRadiants', 'Radiants', 'Radiants of the active meteor showers']
+  ['showRadiants', 'Meteor radiants', 'Radiants of the active meteor showers']
 ];
 const LAYERS: Chip[] = [
   ['showBuildings', 'Buildings', 'OpenStreetMap / Overture building volumes'],
@@ -36,11 +35,6 @@ const LAYERS: Chip[] = [
   ['showGrid', 'Grid', 'Rule-of-thirds grid']
 ];
 const FLAGS: BoolKey[] = [...BODIES, ...NIGHT, ...LAYERS].map(([k]) => k);
-const LIGHT: [LightMode, string, string][] = [
-  [LightMode.Auto, 'Auto', 'Sun by day, moon by night'],
-  [LightMode.Sun, 'Sun', 'Sun only'],
-  [LightMode.Moon, 'Moon', 'Moon only']
-];
 const RANGES_KM = [50, 100, 150, 200];
 
 function Chips({ list, c }: { list: Chip[]; c: Pick<Composition, BoolKey> }) {
@@ -56,23 +50,23 @@ function Chips({ list, c }: { list: Chip[]; c: Pick<Composition, BoolKey> }) {
   );
 }
 
-/** The viewfinder's View tab: aim, sky and scene layers, reference photo, credits. */
+/** The viewfinder's View tab: sky and scene layers, reference photo, credits. */
 export function ViewTools() {
   // Only the flags: the whole store changes on every step of an aim drag.
   const c = useComposition(useShallow((s) => Object.fromEntries(FLAGS.map((k) => [k, s[k]])) as Pick<Composition, BoolKey>));
   const trailMinutes = useComposition((s) => s.trailMinutes);
-  const lightSource = useSettings((s) => s.lightSource);
   const rangeKm = useSettings((s) => s.horizonRangeKm);
+  const showGc = useSettings((s) => s.showGc);
   const update = compositionStore.getState().update;
   const setting = settingsStore.getState().update;
   return (
     <>
-      <Section title="Aim">
-        <AimControl />
-      </Section>
       <Section title="Sky">
         <FormRow label="Bodies">
           <Chips list={BODIES} c={c} />
+          <button aria-pressed={showGc} data-setting="showGc" onClick={() => setting({ showGc: !showGc })} title="Galactic Centre in the readouts and the day's events">
+            Galactic Centre
+          </button>
         </FormRow>
         <FormRow label="Night">
           <Chips list={NIGHT} c={c} />
@@ -87,15 +81,9 @@ export function ViewTools() {
           <Chips list={LAYERS} c={c} />
         </FormRow>
         <FormRow label="Light">
-          <div className="seg" role="radiogroup" aria-label="Light source for shadows">
-            {LIGHT.map(([m, label, title]) => (
-              <button key={m} role="radio" aria-checked={lightSource === m} className={lightSource === m ? 'on' : ''} title={title} onClick={() => setting({ lightSource: m })}>
-                {label}
-              </button>
-            ))}
-          </div>
+          <LightSeg />
         </FormRow>
-        <FormRow label="Horizon">
+        <FormRow label="Horizon range">
           <select value={rangeKm} onChange={(e) => setting({ horizonRangeKm: Number(e.target.value) })} aria-label="Horizon range" title="How far the skyline sweep looks">
             {RANGES_KM.map((km) => (
               <option key={km} value={km}>

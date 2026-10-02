@@ -1,6 +1,6 @@
 import { SkyBody } from '@core/astro/bodies';
 import { SkyFilter } from '@core/astro/finder';
-import { compass, degrees, distance, percent } from '@core/format';
+import { azimuth, compass, degrees, distance, percent } from '@core/format';
 import { formatDate, formatDateTime, formatTime } from '@core/time/format';
 import { formatLngLat } from '@core/geo/coords';
 import { useAlign, alignStore } from '@state/align';
@@ -12,6 +12,7 @@ import { HeatMode } from '@workers/align.protocol';
 import { Dial } from './Dial';
 import { downloadText } from './download';
 import { useOnMap } from './panelPage';
+import { Disclosure } from './Section';
 
 const BODY_LABEL: Record<SkyBody, string> = { Sun: 'Sun', Moon: 'Moon', Gc: 'Galactic Centre' };
 
@@ -96,6 +97,9 @@ export function FindPanel() {
     update({ weekdays: next.length === 0 || next.length === 7 ? null : next });
   };
 
+  const filters = [SKY_LABEL[f.sky], `moon ${Math.round(f.moonIllumMin * 100)}–${Math.round(f.moonIllumMax * 100)}%`, f.moonDown && f.body !== SkyBody.Moon && 'moon down', f.weekdays && f.weekdays.map((d) => WEEKDAYS[d]).join(' '), f.aboveTerrain && !terrainOff && 'above skyline'];
+  const filtersSummary = `Filters · ${filters.filter(Boolean).join(' · ')}`;
+
   const saveSearch = (withPin: boolean) => {
     const name = window.prompt('Name for this search', `${BODY_LABEL[f.body]} ${Math.round(f.azFromDeg)}–${Math.round(f.azToDeg)}°`);
     if (!name) return;
@@ -126,18 +130,6 @@ export function FindPanel() {
           <input type="number" step={0.1} value={f.altMaxDeg} onChange={(e) => update({ altMaxDeg: num(e.target.value, 0) })} aria-label="Maximum altitude, degrees" />
           <span className="muted">°</span>
         </b>
-      </div>
-      <div className="actions">
-        <button onClick={() => finderStore.getState().fromTarget()} disabled={!pin2} title={pin2 ? 'Window around the direction to the target location' : 'Place a target location first'}>
-          From target ± tol
-        </button>
-        <button onClick={() => finderStore.getState().fromFrame()} title="Window matching the current frame">
-          From frame
-        </button>
-        <input type="number" step={0.1} min={0.1} max={45} value={f.toleranceDeg} onChange={(e) => update({ toleranceDeg: num(e.target.value, 2) })} aria-label="Tolerance, degrees" style={{ width: 60 }} />
-        <span className="muted">° tolerance</span>
-      </div>
-      <div className="kv">
         <span className="k">From</span>
         <b className="v">
           <input type="date" value={f.startIso} onChange={(e) => update({ startIso: e.target.value })} aria-label="First day of the search" style={{ width: 'auto' }} />
@@ -152,56 +144,63 @@ export function FindPanel() {
             ))}
           </select>
         </b>
-        <span className="k">Sky</span>
-        <b className="v">
-          <select value={f.sky} onChange={(e) => update({ sky: e.target.value as SkyFilter })} aria-label="Sky condition">
-            {Object.values(SkyFilter).map((k) => (
-              <option key={k} value={k}>
-                {SKY_LABEL[k]}
-              </option>
-            ))}
-          </select>
-        </b>
-        <span className="k">Moon lit</span>
-        <b className="v">
-          <input type="number" min={0} max={100} step={5} value={Math.round(f.moonIllumMin * 100)} onChange={(e) => update({ moonIllumMin: Math.min(1, Math.max(0, num(e.target.value, 0) / 100)) })} aria-label="Minimum moon illumination, percent" />
-          <span className="muted">% to </span>
-          <input type="number" min={0} max={100} step={5} value={Math.round(f.moonIllumMax * 100)} onChange={(e) => update({ moonIllumMax: Math.min(1, Math.max(0, num(e.target.value, 100) / 100)) })} aria-label="Maximum moon illumination, percent" />
-          <span className="muted">%</span>
-        </b>
       </div>
-      <div className="chips one">
-        <button onClick={() => update({ moonIllumMin: 0.9, moonIllumMax: 1 })}>Full moon</button>
-        <button onClick={() => update({ moonIllumMin: 0, moonIllumMax: 0.2 })}>Dark sky</button>
-        <button onClick={() => update({ moonIllumMin: 0, moonIllumMax: 1 })}>Any</button>
+      <div className="actions">
+        <button onClick={() => finderStore.getState().fromTarget()} disabled={!pin2} title={pin2 ? 'Window around the direction to the target location' : 'Place a target location first'}>
+          From target ± tol
+        </button>
+        <button onClick={() => finderStore.getState().fromFrame()} title="Window matching the current frame">
+          From frame
+        </button>
+        <input type="number" step={0.1} min={0.1} max={45} value={f.toleranceDeg} onChange={(e) => update({ toleranceDeg: num(e.target.value, 2) })} aria-label="Tolerance, degrees" style={{ width: 60 }} />
+        <span className="muted">° tolerance</span>
       </div>
-      {f.body !== SkyBody.Moon && (
+      <Disclosure id="find-filters" summary={filtersSummary}>
+        <div className="kv">
+          <span className="k">Sky</span>
+          <b className="v">
+            <select value={f.sky} onChange={(e) => update({ sky: e.target.value as SkyFilter })} aria-label="Sky condition">
+              {Object.values(SkyFilter).map((k) => (
+                <option key={k} value={k}>
+                  {SKY_LABEL[k]}
+                </option>
+              ))}
+            </select>
+          </b>
+          <span className="k">Moon lit</span>
+          <b className="v">
+            <input type="number" min={0} max={100} step={5} value={Math.round(f.moonIllumMin * 100)} onChange={(e) => update({ moonIllumMin: Math.min(1, Math.max(0, num(e.target.value, 0) / 100)) })} aria-label="Minimum moon illumination, percent" />
+            <span className="muted">% to </span>
+            <input type="number" min={0} max={100} step={5} value={Math.round(f.moonIllumMax * 100)} onChange={(e) => update({ moonIllumMax: Math.min(1, Math.max(0, num(e.target.value, 100) / 100)) })} aria-label="Maximum moon illumination, percent" />
+            <span className="muted">%</span>
+          </b>
+        </div>
+        <div className="chips one">
+          <button onClick={() => update({ moonIllumMin: 0.9, moonIllumMax: 1 })}>Full moon</button>
+          <button onClick={() => update({ moonIllumMin: 0, moonIllumMax: 0.2 })}>Dark sky</button>
+          <button onClick={() => update({ moonIllumMin: 0, moonIllumMax: 1 })}>Any</button>
+        </div>
+        {f.body !== SkyBody.Moon && (
+          <label className="toggle">
+            <input type="checkbox" checked={f.moonDown} onChange={(e) => update({ moonDown: e.target.checked })} />
+            <span>Moon below the horizon</span>
+          </label>
+        )}
+        <div className="chips weekdays">
+          {WEEKDAYS.map((w, i) => (
+            <button key={w} className={f.weekdays?.includes(i) ? 'on' : ''} onClick={() => setWeekday(i)} title={`Only ${w}`}>
+              {w}
+            </button>
+          ))}
+        </div>
         <label className="toggle">
-          <input type="checkbox" checked={f.moonDown} onChange={(e) => update({ moonDown: e.target.checked })} />
-          <span>Moon below the horizon</span>
+          <input type="checkbox" checked={f.aboveTerrain} disabled={terrainOff} onChange={(e) => update({ aboveTerrain: e.target.checked })} />
+          <span>Above the terrain skyline</span>
         </label>
-      )}
-      <div className="chips weekdays">
-        {WEEKDAYS.map((w, i) => (
-          <button key={w} className={f.weekdays?.includes(i) ? 'on' : ''} onClick={() => setWeekday(i)} title={`Only ${w}`}>
-            {w}
-          </button>
-        ))}
-      </div>
-      <label className="toggle">
-        <input type="checkbox" checked={f.aboveTerrain} disabled={terrainOff} onChange={(e) => update({ aboveTerrain: e.target.checked })} />
-        <span>Above the terrain skyline</span>
-      </label>
-      {terrainOff && <p className="muted hint">Switch on elevation data and the terrain horizon in Settings to use the skyline.</p>}
+        {terrainOff && <p className="muted hint">Switch on elevation data and the terrain horizon in Settings to use the skyline.</p>}
+      </Disclosure>
       <div className="actions">
         {running ? <button onClick={() => finderStore.getState().cancel()}>Cancel</button> : <button className="on" onClick={() => finderStore.getState().run()}>Search</button>}
-        <button onClick={() => downloadText('scape-search.csv', finderStore.getState().toCsv(s.units), 'text/csv')} disabled={hits.length === 0}>
-          Export CSV
-        </button>
-        <button onClick={() => saveSearch(true)}>Save search</button>
-        <button className="link" onClick={() => saveSearch(false)} title="Save the settings without a camera location">
-          save without location
-        </button>
       </div>
       {(running || progress > 0) && (
         <>
@@ -226,7 +225,7 @@ export function FindPanel() {
               </span>
               <span className="time">{formatTime(h.bestMs, tz, s.hour12)}</span>
               <span className="az">
-                {degrees(h.azDeg, 0)} {compass(h.azDeg)}
+                {azimuth(h.azDeg)}
               </span>
               <span className="note">
                 alt {signed(h.altDeg)} · sun {signed(h.sunAltDeg, 0)} · moon {percent(h.moonIllumination, 0)} {h.moonPhase.toLowerCase()}
@@ -236,10 +235,20 @@ export function FindPanel() {
         ))}
       </ul>
       {!running && hits.length === 0 && progress > 0 && <p className="muted hint">Nothing matched; widen the window, the date range or the sky filter.</p>}
+      <Disclosure id="find-export" summary={`Export & save · ${hits.length} moment${hits.length === 1 ? '' : 's'}`}>
+        <div className="actions">
+          <button onClick={() => downloadText('scape-search.csv', finderStore.getState().toCsv(s.units), 'text/csv')} disabled={hits.length === 0}>
+            Export CSV
+          </button>
+          <button onClick={() => saveSearch(true)}>Save search</button>
+          <button className="link" onClick={() => saveSearch(false)} title="Save the settings without a camera location">
+            save without location
+          </button>
+        </div>
+      </Disclosure>
 
       {onMap && (
-        <>
-          <h3>Visibility &amp; alignment</h3>
+        <Disclosure id="find-heat" summary={`Visibility & alignment · ${MODE_LABEL[a.mode]}`}>
           <div className="seg" role="group" aria-label="Heat mode">
             {MODES.map((m) => (
               <button key={m} className={a.mode === m ? 'on' : ''} onClick={() => align.update({ mode: m })}>
@@ -371,7 +380,7 @@ export function FindPanel() {
               <p className="muted hint">Terrain data is ~30 m; confirm the framing in the viewfinder.</p>
             </>
           )}
-        </>
+        </Disclosure>
       )}
     </div>
   );

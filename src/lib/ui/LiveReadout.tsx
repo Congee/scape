@@ -1,7 +1,7 @@
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { moonInfo, position, type HorizontalPos } from '@core/astro/positions';
 import { shadowLengthM } from '@core/astro/shadow';
-import { compass, degrees, distance, percent, Units } from '@core/format';
+import { azimuth, degrees, distance, moonPhase, Units } from '@core/format';
 import { useSettings } from '@state/settings';
 import { usePinSiteHeightM } from '@state/terrain';
 import { useWorld } from '@state/world';
@@ -25,14 +25,14 @@ export function LiveReadout() {
   return (
     <div className="readout">
       <Row cls="sun" label="Sun" pos={sun} extra={shadow == null ? undefined : `shadow ×${(shadow / shadowHeight).toFixed(1)} · ${heightText} → ${distance(shadow, units)}`} />
-      <Row cls="moon" label="Moon" pos={position(SkyBody.Moon, date, obs)} extra={`${moon.name} · ${percent(moon.illumination, moon.illumination < 0.1 ? 2 : 1)}`} />
+      <Row cls="moon" label="Moon" pos={position(SkyBody.Moon, date, obs)} extra={moonPhase(moon.name, moon.illumination)} />
       {showGc && <Row cls="gc" label="Galactic Centre" pos={position(SkyBody.Gc, date, obs)} />}
     </div>
   );
 }
 
 function Row({ cls, label, pos, extra }: { cls: string; label: string; pos: HorizontalPos; extra?: string }) {
-  return <Cells cls={cls} label={label} up={pos.altitude > 0} azDeg={Math.round(pos.azimuth)} az={`${degrees(pos.azimuth)} ${compass(pos.azimuth)}`} alt={`${pos.altitude >= 0 ? '+' : ''}${degrees(pos.altitude)}`} extra={extra} />;
+  return <Cells cls={cls} label={label} up={pos.altitude > 0} azDeg={Math.round(pos.azimuth)} az={azimuth(pos.azimuth)} alt={`${pos.altitude >= 0 ? '+' : ''}${degrees(pos.altitude)}`} extra={extra} />;
 }
 
 function Cells({ cls, label, up, azDeg, az, alt, extra }: { cls: string; label: string; up: boolean; azDeg: number; az: string; alt: string; extra?: string }) {

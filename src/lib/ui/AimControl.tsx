@@ -1,4 +1,4 @@
-import { compass, degrees } from "@core/format";
+import { azimuth, compass, degrees } from "@core/format";
 import {
   AimLock,
   aimFor,
@@ -19,7 +19,7 @@ const LOCKS: [AimLock, string, string][] = [
   [AimLock.Free, "Free", "Aim by hand"],
 ];
 
-/** The one aim control, shared by the map's Frame tab and the viewfinder's View tab. */
+/** The one aim control, shared by both pages' Now tab. */
 export function AimControl() {
   const c = useComposition(
     useShallow((s) => ({
@@ -77,9 +77,7 @@ export function AimControl() {
       <span className="k">Azimuth</span>
       <b className="v">
         {aim.locked ? (
-          <>
-            {degrees(aim.azimuthDeg)} {compass(aim.azimuthDeg)}
-          </>
+          azimuth(aim.azimuthDeg)
         ) : (
           <>
             <input

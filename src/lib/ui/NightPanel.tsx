@@ -8,7 +8,7 @@ import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type
 import { polarisAid } from '@core/astro/polaris';
 import { moonInfo, position } from '@core/astro/positions';
 import { apply, enuToEqj } from '@core/astro/skyFrame';
-import { compass, degrees, percent } from '@core/format';
+import { azimuth, degrees, moonPhase, percent } from '@core/format';
 import { effectiveOptics } from '@core/optics/fov';
 import { dirFromAzAlt } from '@core/optics/projection';
 import { npfShutterS, pixelPitchUm, trailAngleDeg, trailLengthPx } from '@core/optics/startrails';
@@ -29,6 +29,7 @@ import type { LngLat } from '@core/geo/geodesy';
 import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 import { Dial } from './Dial';
 import { Icon } from './Icon';
+import { Disclosure } from './Section';
 
 const DAY_MS = 86_400_000;
 const R2D = 180 / Math.PI;
@@ -78,21 +79,11 @@ function totalityFor(night: NightWindow): TimeWindow | null {
   return totalityCache.totality;
 }
 
-// Which groups are open survives tab switches but not a reload.
-const openGroups = new Set<string>();
-
 function Group({ id, summary, summaryClass, children }: { id: string; summary: ReactNode; summaryClass?: string; children: ReactNode }) {
   return (
-    <details
-      open={openGroups.has(id)}
-      onToggle={(e) => {
-        if (e.currentTarget.open) openGroups.add(id);
-        else openGroups.delete(id);
-      }}
-    >
-      <summary className={summaryClass}>{summary}</summary>
+    <Disclosure id={`night-${id}`} summary={summary} summaryClass={summaryClass}>
       {children}
-    </details>
+    </Disclosure>
   );
 }
 
@@ -103,7 +94,7 @@ function SkyRow({ label, ink, ms, az, note, tz, hour12, title }: { label: ReactN
       {az !== null ? <Dial az={az} ink={ink} /> : <span />}
       <span className="label">{label}</span>
       <span className="time">{ms !== null ? formatTime(ms, tz, hour12) : '—'}</span>
-      <span className="az">{az !== null ? `${degrees(az, 0)} ${compass(az)}` : ''}</span>
+      <span className="az">{az !== null ? azimuth(az) : ''}</span>
       {note && <span className="note">{note}</span>}
     </button>
   );
@@ -318,7 +309,7 @@ export function NightPanel() {
   const nextMoon = nextMoonEvent(tonight.events, time);
   const moonUpAtNightfall = hasNight && position(SkyBody.Moon, new Date(night.startMs), obs).altitude > 0;
   const moonFree = moonFreeWindow(night, tonight.events, moonUpAtNightfall, totalityFor(night));
-  const moonSummary = `${moon.name} ${percent(moon.illumination, 0)}${nextMoon ? ` · ${nextMoon.kind === EventKind.Rise ? 'rises' : 'sets'} ${formatTime(nextMoon.time, tz, s.hour12)}` : ''}`;
+  const moonSummary = `${moonPhase(moon.name, moon.illumination)}${nextMoon ? ` · ${nextMoon.kind === EventKind.Rise ? 'rises' : 'sets'} ${formatTime(nextMoon.time, tz, s.hour12)}` : ''}`;
 
   const starsSummary = `${npf ? `NPF ${npf.toFixed(1)} s at ${opt.focalMm} mm` : 'NPF needs the camera or pixel count'}${polaris.northern ? ` · Polaris ${signed(polaris.polarisAltDeg)}` : ''}`;
   const meteorSummary = active[0]
@@ -355,7 +346,7 @@ export function NightPanel() {
         <div className="kv">
           <span className="k">Illumination</span>
           <b className="v">
-            {percent(moon.illumination, 0)} <span className="muted">· {moon.name}</span>
+            {moonPhase(moon.name, moon.illumination)}
           </b>
           <span className="k">Moon-free dark</span>
           <b className="v">
