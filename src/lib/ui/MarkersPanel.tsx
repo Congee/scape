@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { compass, degrees, distance } from '@core/format';
 import { formatLngLat } from '@core/geo/coords';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
@@ -14,6 +14,7 @@ import { downloadText } from './download';
 import { CATEGORY_COLORS } from './map/overlays';
 import { ModelsPanel } from './ModelsPanel';
 import { useOnMap } from './panelPage';
+import { Section } from './Section';
 
 const CATEGORIES = Object.values(MarkerCategory);
 const SHAPES = Object.values(MarkerShape);
@@ -21,21 +22,19 @@ const SHAPES = Object.values(MarkerShape);
 export function MarkersPanel() {
   const view = useUi((s) => s.markersView);
   const setView = useUi((s) => s.setMarkersView);
-  return (
-    <>
-      <div className="seg markers-switch" role="group" aria-label="Show">
-        {Object.values(MarkersView).map((v) => (
-          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
-            {v}
-          </button>
-        ))}
-      </div>
-      {view === MarkersView.Models ? <ModelsPanel /> : <MarkerList />}
-    </>
+  const head = (
+    <div className="seg markers-switch" role="group" aria-label="Show">
+      {Object.values(MarkersView).map((v) => (
+        <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+          {v}
+        </button>
+      ))}
+    </div>
   );
+  return view === MarkersView.Models ? <ModelsPanel head={head} /> : <MarkerList head={head} />;
 }
 
-function MarkerList() {
+function MarkerList({ head }: { head: ReactNode }) {
   const markers = useMarkers((s) => s.markers);
   const loaded = useMarkers((s) => s.loaded);
   const selectedId = useMarkers((s) => s.selectedId);
@@ -71,54 +70,57 @@ function MarkerList() {
   };
 
   return (
-    <div className="markers">
-      <div className="actions">
-        {onMap && (
-          <>
-            <button className={placing ? 'on' : ''} aria-pressed={placing} onClick={() => ms.setPlacing(!placing)} title="Then click the map where the marker goes (or Alt-click the map any time)">
-              {placing ? 'Click the map…' : 'Add by clicking the map'}
-            </button>
-            <button onClick={() => addAt(worldStore.getState().view.center)}>Add at map centre</button>
-          </>
-        )}
-        {pin2 && <button onClick={() => addAt(pin2)}>Add at target</button>}
-      </div>
-      {selected && <MarkerEditor m={selected} />}
-      <h3>
-        {markers.length} marker{markers.length === 1 ? '' : 's'}
-      </h3>
-      {loaded && markers.length === 0 && <p className="muted hint">No markers yet</p>}
-      <ul className="list marker-list">
-        {sorted.map(({ m, d }) => (
-          <li key={m.id} className={m.id === selectedId ? 'selected' : ''} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
-            {d > 0 ? <Dial az={bearingDeg(pin, m)} ink="marker" color={CATEGORY_COLORS[m.category]} /> : <span className="cat" style={{ background: CATEGORY_COLORS[m.category] }} aria-hidden="true" />}
-            <span className="name">
-              {m.name}
-              {m.rating > 0 && <span className="muted"> {'★'.repeat(m.rating)}</span>}
-            </span>
-            <span className="time">{distance(d, units)}</span>
-            <span className="az">{d > 0 ? `${degrees(bearingDeg(pin, m), 0)} ${compass(bearingDeg(pin, m))}` : ''}</span>
-          </li>
-        ))}
-      </ul>
-      <h3>Import &amp; export</h3>
-      <label className="button file-pick">
-        Import GeoJSON, KML or GPX
-        <input type="file" accept=".geojson,.json,.kml,.gpx" onChange={(e) => void importFile(e.target.files?.[0])} />
-      </label>
-      <div className="actions">
-        <button onClick={() => exportAs('geojson')} disabled={!markers.length}>
-          Export GeoJSON
-        </button>
-        <button onClick={() => exportAs('kml')} disabled={!markers.length}>
-          Export KML
-        </button>
-        <button onClick={() => exportAs('gpx')} disabled={!markers.length}>
-          Export GPX
-        </button>
-      </div>
-      {status && <p className={status.ok ? 'muted hint ok' : 'error'}>{status.text}</p>}
-    </div>
+    <>
+      <Section className="markers">
+        {head}
+        <div className="actions">
+          {onMap && (
+            <>
+              <button className={placing ? 'on' : ''} aria-pressed={placing} onClick={() => ms.setPlacing(!placing)} title="Then click the map where the marker goes (or Alt-click the map any time)">
+                {placing ? 'Click the map…' : 'Add by clicking the map'}
+              </button>
+              <button onClick={() => addAt(worldStore.getState().view.center)}>Add at map centre</button>
+            </>
+          )}
+          {pin2 && <button onClick={() => addAt(pin2)}>Add at target</button>}
+        </div>
+        {selected && <MarkerEditor m={selected} />}
+      </Section>
+      <Section title={`${markers.length} marker${markers.length === 1 ? '' : 's'}`} className="markers">
+        {loaded && markers.length === 0 && <p className="muted hint">No markers yet</p>}
+        <ul className="list marker-list">
+          {sorted.map(({ m, d }) => (
+            <li key={m.id} className={m.id === selectedId ? 'selected' : ''} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
+              {d > 0 ? <Dial az={bearingDeg(pin, m)} ink="marker" color={CATEGORY_COLORS[m.category]} /> : <span className="cat" style={{ background: CATEGORY_COLORS[m.category] }} aria-hidden="true" />}
+              <span className="name">
+                {m.name}
+                {m.rating > 0 && <span className="muted"> {'★'.repeat(m.rating)}</span>}
+              </span>
+              <span className="time">{distance(d, units)}</span>
+              <span className="az">{d > 0 ? `${degrees(bearingDeg(pin, m), 0)} ${compass(bearingDeg(pin, m))}` : ''}</span>
+            </li>
+          ))}
+        </ul>
+      </Section>
+      <Section title="Import & export" className="markers">
+        <label className="button file-pick">
+          Import GeoJSON, KML or GPX
+          <input type="file" accept=".geojson,.json,.kml,.gpx" onChange={(e) => void importFile(e.target.files?.[0])} />
+        </label>
+        <div className="actions">
+          <button onClick={() => exportAs('geojson')} disabled={!markers.length}>
+            Export GeoJSON
+          </button>
+          <button onClick={() => exportAs('kml')} disabled={!markers.length}>
+            Export KML
+          </button>
+          <button onClick={() => exportAs('gpx')} disabled={!markers.length}>
+            Export GPX
+          </button>
+        </div>
+        {status && <p className={status.ok ? 'muted hint ok' : 'error'}>{status.text}</p>}
+      </Section>
+    </>
   );
 }
 

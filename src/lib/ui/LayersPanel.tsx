@@ -9,6 +9,7 @@ import { settingsStore, useSettings } from '@state/settings';
 import { OrbitPivot, useUi } from '@state/ui';
 import { useMapNotice } from './map/MapNotice';
 import { CloudToggle, DayNightToggle, SettingLayer, TerrainTintToggles, type BoolKey } from './MapLayerToggles';
+import { Section } from './Section';
 
 const FLAVORS: PmFlavor[] = Object.values(PmFlavor);
 const LIGHT_LABEL: Record<LightMode, string> = { [LightMode.Auto]: 'Sun by day, moon by night', [LightMode.Sun]: 'Sun only', [LightMode.Moon]: 'Moon only' };
@@ -51,140 +52,141 @@ export function LayersPanel() {
   const current = all.find((b) => b.id === basemapId);
 
   return (
-    <div className="layers">
-      <h3>Map type · {current?.name ?? 'none'}</h3>
-      {notice && <p className={notice.kind === MapNoticeKind.TilesFailed ? 'error' : 'muted hint'}>{notice.text}</p>}
-      <div className="tree">
-        {GROUPS.map((g) => {
-          const items = all.filter((b) => basemapGroup(b) === g);
-          if (!items.length) return null;
-          return (
-            <details key={g}>
-              <summary>
-                {g}
-                {items.some((b) => b.id === basemapId) && <span className="dot active" aria-hidden="true" />}
-              </summary>
-              {g === BasemapGroup.Downloaded && items.some((b) => b.kind === BasemapKind.Pmtiles) && (
-                <label className="toggle">
-                  <span>Style</span>
-                  <select value={offlineFlavor} onChange={(e) => update({ offlineFlavor: e.target.value as PmFlavor })} title="Protomaps style flavor for downloaded archives">
-                    {FLAVORS.map((f) => (
-                      <option key={f}>{f}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <ul className="radio-list">
-                {items.map((b) => (
-                  <li key={b.id}>
-                    <label>
-                      <input type="radio" name="basemap" checked={b.id === basemapId} onChange={() => update({ basemapId: b.id })} />
-                      <span>{shortName(b, g)}</span>
-                    </label>
-                    {g === BasemapGroup.Custom && (
-                      <button className="link" onClick={() => removeBasemap(b.id)} title="Remove this basemap">
-                        remove
-                      </button>
-                    )}
-                  </li>
+    <>
+      <Section title={`Map type · ${current?.name ?? 'none'}`} className="layers">
+        {notice && <p className={notice.kind === MapNoticeKind.TilesFailed ? 'error' : 'muted hint'}>{notice.text}</p>}
+        <div className="tree">
+          {GROUPS.map((g) => {
+            const items = all.filter((b) => basemapGroup(b) === g);
+            if (!items.length) return null;
+            return (
+              <details key={g}>
+                <summary>
+                  {g}
+                  {items.some((b) => b.id === basemapId) && <span className="dot active" aria-hidden="true" />}
+                </summary>
+                {g === BasemapGroup.Downloaded && items.some((b) => b.kind === BasemapKind.Pmtiles) && (
+                  <label className="toggle">
+                    <span>Style</span>
+                    <select value={offlineFlavor} onChange={(e) => update({ offlineFlavor: e.target.value as PmFlavor })} title="Protomaps style flavor for downloaded archives">
+                      {FLAVORS.map((f) => (
+                        <option key={f}>{f}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <ul className="radio-list">
+                  {items.map((b) => (
+                    <li key={b.id}>
+                      <label>
+                        <input type="radio" name="basemap" checked={b.id === basemapId} onChange={() => update({ basemapId: b.id })} />
+                        <span>{shortName(b, g)}</span>
+                      </label>
+                      {g === BasemapGroup.Custom && (
+                        <button className="link" onClick={() => removeBasemap(b.id)} title="Remove this basemap">
+                          remove
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            );
+          })}
+          <details>
+            <summary>Add a basemap…</summary>
+            <div className="field-row">
+              <input type="url" placeholder="https://…/region.pmtiles" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addUrl()} />
+              <select value={flavor} onChange={(e) => setFlavor(e.target.value as PmFlavor)} title="Protomaps style flavor">
+                {FLAVORS.map((f) => (
+                  <option key={f}>{f}</option>
                 ))}
-              </ul>
-            </details>
-          );
-        })}
-        <details>
-          <summary>Add a basemap…</summary>
-          <div className="field-row">
-            <input type="url" placeholder="https://…/region.pmtiles" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addUrl()} />
-            <select value={flavor} onChange={(e) => setFlavor(e.target.value as PmFlavor)} title="Protomaps style flavor">
-              {FLAVORS.map((f) => (
-                <option key={f}>{f}</option>
+              </select>
+              <button onClick={addUrl}>Add</button>
+            </div>
+            <p className="muted hint">Remote archives must allow cross-origin range requests; Protomaps' daily builds do only for local development origins.</p>
+            <label className="file">
+              <input type="file" accept=".pmtiles" onChange={(e) => addFile(e.target.files?.[0])} />
+              Open a local .pmtiles file (this session only)
+            </label>
+            <p className="muted hint">Regions for offline use are downloaded and imported in the Offline tab.</p>
+          </details>
+        </div>
+      </Section>
+      <Section title="Map layers" className="layers">
+        {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
+        <SettingLayer k="showSatellite" label="Satellite">
+          <p className="muted hint">{satKeys().maptiler ? 'National aerial photos where available, MapTiler elsewhere.' : 'National aerial photos only. Other places need a MapTiler key.'}</p>
+        </SettingLayer>
+        <DayNightToggle />
+        <CloudToggle />
+        <TerrainTintToggles />
+        <SettingLayer k="showHillshade" label="Hillshade" />
+        <SettingLayer k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)">
+          <label className="toggle">
+            <span>Orbit</span>
+            <select aria-label="Orbit the 3D map" value={orbit} onChange={(e) => setOrbit(e.target.value as OrbitPivot, true)}>
+              {Object.values(OrbitPivot).map((o) => (
+                <option key={o} value={o}>
+                  {ORBIT_LABEL[o]}
+                </option>
               ))}
             </select>
-            <button onClick={addUrl}>Add</button>
-          </div>
-          <p className="muted hint">Remote archives must allow cross-origin range requests; Protomaps' daily builds do only for local development origins.</p>
-          <label className="file">
-            <input type="file" accept=".pmtiles" onChange={(e) => addFile(e.target.files?.[0])} />
-            Open a local .pmtiles file (this session only)
           </label>
-          <p className="muted hint">Regions for offline use are downloaded and imported in the Offline tab.</p>
-        </details>
-      </div>
-
-      <h3>Map layers</h3>
-      {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
-      <SettingLayer k="showSatellite" label="Satellite">
-        <p className="muted hint">{satKeys().maptiler ? 'National aerial photos where available, MapTiler elsewhere.' : 'National aerial photos only. Other places need a MapTiler key.'}</p>
-      </SettingLayer>
-      <DayNightToggle />
-      <CloudToggle />
-      <TerrainTintToggles />
-      <SettingLayer k="showHillshade" label="Hillshade" />
-      <SettingLayer k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)">
-        <label className="toggle">
-          <span>Orbit</span>
-          <select aria-label="Orbit the 3D map" value={orbit} onChange={(e) => setOrbit(e.target.value as OrbitPivot, true)}>
-            {Object.values(OrbitPivot).map((o) => (
-              <option key={o} value={o}>
-                {ORBIT_LABEL[o]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {orbit !== OrbitPivot.Off && (
+          {orbit !== OrbitPivot.Off && (
+            <label className="toggle">
+              <input type="checkbox" checked={orbitSpin} onChange={(e) => setOrbit(orbit, e.target.checked)} />
+              <span>Turn slowly (stops when you grab the map)</span>
+            </label>
+          )}
+        </SettingLayer>
+        <SettingLayer k="showBuildings" label="3D buildings (Overture, from zoom 14)" />
+        <SettingLayer k="showSunShadows" label="Shadows on the ground (terrain and buildings)">
           <label className="toggle">
-            <input type="checkbox" checked={orbitSpin} onChange={(e) => setOrbit(orbit, e.target.checked)} />
-            <span>Turn slowly (stops when you grab the map)</span>
+            <span>Light from</span>
+            <select value={lightSource} onChange={(e) => update({ lightSource: e.target.value as LightMode })} aria-label="Light source for shadows" title="The moon takes over once it is up and the sun is 6° below the horizon; the viewfinder follows too">
+              {Object.values(LightMode).map((m) => (
+                <option key={m} value={m}>
+                  {LIGHT_LABEL[m]}
+                </option>
+              ))}
+            </select>
           </label>
-        )}
-      </SettingLayer>
-      <SettingLayer k="showBuildings" label="3D buildings (Overture, from zoom 14)" />
-      <SettingLayer k="showSunShadows" label="Shadows on the ground (terrain and buildings)">
+        </SettingLayer>
+        <SettingLayer k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
+        <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />
+        <SettingLayer k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
+        <SettingLayer k="showShadow" label="Sun shadow (direction and length)">
+          <label className="toggle">
+            <span>Object height</span>
+            <input
+              type="number"
+              className="num"
+              min={0.1}
+              step={0.1}
+              value={shadowHeight}
+              onChange={(e) => Number(e.target.value) > 0 && update({ shadowObjectHeightM: Number(e.target.value) })}
+              title="Height of the object casting the shadow, metres"
+            />
+            <span className="muted">m</span>
+          </label>
+        </SettingLayer>
+        <SettingLayer k="showGc" label="Galactic Centre" />
+      </Section>
+      <Section title="Terrain horizon" className="layers">
+        <Toggle k="terrainHorizon" label="Skyline on the chart, rise and set behind terrain" />
         <label className="toggle">
-          <span>Light from</span>
-          <select value={lightSource} onChange={(e) => update({ lightSource: e.target.value as LightMode })} aria-label="Light source for shadows" title="The moon takes over once it is up and the sun is 6° below the horizon; the viewfinder follows too">
-            {Object.values(LightMode).map((m) => (
-              <option key={m} value={m}>
-                {LIGHT_LABEL[m]}
+          <span>Horizon range</span>
+          <select value={rangeKm} onChange={(e) => update({ horizonRangeKm: Number(e.target.value) })} title="How far the skyline sweep looks">
+            {[50, 100, 150, 200].map((km) => (
+              <option key={km} value={km}>
+                {km} km
               </option>
             ))}
           </select>
         </label>
-      </SettingLayer>
-      <SettingLayer k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
-      <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />
-      <SettingLayer k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
-      <SettingLayer k="showShadow" label="Sun shadow (direction and length)">
-        <label className="toggle">
-          <span>Object height</span>
-          <input
-            type="number"
-            className="num"
-            min={0.1}
-            step={0.1}
-            value={shadowHeight}
-            onChange={(e) => Number(e.target.value) > 0 && update({ shadowObjectHeightM: Number(e.target.value) })}
-            title="Height of the object casting the shadow, metres"
-          />
-          <span className="muted">m</span>
-        </label>
-      </SettingLayer>
-      <SettingLayer k="showGc" label="Galactic Centre" />
-
-      <h3>Terrain horizon</h3>
-      <Toggle k="terrainHorizon" label="Skyline on the chart, rise and set behind terrain" />
-      <label className="toggle">
-        <span>Horizon range</span>
-        <select value={rangeKm} onChange={(e) => update({ horizonRangeKm: Number(e.target.value) })} title="How far the skyline sweep looks">
-          {[50, 100, 150, 200].map((km) => (
-            <option key={km} value={km}>
-              {km} km
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
+      </Section>
+    </>
   );
 }
 

@@ -2918,7 +2918,15 @@ button.cloud-legend.folded:hover {
   height: 20px;
 }
 
-/* Panel sections */
+/* Panel sections: brighter heads than field labels, ruled apart */
+.psec {
+  margin: 0 0 var(--space-6);
+}
+
+.psec + .psec {
+  border-top: var(--stroke-hair) solid var(--line);
+}
+
 .psec-h {
   display: flex;
   align-items: center;
@@ -2929,15 +2937,15 @@ button.cloud-legend.folded:hover {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--fg-2);
+  color: var(--fg);
 }
 
 .psec-b {
-  margin: 0 6px 6px;
+  margin: 0 6px;
   background: var(--bg-3);
 }
 
-.psec:first-child > .psec-b:first-child {
+.psec > .psec-b:first-child {
   margin-top: 8px;
 }
 
@@ -3270,7 +3278,7 @@ button.cloud-legend.folded:hover {
 }
 
 .panel .psec-b {
-  margin: 0 var(--space-3) var(--space-3);
+  margin: 0 var(--space-3);
   padding: var(--space-3);
 }
 
@@ -3310,6 +3318,10 @@ button.cloud-legend.folded:hover {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.panel .field > span:first-child {
   color: var(--fg-2);
 }
 

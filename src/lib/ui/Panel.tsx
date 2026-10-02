@@ -88,9 +88,7 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
           )}
           {tab === PanelTab.Frame && (
             <>
-              <Section>
-                <FramePanel />
-              </Section>
+              <FramePanel />
               <Section title="Calculators">
                 <ToolsPanel part={ToolsPart.Frame} />
               </Section>
@@ -124,20 +122,12 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
           )}
           {tab === PanelTab.Map && (
             <>
-              <Section>
-                <LayersPanel />
-              </Section>
-              <Section title="Offline">
-                <OfflinePanel />
-              </Section>
+              <LayersPanel />
+              <OfflinePanel />
             </>
           )}
           {tab === PanelTab.View && <ViewTools />}
-          {tab === PanelTab.Markers && (
-            <Section>
-              <MarkersPanel />
-            </Section>
-          )}
+          {tab === PanelTab.Markers && <MarkersPanel />}
         </div>
       </div>
     </PanelPageContext.Provider>

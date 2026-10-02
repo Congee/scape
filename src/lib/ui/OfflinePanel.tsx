@@ -16,6 +16,7 @@ import { EARTHDATA_SIGNUP, laadsYearUrl, tilesNear, VIIRS_FIRST_YEAR, VIIRS_MARG
 import { clearGibs, offerYear } from '@state/skyglow';
 import { useWorld } from '@state/world';
 import { Confirm } from './Confirm';
+import { Section } from './Section';
 import { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 
 const BASEMAP_ZOOMS = [10, 11, 12, 13, 14, 15];
@@ -112,9 +113,9 @@ export function OfflinePanel() {
 
   if (!supported) {
     return (
-      <div className="layers offline">
+      <Section className="layers offline">
         <p className="error">This browser has no private file storage; offline regions are unavailable.</p>
-      </div>
+      </Section>
     );
   }
 
@@ -187,241 +188,237 @@ export function OfflinePanel() {
   const satelliteEstimate = estimates[ArchiveKind.Satellite];
 
   return (
-    <div className="layers offline">
-      <h3>Storage</h3>
-      <p className="muted hint">{storage ? `Used ${bytes(storage.usage)} of ${bytes(storage.quota)}` : 'Storage use is unknown in this browser.'}</p>
-      {storage?.persisted ? (
-        <p className="muted hint">Storage is persistent; the browser will not evict these regions on its own.</p>
-      ) : (
+    <>
+      <Section title="Offline storage" className="layers offline">
+        <p className="muted hint">{storage ? `Used ${bytes(storage.usage)} of ${bytes(storage.quota)}` : 'Storage use is unknown in this browser.'}</p>
+        {storage?.persisted ? (
+          <p className="muted hint">Storage is persistent; the browser will not evict these regions on its own.</p>
+        ) : (
+          <div className="actions">
+            <button onClick={() => void o.requestPersist()}>Keep data persistent</button>
+          </div>
+        )}
+        {isSafari() && <p className="muted hint">Safari can purge site data after a week without a visit; re-download if regions disappear.</p>}
+      </Section>
+      <Section title="Region" className="layers offline">
+        {draft ? (
+          <div className="kv">
+            <span className="k">Corners</span>
+            <b className="v">
+              {formatLngLat({ lng: draft.west, lat: draft.south }, coordFormat)}
+              <br />
+              {formatLngLat({ lng: draft.east, lat: draft.north }, coordFormat)}
+            </b>
+            <span className="k">Size</span>
+            <b className="v">{sizeLabel(draft)}</b>
+          </div>
+        ) : (
+          <p className="muted hint">No region</p>
+        )}
         <div className="actions">
-          <button onClick={() => void o.requestPersist()}>Keep data persistent</button>
+          <button onClick={() => o.takeMapView()}>Use the map view</button>
+          <button className={drawing ? 'on' : ''} aria-pressed={drawing} onClick={() => o.setDrawing(!drawing)}>
+            Draw on the map
+          </button>
+          <button onClick={() => o.setDraft(null)} disabled={!draft}>
+            Clear
+          </button>
         </div>
-      )}
-      {isSafari() && <p className="muted hint">Safari can purge site data after a week without a visit; re-download if regions disappear.</p>}
-
-      <h3>Region</h3>
-      {draft ? (
-        <div className="kv">
-          <span className="k">Corners</span>
-          <b className="v">
-            {formatLngLat({ lng: draft.west, lat: draft.south }, coordFormat)}
-            <br />
-            {formatLngLat({ lng: draft.east, lat: draft.north }, coordFormat)}
-          </b>
-          <span className="k">Size</span>
-          <b className="v">{sizeLabel(draft)}</b>
+        {drawing && <p className="muted hint">Drag a rectangle on the map; Esc cancels.</p>}
+      </Section>
+      <Section title="Download" className="layers offline">
+        <div className="field-row">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={todayName()} aria-label="Name for the region" />
         </div>
-      ) : (
-        <p className="muted hint">No region</p>
-      )}
-      <div className="actions">
-        <button onClick={() => o.takeMapView()}>Use the map view</button>
-        <button className={drawing ? 'on' : ''} aria-pressed={drawing} onClick={() => o.setDrawing(!drawing)}>
-          Draw on the map
-        </button>
-        <button onClick={() => o.setDraft(null)} disabled={!draft}>
-          Clear
-        </button>
-      </div>
-      {drawing && <p className="muted hint">Drag a rectangle on the map; Esc cancels.</p>}
-
-      <h3>Download</h3>
-      <div className="field-row">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={todayName()} aria-label="Name for the region" />
-      </div>
-      <div className="field">
-        <span>Basemap</span>
-        <select value={maxZoom} onChange={(e) => setMaxZoom(Number(e.target.value))} aria-label="Highest basemap zoom">
-          {BASEMAP_ZOOMS.map((z) => (
-            <option key={z} value={z}>
-              to zoom {z}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="field">
-        <span>Source</span>
-        <select
-          value={source}
-          onChange={(e) => {
-            setSourceUrl(defaultSourceUrl(e.target.value as BasemapSource));
-            setEstimates(({ [ArchiveKind.Basemap]: _, ...rest }) => rest);
-          }}
-          aria-label="Basemap source"
-        >
-          <option value={BasemapSource.OpenFreeMap}>OpenFreeMap</option>
-          <option value={BasemapSource.Protomaps}>Protomaps PMTiles</option>
-        </select>
-      </div>
-      <div className="field-row">
-        <input
-          className="url"
-          value={sourceUrl}
-          onChange={(e) => setSourceUrl(e.target.value)}
-          spellCheck={false}
-          aria-label="Basemap source URL"
-          title={source === BasemapSource.Protomaps ? 'PMTiles archive the region is cut from; it must allow cross-origin range requests' : 'TileJSON whose vector tiles are packed one by one'}
-        />
-      </div>
-      <p className="muted hint">
-        {source === BasemapSource.Protomaps
-          ? 'The default Protomaps build answers only local development origins (localhost:5173 and :3000); elsewhere use an archive that allows cross-origin range requests.'
-          : 'OpenFreeMap tiles are packed one by one with the Liberty style, its icons and Latin, Greek and Cyrillic labels.'}
-      </p>
-      <div className="actions">
-        <button onClick={() => void runEstimate(ArchiveKind.Basemap)} disabled={!draft}>
-          Estimate
-        </button>
-        <button onClick={() => start(ArchiveKind.Basemap)} disabled={!draft}>
-          Download
-        </button>
-        {basemapEstimate && <span className="muted">{estimateLabel(basemapEstimate)}</span>}
-      </div>
-      <label className="toggle">
-        <input type="checkbox" checked={basemapOn} disabled={!draft} onChange={(e) => setWithBasemap(e.target.checked)} />
-        <span>Include in the terrain download (on by default up to {BASEMAP_DEFAULT_MAX_TILES} tiles)</span>
-      </label>
-      <div className="field">
-        <span>Terrain</span>
-        <span className="muted">
-          zoom {TERRAIN_MIN_ZOOM}–{TERRAIN_MAX_ZOOM} (about 10 m)
-        </span>
-      </div>
-      <div className="actions">
-        <button onClick={() => void runEstimate(ArchiveKind.Terrain)} disabled={!draft}>
-          Estimate
-        </button>
-        <button onClick={() => start(ArchiveKind.Terrain)} disabled={!draft}>
-          Download
-        </button>
-        {terrainEstimate && <span className="muted">{estimateLabel(terrainEstimate)}</span>}
-      </div>
-      <div className="field">
-        <span>Buildings</span>
-        <span className="muted">
-          zoom {BUILDINGS_ZOOM}, Overture {OVERTURE_BUILDINGS_RELEASE}
-        </span>
-      </div>
-      <label className="toggle">
-        <input type="checkbox" checked={buildingsOn} disabled={!draft} onChange={(e) => setWithBuildings(e.target.checked)} />
-        <span>Download with the terrain (on by default up to {BUILDINGS_DEFAULT_MAX_TILES} tiles; a city tile is about 300 KB)</span>
-      </label>
-      <div className="actions">
-        <button onClick={() => void runEstimate(ArchiveKind.Buildings)} disabled={!draft}>
-          Estimate
-        </button>
-        <button onClick={() => start(ArchiveKind.Buildings)} disabled={!draft}>
-          Download
-        </button>
-        {buildingsEstimate && <span className="muted">{estimateLabel(buildingsEstimate)}</span>}
-      </div>
-      <div className="field">
-        <span>Satellite</span>
-        <select
-          value={satMaxZoom}
-          onChange={(e) => {
-            setSatMaxZoom(Number(e.target.value));
-            setEstimates(({ [ArchiveKind.Satellite]: _, ...rest }) => rest);
-          }}
-          aria-label="Highest satellite zoom"
-        >
-          {SAT_OFFLINE_ZOOMS.map((z) => (
-            <option key={z} value={z}>
-              zoom {SAT_OFFLINE_MIN_ZOOM}–{z}
-            </option>
-          ))}
-        </select>
-      </div>
-      <p className="muted hint" title={SAT_OFFLINE_NAMES}>
-        Only national aerial photos whose licence allows offline copies are packed; MapTiler, Esri, and the Dutch, Swiss, Japanese, USGS (to z16), SC, DE and MO photos stay online.
-      </p>
-      <div className="actions" data-offline="satellite">
-        <button onClick={() => void runEstimate(ArchiveKind.Satellite)} disabled={!draft}>
-          Estimate
-        </button>
-        <button onClick={() => start(ArchiveKind.Satellite)} disabled={!draft}>
-          Download
-        </button>
-        {satelliteEstimate && <span className="muted">{estimateLabel(satelliteEstimate)}</span>}
-      </div>
-      {error && <p className="error">{error}</p>}
-
+        <div className="field">
+          <span>Basemap</span>
+          <select value={maxZoom} onChange={(e) => setMaxZoom(Number(e.target.value))} aria-label="Highest basemap zoom">
+            {BASEMAP_ZOOMS.map((z) => (
+              <option key={z} value={z}>
+                to zoom {z}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <span>Source</span>
+          <select
+            value={source}
+            onChange={(e) => {
+              setSourceUrl(defaultSourceUrl(e.target.value as BasemapSource));
+              setEstimates(({ [ArchiveKind.Basemap]: _, ...rest }) => rest);
+            }}
+            aria-label="Basemap source"
+          >
+            <option value={BasemapSource.OpenFreeMap}>OpenFreeMap</option>
+            <option value={BasemapSource.Protomaps}>Protomaps PMTiles</option>
+          </select>
+        </div>
+        <div className="field-row">
+          <input
+            className="url"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.target.value)}
+            spellCheck={false}
+            aria-label="Basemap source URL"
+            title={source === BasemapSource.Protomaps ? 'PMTiles archive the region is cut from; it must allow cross-origin range requests' : 'TileJSON whose vector tiles are packed one by one'}
+          />
+        </div>
+        <p className="muted hint">
+          {source === BasemapSource.Protomaps
+            ? 'The default Protomaps build answers only local development origins (localhost:5173 and :3000); elsewhere use an archive that allows cross-origin range requests.'
+            : 'OpenFreeMap tiles are packed one by one with the Liberty style, its icons and Latin, Greek and Cyrillic labels.'}
+        </p>
+        <div className="actions">
+          <button onClick={() => void runEstimate(ArchiveKind.Basemap)} disabled={!draft}>
+            Estimate
+          </button>
+          <button onClick={() => start(ArchiveKind.Basemap)} disabled={!draft}>
+            Download
+          </button>
+          {basemapEstimate && <span className="muted">{estimateLabel(basemapEstimate)}</span>}
+        </div>
+        <label className="toggle">
+          <input type="checkbox" checked={basemapOn} disabled={!draft} onChange={(e) => setWithBasemap(e.target.checked)} />
+          <span>Include in the terrain download (on by default up to {BASEMAP_DEFAULT_MAX_TILES} tiles)</span>
+        </label>
+        <div className="field">
+          <span>Terrain</span>
+          <span className="muted">
+            zoom {TERRAIN_MIN_ZOOM}–{TERRAIN_MAX_ZOOM} (about 10 m)
+          </span>
+        </div>
+        <div className="actions">
+          <button onClick={() => void runEstimate(ArchiveKind.Terrain)} disabled={!draft}>
+            Estimate
+          </button>
+          <button onClick={() => start(ArchiveKind.Terrain)} disabled={!draft}>
+            Download
+          </button>
+          {terrainEstimate && <span className="muted">{estimateLabel(terrainEstimate)}</span>}
+        </div>
+        <div className="field">
+          <span>Buildings</span>
+          <span className="muted">
+            zoom {BUILDINGS_ZOOM}, Overture {OVERTURE_BUILDINGS_RELEASE}
+          </span>
+        </div>
+        <label className="toggle">
+          <input type="checkbox" checked={buildingsOn} disabled={!draft} onChange={(e) => setWithBuildings(e.target.checked)} />
+          <span>Download with the terrain (on by default up to {BUILDINGS_DEFAULT_MAX_TILES} tiles; a city tile is about 300 KB)</span>
+        </label>
+        <div className="actions">
+          <button onClick={() => void runEstimate(ArchiveKind.Buildings)} disabled={!draft}>
+            Estimate
+          </button>
+          <button onClick={() => start(ArchiveKind.Buildings)} disabled={!draft}>
+            Download
+          </button>
+          {buildingsEstimate && <span className="muted">{estimateLabel(buildingsEstimate)}</span>}
+        </div>
+        <div className="field">
+          <span>Satellite</span>
+          <select
+            value={satMaxZoom}
+            onChange={(e) => {
+              setSatMaxZoom(Number(e.target.value));
+              setEstimates(({ [ArchiveKind.Satellite]: _, ...rest }) => rest);
+            }}
+            aria-label="Highest satellite zoom"
+          >
+            {SAT_OFFLINE_ZOOMS.map((z) => (
+              <option key={z} value={z}>
+                zoom {SAT_OFFLINE_MIN_ZOOM}–{z}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="muted hint" title={SAT_OFFLINE_NAMES}>
+          Only national aerial photos whose licence allows offline copies are packed; MapTiler, Esri, and the Dutch, Swiss, Japanese, USGS (to z16), SC, DE and MO photos stay online.
+        </p>
+        <div className="actions" data-offline="satellite">
+          <button onClick={() => void runEstimate(ArchiveKind.Satellite)} disabled={!draft}>
+            Estimate
+          </button>
+          <button onClick={() => start(ArchiveKind.Satellite)} disabled={!draft}>
+            Download
+          </button>
+          {satelliteEstimate && <span className="muted">{estimateLabel(satelliteEstimate)}</span>}
+        </div>
+        {error && <p className="error">{error}</p>}
+      </Section>
       {jobs.length > 0 && (
-        <>
-          <h3>Downloads</h3>
+        <Section title="Downloads" className="layers offline">
           <ul className="list">
             {jobs.map((j) => (
               <Job key={j.id} job={j} />
             ))}
           </ul>
-        </>
+        </Section>
       )}
-
-      <h3>Saved regions</h3>
-      {archives.length === 0 && <p className="muted hint">No regions on this device yet.</p>}
-      <ul className="list">
-        {archives.map((a) => (
-          <li key={a.id} className="archive">
-            <div className="head">
-              <input defaultValue={a.name} onBlur={(e) => void o.rename(a.id, e.target.value.trim() || a.name)} aria-label="Region name" />
-              <span className="chip">{KIND_LABEL[a.kind]}</span>
-            </div>
-            <span className="detail">
-              {formatLngLat(bboxCentre(a.bbox), coordFormat)} · {sizeLabel(a.bbox)} · zoom {a.minZoom}–{a.maxZoom} · {bytes(a.bytes)} · {a.downloadedAt.slice(0, 10)}
-            </span>
-            <div className="actions">
-              {a.kind === ArchiveKind.Basemap &&
-                (basemapId === `opfs:${a.id}` ? (
-                  <span className="muted">In use</span>
-                ) : (
-                  <button className="link" onClick={() => settingsStore.getState().update({ basemapId: `opfs:${a.id}` })}>
-                    Use as basemap
-                  </button>
-                ))}
-              <button className="link" onClick={() => update(a)} title="Download the same region again from a fresh build">
-                Update
-              </button>
-              <button className="link" onClick={() => void o.exportArchive(a.id)}>
-                Export
-              </button>
-              <Confirm question={`Delete “${a.name}” from this device?`} confirm="Delete" onConfirm={() => void o.remove(a.id)}>
-                Delete
-              </Confirm>
-            </div>
-          </li>
-        ))}
-      </ul>
-      {hasProtomapsArchive && (
-        <label className="toggle">
-          <span>Basemap style</span>
-          <select
-            value={offlineFlavor}
-            onChange={(e) => {
-              const flavor = e.target.value as PmFlavor;
-              settingsStore.getState().update({ offlineFlavor: flavor });
-              warmStyleAssets(flavor);
-            }}
-            title="Protomaps style flavor for offline basemaps"
-          >
-            {FLAVORS.map((f) => (
-              <option key={f}>{f}</option>
-            ))}
-          </select>
+      <Section title="Saved regions" className="layers offline">
+        {archives.length === 0 && <p className="muted hint">No regions on this device yet.</p>}
+        <ul className="list">
+          {archives.map((a) => (
+            <li key={a.id} className="archive">
+              <div className="head">
+                <input defaultValue={a.name} onBlur={(e) => void o.rename(a.id, e.target.value.trim() || a.name)} aria-label="Region name" />
+                <span className="chip">{KIND_LABEL[a.kind]}</span>
+              </div>
+              <span className="detail">
+                {formatLngLat(bboxCentre(a.bbox), coordFormat)} · {sizeLabel(a.bbox)} · zoom {a.minZoom}–{a.maxZoom} · {bytes(a.bytes)} · {a.downloadedAt.slice(0, 10)}
+              </span>
+              <div className="actions">
+                {a.kind === ArchiveKind.Basemap &&
+                  (basemapId === `opfs:${a.id}` ? (
+                    <span className="muted">In use</span>
+                  ) : (
+                    <button className="link" onClick={() => settingsStore.getState().update({ basemapId: `opfs:${a.id}` })}>
+                      Use as basemap
+                    </button>
+                  ))}
+                <button className="link" onClick={() => update(a)} title="Download the same region again from a fresh build">
+                  Update
+                </button>
+                <button className="link" onClick={() => void o.exportArchive(a.id)}>
+                  Export
+                </button>
+                <Confirm question={`Delete “${a.name}” from this device?`} confirm="Delete" onConfirm={() => void o.remove(a.id)}>
+                  Delete
+                </Confirm>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {hasProtomapsArchive && (
+          <label className="toggle">
+            <span>Basemap style</span>
+            <select
+              value={offlineFlavor}
+              onChange={(e) => {
+                const flavor = e.target.value as PmFlavor;
+                settingsStore.getState().update({ offlineFlavor: flavor });
+                warmStyleAssets(flavor);
+              }}
+              title="Protomaps style flavor for offline basemaps"
+            >
+              {FLAVORS.map((f) => (
+                <option key={f}>{f}</option>
+              ))}
+            </select>
+          </label>
+        )}
+      </Section>
+      <Section title="Import" className="layers offline">
+        <label className="file">
+          <input type="file" accept=".pmtiles" onChange={(e) => void importFile(e.target.files?.[0])} />
+          Import a .pmtiles file
         </label>
-      )}
-
-      <h3>Import</h3>
-      <label className="file">
-        <input type="file" accept=".pmtiles" onChange={(e) => void importFile(e.target.files?.[0])} />
-        Import a .pmtiles file
-      </label>
-
+      </Section>
       <ViirsSection />
-
       <GibsSection />
-
       <GeoidSection />
-    </div>
+    </>
   );
 }
 
@@ -470,8 +467,7 @@ function ViirsSection() {
   };
 
   return (
-    <>
-      <h3>Night lights (VIIRS)</h3>
+    <Section title="Night lights (VIIRS)" className="layers offline">
       <p className="muted hint">
         Sky brightness and Bortle come from NASA Black Marble VNP46A4 annual tiles. LAADS lists them openly but serves the files only to a signed-in{' '}
         <a href={EARTHDATA_SIGNUP} target="_blank" rel="noopener noreferrer">
@@ -531,7 +527,7 @@ function ViirsSection() {
         {busy ?? 'Import VNP46A4 .h5 tiles'}
       </label>
       {error && <p className="error">{error}</p>}
-    </>
+    </Section>
   );
 }
 
@@ -553,8 +549,7 @@ function GibsSection() {
   };
 
   return (
-    <>
-      <h3>Nightly lights (GIBS)</h3>
+    <Section title="Nightly lights (GIBS)" className="layers offline">
       <p className="muted hint">Where no year is imported, the Night tab reads the last nights of VIIRS from NASA GIBS and keeps them here; older nights are dropped on their own.</p>
       <div className="list" data-gibs={gibs.bytes}>
         <span className="detail">
@@ -567,7 +562,7 @@ function GibsSection() {
         </div>
       </div>
       {error && <p className="error">{error}</p>}
-    </>
+    </Section>
   );
 }
 
@@ -593,8 +588,7 @@ function GeoidSection() {
   };
 
   return (
-    <>
-      <h3>Geoid (Japan)</h3>
+    <Section title="Geoid (Japan)" className="layers offline">
       <p className="muted hint">
         PLATEAU buildings carry ellipsoid heights; GSI’s geoid sets them on the terrain anywhere in Japan, where a central-Tokyo constant can be metres off. Download “日本のジオイド2011” from{' '}
         <a href={GEOID_DOWNLOAD_URL} target="_blank" rel="noreferrer">
@@ -623,7 +617,7 @@ function GeoidSection() {
         {busy ? 'Importing…' : geoid ? 'Replace the geoid file' : 'Import the geoid file'}
       </label>
       {error && <p className="error">{error}</p>}
-    </>
+    </Section>
   );
 }
 

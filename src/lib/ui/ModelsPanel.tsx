@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { compass, distance, height } from '@core/format';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
 import { groundUnknown, modelBaseM, ModelSource, type ModelPart, type SavedModel } from '@core/model';
@@ -16,6 +16,7 @@ import { ModelImportSheet } from './ModelImport';
 import { useMedia } from './useMedia';
 import { useOnline } from './useOnline';
 import { useOnMap } from './panelPage';
+import { Section } from './Section';
 
 /** Why a model stands at sea level, shown until its ground is read. */
 function GroundWarning({ id }: { id: string }) {
@@ -73,7 +74,7 @@ function NumField({ value, onCommit, label, step }: { value: number; onCommit: (
   return <input key={value} type="number" step={step} defaultValue={value} onBlur={(e) => commit(e.currentTarget)} onKeyDown={(e) => e.key === 'Enter' && commit(e.currentTarget)} aria-label={label} />;
 }
 
-export function ModelsPanel() {
+export function ModelsPanel({ head }: { head: ReactNode }) {
   const models = useModels((s) => s.models);
   const loaded = useModels((s) => s.loaded);
   const selectedId = useModels((s) => s.selectedId);
@@ -91,74 +92,76 @@ export function ModelsPanel() {
   const onMap = useOnMap();
 
   return (
-    <div className="models">
-      <div className="actions">
-        {onMap && (
-          <>
-            <button className={picking ? 'on' : ''} aria-pressed={picking} onClick={() => ms.setPicking(!picking)} title="Then click an Overture building on the map to model it from its footprints">
-              {picking ? 'Click a building…' : 'Model this building'}
-            </button>
-            <button className={draft ? 'on' : ''} aria-pressed={!!draft} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
-              Draw a building
-            </button>
-          </>
-        )}
-        <label className="button file-pick" title="A .glb, a .gltf, or a .gltf with its .bin files picked together">
-          Import GLB…
-          <input
-            type="file"
-            className="model-file"
-            accept=".glb,.gltf,.bin,model/gltf-binary,model/gltf+json"
-            multiple
-            onChange={(e) => {
-              const picked = [...(e.currentTarget.files ?? [])];
-              e.currentTarget.value = '';
-              if (picked.length) setFiles(picked);
-            }}
-          />
-        </label>
-      </div>
-      {files && <ModelImportSheet key={files.map((f) => f.name + f.lastModified).join('|')} files={files} onClose={() => setFiles(null)} />}
-      {pickError && <p className="error">{pickError}</p>}
-      {onMap && draft && (
-        <div className="model-draft">
-          <p className="muted hint">Tap the map to add corners; tap the first corner to close. Drag a corner to move it, hold it to delete it. On a phone the sheet folds away while you draw; tap the tab row to bring it back.</p>
-          <div className="actions">
-            <span className="count">
-              {draft.length} corner{draft.length === 1 ? '' : 's'}
-            </span>
-            <label className="toggle">
-              <input type="checkbox" checked={rightAngles} onChange={(e) => ms.setRightAngles(e.target.checked)} />
-              <span>Right angles</span>
-            </label>
-            <button onClick={() => void finishDraft()} disabled={draft.length < 3}>
-              Done
-            </button>
-            <button className="link" onClick={() => ms.setDraft(null)}>
-              Cancel
-            </button>
-          </div>
+    <>
+      <Section className="models">
+        {head}
+        <div className="actions">
+          {onMap && (
+            <>
+              <button className={picking ? 'on' : ''} aria-pressed={picking} onClick={() => ms.setPicking(!picking)} title="Then click an Overture building on the map to model it from its footprints">
+                {picking ? 'Click a building…' : 'Model this building'}
+              </button>
+              <button className={draft ? 'on' : ''} aria-pressed={!!draft} onClick={() => ms.setDraft(draft ? null : [])} title="Tap its corners on the map">
+                Draw a building
+              </button>
+            </>
+          )}
+          <label className="button file-pick" title="A .glb, a .gltf, or a .gltf with its .bin files picked together">
+            Import GLB…
+            <input
+              type="file"
+              className="model-file"
+              accept=".glb,.gltf,.bin,model/gltf-binary,model/gltf+json"
+              multiple
+              onChange={(e) => {
+                const picked = [...(e.currentTarget.files ?? [])];
+                e.currentTarget.value = '';
+                if (picked.length) setFiles(picked);
+              }}
+            />
+          </label>
         </div>
-      )}
-      {selected && <ModelEditor key={selected.id} m={selected} compact={compact} />}
-      <h3>
-        {models.length} model{models.length === 1 ? '' : 's'}
-      </h3>
-      {loaded && models.length === 0 && <p className="muted hint">A model replaces the rough Overture shape of one building with parts you size yourself, so its crown, spire and shadow line up in the viewfinder.</p>}
-      <ul className="list model-list">
-        {sorted.map(({ m, d }) => (
-          <li key={m.id} className={m.id === selectedId ? 'selected' : ''} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
-            <span className="name">
-              {m.name}
-              {!m.visible && <span className="muted"> · hidden</span>}
-            </span>
-            <span className="where">
-              {distance(d, units)} {compass(bearingDeg(pin, m.anchor))}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+        {files && <ModelImportSheet key={files.map((f) => f.name + f.lastModified).join('|')} files={files} onClose={() => setFiles(null)} />}
+        {pickError && <p className="error">{pickError}</p>}
+        {onMap && draft && (
+          <div className="model-draft">
+            <p className="muted hint">Tap the map to add corners; tap the first corner to close. Drag a corner to move it, hold it to delete it. On a phone the sheet folds away while you draw; tap the tab row to bring it back.</p>
+            <div className="actions">
+              <span className="count">
+                {draft.length} corner{draft.length === 1 ? '' : 's'}
+              </span>
+              <label className="toggle">
+                <input type="checkbox" checked={rightAngles} onChange={(e) => ms.setRightAngles(e.target.checked)} />
+                <span>Right angles</span>
+              </label>
+              <button onClick={() => void finishDraft()} disabled={draft.length < 3}>
+                Done
+              </button>
+              <button className="link" onClick={() => ms.setDraft(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {selected && <ModelEditor key={selected.id} m={selected} compact={compact} />}
+      </Section>
+      <Section title={`${models.length} model${models.length === 1 ? '' : 's'}`} className="models">
+        {loaded && models.length === 0 && <p className="muted hint">A model replaces the rough Overture shape of one building with parts you size yourself, so its crown, spire and shadow line up in the viewfinder.</p>}
+        <ul className="list model-list">
+          {sorted.map(({ m, d }) => (
+            <li key={m.id} className={m.id === selectedId ? 'selected' : ''} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
+              <span className="name">
+                {m.name}
+                {!m.visible && <span className="muted"> · hidden</span>}
+              </span>
+              <span className="where">
+                {distance(d, units)} {compass(bearingDeg(pin, m.anchor))}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Section>
+    </>
   );
 }
 
