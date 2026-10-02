@@ -1,3 +1,4 @@
+import { textDigits } from '@core/geo/coords';
 import { categoryFrom, pointsFromGeoJson, type PointRecord } from '@core/io/points';
 
 const text = (el: Element | null | undefined, tag: string): string | undefined => {
@@ -12,9 +13,10 @@ function pointsFromKml(doc: Document): PointRecord[] {
     const pm = marks[i];
     const coords = pm.getElementsByTagNameNS('*', 'Point')[0]?.getElementsByTagNameNS('*', 'coordinates')[0]?.textContent?.trim();
     if (!coords) continue;
-    const [lng, lat] = coords.split(/[,\s]+/).map(Number);
+    const [lngText, latText] = coords.split(/[,\s]+/);
+    const [lng, lat] = [Number(lngText), Number(latText)];
     if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-    const r: PointRecord = { name: text(pm, 'name') ?? `Placemark ${i + 1}`, lat, lng };
+    const r: PointRecord = { name: text(pm, 'name') ?? `Placemark ${i + 1}`, lat, lng, digits: { lat: textDigits(latText), lng: textDigits(lngText) } };
     const desc = text(pm, 'description');
     if (desc) r.notes = desc;
     const data = pm.getElementsByTagNameNS('*', 'Data');
@@ -38,10 +40,11 @@ function pointsFromGpx(doc: Document): PointRecord[] {
   const wpts = doc.getElementsByTagNameNS('*', 'wpt');
   for (let i = 0; i < wpts.length; i++) {
     const w = wpts[i];
-    const lat = Number(w.getAttribute('lat'));
-    const lng = Number(w.getAttribute('lon'));
+    const latText = w.getAttribute('lat') ?? '';
+    const lngText = w.getAttribute('lon') ?? '';
+    const [lat, lng] = [Number(latText), Number(lngText)];
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    const r: PointRecord = { name: text(w, 'name') ?? `Waypoint ${i + 1}`, lat, lng };
+    const r: PointRecord = { name: text(w, 'name') ?? `Waypoint ${i + 1}`, lat, lng, digits: { lat: textDigits(latText), lng: textDigits(lngText) } };
     const desc = text(w, 'desc') ?? text(w, 'cmt');
     if (desc) r.notes = desc;
     const cat = categoryFrom(text(w, 'type'));

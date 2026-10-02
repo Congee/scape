@@ -1,4 +1,6 @@
 import type { Feature, FeatureCollection, Point } from 'geojson';
+import { numberDigits } from '@core/geo/coords';
+import type { Digits } from '@core/geo/geodesy';
 import { MarkerCategory, MarkerShape, type SavedMarker } from '@core/plan';
 
 /** A point read from or written to an interchange file; everything but the position is optional. */
@@ -6,6 +8,7 @@ export interface PointRecord {
   name: string;
   lat: number;
   lng: number;
+  digits?: Digits;
   notes?: string;
   category?: MarkerCategory;
   heightM?: number;
@@ -55,7 +58,7 @@ export function markersToGeoJson(markers: SavedMarker[]): FeatureCollection<Poin
 
 function recordFromProps(lng: number, lat: number, props: Record<string, unknown> | null | undefined, fallbackName: string): PointRecord {
   const p = props ?? {};
-  const r: PointRecord = { name: str(p.name) ?? str(p.Name) ?? str(p.title) ?? fallbackName, lat, lng };
+  const r: PointRecord = { name: str(p.name) ?? str(p.Name) ?? str(p.title) ?? fallbackName, lat, lng, digits: { lat: numberDigits(lat), lng: numberDigits(lng) } };
   const notes = str(p.notes) ?? str(p.description) ?? str(p.desc);
   if (notes) r.notes = notes;
   const cat = categoryFrom(p.category) ?? categoryFrom(p.type);

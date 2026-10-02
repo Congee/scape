@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { compass, degrees, distance } from '@core/format';
-import { formatLngLat } from '@core/geo/coords';
-import { bearingDeg, distanceM } from '@core/geo/geodesy';
+import { atPixel, formatLngLat } from '@core/geo/coords';
+import { bearingDeg, distanceM, type LngLat } from '@core/geo/geodesy';
 import { markersToGeoJson, markersToGpx, markersToKml } from '@core/io/points';
 import { MarkerCategory, MarkerShape, type SavedMarker } from '@core/plan';
 import { parsePointsText } from '@data/importPoints';
@@ -53,7 +53,7 @@ function MarkerList({ head }: { head: ReactNode }) {
   const selected = markers.find((m) => m.id === selectedId) ?? null;
   const sorted = markers.map((m) => ({ m, d: distanceM(pin, m) })).toSorted((a, b) => a.d - b.d);
 
-  const addAt = (p: { lat: number; lng: number }) => void ms.save(p).then((m) => ms.select(m.id));
+  const addAt = (p: LngLat) => void ms.save(p).then((m) => ms.select(m.id));
   const importFile = async (file: File | undefined) => {
     if (!file) return;
     try {
@@ -79,7 +79,7 @@ function MarkerList({ head }: { head: ReactNode }) {
               <button className={placing ? 'on' : ''} aria-pressed={placing} onClick={() => ms.setPlacing(!placing)} title="Then click the map where the marker goes (or Alt-click the map any time)">
                 {placing ? 'Click the map…' : 'Add by clicking the map'}
               </button>
-              <button onClick={() => addAt(worldStore.getState().view.center)}>Add at map centre</button>
+              <button onClick={() => addAt(atPixel(worldStore.getState().view.center, worldStore.getState().view.zoom))}>Add at map centre</button>
             </>
           )}
           {pin2 && <button onClick={() => addAt(pin2)}>Add at target</button>}
@@ -204,10 +204,10 @@ function MarkerEditor({ m }: { m: SavedMarker }) {
         </label>
       </b>
       <b className="v wide actions">
-        <button onClick={() => worldStore.getState().setPin2({ lat: m.lat, lng: m.lng })} title="Make this marker the target location">
+        <button onClick={() => worldStore.getState().setPin2({ lat: m.lat, lng: m.lng, digits: m.digits })} title="Make this marker the target location">
           Use as target
         </button>
-        <button onClick={() => worldStore.getState().setPin({ lat: m.lat, lng: m.lng })} title="Move the camera to this marker">
+        <button onClick={() => worldStore.getState().setPin({ lat: m.lat, lng: m.lng, digits: m.digits })} title="Move the camera to this marker">
           Camera here
         </button>
         {onMap && <button onClick={() => worldStore.getState().flyTo(m, Math.max(worldStore.getState().view.zoom, 13))}>Show on map</button>}

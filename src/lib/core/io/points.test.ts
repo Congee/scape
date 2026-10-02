@@ -22,7 +22,7 @@ describe('points io', () => {
     const fc = markersToGeoJson([m]);
     expect(fc.features[0].geometry.coordinates).toEqual([-119.5332, 37.7459]);
     const back = pointsFromGeoJson(JSON.parse(JSON.stringify(fc)));
-    expect(back).toEqual([{ name: 'Half <Dome>', lat: 37.7459, lng: -119.5332, notes: 'Granite & light', category: 'Peak', heightM: 0, widthM: 300, rating: 5, showInViewfinder: true }]);
+    expect(back).toEqual([{ name: 'Half <Dome>', lat: 37.7459, lng: -119.5332, digits: { lat: 4, lng: 4 }, notes: 'Granite & light', category: 'Peak', heightM: 0, widthM: 300, rating: 5, showInViewfinder: true }]);
   });
 
   it('reads bare points and foreign property names, skipping lines', () => {

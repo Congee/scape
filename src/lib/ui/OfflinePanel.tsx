@@ -205,9 +205,9 @@ export function OfflinePanel() {
           <div className="kv">
             <span className="k">Corners</span>
             <b className="v">
-              {formatLngLat({ lng: draft.west, lat: draft.south }, coordFormat)}
+              {formatLngLat({ lng: draft.west, lat: draft.south, digits: draft.digits }, coordFormat)}
               <br />
-              {formatLngLat({ lng: draft.east, lat: draft.north }, coordFormat)}
+              {formatLngLat({ lng: draft.east, lat: draft.north, digits: draft.digits }, coordFormat)}
             </b>
             <span className="k">Size</span>
             <b className="v">{sizeLabel(draft)}</b>

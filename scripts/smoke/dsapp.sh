@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Design-system smoke: no old accent blue, dark click-mode, underlined calendar day, square chrome, 390 px topbar, keyboard context menu,
 # danger import row with an icon instead of a frame, 390 px rail tab filling its cell, one-line field labels,
-# no date or time in the panel's place band or the phone peek bar (the DateBar owns them).
+# no date or time at the panel top (place band when named) or the phone peek bar (the DateBar owns them).
 # Usage: scripts/smoke/dsapp.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port; launches a headless Brave on the CDP port unless one answers, and stops only what it started.
 set -uo pipefail
@@ -83,14 +83,14 @@ scan_check() { # where
 
 ab set viewport 1600 1000 >/dev/null
 ab open "$BASE/viewfinder" >/dev/null
-# Collapsing persists; open the panel so the band shows.
+# Collapsing persists; open the panel so its top shows. An unnamed spot has no band, so the tabs lead.
 wait_for '!!document.querySelector(".panel-inner")' 80
 js '(() => { document.querySelector(".panel-expand")?.click(); return "ok"; })()' >/dev/null
-wait_for '!!document.querySelector(".band small")' 40
-band_check "viewfinder band" ".band"
+wait_for '!!document.querySelector(".panel-inner .tabs")' 40
+band_check "viewfinder panel top" ".panel-inner > :first-child"
 ab open "$BASE/" >/dev/null
 styled 120
-band_check "map band" ".band"
+band_check "map panel top" ".panel-inner > :first-child"
 
 # Click-mode control is dark.
 bg=$(js '(() => { const e = document.querySelector(".click-mode"); return e ? getComputedStyle(e).backgroundColor : "none"; })()')

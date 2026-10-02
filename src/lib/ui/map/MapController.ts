@@ -21,7 +21,7 @@ import { lod2Credits, type Lod2Source } from '@core/lod2/regions';
 import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, rowsRings, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
-import { copyLngLat } from '@core/geo/coords';
+import { atPixel, copyLngLat } from '@core/geo/coords';
 import { isUrban, placeClass, type Place } from '@core/geo/parking';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
@@ -238,7 +238,7 @@ export class MapController {
 
     this.map.on('click', (e: MapMouseEvent) => {
       if (this.drawingRegion || this.drawer.onClick(e)) return;
-      const p = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+      const p = this.picked(e.lngLat);
       const lp = lightProbeStore.getState();
       if (lp.picking) return lp.setPoint(p);
       const al = alignStore.getState();
@@ -268,16 +268,16 @@ export class MapController {
     this.installLongPress();
     this.map.on('mousedown', (e: MapMouseEvent) => {
       if (!this.drawingRegion) return;
-      this.drawStart = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+      this.drawStart = this.picked(e.lngLat);
       offlineStore.getState().setDraft(bboxFromCorners(this.drawStart, this.drawStart));
     });
     this.map.on('mousemove', (e: MapMouseEvent) => {
       if (!this.drawingRegion || !this.drawStart) return;
-      offlineStore.getState().setDraft(bboxFromCorners(this.drawStart, { lng: e.lngLat.lng, lat: e.lngLat.lat }));
+      offlineStore.getState().setDraft(bboxFromCorners(this.drawStart, this.picked(e.lngLat)));
     });
     this.map.on('mouseup', (e: MapMouseEvent) => {
       if (!this.drawingRegion || !this.drawStart) return;
-      const bbox = bboxFromCorners(this.drawStart, { lng: e.lngLat.lng, lat: e.lngLat.lat });
+      const bbox = bboxFromCorners(this.drawStart, this.picked(e.lngLat));
       this.drawStart = null;
       const o = offlineStore.getState();
       o.setDraft(bbox);
@@ -448,13 +448,17 @@ export class MapController {
     });
   }
 
+  /** A point the user put on the map, at the precision one pixel resolves. */
+  private picked(ll: { lng: number; lat: number }): LngLat {
+    return atPixel(ll, this.map.getZoom());
+  }
+
   /** Draggable marker whose drags reach the store at most once per frame. */
   private makeMarker(opts: { at: LngLat; color?: string; scale?: number; element?: HTMLElement }, commit: (p: LngLat, final: boolean) => void, setDragging: (d: boolean) => void) {
     const m = new Marker({ draggable: true, color: opts.color, scale: opts.scale, element: opts.element }).setLngLat([opts.at.lng, opts.at.lat]).addTo(this.map);
     let raf = 0;
     const commitPos = (final: boolean) => {
-      const ll = m.getLngLat();
-      commit({ lng: ll.lng, lat: ll.lat }, final);
+      commit(this.picked(m.getLngLat()), final);
     };
     m.on('dragstart', () => setDragging(true));
     m.on('drag', () => {
@@ -575,8 +579,7 @@ export class MapController {
 
   /** `at` is in map container pixels. */
   private openMenu(at: Pt) {
-    const ll = this.map.unproject([at.x, at.y]);
-    const p = { lng: ll.lng, lat: ll.lat };
+    const p = this.picked(this.map.unproject([at.x, at.y]));
     const coords = copyLngLat(p, settingsStore.getState().coordFormat);
     this.menu.open(at, [
       { label: 'Camera here', run: () => worldStore.getState().setPin(p) },

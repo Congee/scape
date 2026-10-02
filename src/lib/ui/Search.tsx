@@ -56,14 +56,14 @@ export function Search() {
 
   const pick = (h: GeocodeHit) => {
     const w = worldStore.getState();
-    const p = { lat: h.lat, lng: h.lng };
+    const p = { lat: h.lat, lng: h.lng, digits: h.digits };
     w.setPin(p);
     w.flyTo(p, Math.max(w.view.zoom, 11));
     close();
   };
 
   const setTarget = (h: GeocodeHit) => {
-    worldStore.getState().setPin2({ lat: h.lat, lng: h.lng });
+    worldStore.getState().setPin2({ lat: h.lat, lng: h.lng, digits: h.digits });
     close();
   };
 

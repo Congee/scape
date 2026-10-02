@@ -1071,12 +1071,6 @@ button.badge:hover {
   white-space: nowrap;
 }
 
-.band small {
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--fg-2);
-}
-
 .tab-body {
   flex: 1;
   min-height: 0;

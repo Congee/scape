@@ -30,9 +30,17 @@ export const WGS84_F = 1 / 298.257223563;
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 
+/** Decimal digits each axis is known to. */
+export interface Digits {
+  lat: number;
+  lng: number;
+}
+
 export interface LngLat {
   lng: number;
   lat: number;
+  /** Absent when unknown: computed points and data saved before precision was kept. */
+  digits?: Digits;
 }
 
 export function normalizeLng(lng: number): number {

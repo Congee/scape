@@ -26,6 +26,7 @@ const withDefaults = (input: Partial<SavedMarker> & Pick<SavedMarker, 'lat' | 'l
     category: input.category ?? MarkerCategory.Other,
     lat: input.lat,
     lng: input.lng,
+    ...(input.digits ? { digits: input.digits } : {}),
     heightM: input.heightM ?? 0,
     widthM: input.widthM ?? 0,
     shape: input.shape ?? MarkerShape.Bar,

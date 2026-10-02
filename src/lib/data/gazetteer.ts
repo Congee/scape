@@ -1,3 +1,4 @@
+import { withNumberDigits } from '@core/geo/coords';
 import { rankCities, type City } from '@core/geo/gazetteer';
 import type { GeocodeHit } from './geocode';
 
@@ -34,12 +35,14 @@ function countryName(code: string): string {
 /** Offline place search against the bundled GeoNames index. Returns [] rather than throwing. */
 export async function searchGazetteer(query: string, limit = 8): Promise<GeocodeHit[]> {
   try {
-    return rankCities(query, await cities(), limit).map((c) => ({
-      name: c.name,
-      detail: `${countryName(c.country)} · offline`,
-      lat: c.lat,
-      lng: c.lng
-    }));
+    return rankCities(query, await cities(), limit).map((c) =>
+      withNumberDigits({
+        name: c.name,
+        detail: `${countryName(c.country)} · offline`,
+        lat: c.lat,
+        lng: c.lng
+      })
+    );
   } catch {
     return [];
   }

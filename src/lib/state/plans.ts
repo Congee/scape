@@ -38,8 +38,8 @@ export function capturePlan(name: string, existing?: SavedPlan): SavedPlan {
   return {
     id: existing?.id ?? crypto.randomUUID(),
     name: name.trim() || existing?.name || 'Plan',
-    camera: { lat: w.pin.lat, lng: w.pin.lng, heightM: w.pinHeightM },
-    target: w.pin2 ? { lat: w.pin2.lat, lng: w.pin2.lng, heightM: w.pin2HeightM } : null,
+    camera: { lat: w.pin.lat, lng: w.pin.lng, digits: w.pin.digits, heightM: w.pinHeightM },
+    target: w.pin2 ? { lat: w.pin2.lat, lng: w.pin2.lng, digits: w.pin2.digits, heightM: w.pin2HeightM } : null,
     time: w.time,
     tz: w.tz,
     tzAuto: w.tzAuto,
@@ -62,9 +62,9 @@ export function capturePlan(name: string, existing?: SavedPlan): SavedPlan {
 /** Loads a plan into the world and composition and flies the map to the camera. */
 export function applyPlan(p: SavedPlan): void {
   const w = worldStore.getState();
-  w.setPin({ lat: p.camera.lat, lng: p.camera.lng });
+  w.setPin({ lat: p.camera.lat, lng: p.camera.lng, digits: p.camera.digits });
   w.setPinHeight(p.camera.heightM);
-  w.setPin2(p.target ? { lat: p.target.lat, lng: p.target.lng } : null);
+  w.setPin2(p.target ? { lat: p.target.lat, lng: p.target.lng, digits: p.target.digits } : null);
   w.setPin2Height(p.target?.heightM ?? 0);
   w.setTz(p.tzAuto ? null : p.tz);
   w.setTime(p.time);

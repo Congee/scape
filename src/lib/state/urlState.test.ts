@@ -9,11 +9,18 @@ const TIME = Date.parse('2026-10-26T23:01:25Z');
 const world = (over: Partial<SceneWorld> = {}): SceneWorld => ({ pin: HOBOKEN, pin2: EDGE, time: TIME, live: false, tz: 'America/New_York', tzAuto: false, ...over });
 
 describe('urlState', () => {
-  it('rounds points to five decimals and parses them back', () => {
-    expect(formatPoint(HOBOKEN)).toBe('40.74795,-74.02369');
-    expect(parsePoint(formatPoint(HOBOKEN))).toEqual({ lat: 40.74795, lng: -74.02369 });
-    // Trailing zeros are dropped to keep the URL short.
+  it('writes points at their known digits and reads the digits back', () => {
+    expect(formatPoint({ lat: 44.47, lng: -72.7, digits: { lat: 2, lng: 1 } })).toBe('44.47,-72.7');
+    expect(parsePoint('44.47,-72.7')).toEqual({ lat: 44.47, lng: -72.7, digits: { lat: 2, lng: 1 } });
+    expect(parsePoint('44.4700,-72.700')).toEqual({ lat: 44.47, lng: -72.7, digits: { lat: 4, lng: 3 } });
+    const p = { lat: 44.4700001, lng: -72.7, digits: { lat: 4, lng: 3 } };
+    expect(parsePoint(formatPoint(p))).toEqual({ lat: 44.47, lng: -72.7, digits: { lat: 4, lng: 3 } });
+  });
+
+  it('writes points of unknown precision at six decimals without trailing zeros', () => {
+    expect(formatPoint(HOBOKEN)).toBe('40.747952,-74.023685');
     expect(formatPoint({ lat: 40.5, lng: -74 })).toBe('40.5,-74');
+    expect(formatPoint({ lat: 40.12345678, lng: -74.1 })).toBe('40.123457,-74.1');
   });
 
   it('rejects junk points', () => {
@@ -39,10 +46,10 @@ describe('urlState', () => {
 
   it('round-trips the map search', () => {
     const s = mapSearchFor(world(), 14.567);
-    expect(s).toEqual({ camera: '40.74795,-74.02369', target: '40.75392,-74.001', z: 14.57, t: '2026-10-26T23:01Z', tz: 'America/New_York' });
+    expect(s).toEqual({ camera: '40.747952,-74.023685', target: '40.753918,-74.000996', z: 14.57, t: '2026-10-26T23:01Z', tz: 'America/New_York' });
     const back = validateScene(s as Record<string, unknown>);
-    expect(parsePoint(back.camera)).toEqual({ lat: 40.74795, lng: -74.02369 });
-    expect(parsePoint(back.target)).toEqual({ lat: 40.75392, lng: -74.001 });
+    expect(parsePoint(back.camera)).toEqual({ ...HOBOKEN, digits: { lat: 6, lng: 6 } });
+    expect(parsePoint(back.target)).toEqual({ ...EDGE, digits: { lat: 6, lng: 6 } });
     expect(back.z).toBe(14.57);
     expect(parseInstant(back.t)).toBe(Date.parse('2026-10-26T23:01:00Z'));
     expect(back.tz).toBe('America/New_York');
@@ -50,7 +57,7 @@ describe('urlState', () => {
 
   it('omits the target, the time while live and the zone while automatic', () => {
     const s = mapSearchFor(world({ pin2: null, live: true, tzAuto: true }), 11);
-    expect(s).toEqual({ camera: '40.74795,-74.02369', target: undefined, t: undefined, tz: undefined, z: 11 });
+    expect(s).toEqual({ camera: '40.747952,-74.023685', target: undefined, t: undefined, tz: undefined, z: 11 });
   });
 
   it('round-trips the viewfinder search', () => {

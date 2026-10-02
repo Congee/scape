@@ -1,9 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { LightMode } from '@core/astro/lightSource';
-import { compass, degrees, distance } from '@core/format';
-import { formatLngLat } from '@core/geo/coords';
+import { degrees, distance } from '@core/format';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
-import { effectiveOptics } from '@core/optics/fov';
 import { LosStatus } from '@core/terrain/los';
 import { BUILDINGS_ATTRIBUTION } from '@data/buildingTiles';
 import { GEOID_DOWNLOAD_URL, geoidCredit } from '@data/geoid';
@@ -51,24 +49,6 @@ const LIGHT: [LightMode, string, string][] = [
 ];
 const RANGES_KM = [50, 100, 150, 200];
 const LOS_WORD: Record<LosStatus, string> = { [LosStatus.Clear]: 'line of sight clear', [LosStatus.Marginal]: 'line of sight marginal', [LosStatus.Blocked]: 'line of sight blocked' };
-
-/** Place, then heading · focal length; the DateBar owns the date. */
-export function ViewBand() {
-  const pin = useWorld((s) => s.pin);
-  const pin2 = useWorld((s) => s.pin2);
-  const format = useSettings((s) => s.coordFormat);
-  const aimed = useComposition((s) => s.aimAtTarget);
-  const az = useComposition((s) => s.azimuthDeg);
-  const focal = useComposition((s) => effectiveOptics(s).focalMm);
-  const saved = useSavedName(pin);
-  const heading = aimed && pin2 ? bearingDeg(pin, pin2) : az;
-  return (
-    <div className="band">
-      <b className="band-name">{saved ?? formatLngLat(pin, format)}</b>
-      <small>{[`facing ${degrees(heading)} ${compass(heading)}`, `${Math.round(focal)} mm`].join(' · ')}</small>
-    </div>
-  );
-}
 
 function Chips({ list, c }: { list: Chip[]; c: Pick<Composition, BoolKey> }) {
   const update = compositionStore.getState().update;

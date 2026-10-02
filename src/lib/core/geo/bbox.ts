@@ -1,7 +1,7 @@
 /** Geographic bounding boxes in degrees, with antimeridian-crossing support. */
 
 import { normalizeLng } from './geodesy';
-import type { LngLat } from './geodesy';
+import type { Digits, LngLat } from './geodesy';
 
 /** `west > east` means the box crosses the antimeridian. */
 export interface Bbox {
@@ -9,6 +9,8 @@ export interface Bbox {
   south: number;
   east: number;
   north: number;
+  /** Precision of the corners, when known. */
+  digits?: Digits;
 }
 
 /** Keeps an exact ±180 as given, so an east edge on the antimeridian survives. */
@@ -22,7 +24,8 @@ export function bboxFromCorners(a: LngLat, b: LngLat): Bbox {
     west: Math.min(aLng, bLng),
     south: Math.min(a.lat, b.lat),
     east: Math.max(aLng, bLng),
-    north: Math.max(a.lat, b.lat)
+    north: Math.max(a.lat, b.lat),
+    ...(a.digits && b.digits ? { digits: { lat: Math.max(a.digits.lat, b.digits.lat), lng: Math.max(a.digits.lng, b.digits.lng) } } : {})
   };
 }
 
@@ -43,5 +46,5 @@ export function bboxIntersects(a: Bbox, b: Bbox): boolean {
 
 export function bboxCentre(b: Bbox): LngLat {
   const width = b.west <= b.east ? b.east - b.west : b.east + 360 - b.west;
-  return { lng: normalizeLng(b.west + width / 2), lat: (b.south + b.north) / 2 };
+  return { lng: normalizeLng(b.west + width / 2), lat: (b.south + b.north) / 2, ...(b.digits ? { digits: b.digits } : {}) };
 }

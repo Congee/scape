@@ -1,5 +1,5 @@
 import type { FinderSettings } from './astro/finder';
-import type { LngLat } from './geo/geodesy';
+import type { Digits, LngLat } from './geo/geodesy';
 import type { ScapeModelRecord } from './model/share';
 import { effectiveOptics, type Orientation, type Teleconverter } from './optics/fov';
 
@@ -8,6 +8,8 @@ export interface SavedLocation {
   name: string;
   lat: number;
   lng: number;
+  /** Precision of lat/lng; absent in data saved before it was kept. */
+  digits?: Digits;
   tz?: string;
   notes?: string;
   createdAt: number;
@@ -41,6 +43,8 @@ export interface SavedMarker {
   category: MarkerCategory;
   lat: number;
   lng: number;
+  /** Precision of lat/lng; absent in data saved before it was kept. */
+  digits?: Digits;
   /** Height above ground, metres (0 for a bare point). */
   heightM: number;
   /** Width across the sightline, metres; drawn in the viewfinder when > 0. */
@@ -87,6 +91,8 @@ export function planOptics(c: PlanComposition): { focalMm: number; fNumber: numb
 export interface PlanPoint {
   lat: number;
   lng: number;
+  /** Precision of lat/lng; absent in plans saved before it was kept. */
+  digits?: Digits;
   heightM: number;
 }
 

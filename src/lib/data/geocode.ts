@@ -1,3 +1,4 @@
+import { withNumberDigits } from '@core/geo/coords';
 import type { LngLat } from '@core/geo/geodesy';
 import { searchGazetteer } from './gazetteer';
 
@@ -23,7 +24,7 @@ async function photon(query: string, signal?: AbortSignal): Promise<GeocodeHit[]
     return json.features.map((f) => {
       const p = f.properties;
       const detail = [p.street, p.city ?? p.county, p.state, p.country].filter((x) => x && x !== p.name).join(', ');
-      return { name: p.name ?? p.city ?? p.country ?? 'Unnamed', detail, lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] };
+      return withNumberDigits({ name: p.name ?? p.city ?? p.country ?? 'Unnamed', detail, lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] });
     });
   } catch {
     return [];

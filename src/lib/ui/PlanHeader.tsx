@@ -1,12 +1,9 @@
 import { makeObserver, SkyBody } from '@core/astro/bodies';
 import { position } from '@core/astro/positions';
-import { height } from '@core/format';
-import { formatLngLat } from '@core/geo/coords';
 import type { LngLat } from '@core/geo/geodesy';
 import { useDayData } from '@state/dayData';
 import { libraryStore, useLibrary } from '@state/library';
-import { useSettings } from '@state/settings';
-import { usePinSiteHeightM, useTerrain } from '@state/terrain';
+import { usePinSiteHeightM } from '@state/terrain';
 import { useWorld } from '@state/world';
 import { useEffect } from 'react';
 import { phaseLightness, phaseStep } from './dayPhase';
@@ -25,19 +22,14 @@ export function useSavedName(p: LngLat | null): string | undefined {
   return name;
 }
 
-/** Place: the saved location's name, else the coordinates; the DateBar owns the date. */
+/** Place: the saved location's name; no band for an unnamed spot, since the badges show coordinates and elevation. */
 export function PlaceBand() {
   const pin = useWorld((s) => s.pin);
-  const format = useSettings((s) => s.coordFormat);
-  const units = useSettings((s) => s.units);
-  const ground = useTerrain((s) => s.pinGroundM);
   const saved = useSavedName(pin);
-  const coords = formatLngLat(pin, format);
-  const meta = [saved ? coords : null, ground == null || Number.isNaN(ground) ? null : height(ground, units)].filter(Boolean).join(' · ');
+  if (!saved) return null;
   return (
     <div className="band">
-      <b className="band-name">{saved ?? coords}</b>
-      {meta && <small>{meta}</small>}
+      <b className="band-name">{saved}</b>
     </div>
   );
 }

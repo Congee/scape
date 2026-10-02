@@ -1,5 +1,6 @@
 /** Compact search params shared by the map and the viewfinder. Pure: no store access. */
 
+import { formatDecimal, textDigits } from '@core/geo/coords';
 import type { LngLat } from '@core/geo/geodesy';
 import { Orientation, Teleconverter } from '@core/optics/fov';
 
@@ -39,8 +40,9 @@ export function teleconvertersFor(tc: string | undefined): readonly Teleconverte
 
 const round = (n: number, digits: number) => Number(n.toFixed(digits));
 
+/** At the point's known digits, so a link reads back with the same precision. */
 export function formatPoint(p: LngLat): string {
-  return `${round(p.lat, 5)},${round(p.lng, 5)}`;
+  return formatDecimal(p);
 }
 
 /** Tolerant: junk, out-of-range values and wrong shapes give null instead of throwing. */
@@ -52,7 +54,7 @@ export function parsePoint(v: unknown): LngLat | null {
   const lng = Number(parts[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-  return { lat, lng };
+  return { lat, lng, digits: { lat: textDigits(parts[0]), lng: textDigits(parts[1]) } };
 }
 
 export function formatInstant(ms: number): string {

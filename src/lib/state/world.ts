@@ -57,9 +57,9 @@ export function tzForPoint(p: LngLat): string {
   }
 }
 
-const DEFAULT_PIN: LngLat = { lat: 40.7463, lng: -74.1553 };
+const DEFAULT_PIN: LngLat = { lat: 40.7463, lng: -74.1553, digits: { lat: 4, lng: 4 } };
 
-// A URL round-trip rounds to 5 decimals (~1 m), so re-applying the same target must still count as the same point.
+// A URL round-trip rounds to the point's digits, so re-applying the same target must still count as the same point.
 const SAME_POINT_DEG = 1e-5;
 const samePoint = (a: LngLat | null, b: LngLat | null) =>
   a === b || (!!a && !!b && Math.abs(a.lat - b.lat) < SAME_POINT_DEG && Math.abs(a.lng - b.lng) < SAME_POINT_DEG);

@@ -16,7 +16,7 @@ import { PAGE_TABS, PanelPage, PanelTab, uiStore, useUi } from '@state/ui';
 import { Icon } from './Icon';
 import { PanelPageContext } from './panelPage';
 import { Section } from './Section';
-import { ViewBand, ViewTools } from './viewfinder/ViewTools';
+import { ViewTools } from './viewfinder/ViewTools';
 
 /** Page roots take this class so the grid drops the panel column. */
 export function usePanelClass(base: string): string {
@@ -57,7 +57,7 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
   return (
     <PanelPageContext.Provider value={page}>
       <div className="panel-inner">
-        {page === PanelPage.Viewfinder ? <ViewBand /> : <PlaceBand />}
+        <PlaceBand />
         <div className="tabs">
           <div className="tablist" role="tablist" aria-label="Panel" onKeyDown={onKey}>
             {TABS.map((t) => (

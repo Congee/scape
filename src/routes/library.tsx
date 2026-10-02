@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { formatLngLat } from '@core/geo/coords';
+import type { LngLat } from '@core/geo/geodesy';
 import { planOptics, type ScapeExport } from '@core/plan';
 import { formatDateTime } from '@core/time/format';
 import { countAll, exportAll, importAll, ImportMode, isScapeExport, replaceQuestion } from '@data/db';
@@ -49,14 +50,14 @@ function LibraryPage() {
   const save = async () => {
     const n = name.trim();
     if (!n) return;
-    await libraryStore.getState().save({ name: n, lat: pin.lat, lng: pin.lng, tz });
+    await libraryStore.getState().save({ name: n, lat: pin.lat, lng: pin.lng, digits: pin.digits, tz });
     setName('');
   };
 
-  const go = (lat: number, lng: number) => {
+  const go = (p: LngLat) => {
     const w = worldStore.getState();
-    w.setPin({ lat, lng });
-    w.flyTo({ lat, lng }, Math.max(w.view.zoom, 11), false);
+    w.setPin(p);
+    w.flyTo(p, Math.max(w.view.zoom, 11), false);
     void navigate({ to: '/' });
   };
 
@@ -124,11 +125,11 @@ function LibraryPage() {
         <ul className="list">
           {locations.map((l) => (
             <li key={l.id}>
-              <button className="primary" onClick={() => go(l.lat, l.lng)} title="Move the camera here">
+              <button className="primary" onClick={() => go({ lat: l.lat, lng: l.lng, digits: l.digits })} title="Move the camera here">
                 <span className="name">{l.name}</span>
                 <span className="detail">{formatLngLat(l, format)}</span>
               </button>
-              <button className="link" onClick={() => worldStore.getState().setPin2({ lat: l.lat, lng: l.lng })} title="Use as the target location">
+              <button className="link" onClick={() => worldStore.getState().setPin2({ lat: l.lat, lng: l.lng, digits: l.digits })} title="Use as the target location">
                 target
               </button>
               <button className="link" onClick={() => libraryStore.getState().remove(l.id)} title="Delete">
