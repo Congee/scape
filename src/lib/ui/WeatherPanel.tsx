@@ -1,9 +1,9 @@
 import { Link } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { LngLat } from '@core/geo/geodesy';
 import { formatDateTime, formatTime } from '@core/time/format';
 import { FOG_CLASS_TEXT, FOG_TEXT, FogClass } from '@core/weather/fog';
-import { ageText, pct, rainText, tempText, visText, windText } from '@core/weather/format';
+import { ageText, pct, rainText, skyVerdict, tempText, visText, windText } from '@core/weather/format';
 import { MODELS, modelInfo, type WeatherModel } from '@core/weather/models';
 import { hourValue, HourlyVar, lacks, valueAt, type PointSeries } from '@core/weather/openMeteo';
 import { ForecastStatus, modelRun, type ForecastResult } from '@data/weather';
@@ -35,7 +35,8 @@ function useModelRun(model: WeatherModel, on: boolean): { ms: number | null; now
   return run?.id === metaId ? run : { ms: null, now: 0 };
 }
 
-export function WeatherPanel() {
+/** The tab's forecast; `children` (the cloud row) sits after the cards, even with forecasts off. */
+export function WeatherPanel({ children }: { children?: ReactNode }) {
   const onMap = useOnMap();
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
@@ -51,17 +52,21 @@ export function WeatherPanel() {
   const { loading, results, retry, now } = useForecast([pin, pin2], dayStart, dayEnd);
   const r0 = loading ? undefined : (results?.[0] ?? null);
   const none = r0 === undefined ? '' : missingText(r0) || (r0?.series && noDataAt(r0.series, time) ? NO_HOUR : '');
+  const r1 = pin2 && !loading ? (results?.[1] ?? null) : undefined;
   if (!on)
     return (
       <div className="weather">
         <p className="wx-missing" data-wx="off">
           Forecasts are off for privacy: no location is sent to Open-Meteo. <Link to="/settings">Turn them on in Settings</Link>.
         </p>
+        {children}
       </div>
     );
 
   return (
     <div className="weather">
+      <Verdict title="Camera" result={r0} time={time} />
+      <Verdict title="Target" result={r1} time={time} />
       <label className="toggle">
         <span>Model</span>
         <select value={model} onChange={(e) => weatherStore.getState().setModel(e.target.value as WeatherModel)} aria-label="Forecast model">
@@ -88,12 +93,25 @@ export function WeatherPanel() {
         </p>
       )}
       <Card title="Camera" at={pin} result={r0} time={time} now={now} onRetry={retry} quiet={!!none} />
-      {pin2 && <Card title="Target" at={pin2} result={loading ? undefined : (results?.[1] ?? null)} time={time} now={now} onRetry={retry} quiet={!!none} />}
+      {pin2 && <Card title="Target" at={pin2} result={r1} time={time} now={now} onRetry={retry} quiet={!!none} />}
+      {children}
       {!none && <Sightlines />}
       <AlpenglowSection />
       {onMap && <CloudLayerControls />}
       <Credit />
     </div>
+  );
+}
+
+/** A place's one-line sky call; absent without data for the hour. */
+function Verdict({ title, result, time }: { title: string; result: ForecastResult | null | undefined; time: number }) {
+  const s = result?.series;
+  if (!s || noDataAt(s, time)) return null;
+  const v = (k: HourlyVar) => (lacks(s, k) ? NaN : valueAt(s, k, time));
+  return (
+    <p className="wx-verdict" data-verdict={title.toLowerCase()}>
+      <span className="k">{title}</span> {skyVerdict(v(HourlyVar.Cloud), fogAt(s, time).cls, v(HourlyVar.PrecipProb))}
+    </p>
   );
 }
 

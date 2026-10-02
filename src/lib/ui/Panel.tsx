@@ -1,4 +1,4 @@
-import { useLayoutEffect, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import { AimControl } from './AimControl';
 import { FindPanel } from './FindPanel';
 import { FramePanel } from './FramePanel';
@@ -11,7 +11,7 @@ import { ParkingLinks } from './ParkingLinks';
 import { PlaceBand } from './PlanHeader';
 import { ToolsPanel, ToolsPart } from './ToolsPanel';
 import { OfflineRow } from './OfflinePanel';
-import { DetailsToggle, TideCloud, Timeline } from './Timeline';
+import { CloudLine, DetailsToggle, TideLine, Timeline } from './Timeline';
 import { WeatherPanel } from './WeatherPanel';
 import { PAGE_TABS, PanelPage, PanelTab, uiStore, useUi } from '@state/ui';
 import { Icon } from './Icon';
@@ -21,7 +21,58 @@ import { ViewTools } from './viewfinder/ViewTools';
 
 /** Page roots take this class so the grid drops the panel column. */
 export function usePanelClass(base: string): string {
-  return useUi((s) => (s.panelCollapsed ? `${base} panel-collapsed` : base));
+  return useUi((s) => (s.panelCollapsed ? `${base} panel-collapsed` : s.panelTall ? `${base} panel-tall` : base));
+}
+
+/** Steps the phone sheet between peek, open and tall. */
+export function stepSheet(up: boolean) {
+  const s = uiStore.getState();
+  if (up) {
+    if (s.panelCollapsed) s.setPanelCollapsed(false);
+    else s.setPanelTall(true);
+  } else if (s.panelTall && !s.panelCollapsed) s.setPanelTall(false);
+  else s.setPanelCollapsed(true);
+}
+
+const DRAG_PX = 24;
+
+/** The phone sheet's grab handle: drag or arrow keys step it, a tap toggles tall. */
+function SheetHandle() {
+  const tall = useUi((s) => s.panelTall && !s.panelCollapsed);
+  const from = useRef<number | null>(null);
+  const dragged = useRef(false);
+  return (
+    <button
+      className="sheet-handle"
+      aria-label={tall ? 'Shrink panel' : 'Expand panel'}
+      title={tall ? 'Shrink panel' : 'Expand panel'}
+      onPointerDown={(e) => {
+        from.current = e.clientY;
+        dragged.current = false;
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerUp={(e) => {
+        const dy = from.current === null ? 0 : e.clientY - from.current;
+        from.current = null;
+        if (Math.abs(dy) < DRAG_PX) return;
+        dragged.current = true;
+        stepSheet(dy < 0);
+      }}
+      onPointerCancel={() => (from.current = null)}
+      onClick={() => {
+        // A drag already stepped the sheet; its trailing click must not undo that.
+        if (dragged.current) return void (dragged.current = false);
+        const s = uiStore.getState();
+        if (s.panelCollapsed) s.setPanelCollapsed(false);
+        else s.setPanelTall(!s.panelTall);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        stepSheet(e.key === 'ArrowUp');
+      }}
+    />
+  );
 }
 
 /** Floating handle that brings the collapsed panel back; lives in the map/viewfinder area. */
@@ -58,6 +109,7 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
   return (
     <PanelPageContext.Provider value={page}>
       <div className="panel-inner">
+        <SheetHandle />
         <PlaceBand />
         <div className="tabs">
           <div className="tablist" role="tablist" aria-label="Panel" onKeyDown={onKey}>
@@ -74,9 +126,6 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
         <div className="tab-body" id="ptabpanel" role="tabpanel" aria-labelledby={`ptab-${tab}`}>
           {tab === PanelTab.Now && (
             <>
-              <Section title="Aim">
-                <AimControl />
-              </Section>
               {/* The viewfinder's BodyStrip is its live readout. */}
               {page === PanelPage.Map && (
                 <Section title="Now">
@@ -84,6 +133,9 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
                   <ParkingLinks />
                 </Section>
               )}
+              <Section title="Aim">
+                <AimControl />
+              </Section>
               <Section title="Today" aside={<DetailsToggle />}>
                 <Timeline />
               </Section>
@@ -111,13 +163,13 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
           )}
           {tab === PanelTab.Weather && (
             <>
-              <Section>
-                <WeatherPanel />
+              <Section title="Forecast">
+                <WeatherPanel>
+                  <CloudLine />
+                </WeatherPanel>
               </Section>
-              <Section title="Tide & cloud">
-                <TideCloud />
-              </Section>
-              <Section>
+              <Section title="Tide, rainbow, clouds">
+                <TideLine />
                 <ToolsPanel part={ToolsPart.Weather} />
               </Section>
             </>

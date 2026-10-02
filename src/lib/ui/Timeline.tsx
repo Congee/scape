@@ -115,12 +115,20 @@ export function DetailsToggle() {
   );
 }
 
-/** The pin's tide and cloud rows, styled as timeline rows. */
-export function TideCloud() {
+/** The pin's cloud row, styled as a timeline row. */
+export function CloudLine() {
+  return (
+    <div className="timeline">
+      <CloudRow />
+    </div>
+  );
+}
+
+/** The pin's tide row, styled as a timeline row. */
+export function TideLine() {
   return (
     <div className="timeline">
       <TideRow />
-      <CloudRow />
     </div>
   );
 }

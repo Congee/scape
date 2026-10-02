@@ -134,7 +134,7 @@ export function CloudRow() {
   const hour12 = useSettings((s) => s.hour12);
   const dayStart = useDayData((s) => s.dayStart);
   const dayEnd = useDayData((s) => s.dayEnd);
-  const { model, off, loading, results, now } = useForecast([pin], dayStart, dayEnd);
+  const { model, off, loading, results } = useForecast([pin], dayStart, dayEnd);
   if (dayEnd <= dayStart) return null;
   if (off)
     return (
@@ -182,7 +182,6 @@ export function CloudRow() {
         </span>
       </div>
       {s && r?.status !== ForecastStatus.OutOfRange && <CloudChart series={s} startMs={dayStart} endMs={dayEnd} time={time} h={34} />}
-      {s && <Credit>{` · ${fetchedText(r!, now)}`}</Credit>}
     </div>
   );
 }

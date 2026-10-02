@@ -11,12 +11,18 @@ import { useWorld } from '@state/world';
 import { GearSearch } from './GearSearch';
 import { useOnMap } from './panelPage';
 import { Disclosure, Section } from './Section';
+import { Segmented } from './Segmented';
 import { ToolsPanel, ToolsPart } from './ToolsPanel';
 
 const megapixels = (s: SensorFormat) => {
   const p = sensorPixels(s);
   return p ? `${Math.round(p / 1e5) / 10} MP` : null;
 };
+const ORIENTATIONS = [Orientation.Landscape, Orientation.Portrait].map((o) => ({ value: o, label: o }));
+const COC_RULES = [
+  { value: CocRule.Standard, label: 'Standard', title: 'Zeiss 0.03 mm scaled by the crop factor' },
+  { value: CocRule.PixelPitch, label: 'Pixel pitch', title: 'Twice the pixel pitch, for large prints' }
+];
 const dist = (m: number, units: Parameters<typeof distance>[1]) => (Number.isFinite(m) ? distance(m, units) : '∞');
 
 export function FramePanel() {
@@ -115,13 +121,7 @@ export function FramePanel() {
           </b>
           <span className="k">Orientation</span>
           <b className="v">
-            <span className="seg" role="radiogroup" aria-label="Orientation">
-              {[Orientation.Landscape, Orientation.Portrait].map((o) => (
-                <button key={o} role="radio" aria-checked={c.orientation === o} className={c.orientation === o ? 'on' : ''} onClick={() => update({ orientation: o })}>
-                  {o}
-                </button>
-              ))}
-            </span>
+            <Segmented label="Orientation" value={c.orientation} options={ORIENTATIONS} onChange={(orientation) => update({ orientation })} />
           </b>
           <span className="k">Focal length</span>
           {/* Read-only: the slider, the quick picks and the viewfinder wheel already set it, and typing fights the lens clamp on every keystroke. */}
@@ -144,9 +144,9 @@ export function FramePanel() {
           )}
         </div>
         {!prime && (
-          <div className="chips one" aria-label="Focal length presets">
+          <div className="chips one" role="group" aria-label="Focal length presets">
             {(lens ? lensFocals(lens, focals) : focals).map((f) => (
-              <button key={f} className={Math.abs(f - c.focalMm) < 0.05 ? 'on' : ''} onClick={() => setFocal(f)}>
+              <button key={f} className={Math.abs(f - c.focalMm) < 0.05 ? 'on' : ''} aria-pressed={Math.abs(f - c.focalMm) < 0.05} onClick={() => setFocal(f)}>
                 {f}
               </button>
             ))}
@@ -257,14 +257,7 @@ export function FramePanel() {
             </b>
             <span className="k">CoC rule</span>
             <b className="v">
-              <span className="seg" role="radiogroup" aria-label="CoC rule">
-                <button role="radio" aria-checked={cocRule === CocRule.Standard} className={cocRule === CocRule.Standard ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.Standard })} title="Zeiss 0.03 mm scaled by the crop factor">
-                  Standard
-                </button>
-                <button role="radio" aria-checked={cocRule === CocRule.PixelPitch} className={cocRule === CocRule.PixelPitch ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.PixelPitch })} title="Twice the pixel pitch, for large prints">
-                  Pixel pitch
-                </button>
-              </span>
+              <Segmented label="CoC rule" value={cocRule} options={COC_RULES} onChange={(r) => setSetting({ cocRule: r })} />
             </b>
           </div>
           <ToolsPanel part={ToolsPart.Frame} />
@@ -295,10 +288,10 @@ export function FramePanel() {
         </Disclosure>
         {(kits.length > 0 || isBody) && (
           <Disclosure id="shot-kits" summary={`Kits · ${kits.find((k) => kitMatches(k, c))?.name ?? (kits.length > 0 ? `${kits.length} saved` : 'none')}`}>
-            <div className="chips one kits" aria-label="Kits">
+            <div className="chips one kits" role="group" aria-label="Kits">
               <span className="k">Kits</span>
               {kits.map((k) => (
-                <button key={k.id} className={kitMatches(k, c) ? 'on' : ''} title={k.name} onClick={() => applyKit(k)}>
+                <button key={k.id} className={kitMatches(k, c) ? 'on' : ''} aria-pressed={kitMatches(k, c)} title={k.name} onClick={() => applyKit(k)}>
                   {k.name}
                 </button>
               ))}

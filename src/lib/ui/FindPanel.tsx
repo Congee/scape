@@ -13,6 +13,7 @@ import { Dial } from './Dial';
 import { downloadText } from './download';
 import { useOnMap } from './panelPage';
 import { Disclosure } from './Section';
+import { Segmented } from './Segmented';
 
 const BODY_LABEL: Record<SkyBody, string> = { Sun: 'Sun', Moon: 'Moon', Gc: 'Galactic Centre' };
 
@@ -42,6 +43,8 @@ const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const BODIES: SkyBody[] = [SkyBody.Sun, SkyBody.Moon, SkyBody.Gc];
 const MODES: HeatMode[] = [HeatMode.Off, HeatMode.Viewshed, HeatMode.Visible, HeatMode.Align, HeatMode.Time];
+const BODY_OPTIONS = BODIES.map((b) => ({ value: b, label: BODY_LABEL[b] }));
+const MODE_OPTIONS = MODES.map((m) => ({ value: m, label: MODE_LABEL[m] }));
 
 const signed = (deg: number, digits = 1) => `${deg >= 0 ? '+' : ''}${degrees(deg, digits)}`;
 const num = (v: string, fallback: number) => (v.trim() === '' || Number.isNaN(Number(v)) ? fallback : Number(v));
@@ -109,27 +112,31 @@ export function FindPanel() {
 
   return (
     <div className="frame find">
-      <div className="seg" role="radiogroup" aria-label="Body">
-        {BODIES.map((b) => (
-          <button key={b} role="radio" aria-checked={f.body === b} className={f.body === b ? 'on' : ''} onClick={() => update({ body: b })}>
-            {BODY_LABEL[b]}
-          </button>
-        ))}
-      </div>
+      <Segmented label="Body" value={f.body} options={BODY_OPTIONS} onChange={(body) => update({ body })} />
       <div className="kv">
         <span className="k">Azimuth</span>
         <b className="v">
-          <input type="number" step={0.1} value={f.azFromDeg} onChange={(e) => update({ azFromDeg: num(e.target.value, 0) })} aria-label="Azimuth from, degrees" />
-          <span className="muted">° to </span>
-          <input type="number" step={0.1} value={f.azToDeg} onChange={(e) => update({ azToDeg: num(e.target.value, 0) })} aria-label="Azimuth to, degrees" />
-          <span className="muted">°</span>
+          <span className="unit">
+            <input type="number" step={0.1} value={f.azFromDeg} onChange={(e) => update({ azFromDeg: num(e.target.value, 0) })} aria-label="Azimuth from, degrees" />
+            <span className="muted">°</span>
+          </span>
+          <span className="muted"> to </span>
+          <span className="unit">
+            <input type="number" step={0.1} value={f.azToDeg} onChange={(e) => update({ azToDeg: num(e.target.value, 0) })} aria-label="Azimuth to, degrees" />
+            <span className="muted">°</span>
+          </span>
         </b>
         <span className="k">Altitude</span>
         <b className="v">
-          <input type="number" step={0.1} value={f.altMinDeg} onChange={(e) => update({ altMinDeg: num(e.target.value, 0) })} aria-label="Minimum altitude, degrees" />
-          <span className="muted">° to </span>
-          <input type="number" step={0.1} value={f.altMaxDeg} onChange={(e) => update({ altMaxDeg: num(e.target.value, 0) })} aria-label="Maximum altitude, degrees" />
-          <span className="muted">°</span>
+          <span className="unit">
+            <input type="number" step={0.1} value={f.altMinDeg} onChange={(e) => update({ altMinDeg: num(e.target.value, 0) })} aria-label="Minimum altitude, degrees" />
+            <span className="muted">°</span>
+          </span>
+          <span className="muted"> to </span>
+          <span className="unit">
+            <input type="number" step={0.1} value={f.altMaxDeg} onChange={(e) => update({ altMaxDeg: num(e.target.value, 0) })} aria-label="Maximum altitude, degrees" />
+            <span className="muted">°</span>
+          </span>
         </b>
         <span className="k">From</span>
         <b className="v">
@@ -153,8 +160,10 @@ export function FindPanel() {
         <button onClick={() => finderStore.getState().fromFrame()} title="Window matching the current frame">
           From frame
         </button>
-        <input type="number" step={0.1} min={0.1} max={45} value={f.toleranceDeg} onChange={(e) => update({ toleranceDeg: num(e.target.value, 2) })} aria-label="Tolerance, degrees" style={{ width: 60 }} />
-        <span className="muted">° tolerance</span>
+        <span className="unit">
+          <input type="number" step={0.1} min={0.1} max={45} value={f.toleranceDeg} onChange={(e) => update({ toleranceDeg: num(e.target.value, 2) })} aria-label="Tolerance, degrees" style={{ width: 60 }} />
+          <span className="muted">° tolerance</span>
+        </span>
       </div>
       <Disclosure id="find-filters" summary={filtersSummary}>
         <div className="kv">
@@ -250,24 +259,12 @@ export function FindPanel() {
 
       {onMap && (
         <Disclosure id="find-heat" summary={`Visibility & alignment · ${MODE_LABEL[a.mode]}`}>
-          <div className="seg" role="radiogroup" aria-label="Heat mode">
-            {MODES.map((m) => (
-              <button key={m} role="radio" aria-checked={a.mode === m} className={a.mode === m ? 'on' : ''} onClick={() => align.update({ mode: m })}>
-                {MODE_LABEL[m]}
-              </button>
-            ))}
-          </div>
+          <Segmented label="Heat mode" value={a.mode} options={MODE_OPTIONS} onChange={(mode) => align.update({ mode })} />
           <p className="muted hint">{MODE_HELP[a.mode]}</p>
           {a.mode !== HeatMode.Off && (
             <>
               {a.mode !== HeatMode.Viewshed && (
-                <div className="seg" role="radiogroup" aria-label="Body for the heat layer">
-                  {BODIES.map((b) => (
-                    <button key={b} role="radio" aria-checked={a.body === b} className={a.body === b ? 'on' : ''} onClick={() => align.update({ body: b })}>
-                      {BODY_LABEL[b]}
-                    </button>
-                  ))}
-                </div>
+                <Segmented label="Body for the heat layer" value={a.body} options={BODY_OPTIONS} onChange={(body) => align.update({ body })} />
               )}
               <div className="kv">
                 {needsTarget && (

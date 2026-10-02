@@ -17,7 +17,6 @@ import { useTerrain } from '@state/terrain';
 import { useWeather } from '@state/weather';
 import { useWorld, worldStore } from '@state/world';
 import type { HorizonResult } from '@workers/terrain.protocol';
-import { Credit } from './CloudChart';
 
 const DAYS = 7;
 const NAME: Record<GlowKind, string> = { Sunrise: 'Sunrise', Sunset: 'Sunset' };
@@ -200,7 +199,6 @@ function AlpenglowForecast({ point, horizon, aboveGroundM }: { point: LngLat; ho
       <p className="muted hint">
         Score 0–100 for direct sun on the point while the Sun is under {lowDeg}°, with low and mid cloud toward the Sun at 25–300 km and cloud or fog at the point. Confidence falls after 2–3 days (greyed).
       </p>
-      <Credit />
     </div>
   );
 }

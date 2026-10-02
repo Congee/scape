@@ -78,6 +78,9 @@ export interface UiState {
   setMarkersView(view: MarkersView): void;
   panelCollapsed: boolean;
   setPanelCollapsed(collapsed: boolean): void;
+  /** The phone sheet's tall snap; the map still peeks above it. */
+  panelTall: boolean;
+  setPanelTall(tall: boolean): void;
   orbit: OrbitPivot;
   /** The orbit turns by itself until the user grabs the map. */
   orbitSpin: boolean;
@@ -104,6 +107,8 @@ export const uiStore = create<UiState>()(
       setMarkersView: (markersView) => set({ markersView }),
       panelCollapsed: false,
       setPanelCollapsed: (panelCollapsed) => set({ panelCollapsed }),
+      panelTall: false,
+      setPanelTall: (panelTall) => set({ panelTall }),
       orbit: OrbitPivot.Off,
       orbitSpin: true,
       setOrbit: (orbit, spin) => set((s) => ({ orbit, orbitSpin: spin ?? s.orbitSpin })),
@@ -113,7 +118,7 @@ export const uiStore = create<UiState>()(
     {
       name: 'scape.ui',
       version: 2,
-      partialize: ({ panelTabs, panelCollapsed, markersView, cloudLegendOpen }) => ({ panelTabs, panelCollapsed, markersView, cloudLegendOpen }),
+      partialize: ({ panelTabs, panelCollapsed, panelTall, markersView, cloudLegendOpen }) => ({ panelTabs, panelCollapsed, panelTall, markersView, cloudLegendOpen }),
       migrate: (stored, version) => migrateUi(stored, version) as unknown as UiState,
       merge: (stored, current) => {
         const s = { ...current, ...(stored as Partial<UiState>) };

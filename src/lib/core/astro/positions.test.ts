@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeObserver, SkyBody } from './bodies';
-import { litAreaFraction, moonTerminator, semidiameterDeg } from './positions';
+import { litAreaFraction, MOON_NEW_MAX, moonPhaseName, moonTerminator, semidiameterDeg } from './positions';
 
 describe('moon terminator', () => {
   it('covers exactly the illuminated fraction of the disc', () => {
@@ -43,5 +43,21 @@ describe('semidiameter', () => {
     expect(sun).toBeGreaterThan(0.26);
     expect(sun).toBeLessThan(0.275);
     expect(semidiameterDeg(SkyBody.Gc, new Date('2026-10-26T23:01:25Z'), obs)).toBe(0);
+  });
+});
+
+describe('moonPhaseName', () => {
+  it('names phases in sentence case from the lit fraction', () => {
+    expect(moonPhaseName(0.01, true)).toBe('New moon');
+    expect(moonPhaseName(0.0333, true)).toBe('Waxing crescent');
+    expect(moonPhaseName(0.2, false)).toBe('Waning crescent');
+    expect(moonPhaseName(0.5, true)).toBe('First quarter');
+    expect(moonPhaseName(0.46, false)).toBe('Last quarter');
+    expect(moonPhaseName(0.7, true)).toBe('Waxing gibbous');
+    expect(moonPhaseName(0.8, false)).toBe('Waning gibbous');
+    expect(moonPhaseName(0.99, false)).toBe('Full moon');
+  });
+  it('never calls a moon above the threshold new', () => {
+    for (const f of [MOON_NEW_MAX, 0.05, 0.1]) for (const w of [true, false]) expect(moonPhaseName(f, w)).not.toBe('New moon');
   });
 });

@@ -81,7 +81,8 @@ ab set viewport 1600 1000 >/dev/null
 for page in map viewfinder; do
   [ $page = map ] && go "/?$Q" || go "/viewfinder?$Q"
   tab Now
-  check "$page Now: Aim first" "$(yes "$(js '(() => document.querySelector("#ptabpanel .psec-h")?.textContent === "Aim" && !!document.querySelector("#ptabpanel [role=radiogroup][aria-label=Aim]"))()')")" "first heading Aim"
+  first=$([ $page = map ] && echo Now || echo Aim)
+  check "$page Now: $first first" "$(yes "$(js "(() => document.querySelector('#ptabpanel .psec-h')?.textContent === '$first' && !!document.querySelector('#ptabpanel [role=radiogroup][aria-label=Aim]'))()")")" "first heading $first"
   ro=$(has '.readout')
   if [ $page = map ]; then check "map Now: live readout" "$(yes "$ro")" "readout $ro"; else check "viewfinder Now: no second readout (BodyStrip only)" "$(no "$ro")" "readout $ro"; fi
   tab Shot

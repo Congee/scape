@@ -1,5 +1,6 @@
 import { makeObserver } from '@core/astro/bodies';
 import { moonView, type MoonView } from '@core/astro/moonSim';
+import { moonPhaseName } from '@core/astro/positions';
 import { degrees, moonPhase } from '@core/format';
 import { formatTime } from '@core/time/format';
 import { useLightProbe } from '@state/lightProbe';
@@ -12,14 +13,7 @@ const wrap360 = (d: number) => ((d % 360) + 360) % 360;
 const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg, 2)}`;
 const hours = (ms: number) => `${Math.floor(ms / 3_600_000)} h ${Math.round((ms % 3_600_000) / 60_000)} min`;
 
-function phaseName(v: MoonView): string {
-  const f = v.illumination;
-  if (f < 0.03) return 'New';
-  if (f > 0.97) return 'Full';
-  const kind = f < 0.45 ? 'crescent' : f > 0.55 ? 'gibbous' : 'quarter';
-  if (kind === 'quarter') return v.waxing ? 'First quarter' : 'Last quarter';
-  return `${v.waxing ? 'Waxing' : 'Waning'} ${kind}`;
-}
+const phaseName = (v: MoonView) => moonPhaseName(v.illumination, v.waxing);
 
 function useMoon(): MoonView {
   const time = usePlanTime();

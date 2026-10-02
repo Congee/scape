@@ -476,6 +476,9 @@ textarea {
       'chart'
       'panel';
   }
+  .map-page.panel-tall {
+    grid-template-rows: auto 12vh var(--chart) minmax(0, 1fr);
+  }
   .panel {
     border-left: 0;
     border-top: 1px solid var(--line);
@@ -930,10 +933,6 @@ button.badge:hover {
   border-bottom: 2px solid var(--fg);
 }
 
-.search input::placeholder {
-  color: var(--fg-3);
-}
-
 .search-results {
   position: absolute;
   z-index: var(--z-popover);
@@ -1004,6 +1003,32 @@ button.badge:hover {
   min-height: 0;
   /* without this wide tab-body content widens the panel past its grid column */
   min-width: 0;
+}
+
+.sheet-handle {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .panel .sheet-handle {
+    display: block;
+    flex: none;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  .panel .sheet-handle::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 0 auto;
+    border-radius: 2px;
+    background: var(--fg-3);
+  }
 }
 
 .tabs {
@@ -1488,8 +1513,10 @@ label.file.danger strong {
   background: var(--bg-2);
 }
 
-.page input::placeholder {
+/* Firefox dims placeholders by default. */
+::placeholder {
   color: var(--fg-3);
+  opacity: 1;
 }
 
 .page button:not(.btn-link, .link, .tgl, .primary, [role='radio']) {
@@ -1793,32 +1820,16 @@ label.file.danger strong {
   color: #08111c;
 }
 
-.panel :is(.chips, .seg) button {
+.panel :is(.chips, .segmented) button {
   border-color: transparent;
   color: var(--fg-2);
-}
-
-.seg {
-  display: inline-flex;
-}
-
-.seg button {
-  border-radius: 0;
-}
-
-.seg button:first-child {
-  border-radius: 6px 0 0 6px;
-}
-
-.seg button:last-child {
-  border-radius: 0 6px 6px 0;
 }
 
 .kv .v.wide {
   grid-column: 1 / -1;
 }
 
-.kv.aim .seg {
+.kv.aim .segmented {
   display: flex;
   justify-content: space-between;
 }
@@ -1943,17 +1954,22 @@ label.file.danger strong {
 
 /* Markers */
 .marker-list li {
+  display: block;
+  padding: 0;
+  border-bottom: 1px dotted var(--line);
+}
+
+.panel .marker-list .marker-row {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr) minmax(64px, auto) minmax(56px, auto);
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 4px 6px;
-  border-bottom: 1px dotted var(--line);
-  cursor: pointer;
-}
-
-.marker-list li:hover {
-  background: var(--bg-4);
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .marker-list li.selected .name {
@@ -2112,6 +2128,9 @@ label.file.danger strong {
     padding: 2px 8px;
     font-size: 11px;
     line-height: 1.4;
+  }
+  .vf-page.panel-tall {
+    grid-template-rows: auto auto 12vh var(--chart) minmax(0, 1fr);
   }
 }
 
@@ -2318,7 +2337,7 @@ label.file.danger strong {
   padding: 3px 6px;
 }
 
-.find .seg {
+.find .segmented {
   margin: 4px 6px;
 }
 
@@ -2516,6 +2535,14 @@ label.file.danger strong {
   color: var(--accent);
 }
 
+.panel .nd-table .nd-pick {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
 .tl-sim,
 .tool-row {
   display: flex;
@@ -2668,13 +2695,13 @@ label.file-pick input[type='file'] {
 
 @media (pointer: coarse) {
   .nudge-row button {
-    min-height: 36px;
+    min-height: var(--size-target);
   }
 
   .model-import button,
   .model-import select,
   label.file-pick {
-    min-height: 36px;
+    min-height: var(--size-target);
   }
 }
 
@@ -2843,6 +2870,19 @@ label.file-pick input[type='file'] {
 }
 
 .wx-credit a { color: var(--fg-2); }
+
+.weather .wx-verdict {
+  margin: 4px 6px;
+  font-weight: 700;
+}
+
+.weather .wx-verdict .k {
+  margin-right: 6px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
 
 .weather .wx-model,
 .weather .wx-caveat {
@@ -3015,7 +3055,7 @@ button.cloud-legend.folded:hover {
   accent-color: var(--fg);
 }
 
-.panel :is(button, input, select, textarea, details, summary, .profile, .verdict, .progress, .error, .seg button:first-child, .seg button:last-child) {
+.panel :is(button, input, select, textarea, details, summary, .profile, .verdict, .progress, .error) {
   border-radius: 0;
 }
 
@@ -3035,7 +3075,7 @@ button.cloud-legend.folded:hover {
   background: transparent;
 }
 
-.panel :is(.chips, .seg, .radio-list) :is(button, label):hover {
+.panel :is(.chips, .segmented, .radio-list) :is(button, label):hover {
   color: var(--fg);
 }
 
@@ -3094,13 +3134,13 @@ button.cloud-legend.folded:hover {
 }
 
 /* Primary: one per surface. */
-.panel button.on:not([aria-pressed], .seg button, .chips button, .stars button) {
+.panel button.on:not([aria-pressed], .chips button, .stars button) {
   background: var(--fg);
   border-color: var(--fg);
   color: var(--bg);
 }
 
-.panel button.on:not([aria-pressed], .seg button, .chips button, .stars button):hover:enabled {
+.panel button.on:not([aria-pressed], .chips button, .stars button):hover:enabled {
   background: var(--fg-2);
   border-color: var(--fg-2);
 }
@@ -3110,7 +3150,7 @@ button.cloud-legend.folded:hover {
   color: var(--sun);
 }
 
-.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.seg button)) {
+.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.chips.one button, .stars button, .marker-row, .nd-pick)) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
@@ -3119,7 +3159,7 @@ button.cloud-legend.folded:hover {
   color: var(--fg-2);
 }
 
-.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.seg button))::before,
+.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.chips.one button, .stars button, .marker-row, .nd-pick))::before,
 .panel input[type='checkbox'] {
   content: '';
   flex: none;
@@ -3128,13 +3168,13 @@ button.cloud-legend.folded:hover {
   border: var(--stroke-hair) solid var(--fg-2);
 }
 
-.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.seg button)),
+.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.chips.one button, .stars button, .marker-row, .nd-pick)),
 .panel label:has(> input[type='checkbox']:checked) {
   color: var(--fg);
   font-weight: 700;
 }
 
-.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.seg button))::before,
+.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.chips.one button, .stars button, .marker-row, .nd-pick))::before,
 .panel input[type='checkbox']:checked {
   background: var(--fg);
   border-color: var(--fg);
@@ -3147,18 +3187,27 @@ button.cloud-legend.folded:hover {
   vertical-align: middle;
 }
 
-.panel :is(.seg, .chips.one) {
+.panel .segmented {
+  border: 0;
+}
+
+.panel .segmented button + button {
+  border-left: 0;
+}
+
+.panel :is(.segmented, .chips.one) {
   gap: var(--space-5);
 }
 
-.panel :is(.seg, .chips.one) button {
+.panel :is(.segmented, .chips.one) button {
   border: 0;
   padding: 0 var(--space-1);
   background: none;
   color: var(--fg-2);
 }
 
-.panel .seg button {
+.panel .segmented button {
+  height: auto;
   min-height: var(--size-control);
   font-size: 10.5px;
   font-weight: 700;
@@ -3166,7 +3215,7 @@ button.cloud-legend.folded:hover {
   text-transform: uppercase;
 }
 
-.panel :is(.seg, .chips.one) button.on {
+.panel :is(.segmented button[aria-checked='true'], .chips.one button.on) {
   color: var(--fg);
   font-weight: 700;
   box-shadow: inset 0 calc(-1 * var(--stroke-mark)) 0 var(--fg);
@@ -3191,6 +3240,41 @@ button.cloud-legend.folded:hover {
   background: none;
   color: var(--fg);
   text-decoration-color: var(--fg);
+}
+
+/* Hit targets (2.5.8): 24 px, 44 px on touch; :where so larger local sizes win. */
+.panel {
+  --hit: 24px;
+}
+
+@media (pointer: coarse) {
+  .panel {
+    --hit: var(--size-target);
+    --size-control: var(--size-target);
+  }
+}
+
+.panel :where(button, select, summary, label.toggle, label:has(> input:is([type='checkbox'], [type='radio'])), label.file-pick, input:not([type='checkbox'], [type='radio'], [type='file'])) {
+  min-height: var(--hit);
+}
+
+.panel :where(button, select, .radio-list label, .cloud-chart) {
+  min-width: var(--hit);
+}
+
+.panel .cloud-chart {
+  min-height: var(--hit);
+}
+
+.panel :is(a[href], button.link, .nd-pick) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit);
+}
+
+.panel .nd-table td {
+  padding-block: 0;
 }
 
 .panel :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), select, textarea):hover:enabled {
@@ -3395,7 +3479,7 @@ button.cloud-legend.folded:hover {
 }
 
 .panel .vrow-v > button[aria-pressed] {
-  min-height: 24px;
+  min-height: var(--hit);
 }
 
 .panel .vrow-v .actions {
@@ -3406,6 +3490,10 @@ button.cloud-legend.folded:hover {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.panel .unit {
+  white-space: nowrap;
 }
 
 .panel .vrow-num input {

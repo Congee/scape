@@ -15,6 +15,7 @@ import { CATEGORY_COLORS } from './map/overlays';
 import { ModelsPanel } from './ModelsPanel';
 import { useOnMap } from './panelPage';
 import { Section } from './Section';
+import { Segmented } from './Segmented';
 
 const CATEGORIES = Object.values(MarkerCategory);
 const SHAPES = Object.values(MarkerShape);
@@ -23,13 +24,7 @@ export function MarkersPanel() {
   const view = useUi((s) => s.markersView);
   const setView = useUi((s) => s.setMarkersView);
   const head = (
-    <div className="seg markers-switch" role="radiogroup" aria-label="Show">
-      {Object.values(MarkersView).map((v) => (
-        <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
-          {v}
-        </button>
-      ))}
-    </div>
+    <Segmented label="Show" className="markers-switch" value={view} options={Object.values(MarkersView).map((v) => ({ value: v, label: v }))} onChange={setView} />
   );
   return view === MarkersView.Models ? <ModelsPanel head={head} /> : <MarkerList head={head} />;
 }
@@ -90,14 +85,16 @@ function MarkerList({ head }: { head: ReactNode }) {
         {loaded && markers.length === 0 && <p className="muted hint">No markers yet</p>}
         <ul className="list marker-list">
           {sorted.map(({ m, d }) => (
-            <li key={m.id} className={m.id === selectedId ? 'selected' : ''} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
-              {d > 0 ? <Dial az={bearingDeg(pin, m)} ink="marker" color={CATEGORY_COLORS[m.category]} /> : <span className="cat" style={{ background: CATEGORY_COLORS[m.category] }} aria-hidden="true" />}
-              <span className="name">
-                {m.name}
-                {m.rating > 0 && <span className="muted"> {'★'.repeat(m.rating)}</span>}
-              </span>
-              <span className="time">{distance(d, units)}</span>
-              <span className="az">{d > 0 ? `${degrees(bearingDeg(pin, m), 0)} ${compass(bearingDeg(pin, m))}` : ''}</span>
+            <li key={m.id} className={m.id === selectedId ? 'selected' : ''}>
+              <button className="marker-row" aria-pressed={m.id === selectedId} onClick={() => ms.select(m.id === selectedId ? null : m.id)}>
+                {d > 0 ? <Dial az={bearingDeg(pin, m)} ink="marker" color={CATEGORY_COLORS[m.category]} /> : <span className="cat" style={{ background: CATEGORY_COLORS[m.category] }} aria-hidden="true" />}
+                <span className="name">
+                  {m.name}
+                  {m.rating > 0 && <span className="muted"> {'★'.repeat(m.rating)}</span>}
+                </span>
+                <span className="time">{distance(d, units)}</span>
+                <span className="az">{d > 0 ? `${degrees(bearingDeg(pin, m), 0)} ${compass(bearingDeg(pin, m))}` : ''}</span>
+              </button>
             </li>
           ))}
         </ul>
@@ -186,9 +183,9 @@ function MarkerEditor({ m }: { m: SavedMarker }) {
         </>
       )}
       <span className="k">Rating</span>
-      <b className="v stars">
+      <b className="v stars" role="group" aria-label="Rating">
         {[1, 2, 3, 4, 5].map((r) => (
-          <button key={r} className={m.rating >= r ? 'on' : ''} onClick={() => patch({ rating: m.rating === r ? 0 : r })} aria-label={`${r} star${r === 1 ? '' : 's'}`}>
+          <button key={r} className={m.rating >= r ? 'on' : ''} aria-pressed={m.rating === r} onClick={() => patch({ rating: m.rating === r ? 0 : r })} aria-label={`${r} star${r === 1 ? '' : 's'}`}>
             ★
           </button>
         ))}

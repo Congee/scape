@@ -7,7 +7,7 @@ import { useSettings } from '@state/settings';
 import { useUi } from '@state/ui';
 import { useWeather, weatherStore } from '@state/weather';
 import { useWorld } from '@state/world';
-import { Credit, WindyLink } from './CloudChart';
+import { WindyLink } from './CloudChart';
 import { Icon } from './Icon';
 import { useMedia } from './useMedia';
 
@@ -95,7 +95,6 @@ export function CloudLegend() {
         {modelInfo(model).label}
         {info ? ` · ${Math.round(info.stepKm)} km cells${info.unknown ? ` · ${info.unknown}/${info.cells} unknown` : ''}${info.fetchedAt ? ` · fetched ${ageText(info.at - info.fetchedAt)} ago` : ''}${info.note ? ` · ${info.note}` : ''}` : ' · loading…'}
       </div>
-      <Credit />
     </div>
   );
 }

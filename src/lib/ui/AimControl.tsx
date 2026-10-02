@@ -9,6 +9,7 @@ import { settingsStore } from "@state/settings";
 import { targetAngleFor, useTerrain } from "@state/terrain";
 import { useWorld, worldStore } from "@state/world";
 import { useShallow } from "zustand/react/shallow";
+import { Segmented } from "./Segmented";
 
 const signed = (deg: number) => `${deg >= 0 ? "+" : ""}${degrees(deg)}`;
 const LOCKS: [AimLock, string, string][] = [
@@ -54,25 +55,22 @@ export function AimControl() {
     <div className="kv aim">
       {/* Full width: five locks overflow the map panel's value column. */}
       <b className="v wide">
-        <span className="seg" role="radiogroup" aria-label="Aim">
-          {LOCKS.map(([l, label, title]) => {
+        <Segmented
+          label="Aim"
+          className="aim-locks"
+          dataKey="aim-lock"
+          value={c.aimLock}
+          options={LOCKS.map(([l, label, title]) => {
             const off = l === AimLock.Target && !pin2;
-            return (
-              <button
-                key={l}
-                role="radio"
-                aria-checked={c.aimLock === l}
-                className={c.aimLock === l ? "on" : ""}
-                data-aim-lock={l}
-                disabled={off}
-                title={off ? "Place a target location on the map first" : title}
-                onClick={() => pick(l)}
-              >
-                {label}
-              </button>
-            );
+            return {
+              value: l,
+              label,
+              disabled: off,
+              title: off ? "Place a target location on the map first" : title,
+            };
           })}
-        </span>
+          onChange={pick}
+        />
       </b>
       <span className="k">Azimuth</span>
       <b className="v">

@@ -40,7 +40,7 @@ import { Dial } from './Dial';
 import { useOnMap } from './panelPage';
 import { Disclosure } from './Section';
 import { LightPointSummary, LightPointTools, MoonSummary, MoonTools } from './LightTools';
-import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
+import { tideKindText, tideText, useNearestTide } from './TideChart';
 import { timelapseStore, useTimelapse } from '@state/timelapse';
 import { usePlanTime, useWorld, worldStore } from '@state/world';
 import type { LngLat } from '@core/geo/geodesy';
@@ -157,7 +157,6 @@ function TidesGroup() {
               {tideText(now.heightM, units)} <span className="muted">{now.rising ? 'rising' : 'falling'}</span>
             </b>
           </div>
-          <TideChart day={today} startMs={startMs} endMs={endMs} time={time} interpolated={site.kind === TideKind.Subordinate} />
           <div className="tide-extremes">
             {today.extremes.map((e) => (
               <button key={e.timeMs} className={`brow${e === next ? ' next' : ''}`} onClick={() => worldStore.getState().setTime(e.timeMs)} title="Set the clock to this moment">
@@ -376,9 +375,15 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
             <tbody>
               {ND_FILTERS.map((f) => {
                 const s = ndStops(f.factor);
+                const on = ndStopsV !== null && Math.abs(s - ndStopsV) < 0.05;
                 return (
-                  <tr key={f.name} className={ndStopsV !== null && Math.abs(s - ndStopsV) < 0.05 ? 'on' : ''} onClick={() => setStops(s)}>
-                    <td>{f.name}</td>
+                  <tr key={f.name} className={on ? 'on' : ''} onClick={() => setStops(s)}>
+                    <td>
+                      {/* Its click bubbles to the row's. */}
+                      <button className="nd-pick" aria-pressed={on}>
+                        {f.name}
+                      </button>
+                    </td>
                     <td>{ndOpticalDensity(s).toFixed(1)}</td>
                     <td>{s.toFixed(s % 1 ? 1 : 0)}</td>
                     <td>{ok(base) ? formatShutter(ndShutter(base, s)) : '—'}</td>
@@ -474,7 +479,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
           <p className="muted hint">A bow needs rain in front of you and sun behind, below 42° (51° for the secondary).</p>
         </Group>
 
-        <Group id="clouds" summary={`Clouds · ${cloudSolve === CloudSolve.Distance ? 'distance' : cloudSolve === CloudSolve.Height ? 'height' : 'angle'} ${cloudOut} · ${sun.altitude < 0 ? `lit above ${height(litNow, units)}` : 'sun up'}`}>
+        <Group id="clouds" summary={`Clouds · ${cloudSolve === CloudSolve.Distance ? 'distance' : cloudSolve === CloudSolve.Height ? 'height' : 'angle'} ${cloudOut} · ${sun.altitude < 0 ? Number.isFinite(litNow) ? `lit above ${distance(litNow, units)}` : 'unlit' : 'sun up'}`}>
           <div className="kv">
             <span className="k">Solve for</span>
             <b className="v">
@@ -521,7 +526,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
           <h3>Sunlit clouds</h3>
           <div className="kv">
             <span className="k">Sunlit now above</span>
-            <b className="v">{sun.altitude >= 0 ? 'every height · sun up' : Number.isFinite(litNow) ? height(litNow, units) : '—'}</b>
+            <b className="v">{sun.altitude >= 0 ? 'every height · sun up' : Number.isFinite(litNow) ? distance(litNow, units) : '—'}</b>
             <span className="k">Stays lit until</span>
             <b className="v">{Number.isFinite(lightH) && lightH > 0 ? `sun ${signed(-depressionForHeightDeg(lightH))}` : '—'}</b>
           </div>

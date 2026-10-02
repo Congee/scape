@@ -1,5 +1,6 @@
 import { LightMode } from '@core/astro/lightSource';
 import { settingsStore, useSettings } from '@state/settings';
+import { Segmented } from './Segmented';
 
 const LIGHT: [LightMode, string, string][] = [
   [LightMode.Auto, 'Auto', 'Sun by day, moon by night: the moon takes over once it is up and the sun is 6° below the horizon'],
@@ -11,12 +12,11 @@ const LIGHT: [LightMode, string, string][] = [
 export function LightSeg() {
   const lightSource = useSettings((s) => s.lightSource);
   return (
-    <div className="seg" role="radiogroup" aria-label="Light source for shadows">
-      {LIGHT.map(([m, label, title]) => (
-        <button key={m} role="radio" aria-checked={lightSource === m} className={lightSource === m ? 'on' : ''} title={title} onClick={() => settingsStore.getState().update({ lightSource: m })}>
-          {label}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      label="Light source for shadows"
+      value={lightSource}
+      options={LIGHT.map(([value, label, title]) => ({ value, label, title }))}
+      onChange={(m) => settingsStore.getState().update({ lightSource: m })}
+    />
   );
 }

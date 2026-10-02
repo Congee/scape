@@ -1,4 +1,5 @@
 import { Units } from '@core/format';
+import { FogClass } from './fog';
 
 const na = (v: number) => Number.isNaN(v);
 
@@ -19,4 +20,10 @@ export function ageText(ms: number): string {
   if (min < 60) return `${min} min`;
   const h = Math.round(min / 60);
   return h < 48 ? `${h} h` : `${Math.round(h / 24)} d`;
+}
+
+/** One-line sky verdict for a place's hour: fog first, then cloud cover, then a likely shower. */
+export function skyVerdict(cloud: number, fog: FogClass, precipProb: number): string {
+  const sky = fog !== FogClass.None ? `${fog} possible` : na(cloud) ? 'Cloud n/a' : cloud < 25 ? `Clear · ${pct(cloud)}` : cloud < 80 ? `Partly cloudy · ${pct(cloud)}` : `Overcast · ${pct(cloud)}`;
+  return precipProb >= 30 ? `${sky} · rain ${pct(precipProb)}` : sky;
 }

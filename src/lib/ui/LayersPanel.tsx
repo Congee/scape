@@ -111,13 +111,11 @@ export function LayersPanel() {
           </details>
         </div>
       </Section>
-      <Section title="Map layers" className="layers">
+      <Section title="Terrain" className="layers">
         {!terrain && <p className="muted hint">Elevation data is switched off in Settings.</p>}
         <SettingLayer k="showSatellite" label="Satellite">
           <p className="muted hint">{satKeys().maptiler ? 'National aerial photos where available, MapTiler elsewhere.' : 'National aerial photos only. Other places need a MapTiler key.'}</p>
         </SettingLayer>
-        <DayNightToggle />
-        <CloudToggle />
         <TerrainTintToggles />
         <SettingLayer k="showHillshade" label="Hillshade" />
         <SettingLayer k="terrain3d" label="3D terrain (right-drag or Ctrl-drag to tilt)">
@@ -139,15 +137,20 @@ export function LayersPanel() {
           )}
         </SettingLayer>
         <SettingLayer k="showBuildings" label="3D buildings on the map (Overture, from zoom 14)" />
+      </Section>
+      <Section title="Sky" className="layers">
+        <DayNightToggle />
+        <CloudToggle />
+        <SettingLayer k="showLightPollution" label="Light pollution" />
+        <SettingLayer k="showGc" label="Galactic Centre" />
+      </Section>
+      <Section title="Light" className="layers">
         <SettingLayer k="showSunShadows" label="Shadows on the map (terrain and buildings)">
           <div className="toggle">
             <span>Light</span>
             <LightSeg />
           </div>
         </SettingLayer>
-        <SettingLayer k="showLightPollution" label="Light pollution" />
-        <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />
-        <SettingLayer k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
         <SettingLayer k="showShadow" label="Sun shadow (direction and length)">
           <label className="toggle">
             <span>Object height</span>
@@ -163,7 +166,10 @@ export function LayersPanel() {
             <span className="muted">m</span>
           </label>
         </SettingLayer>
-        <SettingLayer k="showGc" label="Galactic Centre" />
+      </Section>
+      <Section title="Overlays" className="layers">
+        <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />
+        <SettingLayer k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
       </Section>
       <Section title="Terrain horizon" className="layers">
         <Toggle k="terrainHorizon" label="Skyline on the chart, rise and set behind terrain" />

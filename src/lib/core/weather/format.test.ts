@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Units } from '@core/format';
-import { ageText, pct, tempText, visText, windText } from './format';
+import { FogClass } from './fog';
+import { ageText, pct, skyVerdict, tempText, visText, windText } from './format';
 
 describe('weather format', () => {
   it('says n/a for a missing value', () => {
@@ -17,5 +18,12 @@ describe('weather format', () => {
     expect(ageText(12 * 60_000)).toBe('12 min');
     expect(ageText(3 * 3_600_000)).toBe('3 h');
     expect(ageText(72 * 3_600_000)).toBe('3 d');
+  });
+  it('gives one sky verdict', () => {
+    expect(skyVerdict(10, FogClass.None, 0)).toBe('Clear · 10%');
+    expect(skyVerdict(50, FogClass.None, 40)).toBe('Partly cloudy · 50% · rain 40%');
+    expect(skyVerdict(95, FogClass.None, NaN)).toBe('Overcast · 95%');
+    expect(skyVerdict(95, FogClass.Fog, 0)).toBe('Fog possible');
+    expect(skyVerdict(NaN, FogClass.None, 0)).toBe('Cloud n/a');
   });
 });

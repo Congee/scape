@@ -84,7 +84,7 @@ reach Now Geodetics '.geo'
 reach Shot Shot '.frame select, .frame input'
 reach Shot 'Tools exposure' 'input[aria-label="Aperture, f-number"]'
 reach Sky Night '.moon-chart, .night'
-reach Find Find '.find .seg button'
+reach Find Find '.find .segmented button'
 reach Sky 'Tools moon' '.tools details'
 reach Weather Weather '.weather'
 reach Weather 'tide and cloud rows' '.cloud-row'
@@ -136,7 +136,7 @@ done
 check "no blue accent on panel chrome" "$([ "$blue" = 0 ] && echo 1 || echo 0)" "$blue"
 # Selections: underline bar for one-of, 9 px square box for toggles; no rings, no radius.
 tab Shot
-sel=$(js '(() => { const one = [...document.querySelectorAll("#ptabpanel :is(.seg, .chips.one) button.on")]; const box = [...document.querySelectorAll("#ptabpanel input[type=checkbox]")]; const u = one.filter((b) => { const s = getComputedStyle(b); return /inset$|0px -2px 0px 0px/.test(s.boxShadow) && s.boxShadow.includes("-2px") && s.borderTopLeftRadius === "0px" && s.outlineStyle === "none" && s.fontWeight === "700"; }).length; const q = box.filter((b) => { const s = getComputedStyle(b); return s.appearance === "none" && s.width === "9px" && s.height === "9px" && s.borderTopLeftRadius === "0px"; }).length; return `${one.length} ${u} ${box.length} ${q}`; })()')
+sel=$(js '(() => { const one = [...document.querySelectorAll("#ptabpanel :is(.segmented button[aria-checked=true], .chips.one button.on)")]; const box = [...document.querySelectorAll("#ptabpanel input[type=checkbox]")]; const u = one.filter((b) => { const s = getComputedStyle(b); return /inset$|0px -2px 0px 0px/.test(s.boxShadow) && s.boxShadow.includes("-2px") && s.borderTopLeftRadius === "0px" && s.outlineStyle === "none" && s.fontWeight === "700"; }).length; const q = box.filter((b) => { const s = getComputedStyle(b); return s.appearance === "none" && s.width === "9px" && s.height === "9px" && s.borderTopLeftRadius === "0px"; }).length; return `${one.length} ${u} ${box.length} ${q}`; })()')
 check "selections are underline bars and square boxes" "$(echo "$sel" | awk '{ print ($1 > 0 && $1 == $2 && $3 > 0 && $3 == $4) ? 1 : 0 }')" "$sel (one-of, underlined, boxes, square)"
 wide desktop
 tab Now

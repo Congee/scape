@@ -24,22 +24,24 @@ export interface MoonInfo {
   name: string;
 }
 
-const PHASE_NAMES = [
-  'New Moon',
-  'Waxing Crescent',
-  'First Quarter',
-  'Waxing Gibbous',
-  'Full Moon',
-  'Waning Gibbous',
-  'Last Quarter',
-  'Waning Crescent'
-];
+/** Below this lit fraction the moon is new; above 1 minus it, full. */
+export const MOON_NEW_MAX = 0.03;
+/** Within this of half lit, a quarter. */
+const QUARTER_BAND = 0.05;
+
+/** The phase name every surface shows, from the lit fraction and the waxing flag. */
+export function moonPhaseName(illumination: number, waxing: boolean): string {
+  if (illumination < MOON_NEW_MAX) return 'New moon';
+  if (illumination > 1 - MOON_NEW_MAX) return 'Full moon';
+  if (Math.abs(illumination - 0.5) <= QUARTER_BAND) return waxing ? 'First quarter' : 'Last quarter';
+  return `${waxing ? 'Waxing' : 'Waning'} ${illumination < 0.5 ? 'crescent' : 'gibbous'}`;
+}
 
 export function moonInfo(date: Date): MoonInfo {
   const phaseDeg = MoonPhase(date);
   const illumination = Illumination(Body.Moon, date).phase_fraction;
-  const idx = Math.round(phaseDeg / 45) % 8;
-  return { phaseDeg, illumination, waxing: phaseDeg < 180, name: PHASE_NAMES[idx] };
+  const waxing = phaseDeg < 180;
+  return { phaseDeg, illumination, waxing, name: moonPhaseName(illumination, waxing) };
 }
 
 /** The lit lune drawn over the moon's disc: a semicircle closed by half an ellipse. */
