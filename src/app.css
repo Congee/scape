@@ -1796,6 +1796,11 @@ label.file.danger strong {
   grid-column: 1 / -1;
 }
 
+.kv.aim .seg {
+  display: flex;
+  justify-content: space-between;
+}
+
 .frame h3,
 .markers h3 {
   margin: 12px 6px 4px;

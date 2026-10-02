@@ -1,20 +1,18 @@
 import { useState } from 'react';
-import { makeObserver, SkyBody } from '@core/astro/bodies';
-import { position } from '@core/astro/positions';
-import { compass, degrees, distance } from '@core/format';
+import { distance } from '@core/format';
 import { distanceM } from '@core/geo/geodesy';
 import { depthOfField, panoramaShots } from '@core/optics/dof';
 import { aperturesFor, cocMm, CocRule, effectiveOptics, equivalentFocalMm, fitToLens, F_STOPS, frameFov, isCameraBody, lensFocals, maxApertureAt, Orientation, SENSORS, sensorPixels, tcFactor, Teleconverter, type SensorFormat } from '@core/optics/fov';
-import { aimFor, compositionStore, useComposition } from '@state/composition';
+import { compositionStore, useComposition } from '@state/composition';
 import { applyKit, defaultKitName, gearStore, kitMatches, lensById, sensorById, useGear, zoomPatch } from '@state/gear';
 import { capturePlan, plansStore } from '@state/plans';
 import { settingsStore, useSettings } from '@state/settings';
-import { pinSiteHeightM, targetAngleFor, useTerrain } from '@state/terrain';
-import { useWorld, worldStore } from '@state/world';
+import { useWorld } from '@state/world';
+import { AimControl } from './AimControl';
 import { GearSearch } from './GearSearch';
+import { useOnMap } from './panelPage';
 import { Section } from './Section';
 
-const signed = (deg: number) => `${deg >= 0 ? '+' : ''}${degrees(deg)}`;
 const megapixels = (s: SensorFormat) => {
   const p = sensorPixels(s);
   return p ? `${Math.round(p / 1e5) / 10} MP` : null;
@@ -29,18 +27,13 @@ export function FramePanel() {
   const kits = useGear((s) => s.kits);
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
-  const pinHeightM = useWorld((s) => s.pinHeightM);
   const units = useSettings((s) => s.units);
   const cocRule = useSettings((s) => s.cocRule);
-  const profile = useTerrain((s) => s.profile);
-  const profileKey = useTerrain((s) => s.profileKey);
-  const pinGroundM = useTerrain((s) => s.pinGroundM);
-  const pin2GroundM = useTerrain((s) => s.pin2GroundM);
   const [kitName, setKitName] = useState<string | null>(null);
   const [planName, setPlanName] = useState('');
   const [saved, setSaved] = useState('');
 
-  const targetAngleDeg = targetAngleFor(worldStore.getState(), settingsStore.getState(), { profile, profileKey, pinGroundM, pin2GroundM });
+  const onMap = useOnMap();
   const sensor = sensorById(c.sensorId, cameras);
   const lens = lensById(c.lensId, lenses);
   const prime = lens !== null && lens.minMm === lens.maxMm;
@@ -49,7 +42,6 @@ export function FramePanel() {
   const tcf = tcFactor(c.teleconverters);
   const tc = c.teleconverters.length > 0;
   const fov = frameFov(sensor, opt.focalMm, c.orientation);
-  const aim = aimFor(c, { pin, pin2 }, targetAngleDeg);
   const targetM = pin2 ? distanceM(pin, pin2) : null;
   const focusM = c.focusDistM ?? targetM;
   const pixels = sensorPixels(sensor);
@@ -59,10 +51,6 @@ export function FramePanel() {
   const update = compositionStore.getState().update;
   const setSetting = settingsStore.getState().update;
 
-  const aimAt = (body: SkyBody) => {
-    const p = position(body, new Date(worldStore.getState().time), makeObserver(pin, pinSiteHeightM({ pinHeightM }, { pinGroundM })));
-    compositionStore.getState().aim(p.azimuth, Math.max(0, p.altitude));
-  };
   const setFocal = (v: number) => update(zoomPatch(c, v));
   // Only a 1.4× and a 2.0× exist, so one of each is the whole stack a body can take.
   const toggleTc = (t: Teleconverter) => update({ teleconverters: c.teleconverters.includes(t) ? c.teleconverters.filter((x) => x !== t) : [...c.teleconverters, t].toSorted((a, b) => a - b) });
@@ -235,48 +223,7 @@ export function FramePanel() {
         </div>
       </Section>
       <Section title="Aim" className="frame">
-        <label className="toggle">
-          <input type="checkbox" checked={c.aimAtTarget} disabled={!pin2} onChange={(e) => update({ aimAtTarget: e.target.checked })} />
-          <span>Aim at the target location{pin2 ? '' : ' (place a target first)'}</span>
-        </label>
-        <div className="kv">
-          <span className="k">Azimuth</span>
-          <b className="v">
-            {aim.locked ? (
-              <>
-                {degrees(aim.azimuthDeg)} {compass(aim.azimuthDeg)}
-              </>
-            ) : (
-              <>
-                <input type="number" min={0} max={360} step={0.5} value={Number(c.azimuthDeg.toFixed(1))} onChange={(e) => compositionStore.getState().aim(Number(e.target.value) || 0, c.elevationDeg)} aria-label="Azimuth, degrees" />
-                <span className="muted">° {compass(c.azimuthDeg)}</span>
-              </>
-            )}
-          </b>
-          <span className="k">Elevation</span>
-          <b className="v">
-            {aim.locked ? (
-              // The bearing needs no terrain, but the angle does: say so rather than show the placeholder 0.
-              targetAngleDeg == null ? '…' : signed(aim.elevationDeg)
-            ) : (
-              <>
-                <input type="number" min={-89} max={89} step={0.5} value={Number(c.elevationDeg.toFixed(1))} onChange={(e) => compositionStore.getState().aim(c.azimuthDeg, Number(e.target.value) || 0)} aria-label="Elevation, degrees" />
-                <span className="muted">°</span>
-              </>
-            )}
-          </b>
-        </div>
-        <div className="actions">
-          <button onClick={() => aimAt(SkyBody.Sun)} title="Point the camera at the sun at the simulated time">
-            Aim at sun
-          </button>
-          <button onClick={() => aimAt(SkyBody.Moon)} title="Point the camera at the moon at the simulated time">
-            Aim at moon
-          </button>
-          <button onClick={() => aimAt(SkyBody.Gc)} title="Point the camera at the Galactic Centre">
-            Aim at GC
-          </button>
-        </div>
+        {onMap && <AimControl />}
         <label className="toggle">
           <input type="checkbox" checked={c.showFov} onChange={(e) => update({ showFov: e.target.checked })} />
           <span>FOV cone</span>

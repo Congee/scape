@@ -104,7 +104,7 @@ for f in 24 200 600 2400; do
   for o in Landscape Portrait; do
     for tod in day night; do
       t=$DAY; [ $tod = night ] && t=$NIGHT
-      js "(()=>{__scape.world.getState().setTime(Date.parse('$t')); __scape.composition.getState().update({focalMm:$f, orientation:'$o'}); __scape.composition.setState({aimAtTarget:true}); return 1})()" >/dev/null
+      js "(()=>{__scape.world.getState().setTime(Date.parse('$t')); __scape.composition.getState().update({focalMm:$f, orientation:'$o'}); __scape.composition.setState({aimLock:'Target'}); return 1})()" >/dev/null
       ab wait 2500 >/dev/null
       poll "__scape.buildings.getState().busy===false" 20
       n=$(js "__scape.prism?.buildings ?? 0")

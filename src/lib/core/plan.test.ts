@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Orientation, Teleconverter } from './optics/fov';
 import { planOptics, planTeleconverters, type PlanComposition } from './plan';
 
-const base: PlanComposition = { sensorId: 'ff', focalMm: 600, fNumber: 4, orientation: Orientation.Landscape, azimuthDeg: 0, elevationDeg: 0, aimAtTarget: true };
+const base: PlanComposition = { sensorId: 'ff', focalMm: 600, fNumber: 4, orientation: Orientation.Landscape, azimuthDeg: 0, elevationDeg: 0, aimLock: 'Target' };
 
 describe('planTeleconverters', () => {
   it('reads a plan saved before teleconverter support', () => {

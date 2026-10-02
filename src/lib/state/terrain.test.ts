@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { analyzeSightline, endpointHeightM } from '@core/terrain/los';
 import type { MeshResult, ProfileResult } from '@workers/terrain.protocol';
-import { aimFor } from './composition';
+import { AimLock, aimFor } from './composition';
 import { isComplete, meshEyeKeyFor, meshKeyFor, mergeLevel, profileKeyFor, retiredBuffers, targetAngleFor, type TerrainState } from './terrain';
 
 // Zermatt to the Matterhorn: 8.5 km, the target 1.7 km above the eye.
@@ -86,7 +86,7 @@ describe('targetAngleFor', () => {
 });
 
 describe('aimFor over targetAngleFor', () => {
-  const composition = { aimAtTarget: true, azimuthDeg: 123, elevationDeg: 45 };
+  const composition = { aimLock: AimLock.Target, azimuthDeg: 123, elevationDeg: 45 };
 
   it('yields the true angle with no profile, where the profile-only aim fabricated 0', () => {
     const w = world();
@@ -101,7 +101,7 @@ describe('aimFor over targetAngleFor', () => {
   it('leaves a manual aim alone whatever the terrain says', () => {
     const w = world();
     const t = terrain({ pinGroundM: GROUND_A, pin2GroundM: GROUND_B });
-    const manual = { ...composition, aimAtTarget: false };
+    const manual = { ...composition, aimLock: AimLock.Free };
     expect(aimFor(manual, w, targetAngleFor(w, settings(), t))).toEqual({ azimuthDeg: 123, elevationDeg: 45, locked: false });
     expect(aimFor(manual, w, null)).toEqual({ azimuthDeg: 123, elevationDeg: 45, locked: false });
   });

@@ -74,7 +74,10 @@ export interface PlanComposition {
   orientation: Orientation;
   azimuthDeg: number;
   elevationDeg: number;
-  aimAtTarget: boolean;
+  /** An `AimLock`; absent in plans saved before it replaced `aimAtTarget`. */
+  aimLock?: string;
+  /** Whether plans saved before `aimLock` followed the target. */
+  aimAtTarget?: boolean;
 }
 
 /** Teleconverter stack of a saved plan, from the array or the older scalar. */

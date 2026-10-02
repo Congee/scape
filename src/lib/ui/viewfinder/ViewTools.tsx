@@ -1,20 +1,14 @@
 import { useNavigate } from '@tanstack/react-router';
 import { LightMode } from '@core/astro/lightSource';
-import { degrees, distance } from '@core/format';
-import { bearingDeg, distanceM } from '@core/geo/geodesy';
-import { LosStatus } from '@core/terrain/los';
 import { BUILDINGS_ATTRIBUTION } from '@data/buildingTiles';
 import { GEOID_DOWNLOAD_URL, geoidCredit } from '@data/geoid';
 import { compositionStore, useComposition, type Composition } from '@state/composition';
 import { lod2Drawn, lod2GeoidUse, useLod2 } from '@state/lod2';
 import { useOffline } from '@state/offline';
 import { settingsStore, useSettings } from '@state/settings';
-import { profileKeyFor, useTerrain } from '@state/terrain';
 import { PanelPage, PanelTab, uiStore } from '@state/ui';
-import { useWorld, worldStore } from '@state/world';
 import { useShallow } from 'zustand/react/shallow';
-import { Dial } from '../Dial';
-import { useSavedName } from '../PlanHeader';
+import { AimControl } from '../AimControl';
 import { FormRow, Section } from '../Section';
 import { PhotoTools } from './PhotoTools';
 
@@ -41,14 +35,13 @@ const LAYERS: Chip[] = [
   ['showMarkers', 'Markers', 'Markers flagged for the viewfinder'],
   ['showGrid', 'Grid', 'Rule-of-thirds grid']
 ];
-const FLAGS: BoolKey[] = ['aimAtTarget', ...[...BODIES, ...NIGHT, ...LAYERS].map(([k]) => k)];
+const FLAGS: BoolKey[] = [...BODIES, ...NIGHT, ...LAYERS].map(([k]) => k);
 const LIGHT: [LightMode, string, string][] = [
   [LightMode.Auto, 'Auto', 'Sun by day, moon by night'],
   [LightMode.Sun, 'Sun', 'Sun only'],
   [LightMode.Moon, 'Moon', 'Moon only']
 ];
 const RANGES_KM = [50, 100, 150, 200];
-const LOS_WORD: Record<LosStatus, string> = { [LosStatus.Clear]: 'line of sight clear', [LosStatus.Marginal]: 'line of sight marginal', [LosStatus.Blocked]: 'line of sight blocked' };
 
 function Chips({ list, c }: { list: Chip[]; c: Pick<Composition, BoolKey> }) {
   const update = compositionStore.getState().update;
@@ -68,7 +61,6 @@ export function ViewTools() {
   // Only the flags: the whole store changes on every step of an aim drag.
   const c = useComposition(useShallow((s) => Object.fromEntries(FLAGS.map((k) => [k, s[k]])) as Pick<Composition, BoolKey>));
   const trailMinutes = useComposition((s) => s.trailMinutes);
-  const pin2 = useWorld((s) => s.pin2);
   const lightSource = useSettings((s) => s.lightSource);
   const rangeKm = useSettings((s) => s.horizonRangeKm);
   const update = compositionStore.getState().update;
@@ -76,12 +68,7 @@ export function ViewTools() {
   return (
     <>
       <Section title="Aim">
-        <AimRow />
-        <FormRow label="Camera">
-          <button aria-pressed={c.aimAtTarget && !!pin2} data-flag="aimAtTarget" disabled={!pin2} onClick={() => update({ aimAtTarget: !c.aimAtTarget })} title={pin2 ? 'Keep the frame centred on the target location' : 'Place a target location on the map first'}>
-            Aim at target
-          </button>
-        </FormRow>
+        <AimControl />
       </Section>
       <Section title="Sky">
         <FormRow label="Bodies">
@@ -125,36 +112,6 @@ export function ViewTools() {
         <Credits buildings={c.showBuildings} />
       </Section>
     </>
-  );
-}
-
-function AimRow() {
-  const pin = useWorld((s) => s.pin);
-  const pin2 = useWorld((s) => s.pin2);
-  const units = useSettings((s) => s.units);
-  const profile = useTerrain((s) => s.profile);
-  const profileKey = useTerrain((s) => s.profileKey);
-  const name = useSavedName(pin2);
-  if (!pin2) return <p className="muted hint">No target. Place one on the map.</p>;
-  const brg = bearingDeg(pin, pin2);
-  const fresh = profile && profileKey === profileKeyFor(worldStore.getState(), settingsStore.getState()) ? profile : null;
-  const el = fresh ? fresh.los.targetAngleDeg : null;
-  return (
-    <div className="brow" data-aim="">
-      <Dial az={brg} ink="terrain" />
-      <span className="label">Target</span>
-      <span className="time">{distance(distanceM(pin, pin2), units)}</span>
-      <span className="az">{degrees(brg)}</span>
-      <span className="note">
-        {[name, el == null ? null : `elev ${el >= 0 ? '+' : ''}${degrees(el)}`].filter(Boolean).join(' · ')}
-        {fresh && (
-          <>
-            {name || el != null ? ' · ' : ''}
-            <span className={`los ${fresh.los.status.toLowerCase()}`}>{LOS_WORD[fresh.los.status]}</span>
-          </>
-        )}
-      </span>
-    </div>
   );
 }
 

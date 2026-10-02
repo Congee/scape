@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { planTeleconverters, type SavedPlan } from '@core/plan';
+import { planTeleconverters, type PlanComposition, type SavedPlan } from '@core/plan';
 import { deleteOne, listAll, putOne } from '@data/db';
-import { compositionStore } from './composition';
+import { compositionStore, legacyAimLock, parseAimLock, type AimLock } from './composition';
 import { worldStore } from './world';
 
 export interface PlansState {
@@ -51,12 +51,17 @@ export function capturePlan(name: string, existing?: SavedPlan): SavedPlan {
       orientation: c.orientation,
       azimuthDeg: c.azimuthDeg,
       elevationDeg: c.elevationDeg,
-      aimAtTarget: c.aimAtTarget
+      aimLock: c.aimLock
     },
     notes: existing?.notes ?? '',
     createdAt: existing?.createdAt ?? now,
     updatedAt: now
   };
+}
+
+/** Aim lock of a saved plan, from the lock or the older flag; unknown values aim freely. */
+export function planAimLock(c: PlanComposition): AimLock {
+  return c.aimLock !== undefined ? parseAimLock(c.aimLock) : legacyAimLock(c.aimAtTarget);
 }
 
 /** Loads a plan into the world and composition and flies the map to the camera. */
@@ -68,7 +73,7 @@ export function applyPlan(p: SavedPlan): void {
   w.setPin2Height(p.target?.heightM ?? 0);
   w.setTz(p.tzAuto ? null : p.tz);
   w.setTime(p.time);
-  const { teleconverter: _legacy, ...pc } = p.composition;
-  compositionStore.getState().update({ ...pc, teleconverters: planTeleconverters(p.composition) });
+  const { teleconverter: _legacy, aimAtTarget: _flag, ...pc } = p.composition;
+  compositionStore.getState().update({ ...pc, teleconverters: planTeleconverters(p.composition), aimLock: planAimLock(p.composition) });
   w.flyTo({ lat: p.camera.lat, lng: p.camera.lng }, Math.max(w.view.zoom, 12), false);
 }
