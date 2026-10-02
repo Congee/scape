@@ -54,11 +54,12 @@ ab fill 'input[placeholder^="Name for"]' 'uxfix spot' >/dev/null
 js '(() => { [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Save").click(); return "ok"; })()' >/dev/null
 wait_for 'document.body.innerText.includes("uxfix spot")' 40
 ab screenshot "$OUT/after-library.png" >/dev/null
-# The stub answers Cancel, as a real dialog would here.
-js '(() => { window.__asked = []; window.confirm = (m) => { window.__asked.push(m); return false; }; const f = new File([JSON.stringify({ format: "scape", version: 1, locations: [], markers: [], plans: [] })], "empty.scape.json", { type: "application/json" }); const dt = new DataTransfer(); dt.items.add(f); const i = document.querySelector("label.file.danger input"); i.files = dt.files; i.dispatchEvent(new Event("change", { bubbles: true })); return "ok"; })()' >/dev/null
-wait_for 'window.__asked.length > 0' 40
-asked=$(js 'window.__asked.join(" / ")')
+js '(() => { const f = new File([JSON.stringify({ format: "scape", version: 1, locations: [], markers: [], plans: [] })], "empty.scape.json", { type: "application/json" }); const dt = new DataTransfer(); dt.items.add(f); const i = document.querySelector("label.file.danger input"); i.files = dt.files; i.dispatchEvent(new Event("change", { bubbles: true })); return "ok"; })()' >/dev/null
+wait_for '!!document.querySelector(".confirm .confirm-q")' 40
+asked=$(js 'document.querySelector(".confirm .confirm-q").textContent')
 check "Replace asks first, naming the counts" "$([[ "$asked" =~ ^Replace\ [0-9]+\ locations?\ with\ this\ file\?$ ]] && echo 1 || echo 0)" "$asked"
+# Cancel in place, as the user would.
+js '(() => { [...document.querySelectorAll(".confirm button")].find((b) => b.textContent.trim() === "Cancel").click(); return "ok"; })()' >/dev/null
 sleep 0.5
 ab reload >/dev/null
 wait_for '!!document.querySelector("label.file.danger input")' 80
@@ -138,9 +139,9 @@ js '(() => { window.__scape.settings.getState().update({ showSatellite: false })
 # Search: no matches, then ↓↓ Enter picks the second result.
 INPUT='input[role=combobox]'
 ab fill "$INPUT" 'qzxqzxv wqxzz' >/dev/null
-wait_for '[...document.querySelectorAll(".search-status")].some((p) => p.textContent === "No matches")' 60
+wait_for '[...document.querySelectorAll(".search-status")].some((p) => p.textContent === "No places")' 60
 st=$(js '[...document.querySelectorAll(".search-status")].map((p) => p.textContent).join(" / ") || "none"')
-check "nonsense query says No matches" "$([[ "$st" == *"No matches"* ]] && echo 1 || echo 0)" "$st"
+check "nonsense query says No places" "$([[ "$st" == *"No places"* ]] && echo 1 || echo 0)" "$st"
 ab screenshot "$OUT/after-search-none.png" >/dev/null
 ab fill "$INPUT" 'Springfield' >/dev/null
 wait_for 'document.querySelectorAll("[role=option]").length >= 2' 60

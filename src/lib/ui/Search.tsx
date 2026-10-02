@@ -3,6 +3,7 @@ import { formatLngLat, parseLngLat } from '@core/geo/coords';
 import { geocode, type GeocodeHit } from '@data/geocode';
 import { useSettings } from '@state/settings';
 import { worldStore } from '@state/world';
+import { Icon } from './icons';
 import { SearchAction, searchKey, searchStatus } from './searchKeys';
 import { useOnline } from './useOnline';
 
@@ -77,6 +78,7 @@ export function Search() {
       }}
       onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
     >
+      <Icon name="search" />
       <input
         type="search"
         role="combobox"
@@ -108,15 +110,19 @@ export function Search() {
         // Keeps focus in the input, so picking never races its blur.
         <div className="search-results" onMouseDown={(e) => e.preventDefault()}>
           {offline && <p className="search-status">Offline: showing built-in places only</p>}
-          {status && <p className="search-status">{status}</p>}
           <ul id={`${id}-list`} role="listbox" aria-label="Search results">
+            {status && (
+              <li role="option" aria-selected={false} aria-disabled="true" className="search-status">
+                {status}
+              </li>
+            )}
             {hits.map((h, i) => (
               <li key={`${h.name}|${h.lat}|${h.lng}`} role="none" className={i === active ? 'active' : undefined}>
                 <div id={optionId(i)} role="option" aria-selected={i === active} className="text" onClick={() => pick(h)} onPointerEnter={() => setActive(i)}>
                   <span className="name">{h.name}</span>
                   {h.detail && <span className="detail">{h.detail}</span>}
                 </div>
-                <button className="link" title="Set as the target location" aria-label={`Set ${h.name} as the target`} onClick={() => setTarget(h)}>
+                <button className="btn-link" title="Set as the target location" aria-label={`Set ${h.name} as the target`} onClick={() => setTarget(h)}>
                   Target
                 </button>
               </li>

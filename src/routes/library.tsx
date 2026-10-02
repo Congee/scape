@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { formatLngLat } from '@core/geo/coords';
-import { planOptics } from '@core/plan';
+import { planOptics, type ScapeExport } from '@core/plan';
 import { formatDateTime } from '@core/time/format';
 import { countAll, exportAll, importAll, ImportMode, isScapeExport, replaceQuestion } from '@data/db';
 import { libraryStore, useLibrary } from '@state/library';
@@ -11,13 +11,10 @@ import { searchesStore, useSearches } from '@state/searches';
 import { useSettings } from '@state/settings';
 import { PanelTab, uiStore } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
+import { Confirm, ConfirmAsk } from '@ui/Confirm';
 import { downloadText } from '@ui/download';
 
 export const Route = createFileRoute('/library')({ component: LibraryPage });
-
-function removeSearch(id: string, label: string) {
-  if (window.confirm(`Delete the search "${label}"?`)) void searchesStore.getState().remove(id);
-}
 
 async function exportEverything() {
   const data = await exportAll();
@@ -40,6 +37,7 @@ function LibraryPage() {
   const [name, setName] = useState('');
   const [planName, setPlanName] = useState('');
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [replacing, setReplacing] = useState<{ data: ScapeExport; question: string } | null>(null);
 
   useEffect(() => {
     if (!loaded) void libraryStore.getState().load();
@@ -80,21 +78,28 @@ function LibraryPage() {
     void navigate({ to: '/' });
   };
 
+  const runImport = async (data: ScapeExport, mode: ImportMode) => {
+    try {
+      await importAll(data, mode);
+      await Promise.all([libraryStore.getState().load(), plansStore.getState().load(), markersStore.getState().load(), searchesStore.getState().load()]);
+      setStatus({ ok: true, text: `Imported ${data.locations.length} locations, ${data.plans.length} plans, ${data.markers.length} markers and ${data.searches?.length ?? 0} searches.` });
+    } catch (e) {
+      setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   const importEverything = async (input: HTMLInputElement, mode: ImportMode) => {
     const file = input.files?.[0];
     // Cleared so picking the same file again still fires change.
     input.value = '';
     if (!file) return;
+    setReplacing(null);
     try {
       const data: unknown = JSON.parse(await file.text());
       if (!isScapeExport(data)) throw new Error('Not a Scape export file');
-      if (mode === ImportMode.Replace) {
-        const q = replaceQuestion(await countAll());
-        if (q && !window.confirm(q)) return;
-      }
-      await importAll(data, mode);
-      await Promise.all([libraryStore.getState().load(), plansStore.getState().load(), markersStore.getState().load(), searchesStore.getState().load()]);
-      setStatus({ ok: true, text: `Imported ${data.locations.length} locations, ${data.plans.length} plans, ${data.markers.length} markers and ${data.searches?.length ?? 0} searches.` });
+      const question = mode === ImportMode.Replace ? replaceQuestion(await countAll()) : null;
+      if (question) setReplacing({ data, question });
+      else await runImport(data, mode);
     } catch (e) {
       setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
     }
@@ -181,9 +186,9 @@ function LibraryPage() {
               <button className="link" onClick={() => runSearch(sv.id, true)} title="Run at the current camera location">
                 run here
               </button>
-              <button className="link" onClick={() => removeSearch(sv.id, sv.name)} title="Delete">
+              <Confirm question={`Delete the search “${sv.name}”?`} confirm="Delete" title="Delete" onConfirm={() => void searchesStore.getState().remove(sv.id)}>
                 delete
-              </button>
+              </Confirm>
             </li>
           ))}
         </ul>
@@ -207,6 +212,17 @@ function LibraryPage() {
           <input type="file" accept=".json" onChange={(e) => void importEverything(e.currentTarget, ImportMode.Replace)} />
           Import a Scape export, <strong>replacing everything</strong> saved here
         </label>
+        {replacing && (
+          <ConfirmAsk
+            question={replacing.question}
+            confirm="Replace"
+            onConfirm={() => {
+              setReplacing(null);
+              void runImport(replacing.data, ImportMode.Replace);
+            }}
+            onCancel={() => setReplacing(null)}
+          />
+        )}
         {status && <p className={status.ok ? 'muted ok' : 'error'}>{status.text}</p>}
       </section>
     </div>

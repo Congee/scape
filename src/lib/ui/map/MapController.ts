@@ -51,6 +51,7 @@ import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
 import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { planTime, worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
+import { HALO, Ink } from '../inks';
 import { buildingFilter, buildingPaint } from './buildingStyle';
 import { CloudOverlay } from './cloudOverlay';
 import { paintHeat } from './heat';
@@ -111,9 +112,9 @@ const SHADOW_MAX_LENGTH_M = 5_000;
 const TALLEST_TERRAIN_M = 3_000;
 const SHADOW_MAX_TERRAIN_M = 40_000;
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-const PIN_COLOR = '#e5322d';
-const PIN2_COLOR = '#8fd18c';
-const PROBE_COLOR = '#ffc94a';
+const PIN_COLOR = Ink.pin;
+const PIN2_COLOR = Ink.pinTarget;
+const PROBE_COLOR = Ink.edit;
 const MAX_PITCH = 60;
 // Read at load: the route rewrites the URL without it.
 const ZOOM_PROBE = new URLSearchParams(location.search).has('zoomprobe');
@@ -122,9 +123,9 @@ const ORBIT_MAX_PITCH = 80;
 const ORBIT_PITCH = 65;
 const ORBIT_DEG_PER_S = 6;
 const ORBIT_STEP_DEG = 90;
-const FOV_COLOR = '#5aa9ff';
-const REGION_COLOR = '#5aa9ff';
-const IMPORT_COLOR = '#ffb300';
+const FOV_COLOR = Ink.edit;
+const REGION_COLOR = Ink.edit;
+const IMPORT_COLOR = Ink.edit;
 const DEFAULT_FOV_RANGE_M = 5_000;
 
 /** Rectangle ring for a draft region; a box crossing the antimeridian runs past +180. */
@@ -255,6 +256,13 @@ export class MapController {
     this.menu = new MapMenu(this.map.getContainer(), this.map.getCanvasContainer());
     this.map.on('contextmenu', (e: MapMouseEvent) => {
       if (!this.touches && !this.drawingRegion) this.openMenu(e.point);
+    });
+    this.map.getCanvas().addEventListener('keydown', (e) => {
+      if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+      // Also stops the browser's own contextmenu event, so the menu opens once.
+      e.preventDefault();
+      const c = this.map.getCanvas();
+      if (!this.drawingRegion) this.openMenu({ x: c.clientWidth / 2, y: c.clientHeight / 2 });
     });
     this.map.on('movestart', () => this.menu.close());
     this.installLongPress();
@@ -755,9 +763,11 @@ export class MapController {
     this.map.addSource(MARKERS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(REGION_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(IMPORT_SRC, { type: 'geojson', data: EMPTY });
-    this.map.addLayer({ id: 'import-pick-fill', type: 'fill', source: IMPORT_SRC, paint: { 'fill-color': IMPORT_COLOR, 'fill-opacity': 0.35 } });
+    this.map.addLayer({ id: 'import-pick-fill', type: 'fill', source: IMPORT_SRC, paint: { 'fill-color': IMPORT_COLOR, 'fill-opacity': 0.2 } });
+    this.map.addLayer({ id: 'import-pick-casing', type: 'line', source: IMPORT_SRC, paint: { 'line-color': HALO, 'line-width': 6.5 } });
     this.map.addLayer({ id: 'import-pick-line', type: 'line', source: IMPORT_SRC, paint: { 'line-color': IMPORT_COLOR, 'line-width': 2.5 } });
     this.map.addLayer({ id: 'region-fill', type: 'fill', source: REGION_SRC, paint: { 'fill-color': REGION_COLOR, 'fill-opacity': 0.12 } });
+    this.map.addLayer({ id: 'region-casing', type: 'line', source: REGION_SRC, paint: { 'line-color': HALO, 'line-width': 6 } });
     this.map.addLayer({
       id: 'region-line',
       type: 'line',
@@ -790,7 +800,15 @@ export class MapController {
       type: 'line',
       source: FOV_SRC,
       filter: ['==', ['get', 'kind'], FovKind.Dof],
-      paint: { 'line-color': '#f1c40f', 'line-width': 2, 'line-opacity': 0.9 }
+      paint: { 'line-color': FOV_COLOR, 'line-width': 2, 'line-opacity': 0.6 }
+    });
+    this.map.addLayer({
+      id: 'fov-edge-casing',
+      type: 'line',
+      source: FOV_SRC,
+      filter: ['==', ['get', 'kind'], FovKind.Edge],
+      layout: { 'line-cap': 'round' },
+      paint: { 'line-color': HALO, 'line-width': 6 }
     });
     this.map.addLayer({
       id: 'fov-edge',
@@ -805,7 +823,7 @@ export class MapController {
       type: 'line',
       source: GEO_SRC,
       layout: { 'line-cap': 'round' },
-      paint: { 'line-color': '#000', 'line-width': 6, 'line-opacity': 0.35 }
+      paint: { 'line-color': HALO, 'line-width': 6 }
     });
     this.map.addLayer({
       id: 'geodetic-line',
@@ -851,7 +869,7 @@ export class MapController {
       paint: {
         'circle-radius': ['case', ['get', 'selected'], 8, 6],
         'circle-color': ['get', 'color'],
-        'circle-stroke-color': ['case', ['get', 'selected'], '#ffffff', '#0f1216'],
+        'circle-stroke-color': ['case', ['get', 'selected'], Ink.edit, Ink.bg],
         'circle-stroke-width': 2
       }
     });
@@ -867,7 +885,7 @@ export class MapController {
         'text-anchor': 'top',
         'text-optional': true
       },
-      paint: { 'text-color': '#e6edf3', 'text-halo-color': '#0f1216', 'text-halo-width': 1.2 }
+      paint: { 'text-color': Ink.fg, 'text-halo-color': Ink.bg, 'text-halo-width': 1.2 }
     });
   }
 

@@ -283,9 +283,9 @@ async function run(vp: 'desktop' | 'phone') {
   check(`${vp}: privacy off sends nothing, rows say so`, /off for privacy/i.test(offWx) && offRow === 'off for privacy' && stub.hits.length === p0 && pf1 === pf0 && vis === 'none', `${offRow} · ${offWx.slice(0, 40)} · ${stub.hits.length - p0} requests, ${pf1 - pf0} layer fetches, layer ${vis}`);
   await tab.shot(`${out}/${vp}-privacy.png`);
   await tab.navigate(`${BASE}/settings`);
-  await until('document.querySelector(\'input[aria-label="Fetch weather forecasts"]\')', 30_000);
-  const box = await js<boolean>('document.querySelector(\'input[aria-label="Fetch weather forecasts"]\').checked');
-  await js('document.querySelector(\'input[aria-label="Fetch weather forecasts"]\').click()');
+  await until('document.querySelector(\'[aria-label="Fetch weather forecasts"]\')', 30_000);
+  const box = await js<boolean>('document.querySelector(\'[aria-label="Fetch weather forecasts"]\').getAttribute("aria-pressed") === "true"');
+  await js('document.querySelector(\'[aria-label="Fetch weather forecasts"]\').click()');
   const back = await until('window.__scape.settings.getState().weather === true', 5000);
   check(`${vp}: Settings toggle persists and turns forecasts back on`, !box && !!back, `checked ${box} → store ${back}`);
   await js(`(() => { window.__scape.weather.getState().setLayer('Off'); return 1; })()`);

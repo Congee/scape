@@ -45,5 +45,5 @@ export function searchStatus(s: { text: string; coord: boolean; searching: boole
   if (s.coord) return null;
   if (s.text.length < 2) return null;
   if (s.searching) return 'Searching…';
-  return s.count ? null : 'No matches';
+  return s.count ? null : 'No places';
 }

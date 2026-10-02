@@ -10,6 +10,7 @@ import { isoDate, localMidnight, localParts } from '@core/time/localDay';
 import { settingsStore, useSettings } from '@state/settings';
 import { horizonKeyFor, usePinSiteHeightM, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
+import { Icon } from './icons';
 
 const DAY_MS = 86_400_000;
 const POP_W = 268;
@@ -108,6 +109,9 @@ export function Calendar() {
   const pin = useWorld((s) => s.pin);
   const hour12 = useSettings((s) => s.hour12);
   const box = useRef<HTMLDivElement>(null);
+  const toggleBtn = useRef<HTMLButtonElement>(null);
+  // Roving focus: the one day cell in the tab order.
+  const [focusDay, setFocusDay] = useState(selected);
 
   const [ym, setYm] = useState(selected.slice(0, 7));
   // The popover is fixed, so the shell's clipped, wrapping header cannot cut it off.
@@ -119,6 +123,7 @@ export function Calendar() {
       const w = Math.min(POP_W, window.innerWidth - 16);
       setAt({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) });
       setYm(selected.slice(0, 7));
+      setFocusDay(selected);
     }
     setOpen(!open);
   };
@@ -129,7 +134,9 @@ export function Calendar() {
       if (!box.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Escape') return;
+      setOpen(false);
+      toggleBtn.current?.focus();
     };
     window.addEventListener('pointerdown', onDown);
     window.addEventListener('keydown', onKey);
@@ -138,6 +145,10 @@ export function Calendar() {
       window.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (open) box.current?.querySelector<HTMLButtonElement>(`.cal-day[data-iso="${focusDay}"]`)?.focus();
+  }, [open, focusDay]);
 
   const [year, month] = ym.split('-').map(Number);
   // The camera location only matters to a few hundred metres for eclipse visibility.
@@ -163,7 +174,20 @@ export function Calendar() {
   const lead = (utcDay(year, month, 1).getUTCDay() + 6) % 7;
   const days = utcDay(year, month + 1, 0).getUTCDate();
   const cells = Array.from({ length: Math.ceil((lead + days) / 7) * 7 }, (_, i) => utcDay(year, month, 1 - lead + i));
+  const rove = cells.some((c) => utcIso(c) === focusDay) ? focusDay : `${ym}-01`;
   const shiftMonth = (n: number) => setYm(utcIso(utcDay(year, month + n, 1)).slice(0, 7));
+  const STEP: Record<string, [number, number]> = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [0, -7], ArrowDown: [0, 7], PageUp: [-1, 0], PageDown: [1, 0] };
+  const onGridKey = (e: React.KeyboardEvent) => {
+    const step = STEP[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const [fy, fm, fd] = rove.split('-').map(Number);
+    // A month step clamps to the target month's last day.
+    const d = step[0] ? utcDay(fy, fm + step[0], Math.min(fd, utcDay(fy, fm + step[0] + 1, 0).getUTCDate())) : utcDay(fy, fm, fd + step[1]);
+    const iso = utcIso(d);
+    setFocusDay(iso);
+    setYm(iso.slice(0, 7));
+  };
   const pick = (iso: string) => {
     worldStore.getState().setDate(iso);
     setOpen(false);
@@ -172,31 +196,30 @@ export function Calendar() {
   return (
     <div className="cal" ref={box}>
       <button
-        className={`cal-toggle${open ? ' on' : ''}`}
+        ref={toggleBtn}
+        className={`cal-toggle btn-icon${open ? ' on' : ''}`}
         onClick={toggle}
         aria-expanded={open}
         aria-label="Calendar"
         title="Month calendar with moon phases and eclipses"
       >
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 5h16v15H4zM4 10h16M9 3v4M15 3v4" />
-        </svg>
+        <Icon name="calendar" />
       </button>
       {open && (
         <div className="cal-pop" role="dialog" aria-label="Calendar" style={{ top: at.top, left: at.left }}>
           <div className="cal-head">
-            <button onClick={() => shiftMonth(-1)} title="Previous month">
-              ‹
+            <button className="btn-icon" onClick={() => shiftMonth(-1)} title="Previous month" aria-label="Previous month">
+              <Icon name="left" />
             </button>
             <strong>{monthTitle.format(utcDay(year, month, 1))}</strong>
-            <button onClick={() => shiftMonth(1)} title="Next month">
-              ›
+            <button className="btn-icon" onClick={() => shiftMonth(1)} title="Next month" aria-label="Next month">
+              <Icon name="right" />
             </button>
-            <button onClick={() => pick(today)} title="Jump to today">
+            <button className="btn" onClick={() => pick(today)} title="Jump to today">
               Today
             </button>
           </div>
-          <div className="cal-grid">
+          <div className="cal-grid" onKeyDown={onGridKey}>
             {WEEKDAYS.map((w) => (
               <div key={w.key} className="cal-wd">
                 {w.label}
@@ -210,8 +233,11 @@ export function Calendar() {
                 <button
                   key={iso}
                   className={`cal-day${out ? ' out' : ''}${iso === selected ? ' sel' : ''}${iso === today ? ' today' : ''}`}
+                  data-iso={iso}
+                  tabIndex={iso === rove ? 0 : -1}
                   onClick={() => pick(iso)}
-                  aria-current={iso === selected ? 'date' : undefined}
+                  aria-pressed={iso === selected}
+                  aria-current={iso === today ? 'date' : undefined}
                 >
                   <span className="n">{d.getUTCDate()}</span>
                   <span className="marks">

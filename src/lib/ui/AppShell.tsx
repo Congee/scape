@@ -17,6 +17,8 @@ const ICONS = {
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'
 };
 
+const ACTIVE = { className: 'rail-link active', 'aria-current': 'page' } as const;
+
 /** A landscape phone: too short for the open bottom sheet. */
 const LOW_PHONE = '(max-width: 900px) and (max-height: 500px)';
 
@@ -33,17 +35,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Main">
-        <Link to="/" className="rail-link" activeProps={{ className: 'rail-link active' }} activeOptions={{ exact: true, includeSearch: false }} title="Map">
+        <Link to="/" className="rail-link" activeProps={ACTIVE} activeOptions={{ exact: true, includeSearch: false }} title="Map" aria-label="Map">
           <Icon d={ICONS.map} />
         </Link>
-        <Link to="/viewfinder" className="rail-link" activeProps={{ className: 'rail-link active' }} title="Viewfinder">
+        <Link to="/viewfinder" className="rail-link" activeProps={ACTIVE} title="Viewfinder" aria-label="Viewfinder">
           <Icon d={ICONS.viewfinder} />
         </Link>
-        <Link to="/library" className="rail-link" activeProps={{ className: 'rail-link active' }} title="Library">
+        <Link to="/library" className="rail-link" activeProps={ACTIVE} title="Library" aria-label="Library">
           <Icon d={ICONS.library} />
         </Link>
         <div className="rail-spacer" />
-        <Link to="/settings" className="rail-link" activeProps={{ className: 'rail-link active' }} title="Settings">
+        <Link to="/settings" className="rail-link" activeProps={ACTIVE} title="Settings" aria-label="Settings">
           <Icon d={ICONS.settings} />
         </Link>
       </nav>

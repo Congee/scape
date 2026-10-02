@@ -15,6 +15,7 @@ import { settingsStore, useSettings } from '@state/settings';
 import { EARTHDATA_SIGNUP, laadsYearUrl, tilesNear, VIIRS_FIRST_YEAR, VIIRS_MARGIN_KM } from '@core/sky/viirs';
 import { clearGibs, offerYear } from '@state/skyglow';
 import { useWorld } from '@state/world';
+import { Confirm } from './Confirm';
 import { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 
 const BASEMAP_ZOOMS = [10, 11, 12, 13, 14, 15];
@@ -175,10 +176,6 @@ export function OfflinePanel() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  };
-
-  const remove = (a: ArchiveMeta) => {
-    if (window.confirm(`Delete “${a.name}”? The tiles are removed from this device.`)) void o.remove(a.id);
   };
 
   // The flavor only styles Protomaps archives; OpenFreeMap ones carry their own style.
@@ -387,9 +384,9 @@ export function OfflinePanel() {
               <button className="link" onClick={() => void o.exportArchive(a.id)}>
                 Export
               </button>
-              <button className="link" onClick={() => remove(a)}>
+              <Confirm question={`Delete “${a.name}” from this device?`} confirm="Delete" onConfirm={() => void o.remove(a.id)}>
                 Delete
-              </button>
+              </Confirm>
             </div>
           </li>
         ))}
@@ -516,9 +513,9 @@ function ViirsSection() {
                   VNP46A4 {yr} · {ts.length} tile{ts.length === 1 ? '' : 's'} · {bytes(ts.reduce((n, t) => n + t.bytes, 0))}
                 </span>
                 <div className="actions">
-                  <button className="link" onClick={() => window.confirm(`Remove the ${yr} VIIRS tiles?`) && void run('Removing…', () => o.removeViirs(yr))}>
+                  <Confirm question={`Remove the ${yr} VIIRS tiles?`} confirm="Remove" onConfirm={() => void run('Removing…', () => o.removeViirs(yr))}>
                     Remove
-                  </button>
+                  </Confirm>
                 </div>
               </li>
             );
@@ -544,7 +541,6 @@ function GibsSection() {
   const [error, setError] = useState<string | null>(null);
 
   const clear = async () => {
-    if (!window.confirm('Clear the cached VIIRS nightly tiles? The Night tab downloads them again when it next shows the sky.')) return;
     setError(null);
     setBusy(true);
     try {
@@ -565,9 +561,9 @@ function GibsSection() {
           {gibs.nights} night{gibs.nights === 1 ? '' : 's'} · {gibs.tiles} tile{gibs.tiles === 1 ? '' : 's'} · {bytes(gibs.bytes)}
         </span>
         <div className="actions">
-          <button className="link" disabled={busy || gibs.bytes === 0} onClick={() => void clear()}>
+          <Confirm question="Clear the cached nightly tiles?" confirm="Clear" disabled={busy || gibs.bytes === 0} onConfirm={() => void clear()}>
             {busy ? 'Clearing…' : 'Clear'}
-          </button>
+          </Confirm>
         </div>
       </div>
       {error && <p className="error">{error}</p>}
@@ -596,10 +592,6 @@ function GeoidSection() {
     }
   };
 
-  const remove = () => {
-    if (window.confirm('Remove the imported geoid? PLATEAU heights fall back to a Tokyo average.')) void o.removeGeoid();
-  };
-
   return (
     <>
       <h3>Geoid (Japan)</h3>
@@ -616,9 +608,9 @@ function GeoidSection() {
             GSIGEO2011 {geoid.version} · {geoid.fileName} · {bytes(geoid.bytes)} · imported {geoid.importedAt.slice(0, 10)}
           </span>
           <div className="actions">
-            <button className="link" onClick={remove}>
+            <Confirm question="Remove the geoid? Heights fall back to a Tokyo average." confirm="Remove" onConfirm={() => void o.removeGeoid()}>
               Remove
-            </button>
+            </Confirm>
           </div>
         </div>
       ) : (
@@ -645,7 +637,14 @@ function Job({ job }: { job: DownloadJob }) {
         <span>{job.name}</span>
         <span className="chip">{KIND_LABEL[job.kind]}</span>
       </div>
-      <div className="progress">
+      <div
+        className={`progress-bar${job.state === JobState.Error ? ' failed' : ''}`}
+        role="progressbar"
+        aria-label={`${job.name} download`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(pct)}
+      >
         <i style={{ width: `${pct}%` }} />
       </div>
       <div className="head">

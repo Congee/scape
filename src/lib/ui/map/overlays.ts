@@ -7,19 +7,20 @@ import { shadowLengthM } from '@core/astro/shadow';
 import { destination, geodesicPath, geodesicRay, type LngLat } from '@core/geo/geodesy';
 import { MarkerCategory, type SavedMarker } from '@core/plan';
 import type { LosStatus } from '@core/terrain/los';
+import { Ink } from '../inks';
 
 export const LiveLineKind = { Live: 'Live', Shadow: 'Shadow' } as const;
 export type LiveLineKind = (typeof LiveLineKind)[keyof typeof LiveLineKind];
 
 export const EVENT_COLORS: Record<SkyBody, { rise: string; set: string }> = {
-  Sun: { rise: '#ffd84d', set: '#ff7a1a' },
-  Moon: { rise: '#9ccbff', set: '#2a63b8' },
-  Gc: { rise: '#d2bcff', set: '#8a5cf0' }
+  Sun: { rise: Ink.sunRise, set: Ink.sunSet },
+  Moon: { rise: Ink.moonRise, set: Ink.moonSet },
+  Gc: { rise: Ink.gcRise, set: Ink.gcSet }
 };
 
-export const LIVE_COLORS = { Sun: '#f5a524', Moon: '#5aa9ff', Gc: '#b48cff', Shadow: '#1c1c1c' } as const;
+export const LIVE_COLORS = { Sun: Ink.sun, Moon: Ink.moon, Gc: Ink.gc, Shadow: Ink.chartCivil } as const;
 /** The viewfinder's umbral copper, which the live Moon line turns toward in a lunar eclipse. */
-export const ECLIPSED_MOON_COLOR = '#c0582e';
+export const ECLIPSED_MOON_COLOR = Ink.eclipse;
 
 const rgbOf = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
@@ -32,10 +33,10 @@ export function eclipsedMoonColor(umbra: number): string {
 }
 
 export const LOS_COLORS: Record<LosStatus | 'Unknown', string> = {
-  Clear: '#2ecc71',
-  Marginal: '#f1c40f',
-  Blocked: '#ff5c5c',
-  Unknown: '#9aa7b4'
+  Clear: Ink.losClear,
+  Marginal: Ink.losMarginal,
+  Blocked: Ink.losBlocked,
+  Unknown: Ink.losUnknown
 };
 
 export interface LineProps {
@@ -179,14 +180,14 @@ export function fovCone(pin: LngLat, azimuthDeg: number, hfovDeg: number, o: Fov
 }
 
 export const CATEGORY_COLORS: Record<MarkerCategory, string> = {
-  Peak: '#c9a26b',
-  Building: '#9aa7b4',
-  Tree: '#5cb85c',
-  Lighthouse: '#ff6b6b',
-  Bridge: '#7fb3ff',
-  Waterfall: '#4dd0e1',
-  Viewpoint: '#f5a524',
-  Other: '#d0b8ff'
+  Peak: Ink.markerPeak,
+  Building: Ink.markerBuilding,
+  Tree: Ink.markerTree,
+  Lighthouse: Ink.markerLighthouse,
+  Bridge: Ink.markerBridge,
+  Waterfall: Ink.markerWaterfall,
+  Viewpoint: Ink.markerViewpoint,
+  Other: Ink.markerOther
 };
 
 export interface MarkerFeatureProps {

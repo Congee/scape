@@ -52,6 +52,7 @@ import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, meshEyeKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
+import { FONT_SANS } from '../inks';
 import { MODEL_ACCENT } from '../map/modelOverlay';
 import { CATEGORY_COLORS } from '../map/overlays';
 
@@ -925,7 +926,7 @@ export class ViewfinderController {
     }
     ctx.globalAlpha = sc.night;
     ctx.fillStyle = 'rgba(230,237,243,0.8)';
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `10px ${FONT_SANS}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     for (const l of labels) haloText(ctx, l.name, l.x + 5, l.y - 4);
@@ -949,7 +950,7 @@ export class ViewfinderController {
     ctx.globalAlpha = sc.night;
     if (sc.hfov > 20) {
       ctx.fillStyle = 'rgba(180,170,240,0.7)';
-      ctx.font = 'italic 11px system-ui, sans-serif';
+      ctx.font = `italic 11px ${FONT_SANS}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       for (let i = 0; i < pc.ids.length; i++) {
@@ -978,7 +979,7 @@ export class ViewfinderController {
     ctx.stroke();
     // Below the mark: Polaris' own label sits above-right, less than a degree away.
     ctx.fillStyle = 'rgba(230,237,243,0.7)';
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `10px ${FONT_SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     haloText(ctx, 'Celestial pole', p.x, p.y + 11);
@@ -1027,7 +1028,7 @@ export class ViewfinderController {
     if (this.showers.list.length === 0) return;
     const { ctx } = this;
     const out = new Float64Array(3);
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = `11px ${FONT_SANS}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.lineWidth = 1.2;
@@ -1086,7 +1087,7 @@ export class ViewfinderController {
     let prevSky = false;
     // The picture draws these under the overlay; ghosted ones behind geometry still show.
     const discs: Disc[] = [SkyBody.Sun, SkyBody.Moon].flatMap((b) => this.seen.bodies[b] ?? []);
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `10px ${FONT_SANS}`;
     const pxs = Array.from({ length: curve.n }, (_, i) => this.toPx(sc, azs[i], alts[i]));
     const ins = pxs.map((p) => this.inView(sc, p, 40));
     // Occlusion does not depend on the aim, so a drag reuses it until the path or occluders change.
@@ -1261,7 +1262,7 @@ export class ViewfinderController {
     ctx.beginPath();
     ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = `11px ${FONT_SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     for (const l of labels) {
@@ -1300,7 +1301,7 @@ export class ViewfinderController {
     ctx.lineTo(p.x - 9, p.y);
     ctx.closePath();
     ctx.stroke();
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = `11px ${FONT_SANS}`;
     ctx.textBaseline = 'middle';
     ctx.fillStyle = ctx.strokeStyle;
     const label = `Target · ${distance(d, s.units)}${w.pin2HeightM > 0 ? ` · ${height(w.pin2HeightM, s.units)}` : ''}${blocked ? ' · behind terrain' : ''}`;
@@ -1320,7 +1321,7 @@ export class ViewfinderController {
     ctx.beginPath();
     ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
     ctx.clip();
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = `11px ${FONT_SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     // Flat shading follows the picked light (or the sun at dusk), else a fixed key light from the camera's left.
@@ -1423,7 +1424,7 @@ export class ViewfinderController {
     const c = compositionStore.getState();
     const s = settingsStore.getState();
     const t = terrainStore.getState();
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = `11px ${FONT_SANS}`;
     ctx.textBaseline = 'top';
     const y = sc.frame.y + sc.frame.h + 6;
     const lens = `${effectiveOptics(c).focalMm} mm${c.teleconverters.length === 0 ? '' : ` · ${tcFactor(c.teleconverters)}×`} · ${sc.hfov.toFixed(1)}° × ${sc.vfov.toFixed(1)}°`;
@@ -1458,7 +1459,7 @@ export class ViewfinderController {
     ctx.strokeStyle = 'rgba(230,237,243,0.9)';
     ctx.lineWidth = 1;
     ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w), Math.round(h));
-    ctx.font = '13px system-ui, sans-serif';
+    ctx.font = `13px ${FONT_SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(230,237,243,0.9)';

@@ -98,7 +98,7 @@ TEXT_OF() { echo "(() => document.querySelector('$1')?.textContent.trim().replac
 OFFLINE_TAB="(async () => { $HELPERS const u = await imp('/src/lib/state/ui.ts'); u.uiStore.getState().setPanelTab('Map'); u.uiStore.setState({ panelCollapsed: false }); return 'ok'; })()"
 INPUT='input[aria-label="Import the GSI geoid"]'
 NO_SIDEWAYS='(() => document.documentElement.scrollWidth <= innerWidth)()'
-REMOVE="(() => { window.confirm = () => true; const b = [...document.querySelectorAll('[data-geoid=\"imported\"] button')].find((e) => e.textContent.trim() === 'Remove'); b?.click(); return !!b; })()"
+REMOVE="(async () => { const b = [...document.querySelectorAll('[data-geoid=\"imported\"] button')].find((e) => e.textContent.trim() === 'Remove'); b?.click(); await new Promise(requestAnimationFrame); const y = document.querySelector('[data-geoid=\"imported\"] .confirm .btn.danger'); y?.click(); return !!y; })()"
 
 ab set viewport 1400 900 >/dev/null
 

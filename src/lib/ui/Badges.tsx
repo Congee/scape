@@ -32,12 +32,12 @@ export function Badges() {
       </button>
       {terrain && (
         <span className="badge" title="Ground elevation at the camera location (Terrain Tiles; water shows depth)">
-          ▲ {ground == null || Number.isNaN(ground) ? (busy ? '…' : '—') : height(ground, units)}
+          <span className="k">Elev</span> {ground == null || Number.isNaN(ground) ? (busy ? '…' : '—') : height(ground, units)}
         </span>
       )}
       {sky && (
         <button className="badge sky-badge" onClick={() => uiStore.getState().setPanelTab(PanelTab.Sky)} title={`Sky ≈ ${sky.mag.toFixed(2)} mag/arcsec² at the camera, ${glow.source ? sourceText(glow.source) : 'VIIRS'}. ${SKY_TOOLTIP}`}>
-          ✦ Bortle ≈ {sky.bortle.label}
+          <span className="k">Bortle</span> ≈ {sky.bortle.label}
         </button>
       )}
     </div>

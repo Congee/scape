@@ -8,6 +8,7 @@ import { useUi } from '@state/ui';
 import { useWeather, weatherStore } from '@state/weather';
 import { useWorld } from '@state/world';
 import { Credit, WindyLink } from './CloudChart';
+import { Icon } from './icons';
 import { useMedia } from './useMedia';
 
 const HOUR_MS = 3_600_000;
@@ -70,7 +71,7 @@ export function CloudLegend() {
   if (phone && !open)
     return (
       <button className="cloud-legend folded" data-layer={layer} aria-expanded={false} onClick={() => setOpen(true)} title="Show the cloud legend">
-        {title} <span aria-hidden="true">▸</span>
+        {title} <Icon name="right" />
       </button>
     );
   return (
@@ -78,8 +79,8 @@ export function CloudLegend() {
       <div className="row">
         {title}
         {phone && (
-          <button className="link fold" aria-expanded={true} onClick={() => setOpen(false)} title="Fold the cloud legend">
-            ▾
+          <button className="btn-icon fold" aria-expanded={true} onClick={() => setOpen(false)} title="Fold the cloud legend" aria-label="Fold the cloud legend">
+            <Icon name="down" />
           </button>
         )}
       </div>

@@ -8,24 +8,26 @@ import { dayDataStore } from '@state/dayData';
 import { settingsStore } from '@state/settings';
 import { horizonKeyFor, pinSiteHeightM, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
+import { FONT_SANS, Ink, withAlpha } from '../inks';
 
 const PAD = { l: 30, r: 10, t: 18, b: 16 };
 const ALT_MAX = 90;
 const ALT_MIN = -60;
 const COLORS = {
-  night: '#0b0e12',
-  astro: '#10151c',
-  nautical: '#161d27',
-  civil: '#1e2a38',
-  day: '#26384f',
-  grid: '#2a333e',
-  horizon: '#4a5866',
-  text: '#9aa7b4',
-  cursor: '#e6edf3',
-  now: '#8fd18c',
-  terrain: '#8fd18c'
+  night: Ink.chartNight,
+  astro: Ink.chartAstro,
+  nautical: Ink.chartNautical,
+  civil: Ink.chartCivil,
+  day: Ink.chartDay,
+  grid: Ink.line,
+  horizon: Ink.chartHorizon,
+  text: Ink.fg3,
+  cursor: Ink.fg,
+  now: Ink.fg3,
+  terrain: Ink.terrain
 };
-const BODY_COLORS: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#5aa9ff', Gc: '#b48cff' };
+const BODY_COLORS: Record<SkyBody, string> = { Sun: Ink.sun, Moon: Ink.moon, Gc: Ink.gc };
+const AXIS_FONT = `10px ${FONT_SANS}`;
 
 function bandColor(sunAlt: number): string {
   if (sunAlt > 0) return COLORS.day;
@@ -190,15 +192,15 @@ export class ChartController {
       for (const win of dayDataStore.getState().milkyWay) {
         const x0 = X(win.startMs);
         const x1 = X(win.endMs);
-        ctx.fillStyle = 'rgba(180, 140, 255, 0.10)';
+        ctx.fillStyle = withAlpha(Ink.gc, 0.1);
         ctx.fillRect(x0, PAD.t, x1 - x0, h - PAD.t - PAD.b);
-        ctx.fillStyle = 'rgba(180, 140, 255, 0.85)';
+        ctx.fillStyle = withAlpha(Ink.gc, 0.85);
         ctx.fillRect(x0, h - PAD.b - 3, x1 - x0, 3);
       }
     }
 
     // Grid: every 3 hours, altitude lines at 0/30/60.
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = AXIS_FONT;
     ctx.textBaseline = 'top';
     ctx.strokeStyle = COLORS.grid;
     ctx.lineWidth = 1;
@@ -249,22 +251,22 @@ export class ChartController {
       ctx.lineTo(X(dayEnd), h - PAD.b);
       ctx.lineTo(X(dayStart), h - PAD.b);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(143, 209, 140, 0.16)';
+      ctx.fillStyle = withAlpha(Ink.terrain, 0.16);
       ctx.fill();
       ctx.lineWidth = 1;
       trace(SkyBody.Sun);
-      ctx.strokeStyle = 'rgba(143, 209, 140, 0.85)';
+      ctx.strokeStyle = withAlpha(Ink.terrain, 0.85);
       ctx.stroke();
       trace(SkyBody.Moon);
       ctx.setLineDash([2, 3]);
-      ctx.strokeStyle = 'rgba(143, 209, 140, 0.6)';
+      ctx.strokeStyle = withAlpha(Ink.terrain, 0.6);
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
     if (curveOk) {
       const bodies: Array<[SkyBody, string, number]> = [
-        [SkyBody.Gc, BODY_COLORS.Gc, 1.5],
+        [SkyBody.Gc, BODY_COLORS.Gc, 2],
         [SkyBody.Moon, BODY_COLORS.Moon, 2],
         [SkyBody.Sun, BODY_COLORS.Sun, 2]
       ];
@@ -311,7 +313,8 @@ export class ChartController {
     if (now >= dayStart && now < dayEnd) {
       const x = Math.round(X(now)) + 0.5;
       ctx.strokeStyle = COLORS.now;
-      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([1, 3]);
       ctx.beginPath();
       ctx.moveTo(x, PAD.t);
       ctx.lineTo(x, h - PAD.b);
@@ -324,10 +327,13 @@ export class ChartController {
       const x = Math.round(X(time)) + 0.5;
       ctx.strokeStyle = COLORS.cursor;
       ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(x, PAD.t - 4);
       ctx.lineTo(x, h - PAD.b);
       ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = `700 11px ${FONT_SANS}`;
       ctx.fillStyle = COLORS.cursor;
       ctx.textBaseline = 'top';
       ctx.textAlign = x > w - 60 ? 'right' : x < 60 ? 'left' : 'center';

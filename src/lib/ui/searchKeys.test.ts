@@ -40,7 +40,7 @@ describe('search keys', () => {
 describe('search status', () => {
   it('says searching, then no matches, and nothing once there are results', () => {
     expect(searchStatus({ text: 'zz', coord: false, searching: true, count: 0 })).toBe('Searching…');
-    expect(searchStatus({ text: 'zz', coord: false, searching: false, count: 0 })).toBe('No matches');
+    expect(searchStatus({ text: 'zz', coord: false, searching: false, count: 0 })).toBe('No places');
     expect(searchStatus({ text: 'zz', coord: false, searching: false, count: 2 })).toBeNull();
   });
 

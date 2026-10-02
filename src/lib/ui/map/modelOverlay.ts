@@ -2,14 +2,15 @@ import type { FeatureCollection, LineString, Polygon } from 'geojson';
 import type { LayerSpecification } from 'maplibre-gl';
 import { localToLngLat, modelBaseM, type SavedModel } from '@core/model';
 import { modelMesh } from '@core/model/mesh';
+import { Ink } from '../inks';
 
-export const MODEL_COLOR = '#e0b872';
-export const MODEL_ACCENT = '#5aa9ff';
+export const MODEL_COLOR = Ink.fg2;
+export const MODEL_ACCENT = Ink.edit;
 export const MODELS_FILL_LAYER = 'models-fill';
 export const MODELS_LINE_LAYER = 'models-line';
 export const MODELS_CASING_LAYER = 'models-line-casing';
-export const OUTLINE_COLOR = '#ffffff';
-export const OUTLINE_CASING = '#10141c';
+export const OUTLINE_COLOR = Ink.edit;
+export const OUTLINE_CASING = Ink.bg;
 export const OTHER_MODELS_FILL_LAYER = 'models-fill-others';
 
 const fillLayer = (id: string, source: string, selected: boolean): LayerSpecification => ({

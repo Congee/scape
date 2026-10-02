@@ -1,6 +1,7 @@
 import { isoDate, localParts, offsetLabel, withLocalTime } from '@core/time/localDay';
 import { useWorld, worldStore } from '@state/world';
 import { Calendar } from './Calendar';
+import { Icon } from './icons';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const ZONES: string[] = Intl.supportedValuesOf('timeZone');
@@ -20,23 +21,22 @@ export function DateBar() {
 
   return (
     <div className="datebar">
-      <button onClick={() => addDays(-7)} title="Back one week" aria-label="Back one week">
-        «
+      <button className="btn-icon" onClick={() => addDays(-7)} title="Back one week" aria-label="Back one week">
+        <Icon name="leftDouble" />
       </button>
-      <button onClick={() => addDays(-1)} title="Back one day" aria-label="Back one day">
-        ‹
+      <button className="btn-icon" onClick={() => addDays(-1)} title="Back one day" aria-label="Back one day">
+        <Icon name="left" />
       </button>
       <input type="date" value={iso} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Date" />
       <Calendar />
-      <button onClick={() => addDays(1)} title="Forward one day" aria-label="Forward one day">
-        ›
+      <button className="btn-icon" onClick={() => addDays(1)} title="Forward one day" aria-label="Forward one day">
+        <Icon name="right" />
       </button>
-      <button onClick={() => addDays(7)} title="Forward one week" aria-label="Forward one week">
-        »
+      <button className="btn-icon" onClick={() => addDays(7)} title="Forward one week" aria-label="Forward one week">
+        <Icon name="rightDouble" />
       </button>
       <input
         type="time"
-        className={live ? 'live' : undefined}
         value={hm}
         onChange={(e) => {
           const [h, m] = e.target.value.split(':').map(Number);
@@ -45,7 +45,12 @@ export function DateBar() {
         aria-label="Time"
         title={live ? 'Following real time' : 'Simulated time'}
       />
-      <button className={live ? 'on' : ''} aria-pressed={live} onClick={setNow} title={live ? 'Following real time' : 'Jump to the current time and follow it'}>
+      <button
+        className="tgl"
+        aria-pressed={live}
+        onClick={() => (live ? setTime(worldStore.getState().time) : setNow())}
+        title={live ? 'Following real time; click to stop' : 'Jump to the current time and follow it'}
+      >
         Now
       </button>
       <select

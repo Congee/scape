@@ -1,4 +1,4 @@
-import { mapNotice, mapStatusStore, useMapStatus } from '@state/mapStatus';
+import { mapNotice, MapNoticeKind, mapStatusStore, useMapStatus } from '@state/mapStatus';
 import { useOnline } from '../useOnline';
 
 /** What the map can't draw right now, in one line; gone once it can. */
@@ -14,10 +14,10 @@ export function MapNotice() {
   return (
     <div className="map-notice-slot" role="status">
       {notice && (
-        <p className="map-notice" data-kind={notice.kind}>
+        <p className="map-notice" data-kind={notice.kind} role={notice.kind === MapNoticeKind.TilesFailed ? 'alert' : undefined}>
           {notice.text}
           {notice.retry && (
-            <button className="link" onClick={() => mapStatusStore.getState().retry()}>
+            <button className="btn-link" onClick={() => mapStatusStore.getState().retry()}>
               Retry
             </button>
           )}

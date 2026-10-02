@@ -4,6 +4,7 @@ import { settingsStore } from '@state/settings';
 import { profileKeyFor, terrainStore } from '@state/terrain';
 import { worldStore } from '@state/world';
 import type { ProfileResult } from '@workers/terrain.protocol';
+import { FONT_SANS } from './inks';
 
 const PAD = { l: 44, r: 10, t: 10, b: 18 };
 const C = {
@@ -65,7 +66,7 @@ export class ProfileController {
     const t = terrainStore.getState();
     const units = settingsStore.getState().units;
     const fresh = t.profile && t.profileKey === profileKeyFor(world, settingsStore.getState());
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `10px ${FONT_SANS}`;
     ctx.fillStyle = C.text;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -144,7 +145,7 @@ export class ProfileController {
 
     // Axes.
     ctx.fillStyle = C.text;
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `10px ${FONT_SANS}`;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
     ctx.fillText('0', X(0), base + 3);

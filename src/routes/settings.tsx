@@ -1,9 +1,20 @@
 import { createFileRoute } from '@tanstack/react-router';
 import type { Units } from '@core/format';
 import type { CoordFormat } from '@core/geo/coords';
+import { Confirm } from '@ui/Confirm';
 import { GearSettings } from '@ui/GearSettings';
+import { Segmented } from '@ui/Segmented';
 import { DEFAULT_SETTINGS, settingsStore, useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
+
+const UNITS = [
+  { value: 'metric', label: 'Metric' },
+  { value: 'imperial', label: 'Imperial' }
+] as const satisfies readonly { value: Units; label: string }[];
+const CLOCKS = [
+  { value: '12', label: '12-hour' },
+  { value: '24', label: '24-hour' }
+] as const;
 
 export const Route = createFileRoute('/settings')({ component: SettingsPage });
 
@@ -16,20 +27,14 @@ function SettingsPage() {
       <h1>Settings</h1>
       <section>
         <h2>Display</h2>
-        <label className="field">
+        <div className="field">
           <span>Units</span>
-          <select value={s.units} onChange={(e) => update({ units: e.target.value as Units })}>
-            <option value="metric">Metric</option>
-            <option value="imperial">Imperial</option>
-          </select>
-        </label>
-        <label className="field">
+          <Segmented<Units> label="Units" value={s.units} options={UNITS} onChange={(units) => update({ units })} />
+        </div>
+        <div className="field">
           <span>Time format</span>
-          <select value={s.hour12 ? '12' : '24'} onChange={(e) => update({ hour12: e.target.value === '12' })}>
-            <option value="12">12-hour</option>
-            <option value="24">24-hour</option>
-          </select>
-        </label>
+          <Segmented label="Time format" value={s.hour12 ? '12' : '24'} options={CLOCKS} onChange={(v) => update({ hour12: v === '12' })} />
+        </div>
         <label className="field">
           <span>Coordinates</span>
           <select value={s.coordFormat} onChange={(e) => update({ coordFormat: e.target.value as CoordFormat })}>
@@ -54,24 +59,30 @@ function SettingsPage() {
       </section>
       <section>
         <h2>Terrain</h2>
-        <label className="field">
-          <span>Fetch elevation data (Terrain Tiles)</span>
-          <input type="checkbox" checked={s.terrain} onChange={(e) => update({ terrain: e.target.checked })} />
-        </label>
+        <div className="field">
+          <span>Elevation</span>
+          <button className="tgl" aria-pressed={s.terrain} aria-label="Fetch elevation data" onClick={() => update({ terrain: !s.terrain })}>
+            Fetch (Terrain Tiles)
+          </button>
+        </div>
         <p className="muted">Powers the elevation badge, the sightline profile and the terrain horizon. Water reads as depth in the data; sightlines treat it as sea level.</p>
       </section>
       <section>
         <h2>Weather</h2>
-        <label className="field">
-          <span>Fetch forecasts (Open-Meteo)</span>
-          <input type="checkbox" checked={s.weather} onChange={(e) => update({ weather: e.target.checked })} aria-label="Fetch weather forecasts" />
-        </label>
+        <div className="field">
+          <span>Forecasts</span>
+          <button className="tgl" aria-pressed={s.weather} aria-label="Fetch weather forecasts" onClick={() => update({ weather: !s.weather })}>
+            Fetch (Open-Meteo)
+          </button>
+        </div>
         <p className="muted">Sends the camera, target and map-view locations to Open-Meteo. Off, no weather is fetched and the forecasts read "off for privacy".</p>
       </section>
       <GearSettings />
       <section>
         <h2>Reset</h2>
-        <button onClick={() => update({ ...DEFAULT_SETTINGS, customBasemaps: s.customBasemaps })}>Restore default settings</button>
+        <Confirm className="btn danger" question="Restore every setting to its default?" confirm="Restore" onConfirm={() => update({ ...DEFAULT_SETTINGS, customBasemaps: s.customBasemaps })}>
+          Restore default settings
+        </Confirm>
       </section>
     </div>
   );
