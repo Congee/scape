@@ -90,7 +90,11 @@ reach Weather Weather '.weather'
 reach Weather 'tide and cloud rows' '.cloud-row'
 reach Weather 'Tools clouds' 'input[aria-label="Cloud base above the ground"]'
 reach Map Layers '.layers input[type=checkbox]'
-reach Map Offline 'input[aria-label="Name for the region"]'
+tab Map
+off=$(js '(() => { const a = document.querySelector("#ptabpanel a.offline-row"); if (!a) return "none"; const u = new URL(a.href); const r = `${a.textContent.trim().startsWith("Offline maps")} ${u.pathname}${u.hash}`; a.click(); return r; })()')
+wait_for 'location.pathname === "/settings" && location.hash === "#offline" && document.querySelector("input[aria-label=\"Name for the region\"]")' 40 && reached=1 || reached=0
+check "Map Offline maps row reaches /settings#offline" "$([ "$off" = 'true /settings#offline' ] && echo "$reached" || echo 0)" "$off, region form $reached"
+go
 reach Markers Markers '.markers .actions button'
 reach Markers Models '.markers-switch button'
 
