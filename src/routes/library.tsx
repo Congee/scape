@@ -13,6 +13,7 @@ import { PanelPage, PanelTab, uiStore } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
 import { Confirm, ConfirmAsk } from '@ui/Confirm';
 import { downloadText } from '@ui/download';
+import { Icon } from '@ui/Icon';
 
 export const Route = createFileRoute('/library')({ component: LibraryPage });
 
@@ -210,6 +211,7 @@ function LibraryPage() {
         </label>
         <label className="file danger">
           <input type="file" accept=".json" onChange={(e) => void importEverything(e.currentTarget, ImportMode.Replace)} />
+          <Icon name="alert" />
           Import a Scape export, <strong>replacing everything</strong> saved here
         </label>
         {replacing && (

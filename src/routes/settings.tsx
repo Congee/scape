@@ -3,6 +3,7 @@ import type { Units } from '@core/format';
 import type { CoordFormat } from '@core/geo/coords';
 import { Confirm } from '@ui/Confirm';
 import { GearSettings } from '@ui/GearSettings';
+import { Icon } from '@ui/Icon';
 import { Segmented } from '@ui/Segmented';
 import { DEFAULT_SETTINGS, settingsStore, useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
@@ -81,6 +82,7 @@ function SettingsPage() {
       <section>
         <h2>Reset</h2>
         <Confirm className="btn danger" question="Restore every setting to its default?" confirm="Restore" onConfirm={() => update({ ...DEFAULT_SETTINGS, customBasemaps: s.customBasemaps })}>
+          <Icon name="alert" />
           Restore default settings
         </Confirm>
       </section>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Icon } from './Icon';
 
 interface AskProps {
   question: string;
@@ -22,6 +23,7 @@ export function ConfirmAsk({ question, confirm, onConfirm, onCancel }: AskProps)
     >
       <span className="confirm-q">{question}</span>
       <button className="btn danger" autoFocus onClick={onConfirm}>
+        <Icon name="alert" />
         {confirm}
       </button>
       <button className="btn" onClick={onCancel}>

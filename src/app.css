@@ -489,9 +489,13 @@ textarea {
     order: 1;
     flex-direction: row;
     justify-content: space-around;
-    padding: 4px 0 calc(4px + env(safe-area-inset-bottom));
+    padding: 0 0 env(safe-area-inset-bottom);
     border-right: 0;
     border-top: 1px solid var(--line);
+  }
+  /* Each tab fills its quarter, so the current-view fill and hit area span the cell. */
+  .rail-link {
+    flex: 1 1 0;
   }
   .rail-spacer {
     display: none;
@@ -591,7 +595,6 @@ button:focus-visible {
 }
 
 .btn.danger {
-  border-color: var(--danger);
   color: var(--danger);
 }
 
@@ -1372,10 +1375,10 @@ label.file input {
   background: var(--bg-4);
 }
 
-label.file.danger {
-  margin-top: 12px;
-  padding: 6px 8px;
-  border: 1px solid var(--danger);
+/* Danger is an icon and ink, never a frame. */
+.danger > .icon {
+  margin-right: 4px;
+  color: var(--danger);
 }
 
 label.file.danger strong {
@@ -1400,10 +1403,20 @@ label.file.danger strong {
 
 .field {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
   padding: 6px 0;
+}
+
+/* Labels never wrap; a row too narrow for label and control stacks them instead. */
+.field > span:first-child {
+  white-space: nowrap;
+}
+
+.field input[type='number'] {
+  width: calc(6ch + 1.5em);
 }
 
 /* Library and Settings: Field, ListItem and Button from the design system. */
@@ -1426,15 +1439,16 @@ label.file.danger strong {
 }
 
 .page .field {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
   justify-content: start;
-  justify-items: start;
   min-height: var(--size-control);
   padding: 2px 0;
   color: var(--fg-2);
   font-size: 12px;
   line-height: 16px;
+}
+
+.page .field > span:first-child {
+  min-width: 104px;
 }
 
 .page input:not([type='file']),
@@ -1473,10 +1487,6 @@ label.file.danger strong {
 
 .page button:not(.btn-link, .link, .tgl, .primary, [role='radio']):hover:enabled {
   background: var(--bg-4);
-}
-
-.page button.btn.danger {
-  border-color: var(--danger);
 }
 
 .page button.link {

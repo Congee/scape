@@ -5,7 +5,6 @@ import { formatLngLat } from '@core/geo/coords';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
 import { effectiveOptics } from '@core/optics/fov';
 import { LosStatus } from '@core/terrain/los';
-import { formatDate, formatTime } from '@core/time/format';
 import { BUILDINGS_ATTRIBUTION } from '@data/buildingTiles';
 import { GEOID_DOWNLOAD_URL, geoidCredit } from '@data/geoid';
 import { compositionStore, useComposition, type Composition } from '@state/composition';
@@ -53,13 +52,10 @@ const LIGHT: [LightMode, string, string][] = [
 const RANGES_KM = [50, 100, 150, 200];
 const LOS_WORD: Record<LosStatus, string> = { [LosStatus.Clear]: 'line of sight clear', [LosStatus.Marginal]: 'line of sight marginal', [LosStatus.Blocked]: 'line of sight blocked' };
 
-/** Place, then date · time · heading · focal length. */
+/** Place, then heading · focal length; the DateBar owns the date. */
 export function ViewBand() {
   const pin = useWorld((s) => s.pin);
   const pin2 = useWorld((s) => s.pin2);
-  const time = useWorld((s) => s.time);
-  const tz = useWorld((s) => s.tz);
-  const hour12 = useSettings((s) => s.hour12);
   const format = useSettings((s) => s.coordFormat);
   const aimed = useComposition((s) => s.aimAtTarget);
   const az = useComposition((s) => s.azimuthDeg);
@@ -69,7 +65,7 @@ export function ViewBand() {
   return (
     <div className="band">
       <b className="band-name">{saved ?? formatLngLat(pin, format)}</b>
-      <small>{[formatDate(time, tz), formatTime(time, tz, hour12), `facing ${degrees(heading)} ${compass(heading)}`, `${Math.round(focal)} mm`].join(' · ')}</small>
+      <small>{[`facing ${degrees(heading)} ${compass(heading)}`, `${Math.round(focal)} mm`].join(' · ')}</small>
     </div>
   );
 }

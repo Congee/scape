@@ -3,7 +3,6 @@ import { position } from '@core/astro/positions';
 import { height } from '@core/format';
 import { formatLngLat } from '@core/geo/coords';
 import type { LngLat } from '@core/geo/geodesy';
-import { formatDate, formatTime } from '@core/time/format';
 import { useDayData } from '@state/dayData';
 import { libraryStore, useLibrary } from '@state/library';
 import { useSettings } from '@state/settings';
@@ -26,22 +25,19 @@ export function useSavedName(p: LngLat | null): string | undefined {
   return name;
 }
 
-/** Place and date: the saved location's name, else the coordinates. */
+/** Place: the saved location's name, else the coordinates; the DateBar owns the date. */
 export function PlaceBand() {
   const pin = useWorld((s) => s.pin);
-  const time = useWorld((s) => s.time);
-  const tz = useWorld((s) => s.tz);
-  const hour12 = useSettings((s) => s.hour12);
   const format = useSettings((s) => s.coordFormat);
   const units = useSettings((s) => s.units);
   const ground = useTerrain((s) => s.pinGroundM);
   const saved = useSavedName(pin);
   const coords = formatLngLat(pin, format);
-  const parts = [formatDate(time, tz), formatTime(time, tz, hour12), saved ? coords : null, ground == null || Number.isNaN(ground) ? null : height(ground, units)];
+  const meta = [saved ? coords : null, ground == null || Number.isNaN(ground) ? null : height(ground, units)].filter(Boolean).join(' · ');
   return (
     <div className="band">
       <b className="band-name">{saved ?? coords}</b>
-      <small>{parts.filter(Boolean).join(' · ')}</small>
+      {meta && <small>{meta}</small>}
     </div>
   );
 }

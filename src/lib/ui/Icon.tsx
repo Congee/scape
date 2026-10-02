@@ -14,6 +14,7 @@ const PATHS = {
   arrowDown: 'M8 3v10M4 9l4 4 4-4',
   turnLeft: 'M4 8a4 4 0 1 1 1.2 2.9M4 11.5V8h3.5',
   turnRight: 'M12 8a4 4 0 1 0-1.2 2.9M12 11.5V8H8.5',
+  alert: 'M8 14.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM8 4.5v4M8 11v.5',
 } as const;
 
 export type IconName = keyof typeof PATHS;
