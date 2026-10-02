@@ -8,7 +8,7 @@ import { moonFreeWindow, nextMoonEvent, nightWindow, NightKind, panelNight, type
 import { polarisAid } from '@core/astro/polaris';
 import { moonInfo, position } from '@core/astro/positions';
 import { apply, enuToEqj } from '@core/astro/skyFrame';
-import { azimuth, degrees, moonPhase, percent } from '@core/format';
+import { azimuth, degrees, moonPhase } from '@core/format';
 import { effectiveOptics } from '@core/optics/fov';
 import { dirFromAzAlt } from '@core/optics/projection';
 import { npfShutterS, pixelPitchUm, trailAngleDeg, trailLengthPx } from '@core/optics/startrails';
@@ -30,6 +30,7 @@ import { ScrubCursor, useTimeScrub } from './chart/useTimeScrub';
 import { Dial } from './Dial';
 import { Icon } from './Icon';
 import { Disclosure } from './Section';
+import { mwReasons, mwVerdict, npfSummary } from './summaries';
 
 const DAY_MS = 86_400_000;
 const R2D = 180 / Math.PI;
@@ -311,14 +312,14 @@ export function NightPanel() {
   const moonFree = moonFreeWindow(night, tonight.events, moonUpAtNightfall, totalityFor(night));
   const moonSummary = `${moonPhase(moon.name, moon.illumination)}${nextMoon ? ` · ${nextMoon.kind === EventKind.Rise ? 'rises' : 'sets'} ${formatTime(nextMoon.time, tz, s.hour12)}` : ''}`;
 
-  const starsSummary = `${npf ? `NPF ${npf.toFixed(1)} s at ${opt.focalMm} mm` : 'NPF needs the camera or pixel count'}${polaris.northern ? ` · Polaris ${signed(polaris.polarisAltDeg)}` : ''}`;
+  const starsSummary = npfSummary(npf, opt.focalMm);
   const meteorSummary = active[0]
     ? `${active[0].shower.name} active · peak ${formatDateShort(active[0].peakMs, tz)}`
     : upcoming[0]
       ? `No shower active · next ${upcoming[0].shower.name} ${formatDateShort(upcoming[0].peakMs, tz)}`
       : 'No shower active';
 
-  const reasons = [!mw.dark && `sun at ${signed(mw.sunAltDeg)}`, !mw.coreUp && `core needs ${signed(mw.floorDeg)}`, !mw.moonOk && `moon up, ${percent(mw.moonIllumination, 0)} lit`].filter(Boolean);
+  const reasons = mwReasons(mw);
 
   return (
     <div className="frame night">
@@ -380,13 +381,14 @@ export function NightPanel() {
       <Group
         id="milkyway"
         summaryClass={`verdict${mw.visible ? '' : ' off'}`}
-        summary={
-          <>
-            {mw.visible ? 'Core visible now' : 'Core not visible now'}
-            {reasons.length > 0 && <span className="why"> · {reasons.join(', ')}</span>}
-          </>
-        }
+        summary={mwVerdict(mw)}
       >
+        {reasons.length > 0 && (
+          <div className="kv" data-mw-reasons="">
+            <span className="k">Blocked by</span>
+            <b className="v">{reasons.join(', ')}</b>
+          </div>
+        )}
         {windows.length === 0 && <p className="muted hint">No core window on this day under the rules below.</p>}
         {windows.map((w) => (
           <div key={w.startMs} className="mw-window">

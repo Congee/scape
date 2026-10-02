@@ -39,6 +39,7 @@ const MODE_HELP: Record<HeatMode, string> = {
 
 const DAYS = [30, 90, 180, 365];
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const BODIES: SkyBody[] = [SkyBody.Sun, SkyBody.Moon, SkyBody.Gc];
 const MODES: HeatMode[] = [HeatMode.Off, HeatMode.Viewshed, HeatMode.Visible, HeatMode.Align, HeatMode.Time];
 
@@ -108,9 +109,9 @@ export function FindPanel() {
 
   return (
     <div className="frame find">
-      <div className="seg" role="group" aria-label="Body">
+      <div className="seg" role="radiogroup" aria-label="Body">
         {BODIES.map((b) => (
-          <button key={b} className={f.body === b ? 'on' : ''} onClick={() => update({ body: b })}>
+          <button key={b} role="radio" aria-checked={f.body === b} className={f.body === b ? 'on' : ''} onClick={() => update({ body: b })}>
             {BODY_LABEL[b]}
           </button>
         ))}
@@ -186,9 +187,9 @@ export function FindPanel() {
             <span>Moon below the horizon</span>
           </label>
         )}
-        <div className="chips weekdays">
+        <div className="chips weekdays" role="group" aria-label="Weekdays">
           {WEEKDAYS.map((w, i) => (
-            <button key={w} className={f.weekdays?.includes(i) ? 'on' : ''} onClick={() => setWeekday(i)} title={`Only ${w}`}>
+            <button key={w} className={f.weekdays?.includes(i) ? 'on' : ''} aria-pressed={!!f.weekdays?.includes(i)} aria-label={WEEKDAY_NAMES[i]} onClick={() => setWeekday(i)}>
               {w}
             </button>
           ))}
@@ -242,16 +243,16 @@ export function FindPanel() {
           </button>
           <button onClick={() => saveSearch(true)}>Save search</button>
           <button className="link" onClick={() => saveSearch(false)} title="Save the settings without a camera location">
-            save without location
+            save for any location
           </button>
         </div>
       </Disclosure>
 
       {onMap && (
         <Disclosure id="find-heat" summary={`Visibility & alignment · ${MODE_LABEL[a.mode]}`}>
-          <div className="seg" role="group" aria-label="Heat mode">
+          <div className="seg" role="radiogroup" aria-label="Heat mode">
             {MODES.map((m) => (
-              <button key={m} className={a.mode === m ? 'on' : ''} onClick={() => align.update({ mode: m })}>
+              <button key={m} role="radio" aria-checked={a.mode === m} className={a.mode === m ? 'on' : ''} onClick={() => align.update({ mode: m })}>
                 {MODE_LABEL[m]}
               </button>
             ))}
@@ -260,9 +261,9 @@ export function FindPanel() {
           {a.mode !== HeatMode.Off && (
             <>
               {a.mode !== HeatMode.Viewshed && (
-                <div className="seg" role="group" aria-label="Body for the heat layer">
+                <div className="seg" role="radiogroup" aria-label="Body for the heat layer">
                   {BODIES.map((b) => (
-                    <button key={b} className={a.body === b ? 'on' : ''} onClick={() => align.update({ body: b })}>
+                    <button key={b} role="radio" aria-checked={a.body === b} className={a.body === b ? 'on' : ''} onClick={() => align.update({ body: b })}>
                       {BODY_LABEL[b]}
                     </button>
                   ))}

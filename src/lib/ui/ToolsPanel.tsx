@@ -292,7 +292,7 @@ export function ToolsPanel({ part }: { part: ToolsPart }) {
   return (
     <PartContext value={part}>
       <div className="frame night tools">
-        <Group id="exposure" summary={`Exposure · ${solve === ExposureSolve.Ev ? solvedText : `EV ${evIn || '—'}`} · ${scenes[0] ? `scene ${scenes[0].label.toLowerCase()} EV ${evText(scenes[0].ev)}` : ''}`}>
+        <Group id="exposure" summary={`Exposure · ${solve === ExposureSolve.Ev ? solvedText : `EV ${evIn || '—'}`}${scenes[0] ? ` · now EV ${evText(scenes[0].ev)}` : ''}`}>
           <div className="kv">
             <span className="k">Solve for</span>
             <b className="v">

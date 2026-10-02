@@ -11,6 +11,7 @@ import { usePlanTime, useWorld, worldStore } from '@state/world';
 import { Dial } from './Dial';
 import { CloudRow } from './CloudChart';
 import { sightKey, useSightlines, VERDICT_TEXT } from './Sightlines';
+import { anyUnknown, rowVerdict } from './summaries';
 import { TideChart, tideKindText, tideText, useNearestTide } from './TideChart';
 
 const LABELS: Record<SkyBody, Partial<Record<EventKind, string>>> = {
@@ -67,6 +68,7 @@ export function Timeline() {
 
   const sight = useSightlines().lines;
   const list = events.filter((e) => (detail ? showGc || e.body !== SkyBody.Gc : !isDetail(e)));
+  const verdicts = list.map((e) => sight.get(sightKey(e))?.verdict);
   // An index selector, so a clock tick re-renders only when the active event changes.
   const activeIdx = useWorld((s) => {
     let idx = -1;
@@ -81,11 +83,12 @@ export function Timeline() {
         {activeIdx === -1 && list.length > 0 && <NowLine />}
         {list.map((ev, i) => (
           <Fragment key={`${ev.body}-${ev.kind}-${ev.time}`}>
-            <Row ev={ev} active={i === activeIdx} tz={tz} hour12={hour12} sight={sight.get(sightKey(ev))?.verdict} />
+            <Row ev={ev} active={i === activeIdx} tz={tz} hour12={hour12} sight={rowVerdict(verdicts[i])} />
             {i === activeIdx && <NowLine />}
           </Fragment>
         ))}
       </ul>
+      {anyUnknown(verdicts) && <p className="muted sight-unknown">{VERDICT_TEXT.Unknown}</p>}
     </div>
   );
 }

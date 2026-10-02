@@ -138,8 +138,8 @@ export function LayersPanel() {
             </label>
           )}
         </SettingLayer>
-        <SettingLayer k="showBuildings" label="3D buildings (Overture, from zoom 14)" />
-        <SettingLayer k="showSunShadows" label="Shadows on the ground (terrain and buildings)">
+        <SettingLayer k="showBuildings" label="3D buildings on the map (Overture, from zoom 14)" />
+        <SettingLayer k="showSunShadows" label="Shadows on the map (terrain and buildings)">
           <div className="toggle">
             <span>Light</span>
             <LightSeg />

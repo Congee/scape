@@ -8,7 +8,7 @@ import { LiveReadout } from './LiveReadout';
 import { MarkersPanel } from './MarkersPanel';
 import { NightPanel } from './NightPanel';
 import { ParkingLinks } from './ParkingLinks';
-import { DayStrip, PlaceBand } from './PlanHeader';
+import { PlaceBand } from './PlanHeader';
 import { ToolsPanel, ToolsPart } from './ToolsPanel';
 import { OfflineRow } from './OfflinePanel';
 import { DetailsToggle, TideCloud, Timeline } from './Timeline';
@@ -74,7 +74,6 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
         <div className="tab-body" id="ptabpanel" role="tabpanel" aria-labelledby={`ptab-${tab}`}>
           {tab === PanelTab.Now && (
             <>
-              <DayStrip />
               <Section title="Aim">
                 <AimControl />
               </Section>

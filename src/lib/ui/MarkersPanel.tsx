@@ -23,9 +23,9 @@ export function MarkersPanel() {
   const view = useUi((s) => s.markersView);
   const setView = useUi((s) => s.setMarkersView);
   const head = (
-    <div className="seg markers-switch" role="group" aria-label="Show">
+    <div className="seg markers-switch" role="radiogroup" aria-label="Show">
       {Object.values(MarkersView).map((v) => (
-        <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+        <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
           {v}
         </button>
       ))}

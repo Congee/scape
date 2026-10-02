@@ -18,8 +18,7 @@ const BODIES: Chip[] = [
   ['showSun', 'Sun', 'The sun disc, its label and its path'],
   ['showMoon', 'Moon', 'The moon disc, its label and its path'],
   ['showMilkyWay', 'Milky Way', 'NASA Milky Way map'],
-  ['showPaths', 'Sun & moon paths', 'Sun, moon and Galactic Centre paths for the day'],
-  ['showRainbow', 'Rainbow', 'Where a rainbow would stand: the 42° and 51° arcs opposite the sun']
+  ['showPaths', 'Sun & moon paths', 'Sun, moon and Galactic Centre paths for the day']
 ];
 const NIGHT: Chip[] = [
   ['showStars', 'Stars', 'Star field (HYG, to magnitude 6.5) with the celestial pole'],
@@ -29,8 +28,8 @@ const NIGHT: Chip[] = [
   ['showRadiants', 'Meteor radiants', 'Radiants of the active meteor showers']
 ];
 const LAYERS: Chip[] = [
-  ['showBuildings', 'Buildings', 'OpenStreetMap / Overture building volumes'],
-  ['showSunShadows', 'Shadows', 'Sun shadows cast by terrain and buildings'],
+  ['showBuildings', 'Buildings in view', 'OpenStreetMap / Overture building volumes in the viewfinder'],
+  ['showSunShadows', 'Shadows in view', 'Shadows cast by terrain and buildings in the viewfinder'],
   ['showMarkers', 'Markers', 'Markers flagged for the viewfinder'],
   ['showGrid', 'Grid', 'Rule-of-thirds grid']
 ];

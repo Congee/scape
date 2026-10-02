@@ -2219,10 +2219,6 @@ label.file.danger strong {
   color: var(--fg-2);
 }
 
-.night .verdict .why {
-  color: var(--fg-3);
-}
-
 .night label.toggle input[type='number'] {
   margin: 0 4px;
 }
@@ -2345,8 +2341,20 @@ label.file.danger strong {
   background: var(--accent);
 }
 
-.weekdays button {
-  min-width: 28px;
+.chips.weekdays {
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+}
+
+.panel .chips.weekdays button[aria-pressed] {
+  min-height: var(--size-control);
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+}
+
+.chips.tc {
+  display: inline-flex;
+  padding: 0;
 }
 
 .find details.offset {
@@ -3001,35 +3009,6 @@ button.cloud-legend.folded:hover {
   padding: 0;
 }
 
-/* Day phase strip */
-.zone {
-  margin: 10px 6px 0;
-}
-
-.zone-strip {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(24, 1fr);
-  height: 14px;
-}
-
-.zone-now {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--fg);
-}
-
-.zone-axis {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 4px;
-  font-size: 10px;
-  color: var(--fg-3);
-}
-
 /* Hybrid look inside the panel: neutral, square, ruled. */
 .panel {
   --accent: var(--fg);
@@ -3313,8 +3292,10 @@ button.cloud-legend.folded:hover {
   line-height: 16px;
 }
 
+/* One step above the Disclosure sub-heads (10.5px, --fg-2). */
 .panel .psec-h {
-  padding: var(--space-4) var(--space-6) var(--space-2);
+  padding: var(--space-6) var(--space-6) var(--space-3);
+  font-size: 12px;
 }
 
 .panel .psec-b {

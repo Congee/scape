@@ -115,9 +115,9 @@ export function FramePanel() {
           </b>
           <span className="k">Orientation</span>
           <b className="v">
-            <span className="seg">
+            <span className="seg" role="radiogroup" aria-label="Orientation">
               {[Orientation.Landscape, Orientation.Portrait].map((o) => (
-                <button key={o} className={c.orientation === o ? 'on' : ''} onClick={() => update({ orientation: o })}>
+                <button key={o} role="radio" aria-checked={c.orientation === o} className={c.orientation === o ? 'on' : ''} onClick={() => update({ orientation: o })}>
                   {o}
                 </button>
               ))}
@@ -191,10 +191,7 @@ export function FramePanel() {
           <div className="kv">
             <span className="k">Teleconverter</span>
             <b className="v">
-              <span className="seg">
-                <button className={tc ? '' : 'on'} onClick={() => update({ teleconverters: [] })} title="No teleconverter">
-                  None
-                </button>
+              <span className="chips tc">
                 {[Teleconverter.X14, Teleconverter.X20].map((t) => (
                   <button
                     key={t}
@@ -260,11 +257,11 @@ export function FramePanel() {
             </b>
             <span className="k">CoC rule</span>
             <b className="v">
-              <span className="seg">
-                <button className={cocRule === CocRule.Standard ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.Standard })} title="Zeiss 0.03 mm scaled by the crop factor">
+              <span className="seg" role="radiogroup" aria-label="CoC rule">
+                <button role="radio" aria-checked={cocRule === CocRule.Standard} className={cocRule === CocRule.Standard ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.Standard })} title="Zeiss 0.03 mm scaled by the crop factor">
                   Standard
                 </button>
-                <button className={cocRule === CocRule.PixelPitch ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.PixelPitch })} title="Twice the pixel pitch, for large prints">
+                <button role="radio" aria-checked={cocRule === CocRule.PixelPitch} className={cocRule === CocRule.PixelPitch ? 'on' : ''} onClick={() => setSetting({ cocRule: CocRule.PixelPitch })} title="Twice the pixel pitch, for large prints">
                   Pixel pitch
                 </button>
               </span>

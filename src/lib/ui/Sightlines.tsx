@@ -10,6 +10,7 @@ import { useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 import { missingText, useForecast } from './CloudChart';
 import { Dial } from './Dial';
+import { anyUnknown, rowVerdict } from './summaries';
 
 const NAMES: Partial<Record<SkyBody, Partial<Record<EventKind, string>>>> = {
   Sun: { Rise: 'Sunrise', Set: 'Sunset' },
@@ -61,6 +62,7 @@ export function Sightlines() {
           </button>
         </p>
       )}
+      {!loading && !missing && anyUnknown(events.map((e) => lines.get(sightKey(e))?.verdict)) && <p className="muted sight-unknown">{VERDICT_TEXT.Unknown}</p>}
       {!loading &&
         !missing &&
         events.map((e) => {
@@ -74,7 +76,7 @@ export function Sightlines() {
                   <button className="link" onClick={() => worldStore.getState().setTime(e.time)} title="Set the clock to this moment">
                     {NAMES[e.body]?.[e.kind]}
                   </button>{' '}
-                  <b className={`verdict ${l.verdict.toLowerCase()}`}>{VERDICT_TEXT[l.verdict]}</b>
+                  {rowVerdict(l.verdict) && <b className={`verdict ${l.verdict.toLowerCase()}`}>{VERDICT_TEXT[l.verdict]}</b>}
                 </span>
                 <span className="time">{formatTime(e.time, tz, hour12)}</span>
                 <span className="az">
