@@ -109,7 +109,7 @@ export function LayersPanel() {
               <input type="file" accept=".pmtiles" onChange={(e) => addFile(e.target.files?.[0])} />
               Open a local .pmtiles file (this session only)
             </label>
-            <p className="muted hint">Regions for offline use are downloaded and imported in the Offline tab.</p>
+            <p className="muted hint">Regions for offline use are downloaded and imported in Settings, under Offline.</p>
           </details>
         </div>
       </Section>
@@ -153,7 +153,7 @@ export function LayersPanel() {
             </select>
           </label>
         </SettingLayer>
-        <SettingLayer k="showLightPollution" label="Night lights (NASA VIIRS Black Marble): brighter means more light pollution" />
+        <SettingLayer k="showLightPollution" label="Light pollution" />
         <SettingLayer k="showEventLines" label="Rise and set azimuth lines" />
         <SettingLayer k="showLiveLines" label="Live sun, moon and Galactic Centre lines" />
         <SettingLayer k="showShadow" label="Sun shadow (direction and length)">

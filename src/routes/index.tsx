@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { mapSearchFor, parseInstant, parsePoint, validateScene, type SceneSearch } from '@state/urlState';
+import { offlineStore } from '@state/offline';
 import { worldStore } from '@state/world';
 import { Badges } from '@ui/Badges';
 import { CloudLegend } from '@ui/CloudLayerControls';
@@ -62,6 +63,15 @@ function MapPage() {
       clearTimeout(timer);
     };
   }, [navigate]);
+
+  // Drawing a region starts in Settings; finishing or cancelling it goes back there.
+  useEffect(
+    () =>
+      offlineStore.subscribe((s) => s.drawing, (on) => {
+        if (!on) void navigate({ to: '/settings', hash: 'offline' });
+      }),
+    [navigate]
+  );
 
   return (
     <div className={usePanelClass('map-page')}>

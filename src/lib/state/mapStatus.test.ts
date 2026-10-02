@@ -17,6 +17,10 @@ describe('map notice', () => {
     expect(mapNotice({ online: true, tileError: true, satGap: true })?.kind).toBe(MapNoticeKind.TilesFailed);
   });
 
+  it('puts the drawing hint above everything else', () => {
+    expect(mapNotice({ online: false, tileError: true, satGap: true, drawing: true })).toEqual({ kind: MapNoticeKind.Drawing, text: 'Drag a rectangle on the map; Esc cancels.', retry: false });
+  });
+
   it('clears the error on retry and drops its source with it', () => {
     const s = mapStatusStore.getState();
     s.setError('AJAXError: Failed to fetch (0): https://x', 'openmaptiles');

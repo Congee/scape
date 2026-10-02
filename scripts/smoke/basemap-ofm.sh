@@ -34,7 +34,7 @@ removeRegion() {
   js "(async()=>{const o=__scape.offline.getState(); for (const a of o.archives.filter(a=>a.name==='$NAME')) await o.remove(a.id); return __scape.offline.getState().archives.filter(a=>a.name==='$NAME').length})()"
 }
 offlineTab() {
-  poll "(()=>{[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Map')?.click(); return !!document.querySelector('select[aria-label=\"Basemap source\"]')})()" 20
+  poll "(()=>{document.querySelector('a.rail-link[aria-label=Settings]')?.click(); return !!document.querySelector('select[aria-label=\"Basemap source\"]')})()" 20
 }
 # Rendered labels: symbol features that carry text.
 LABELS="__scapeMap.queryRenderedFeatures().filter(f=>f.layer.type==='symbol'&&f.layer.layout?.['text-field']).length"
@@ -94,6 +94,8 @@ check "network offline (CDP)" "$([ "$net" = offline ] && echo 1 || echo 0)" "$ne
 js "(()=>{__scapeMap.jumpTo({center:$CENTRE,zoom:14.5,pitch:0,bearing:0}); return 1})()" >/dev/null
 offlineTab
 js "(()=>{[...document.querySelectorAll('li.archive')].find(l=>l.querySelector('input').value==='$NAME').querySelector('button.link').click(); return 1})()" >/dev/null
+js "(()=>{document.querySelector('a.rail-link[aria-label=Map]').click(); return 1})()" >/dev/null
+poll "location.pathname==='/' && !!window.__scapeMap" 30
 poll "__scapeMap.getStyle()?.glyphs?.startsWith('scape-asset://$ID/') && __scapeMap.loaded() && $LABELS>0" 40
 st=$(js "(()=>{const s=__scapeMap.getStyle(); return Object.values(s.sources).filter(x=>x.type==='vector').map(x=>x.url).join(',')+' sprite='+(typeof s.sprite==='string'?s.sprite:'?')})()")
 check "style reads the local archive" "$(echo "$st" | grep -q "pmtiles://opfs/$ID.pmtiles" && echo 1 || echo 0)" "$st"

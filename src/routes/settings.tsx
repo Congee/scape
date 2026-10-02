@@ -4,6 +4,7 @@ import type { CoordFormat } from '@core/geo/coords';
 import { Confirm } from '@ui/Confirm';
 import { GearSettings } from '@ui/GearSettings';
 import { Icon } from '@ui/Icon';
+import { OfflinePanel } from '@ui/OfflinePanel';
 import { Segmented } from '@ui/Segmented';
 import { DEFAULT_SETTINGS, settingsStore, useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
@@ -79,6 +80,10 @@ function SettingsPage() {
         <p className="muted">Sends the camera, target and map-view locations to Open-Meteo. Off, no weather is fetched and the forecasts read "off for privacy".</p>
       </section>
       <GearSettings />
+      <section id="offline">
+        <h2>Offline</h2>
+        <OfflinePanel />
+      </section>
       <section>
         <h2>Reset</h2>
         <Confirm className="btn danger" question="Restore every setting to its default?" confirm="Restore" onConfirm={() => update({ ...DEFAULT_SETTINGS, customBasemaps: s.customBasemaps })}>

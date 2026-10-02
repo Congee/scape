@@ -1438,6 +1438,28 @@ label.file.danger strong {
   letter-spacing: 0.04em;
 }
 
+/* Panel sections on a page (Offline) read as flat sub-heads, like Gear's. */
+.page .psec {
+  margin: 0;
+}
+
+.page .psec + .psec {
+  border-top: 0;
+}
+
+.page .psec-h {
+  margin: 16px 0 6px;
+  padding: 0;
+  color: var(--fg-2);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.page .psec-b {
+  margin: 0;
+  background: none;
+}
+
 .page .field {
   min-height: var(--size-control);
   padding: 2px 0;
@@ -2383,6 +2405,25 @@ label.file.danger strong {
 }
 
 /* Offline panel */
+.offline-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.offline-row:hover {
+  background: var(--bg-4);
+}
+
+@media (pointer: coarse) {
+  .offline-row {
+    min-height: var(--size-target);
+  }
+}
+
 .offline .job,
 .offline .archive {
   flex-direction: column;

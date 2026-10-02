@@ -154,9 +154,9 @@ for (const v of views) {
 }
 await tab.viewport(1400, 900);
 
-// 2. Offline tab: Check LAADS lists the year from the stub.
-await ev(`window.__scape.ui.getState().setPanelTab('Map')`);
-const tabNow = await ev<string>('window.__scape.ui.getState().panelTab');
+// 2. Settings, Offline: Check LAADS lists the year from the stub.
+await ev(`document.querySelector('a.rail-link[aria-label=Settings]').click()`);
+const tabNow = await tab.until<string>(`location.pathname === '/settings' && location.pathname`, 10_000);
 await tab.until(`[...document.querySelectorAll('button')].some((b) => /Check LAADS|Recheck LAADS/.test(b.textContent))`, 20_000);
 await ev(`(() => {
   const i = document.querySelector('input[aria-label="VIIRS composite year"]');
@@ -168,7 +168,7 @@ await ev(`[...document.querySelectorAll('button')].find((b) => /Check LAADS|Rech
 const listed = await tab.until<string>(`(() => { const l = window.__scape.offline.getState().viirs.listings[${YEAR}]; return l ? l.join(' ') : ''; })()`, 20_000);
 const chips = await ev<string>(`[...document.querySelectorAll('.viirs-need [data-tile]')].map((c) => c.dataset.tile + ':' + c.className.replace('chip ', '')).join(' ')`);
 await tab.shot(join(shots, 'desktop-offline-listing.png'));
-check('Map tab; stubbed LAADS listing stored', tabNow === 'Map' && stubbed >= 1 && listed === LISTED.join(' ') && chips.includes('h18v03:viirs-missing') && chips.includes('h17v04:viirs-ocean'), `tab ${tabNow}, ${stubbed} stubbed, chips ${chips}`);
+check('Settings; stubbed LAADS listing stored', tabNow === '/settings' && stubbed >= 1 && listed === LISTED.join(' ') && chips.includes('h18v03:viirs-missing') && chips.includes('h17v04:viirs-ocean'), `tab ${tabNow}, ${stubbed} stubbed, chips ${chips}`);
 
 // 3. Import the synthetic tiles through the Offline file input.
 const files = readdirSync(tiles)

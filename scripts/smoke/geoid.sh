@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Geoid smoke: a synthetic GSIGEO2011 file imported through the Offline tab moves Tokyo's PLATEAU heights by exactly its offset from 37.0 m; removing it reverts them; Rotterdam never changes.
+# Geoid smoke: a synthetic GSIGEO2011 file imported through Settings, under Offline, moves Tokyo's PLATEAU heights by exactly its offset from 37.0 m; removing it reverts them; Rotterdam never changes.
 # Usage: scripts/smoke/geoid.sh [port] [cdp-port] [screenshot-dir] [brave-profile]
 # Starts what is missing (vite dev, one background Brave) and stops only what it started. The grid is synthetic, written to the screenshot dir at runtime.
 set -uo pipefail
@@ -95,8 +95,8 @@ DIFF="(async () => { $HELPERS const l = await imp('/src/lib/state/lod2.ts'); let
 HASH="(async () => { $HELPERS const l = await imp('/src/lib/state/lod2.ts'); let h = 0, v = 0; for (const [, t] of [...l.lod2Store.getState().tiles].sort(([a], [b]) => (a < b ? -1 : 1))) { const w = new Uint32Array(t.mesh.pos.buffer, t.mesh.pos.byteOffset, t.mesh.pos.length); for (let i = 0; i < w.length; i++) h = (Math.imul(h, 31) + w[i]) | 0; v += w.length / 3; } return \`\${l.lod2Store.getState().tiles.size} \${v} \${(h >>> 0).toString(16)}\`; })()"
 GEOID_META="(async () => { $HELPERS const o = await imp('/src/lib/state/offline.ts'); const g = o.offlineStore.getState().geoid; return g ? \`\${g.version.replaceAll(' ', '_')} \${g.rows}x\${g.cols} \${g.fileName}\` : 'none'; })()"
 TEXT_OF() { echo "(() => document.querySelector('$1')?.textContent.trim().replaceAll(' ', '_') ?? 'absent')()"; }
-# Offline lives on the map page; the rail links keep the page, so the tiles and the snapshot survive.
-OFFLINE_TAB="(async () => { $HELPERS const u = await imp('/src/lib/state/ui.ts'); u.uiStore.getState().setPanelTab('Map', 'map'); u.uiStore.setState({ panelCollapsed: false }); document.querySelector('a.rail-link[aria-label=Map]').click(); return 'ok'; })()"
+# Offline lives in Settings; the rail links navigate in place, so the stores and the snapshot survive.
+OFFLINE_TAB="(() => { document.querySelector('a.rail-link[aria-label=Settings]').click(); return 'ok'; })()"
 TO_VF="(() => { document.querySelector('a.rail-link[aria-label=Viewfinder]').click(); return 'ok'; })()"
 INPUT='input[aria-label="Import the GSI geoid"]'
 NO_SIDEWAYS='(() => document.documentElement.scrollWidth <= innerWidth)()'

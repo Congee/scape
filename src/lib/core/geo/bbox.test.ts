@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bboxCentre, bboxContains, bboxFromCorners, bboxIntersects } from './bbox';
+import { bboxCentre, bboxContains, bboxFromCorners, bboxIntersects, distinctBboxes } from './bbox';
 
 const alps = { west: 6, south: 45, east: 9, north: 47 };
 const dateline = { west: 170, south: -10, east: -170, north: 10 };
@@ -7,6 +7,11 @@ const dateline = { west: 170, south: -10, east: -170, north: 10 };
 describe('bbox', () => {
   it('orders corners into a box', () => {
     expect(bboxFromCorners({ lng: 9, lat: 45 }, { lng: 6, lat: 47 })).toEqual(alps);
+  });
+
+  it('counts each box once, whatever its precision', () => {
+    expect(distinctBboxes([])).toBe(0);
+    expect(distinctBboxes([alps, { ...alps, digits: { lat: 2, lng: 2 } }, dateline])).toBe(2);
   });
 
   it('wraps out-of-range corner longitudes', () => {

@@ -42,13 +42,14 @@ export interface OfflineState {
   /** Region being drawn or edited on the map. */
   draft: Bbox | null;
   drawing: boolean;
-  /** Bumped to ask the map for its current bounds. */
-  viewSeq: number;
+  /** Bounds of the map when it was last shown; the map is gone while Settings is open. */
+  mapView: Bbox | null;
   load(): Promise<void>;
   refreshStorage(): Promise<void>;
   requestPersist(): Promise<boolean>;
   setDraft(b: Bbox | null): void;
   setDrawing(on: boolean): void;
+  setMapView(b: Bbox): void;
   takeMapView(): void;
   estimate(spec: RegionSpec): Promise<Estimate>;
   /** Returns the job id, which becomes the archive id. */
@@ -128,7 +129,7 @@ export const offlineStore = create<OfflineState>()(
       storage: null,
       draft: null,
       drawing: false,
-      viewSeq: 0,
+      mapView: null,
       geoid: null,
       viirs: { tiles: [], listings: {} },
       gibs: NO_GIBS,
@@ -158,7 +159,8 @@ export const offlineStore = create<OfflineState>()(
 
       setDraft: (b) => set({ draft: b }),
       setDrawing: (on) => set({ drawing: on }),
-      takeMapView: () => set((s) => ({ viewSeq: s.viewSeq + 1 })),
+      setMapView: (b) => set({ mapView: b }),
+      takeMapView: () => set((s) => (s.mapView ? { draft: s.mapView } : {})),
 
       estimate: (spec) =>
         new Promise<Estimate>((resolve, reject) => {

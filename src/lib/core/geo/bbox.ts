@@ -48,3 +48,6 @@ export function bboxCentre(b: Bbox): LngLat {
   const width = b.west <= b.east ? b.east - b.west : b.east + 360 - b.west;
   return { lng: normalizeLng(b.west + width / 2), lat: (b.south + b.north) / 2, ...(b.digits ? { digits: b.digits } : {}) };
 }
+
+/** How many different boxes the list holds; precision is ignored. */
+export const distinctBboxes = (bs: readonly Bbox[]): number => new Set(bs.map((b) => `${b.west},${b.south},${b.east},${b.north}`)).size;

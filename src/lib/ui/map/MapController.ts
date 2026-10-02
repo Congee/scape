@@ -402,7 +402,6 @@ export class MapController {
       offlineStore.subscribe((st) => st.draft, () => this.renderRegion()),
       modelsStore.subscribe((st) => st.importRings, () => this.renderImportPick()),
       offlineStore.subscribe((st) => st.drawing, (on) => this.setDrawingRegion(on)),
-      offlineStore.subscribe((st) => st.viewSeq, () => this.draftFromView()),
       settingsStore.subscribe(
         (st) => [st.showEventLines, st.showLiveLines, st.showShadow, st.showGc, st.shadowObjectHeightM] as const,
         () => this.renderAll(),
@@ -430,6 +429,8 @@ export class MapController {
       })
     );
 
+    // Settings starts the drawing and then opens the map.
+    if (offlineStore.getState().drawing) this.setDrawingRegion(true);
     this.showBothPins();
   }
 
@@ -705,9 +706,9 @@ export class MapController {
     }
   }
 
-  private draftFromView() {
+  private recordView() {
     const b = this.map.getBounds();
-    offlineStore.getState().setDraft(bboxFromCorners({ lng: b.getWest(), lat: b.getSouth() }, { lng: b.getEast(), lat: b.getNorth() }));
+    offlineStore.getState().setMapView(bboxFromCorners({ lng: b.getWest(), lat: b.getSouth() }, { lng: b.getEast(), lat: b.getNorth() }));
   }
 
   // MapLibre never refetches tiles that failed while offline.
@@ -1311,6 +1312,7 @@ export class MapController {
     this.candidate?.remove();
     this.fovHandle?.remove();
     this.fovEdgeHandle?.remove();
+    this.recordView();
     this.map.remove();
   }
 }

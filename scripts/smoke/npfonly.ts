@@ -99,8 +99,8 @@ const run = async (sky: 'NoData' | 'Ready') => {
 
 await run('NoData');
 
-// Import the synthetic tiles through the Offline file input.
-await ev(`window.__scape.ui.getState().setPanelTab('Map')`);
+// Import the synthetic tiles through the Offline file input in Settings.
+await ev(`document.querySelector('a.rail-link[aria-label=Settings]').click()`);
 await tab.until(`!!document.querySelector('input[aria-label="Import VNP46A4 tiles"]')`, 20_000);
 const files = readdirSync(tiles)
   .filter((f) => f.endsWith('.h5'))

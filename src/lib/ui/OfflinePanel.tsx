@@ -1,5 +1,6 @@
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { bboxCentre, type Bbox } from '@core/geo/bbox';
+import { bboxCentre, distinctBboxes, type Bbox } from '@core/geo/bbox';
 import { formatLngLat } from '@core/geo/coords';
 import { distanceM } from '@core/geo/geodesy';
 import { bytes } from '@core/format';
@@ -16,6 +17,7 @@ import { EARTHDATA_SIGNUP, laadsYearUrl, tilesNear, VIIRS_FIRST_YEAR, VIIRS_MARG
 import { clearGibs, offerYear } from '@state/skyglow';
 import { useWorld } from '@state/world';
 import { Confirm } from './Confirm';
+import { Icon } from './Icon';
 import { Section } from './Section';
 import { ArchiveKind, type ArchiveMeta, type Estimate, type RegionSpec } from '@workers/region.protocol';
 
@@ -82,6 +84,18 @@ const ZOOMS: Record<ArchiveKind, [number, number] | null> = {
   [ArchiveKind.Satellite]: null
 };
 
+/** The Map tab's way into the Offline section of Settings. */
+export function OfflineRow() {
+  const n = useOffline((s) => distinctBboxes(s.archives.map((a) => a.bbox)));
+  return (
+    <Section className="layers">
+      <Link to="/settings" hash="offline" className="offline-row">
+        Offline maps · {n} {n === 1 ? 'region' : 'regions'} <Icon name="right" />
+      </Link>
+    </Section>
+  );
+}
+
 export function OfflinePanel() {
   const supported = useOffline((s) => s.supported);
   const archives = useOffline((s) => s.archives);
@@ -89,6 +103,8 @@ export function OfflinePanel() {
   const storage = useOffline((s) => s.storage);
   const draft = useOffline((s) => s.draft);
   const drawing = useOffline((s) => s.drawing);
+  const mapView = useOffline((s) => s.mapView);
+  const navigate = useNavigate();
   const coordFormat = useSettings((s) => s.coordFormat);
   const basemapId = useSettings((s) => s.basemapId);
   const offlineFlavor = useSettings((s) => s.offlineFlavor);
@@ -216,15 +232,23 @@ export function OfflinePanel() {
           <p className="muted hint">No region</p>
         )}
         <div className="actions">
-          <button onClick={() => o.takeMapView()}>Use the map view</button>
-          <button className={drawing ? 'on' : ''} aria-pressed={drawing} onClick={() => o.setDrawing(!drawing)}>
+          <button onClick={() => o.takeMapView()} disabled={!mapView}>
+            Use the map view
+          </button>
+          <button
+            className={drawing ? 'on' : ''}
+            aria-pressed={drawing}
+            onClick={() => {
+              o.setDrawing(!drawing);
+              if (!drawing) void navigate({ to: '/' });
+            }}
+          >
             Draw on the map
           </button>
           <button onClick={() => o.setDraft(null)} disabled={!draft}>
             Clear
           </button>
         </div>
-        {drawing && <p className="muted hint">Drag a rectangle on the map; Esc cancels.</p>}
       </Section>
       <Section title="Download" className="layers offline">
         <div className="field-row">

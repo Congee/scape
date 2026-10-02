@@ -9,7 +9,7 @@ import { NightPanel } from './NightPanel';
 import { ParkingLinks } from './ParkingLinks';
 import { DayStrip, PlaceBand } from './PlanHeader';
 import { ToolsPanel, ToolsPart } from './ToolsPanel';
-import { OfflinePanel } from './OfflinePanel';
+import { OfflineRow } from './OfflinePanel';
 import { DetailsToggle, TideCloud, Timeline } from './Timeline';
 import { WeatherPanel } from './WeatherPanel';
 import { PAGE_TABS, PanelPage, PanelTab, uiStore, useUi } from '@state/ui';
@@ -123,7 +123,7 @@ export function Panel({ page = PanelPage.Map }: { page?: PanelPage }) {
           {tab === PanelTab.Map && (
             <>
               <LayersPanel />
-              <OfflinePanel />
+              <OfflineRow />
             </>
           )}
           {tab === PanelTab.View && <ViewTools />}

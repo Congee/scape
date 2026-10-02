@@ -45,7 +45,7 @@ export const mapStatusStore = create<MapStatusState>()(
 
 export const useMapStatus = mapStatusStore;
 
-export const MapNoticeKind = { Offline: 'Offline', TilesFailed: 'TilesFailed', NoSatellite: 'NoSatellite' } as const;
+export const MapNoticeKind = { Offline: 'Offline', TilesFailed: 'TilesFailed', NoSatellite: 'NoSatellite', Drawing: 'Drawing' } as const;
 export type MapNoticeKind = (typeof MapNoticeKind)[keyof typeof MapNoticeKind];
 
 export interface MapNotice {
@@ -54,8 +54,9 @@ export interface MapNotice {
   retry: boolean;
 }
 
-/** The one line the map shows about what it cannot draw; offline explains failed tiles, so it wins. */
-export function mapNotice(s: { online: boolean; tileError: boolean; satGap: boolean }): MapNotice | null {
+/** The one line the map shows about what it cannot draw; offline explains failed tiles, so it wins. A region being drawn beats both. */
+export function mapNotice(s: { online: boolean; tileError: boolean; satGap: boolean; drawing?: boolean }): MapNotice | null {
+  if (s.drawing) return { kind: MapNoticeKind.Drawing, text: 'Drag a rectangle on the map; Esc cancels.', retry: false };
   if (!s.online) return { kind: MapNoticeKind.Offline, text: 'Offline: showing cached map only', retry: false };
   if (s.tileError) return { kind: MapNoticeKind.TilesFailed, text: "Map tiles couldn't load", retry: true };
   if (s.satGap) return { kind: MapNoticeKind.NoSatellite, text: 'No satellite imagery here without a MapTiler key', retry: false };

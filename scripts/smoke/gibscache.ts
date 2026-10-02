@@ -38,7 +38,12 @@ const go = async () => {
   await tab.until('!!window.__scape?.offline.getState().loaded', 60_000);
 };
 const setTab = (t: string) => ev(`(() => { const u = window.__scape.ui; u.getState().setPanelTab('${t}'); u.setState({ panelCollapsed: false }); })()`);
+const toViewfinder = async () => {
+  await ev(`(() => { if (location.pathname !== '/viewfinder') document.querySelector('a.rail-link[aria-label=Viewfinder]').click(); })()`);
+  await tab.until(`location.pathname === '/viewfinder' && !!document.querySelector('.panel-inner .tablist')`, 20_000, 100);
+};
 const openNight = async () => {
+  await toViewfinder();
   await setTab('Sky');
   await tab.until(`(() => { const d = document.querySelector('[data-sky]')?.closest('details'); if (!d) return false; d.open = true; d.scrollIntoView({ block: 'start' }); return true; })()`, 10_000, 100);
   const ok = await tab.until(`(() => { const g = window.__scape.skyglow.getState(); return g.camera.status === 'Ready' && g.target.status === 'Ready'; })()`, 120_000);
@@ -46,7 +51,7 @@ const openNight = async () => {
   return !!ok;
 };
 const openOffline = async () => {
-  await setTab('Map');
+  await ev(`document.querySelector('a.rail-link[aria-label=Settings]').click()`);
   await tab.until(`(() => { const e = document.querySelector('[data-gibs]'); if (!e) return false; e.scrollIntoView({ block: 'center' }); return true; })()`, 10_000, 100);
   await Bun.sleep(400);
 };
@@ -98,6 +103,7 @@ for (const v of [
 }
 
 // 4. Idle: no frames, GPU work or requests.
+await toViewfinder();
 for (const t0 = Date.now(); Date.now() - t0 < 30_000; ) {
   await ev('window.__scape.idle.reset()');
   await Bun.sleep(1000);

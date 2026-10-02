@@ -1,4 +1,5 @@
 import { mapNotice, MapNoticeKind, mapStatusStore, useMapStatus } from '@state/mapStatus';
+import { useOffline } from '@state/offline';
 import { useOnline } from '../useOnline';
 
 /** What the map can't draw right now, in one line; gone once it can. */
@@ -6,7 +7,8 @@ export function useMapNotice() {
   const online = useOnline();
   const tileError = useMapStatus((s) => s.error !== null);
   const satGap = useMapStatus((s) => s.satGap);
-  return mapNotice({ online, tileError, satGap });
+  const drawing = useOffline((s) => s.drawing);
+  return mapNotice({ online, tileError, satGap, drawing });
 }
 
 export function MapNotice() {
