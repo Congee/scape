@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CoordFormat } from '@core/geo/coords';
 import { ClickMode, DEFAULT_SETTINGS, migrateSettings, SETTINGS_PERSIST, SETTINGS_VERSION } from './settings';
 
 describe('migrateSettings', () => {
@@ -16,6 +17,14 @@ describe('migrateSettings', () => {
     const s = migrateSettings({ clickMovesPin: false, hour12: false }, 0);
     expect(s).not.toHaveProperty('clickMovesPin');
     expect(s.hour12).toBe(false);
+  });
+
+  it('moves the old dd default to signed once', () => {
+    expect(DEFAULT_SETTINGS.coordFormat).toBe(CoordFormat.Signed);
+    expect(migrateSettings({ coordFormat: CoordFormat.DD }, 1).coordFormat).toBe(CoordFormat.Signed);
+    expect(migrateSettings({ coordFormat: CoordFormat.DD, clickMovesPin: false }, 0)).toMatchObject({ coordFormat: CoordFormat.Signed, clickMode: ClickMode.Off });
+    expect(migrateSettings({ coordFormat: CoordFormat.DMS }, 1).coordFormat).toBe(CoordFormat.DMS);
+    expect(migrateSettings({ ...DEFAULT_SETTINGS, coordFormat: CoordFormat.DD }, SETTINGS_VERSION).coordFormat).toBe(CoordFormat.DD);
   });
 
   it('leaves current settings alone', () => {

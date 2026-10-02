@@ -39,10 +39,10 @@ function SettingsPage() {
         <label className="field">
           <span>Coordinates</span>
           <select value={s.coordFormat} onChange={(e) => update({ coordFormat: e.target.value as CoordFormat })}>
+            <option value="signed">Signed decimal (44.4703,-72.7404)</option>
             <option value="dd">Decimal degrees</option>
             <option value="dm">Degrees, minutes</option>
             <option value="dms">Degrees, minutes, seconds</option>
-            <option value="signed">Signed decimal (40.71955, -74.14086)</option>
           </select>
         </label>
       </section>

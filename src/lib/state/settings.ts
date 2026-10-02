@@ -77,7 +77,7 @@ export interface SettingsState extends Settings {
 export const DEFAULT_SETTINGS: Settings = {
   units: Units.Metric,
   hour12: true,
-  coordFormat: CoordFormat.DD,
+  coordFormat: CoordFormat.Signed,
   basemapId: DEFAULT_BASEMAP_ID,
   customBasemaps: [],
   offlineFlavor: PmFlavor.Light,
@@ -115,14 +115,22 @@ export const DEFAULT_SETTINGS: Settings = {
   mwMoonMaxIllum: 0.25
 };
 
-export const SETTINGS_VERSION = 1;
+export const SETTINGS_VERSION = 2;
 
-/** Version 0 stored `clickMovesPin`, where false meant a plain click did nothing. */
+/**
+ * Version 0 stored `clickMovesPin`, where false meant a plain click did nothing.
+ * Version 1 persisted the old `dd` default, indistinguishable from a choice, so it moves to signed once.
+ */
 export function migrateSettings(state: unknown, version: number): Settings {
   const s = (state ?? {}) as Partial<Settings> & { clickMovesPin?: boolean };
   if (version >= SETTINGS_VERSION) return s as Settings;
-  const { clickMovesPin, ...rest } = s;
-  return { ...rest, clickMode: clickMovesPin === false ? ClickMode.Off : ClickMode.Camera } as Settings;
+  let out: Partial<Settings> = s;
+  if (version < 1) {
+    const { clickMovesPin, ...rest } = s;
+    out = { ...rest, clickMode: clickMovesPin === false ? ClickMode.Off : ClickMode.Camera };
+  }
+  if (version < 2 && out.coordFormat === CoordFormat.DD) out = { ...out, coordFormat: CoordFormat.Signed };
+  return out as Settings;
 }
 
 /** Exported so a test can check the store is wired to the migration, which storage-less Node hides. */

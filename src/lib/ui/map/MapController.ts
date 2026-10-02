@@ -21,7 +21,7 @@ import { lod2Credits, type Lod2Source } from '@core/lod2/regions';
 import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, rowsRings, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
-import { formatLngLat } from '@core/geo/coords';
+import { copyLngLat } from '@core/geo/coords';
 import { isUrban, placeClass, type Place } from '@core/geo/parking';
 import { bearingDeg, destination, distanceM, EARTH_RADIUS_M, type LngLat } from '@core/geo/geodesy';
 import { cellOf, gridCorners } from '@core/geo/grid';
@@ -577,7 +577,7 @@ export class MapController {
   private openMenu(at: Pt) {
     const ll = this.map.unproject([at.x, at.y]);
     const p = { lng: ll.lng, lat: ll.lat };
-    const coords = formatLngLat(p, settingsStore.getState().coordFormat);
+    const coords = copyLngLat(p, settingsStore.getState().coordFormat);
     this.menu.open(at, [
       { label: 'Camera here', run: () => worldStore.getState().setPin(p) },
       { label: 'Target here', run: () => this.setTargetFromMap(p) },

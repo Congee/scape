@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { compass, degrees, distance } from '@core/format';
+import { formatLngLat } from '@core/geo/coords';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
 import { markersToGeoJson, markersToGpx, markersToKml } from '@core/io/points';
 import { MarkerCategory, MarkerShape, type SavedMarker } from '@core/plan';
@@ -123,6 +124,7 @@ function MarkerList() {
 
 function MarkerEditor({ m }: { m: SavedMarker }) {
   const units = useSettings((s) => s.units);
+  const coordFormat = useSettings((s) => s.coordFormat);
   const ms = markersStore.getState();
   const patch = (p: Partial<SavedMarker>) => void ms.save({ ...m, ...p });
   const shape = m.shape ?? MarkerShape.Bar;
@@ -213,7 +215,7 @@ function MarkerEditor({ m }: { m: SavedMarker }) {
       </b>
       <span className="k">Position</span>
       <b className="v muted">
-        {m.lat.toFixed(5)}, {m.lng.toFixed(5)} · {distance(distanceM(worldStore.getState().pin, m), units)} at {degrees(bearingDeg(worldStore.getState().pin, m), 1)}
+        {formatLngLat(m, coordFormat)} · {distance(distanceM(worldStore.getState().pin, m), units)} at {degrees(bearingDeg(worldStore.getState().pin, m), 1)}
       </b>
     </div>
   );

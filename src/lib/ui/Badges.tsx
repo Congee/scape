@@ -9,7 +9,7 @@ import { SKYGLOW_PARAMS, skyglowFrom } from '@core/sky/skyglow';
 import { GlowStatus, useSkyglow } from '@state/skyglow';
 import { PanelTab, uiStore } from '@state/ui';
 
-const NEXT: Record<CoordFormat, CoordFormat> = { dd: CoordFormat.DM, dm: CoordFormat.DMS, dms: CoordFormat.Signed, signed: CoordFormat.DD };
+const NEXT: Record<CoordFormat, CoordFormat> = { signed: CoordFormat.DD, dd: CoordFormat.DM, dm: CoordFormat.DMS, dms: CoordFormat.Signed };
 
 export function Badges() {
   const pin = useWorld((s) => s.pin);

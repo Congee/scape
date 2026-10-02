@@ -20,14 +20,19 @@ function fmtOne(value: number, pos: string, neg: string, format: Exclude<CoordFo
   return `${d}°${pad(m, 2)}′${pad(Number(s.toFixed(1)), 4)}″${hemi}`;
 }
 
-export function formatLngLat(p: LngLat, format: CoordFormat = CoordFormat.DD): string {
-  if (format === CoordFormat.Signed) return formatDecimal(p, 6);
+export function formatLngLat(p: LngLat, format: CoordFormat = CoordFormat.Signed): string {
+  if (format === CoordFormat.Signed) return formatDecimal(p, 4);
   return `${fmtOne(p.lat, 'N', 'S', format)} ${fmtOne(p.lng, 'E', 'W', format)}`;
 }
 
-/** Decimal degrees with sign, suitable for pasting into other tools. */
-export function formatDecimal(p: LngLat, digits = 5): string {
-  return `${p.lat.toFixed(digits)}, ${p.lng.toFixed(digits)}`;
+/** Text for the clipboard: signed decimals keep full precision, other formats copy as shown. */
+export function copyLngLat(p: LngLat, format: CoordFormat = CoordFormat.Signed): string {
+  return format === CoordFormat.Signed ? formatDecimal(p, 6) : formatLngLat(p, format);
+}
+
+/** Signed `lat,lng`, suitable for pasting into other tools. */
+export function formatDecimal(p: LngLat, digits = 6): string {
+  return `${p.lat.toFixed(digits)},${p.lng.toFixed(digits)}`;
 }
 
 /** Accepts a Google Maps URL or fragment and a trailing zoom suffix. */
@@ -45,7 +50,7 @@ const ONE = String.raw`([NSEW])?\s*${NUM}${SEP}(?:(\d+(?:\.\d+)?)['′:\s]*)?(?:
 const PAIR = new RegExp(String.raw`^\s*${ONE}\s*[,;/\s]\s*${ONE}\s*$`, 'i');
 
 /**
- * Parse "40.7463, -74.1553", "40°44'46.7\"N 74°09'19.1\"W", "N40 44.78 W74 09.32" and similar.
+ * Parse "40.7463,-74.1553", "40.7463, -74.1553", "40°44'46.7\"N 74°09'19.1\"W", "N40 44.78 W74 09.32" and similar.
  * Returns null when the text is not a coordinate pair.
  */
 export function parseLngLat(text: string): LngLat | null {

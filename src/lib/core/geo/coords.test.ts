@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CoordFormat, formatLngLat, parseLngLat } from './coords';
+import { CoordFormat, copyLngLat, formatLngLat, parseLngLat } from './coords';
 
 describe('coords', () => {
   it('parses decimal degrees', () => {
@@ -38,11 +38,25 @@ describe('coords', () => {
 
   it('formats', () => {
     const p = { lat: 40.7463, lng: -74.1553 };
-    expect(formatLngLat(p)).toBe('40.7463°N 74.1553°W');
+    expect(formatLngLat(p, CoordFormat.DD)).toBe('40.7463°N 74.1553°W');
     expect(formatLngLat(p, CoordFormat.DMS)).toBe('40°44′46.7″N 74°09′19.1″W');
   });
 
-  it('formats signed decimal', () => {
-    expect(formatLngLat({ lat: 40.7195497, lng: -74.1408596 }, CoordFormat.Signed)).toBe('40.719550, -74.140860');
+  it('defaults to signed lat,lng at four decimals', () => {
+    const p = { lat: 44.470342, lng: -72.740381 };
+    expect(formatLngLat(p)).toBe('44.4703,-72.7404');
+    expect(formatLngLat(p, CoordFormat.Signed)).toBe('44.4703,-72.7404');
+  });
+
+  it('copies signed at six decimals and other formats as shown', () => {
+    const p = { lat: 44.470342, lng: -72.740381 };
+    expect(copyLngLat(p)).toBe('44.470342,-72.740381');
+    expect(copyLngLat(p, CoordFormat.DMS)).toBe(formatLngLat(p, CoordFormat.DMS));
+  });
+
+  it('parses its own output back', () => {
+    const p = { lat: 44.470342, lng: -72.740381 };
+    expect(parseLngLat(copyLngLat(p))).toEqual(p);
+    expect(parseLngLat('44.470342, -72.740381')).toEqual(p);
   });
 });
