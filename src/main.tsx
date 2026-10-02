@@ -21,6 +21,7 @@ import { modelsStore, startModelsSync } from '@state/models';
 import { offlineStore, startGeoidSync, startOffline } from '@state/offline';
 import { plansStore } from '@state/plans';
 import { searchesStore } from '@state/searches';
+import { stringifySearch } from '@state/searchCodec';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
 import { startTerrainSync, terrainStore } from '@state/terrain';
@@ -34,7 +35,7 @@ import { cloudStats } from '@ui/map/cloudOverlay';
 import { parkedAt } from '@ui/viewfinder/parkedScene';
 import { routeTree } from './routeTree.gen';
 
-const router = createRouter({ routeTree, defaultPreload: 'intent' });
+const router = createRouter({ routeTree, defaultPreload: 'intent', stringifySearch });
 
 declare module '@tanstack/react-router' {
   interface Register {

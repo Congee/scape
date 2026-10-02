@@ -206,6 +206,8 @@ export class MapController {
       style: styleFor(bm),
       center: [w.view.center.lng, w.view.center.lat],
       zoom: w.view.zoom,
+      bearing: w.view.bearing ?? 0,
+      pitch: w.view.pitch ?? 0,
       maxPitch: MAX_PITCH,
       // Box zoom takes every shift-press, which would swallow Shift-click.
       boxZoom: false,
@@ -331,7 +333,7 @@ export class MapController {
       this.renderAll();
       this.scheduleShadows();
       const c = this.map.getCenter();
-      worldStore.getState().setView({ center: { lng: c.lng, lat: c.lat }, zoom: this.map.getZoom() });
+      worldStore.getState().setView({ center: { lng: c.lng, lat: c.lat }, zoom: this.map.getZoom(), bearing: this.map.getBearing(), pitch: this.map.getPitch() });
     });
     this.map.on('idle', () => this.senseUrban());
 
@@ -381,7 +383,7 @@ export class MapController {
         (st) => st.fly,
         (f) => {
           if (!f) return;
-          const opts = { center: [f.center.lng, f.center.lat] as [number, number], zoom: f.zoom };
+          const opts = { center: [f.center.lng, f.center.lat] as [number, number], zoom: f.zoom, bearing: f.bearing, pitch: f.pitch };
           if (f.animate) this.map.flyTo({ ...opts, duration: 900 });
           else this.map.jumpTo(opts);
         }

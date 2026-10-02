@@ -1,4 +1,6 @@
 import { Link } from '@tanstack/react-router';
+import { retargeted } from '@state/urlState';
+import { sceneSearchNow } from '@ui/sceneUrl';
 import { useEffect, type ReactNode } from 'react';
 import { uiStore } from '@state/ui';
 
@@ -35,10 +37,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Main">
-        <Link to="/" className="rail-link" activeProps={ACTIVE} activeOptions={{ exact: true, includeSearch: false }} title="Map" aria-label="Map">
+        <Link to="/" search={sceneSearchNow} className="rail-link" activeProps={ACTIVE} activeOptions={{ exact: true, includeSearch: false }} title="Map" aria-label="Map">
           <Icon d={ICONS.map} />
         </Link>
-        <Link to="/viewfinder" className="rail-link" activeProps={ACTIVE} title="Viewfinder" aria-label="Viewfinder">
+        <Link to="/viewfinder" search={() => retargeted(sceneSearchNow())} className="rail-link" activeProps={ACTIVE} activeOptions={{ includeSearch: false }} title="Viewfinder" aria-label="Viewfinder">
           <Icon d={ICONS.viewfinder} />
         </Link>
         <Link to="/library" className="rail-link" activeProps={ACTIVE} title="Library" aria-label="Library">

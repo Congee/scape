@@ -7,6 +7,8 @@ import { addLocalDays, withLocalDate } from '@core/time/localDay';
 export interface MapView {
   center: LngLat;
   zoom: number;
+  bearing?: number;
+  pitch?: number;
 }
 
 export interface FlyRequest extends MapView {
@@ -46,7 +48,7 @@ export interface WorldState {
   setNow(): void;
   setTz(tz: string | null): void;
   setView(view: MapView): void;
-  flyTo(center: LngLat, zoom?: number, animate?: boolean): void;
+  flyTo(center: LngLat, zoom?: number, animate?: boolean, tilt?: Pick<MapView, 'bearing' | 'pitch'>): void;
 }
 
 export function tzForPoint(p: LngLat): string {
@@ -94,8 +96,8 @@ export const worldStore = create<WorldState>()(
         setNow: () => set({ time: Date.now(), live: true }),
         setTz: (tz) => set((s) => (tz ? { tz, tzAuto: false } : { tz: tzForPoint(s.pin), tzAuto: true })),
         setView: (view) => set({ view }),
-        flyTo: (center, zoom, animate = true) =>
-          set((s) => ({ fly: { center, zoom: zoom ?? s.view.zoom, animate, seq: (s.fly?.seq ?? 0) + 1 } }))
+        flyTo: (center, zoom, animate = true, tilt) =>
+          set((s) => ({ fly: { center, zoom: zoom ?? s.view.zoom, ...tilt, animate, seq: (s.fly?.seq ?? 0) + 1 } }))
       }),
       {
         name: 'scape.world',
