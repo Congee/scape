@@ -55,6 +55,8 @@ labels_check() { # where
   local l
   l=$(js '(() => { const ls = [...document.querySelectorAll(".field > span:first-child")].filter((e) => e.offsetParent); const bad = ls.filter((e) => Math.abs(e.getBoundingClientRect().height - parseFloat(getComputedStyle(e).lineHeight)) > 0.5).map((e) => e.textContent); return `${ls.length} ${JSON.stringify(bad)}`; })()')
   check "$1: field labels on one line" "$([[ "$l" == *" []" && "${l%% *}" -gt 0 ]] && echo 1 || echo 0)" "$l"
+  l=$(js '(() => { const g = new Map(); for (const f of document.querySelectorAll(".field")) { if (!f.offsetParent) continue; const k = f.closest("section") ?? f.parentElement; g.set(k, [...(g.get(k) ?? []), Math.round(f.lastElementChild.getBoundingClientRect().right)]); } const bad = [...g.values()].filter((r) => new Set(r).size > 1); return `${g.size} ${JSON.stringify(bad)}`; })()')
+  check "$1: field controls share a right edge per section" "$([[ "$l" == *" []" && "${l%% *}" -gt 0 ]] && echo 1 || echo 0)" "$l"
 }
 # No danger frames: every .danger keeps a non-danger border and leads with the danger icon.
 danger_check() { # where

@@ -1412,7 +1412,13 @@ label.file.danger strong {
 
 /* Labels never wrap; a row too narrow for label and control stacks them instead. */
 .field > span:first-child {
+  flex: 1 0 auto;
   white-space: nowrap;
+}
+
+/* Controls end on the right edge, stacked or not. */
+.field > :last-child {
+  margin-left: auto;
 }
 
 .field input[type='number'] {
@@ -1439,16 +1445,11 @@ label.file.danger strong {
 }
 
 .page .field {
-  justify-content: start;
   min-height: var(--size-control);
   padding: 2px 0;
   color: var(--fg-2);
   font-size: 12px;
   line-height: 16px;
-}
-
-.page .field > span:first-child {
-  min-width: 104px;
 }
 
 .page input:not([type='file']),
