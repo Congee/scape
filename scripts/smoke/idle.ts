@@ -17,8 +17,8 @@ const LIVE_FRAMES_MAX = Math.ceil(SECS / 3);
 const RESTAMP_MAX = 1;
 const RESTAMP_CPU_S = 2.5;
 const RESTAMP_FETCH_MAX = 50;
-// DOM the minute tick itself may change: the time field and the sun and moon readouts.
-const TICK_DOM = /^(input\.live < div\.datebar|span\.(val|extra) < div\.readout-row\S*) /;
+// DOM the minute tick itself may change: the Timeline's now line and the sun and moon readouts.
+const TICK_DOM = /^(span < li\.now-line|span\.(val|extra) < div\.readout-row\S*) /;
 
 const Scene = {
   // `noon`: a visible live scene is pinned here, with the sun high, so no minute tick can land a mask re-stamp in the window.

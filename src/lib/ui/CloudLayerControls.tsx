@@ -55,14 +55,14 @@ export function CloudLegend() {
   const layer = useWeather((s) => s.layer);
   const model = useWeather((s) => s.model);
   const info = useWeather((s) => s.cloudInfo);
-  const time = useWorld((s) => s.time);
+  // The forecast hour, so a minute tick does not re-render the legend.
+  const hour = useWorld((s) => Math.round(s.time / HOUR_MS) * HOUR_MS);
   const tz = useWorld((s) => s.tz);
   const hour12 = useSettings((s) => s.hour12);
   const phone = useMedia(PHONE);
   const open = useUi((s) => s.cloudLegendOpen);
   const setOpen = useUi((s) => s.setCloudLegendOpen);
   if (layer === CloudLayer.Off) return null;
-  const hour = Math.round(time / HOUR_MS) * HOUR_MS;
   const title = (
     <>
       <b>{LAYER_TEXT[layer]}</b> <span className="muted">· {formatTime(hour, tz, hour12)} forecast</span>
