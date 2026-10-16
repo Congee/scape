@@ -158,3 +158,14 @@ a visit; re-download if regions disappear.
 Place search uses Photon (komoot) with a four-second timeout and falls back to a bundled index of
 every place above 5,000 people from GeoNames `cities5000` (CC BY 4.0; see
 `public/gazetteer/README.md`), so search still works with no network.
+
+## License
+
+Scape's code is licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
+your option. Unless you state otherwise, any contribution you submit is dual-licensed the same way,
+without additional terms.
+
+Third-party code and data keep their own licences: the geodesic solver is a port of GeographicLib
+(MIT, notice in `src/lib/core/geo/geodesy.ts`); sky data is listed in `public/sky/README.md` and the
+gazetteer in `public/gazetteer/README.md`. Map tiles, terrain and imagery are fetched at run time and
+credited on the map.
