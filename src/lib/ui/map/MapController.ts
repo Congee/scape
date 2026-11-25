@@ -58,6 +58,7 @@ import { ShadowLayer } from './shadowLayer';
 import { MapMenu } from './mapMenu';
 import { ModelDrawer } from './ModelDrawer';
 import { installMotionLod } from './motionLod';
+import { NightLightsLayer } from './nightLightsLayer';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 import { installTrackpadWheel } from './wheelZoom';
 
@@ -70,10 +71,6 @@ const MARKERS_SRC = 'markers';
 const URBAN_MIN_ZOOM = 10;
 const REGION_SRC = 'region';
 const IMPORT_SRC = 'import-pick';
-// NASA GIBS, public domain; a coarse (zoom ≤ 8) proxy for light pollution.
-const LIGHTS_SRC = 'night-lights';
-const LIGHTS_URL = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png';
-const LIGHTS_ATTRIBUTION = 'Night lights: <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>, VIIRS Black Marble 2016';
 const PIN_COLOR = Ink.pin;
 const PIN2_COLOR = Ink.pinTarget;
 const PROBE_COLOR = Ink.edit;
@@ -137,6 +134,7 @@ export class MapController {
   private buildings: BuildingsLayer;
   private shadows: ShadowLayer;
   private heat: HeatLayer;
+  private nightLights: NightLightsLayer;
 
   constructor(container: HTMLElement) {
     const w = worldStore.getState();
@@ -265,7 +263,7 @@ export class MapController {
       mapStatusStore.getState().setError(null);
       this.addOverlayLayers();
       this.terrain.apply();
-      this.applyNightLights();
+      this.nightLights.apply();
       this.buildings.apply();
       this.drawer.addLayers(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
       this.clouds.addLayer(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
@@ -347,16 +345,17 @@ export class MapController {
       () => this.terrain.dispose(),
       () => this.buildings.dispose(),
       () => this.shadows.dispose(),
-      () => this.heat.dispose()
+      () => this.heat.dispose(),
+      () => this.nightLights.dispose()
     );
     // Settings listeners run in subscribe order, which decides the stacking of layers that share an anchor.
     this.terrain = new TerrainLayer(this.map, () => this.styleReady);
     this.buildings = new BuildingsLayer(this.map, () => this.styleReady, () => this.shadows.schedule());
     this.shadows = new ShadowLayer(this.map, () => this.styleReady);
     this.heat = new HeatLayer(this.map, () => this.styleReady);
+    this.nightLights = new NightLightsLayer(this.map, () => this.styleReady);
     this.unsubs.push(
       settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
-      settingsStore.subscribe((st) => st.showLightPollution, () => this.applyNightLights()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
       uiStore.subscribe((st, prev) => {
         if (st.orbit !== prev.orbit || st.orbitSpin !== prev.orbitSpin) this.applyOrbit();
@@ -847,18 +846,6 @@ export class MapController {
       }
     }
     if (vector) mapStatusStore.getState().setUrban(pin, isUrban(pin, places));
-  }
-
-  private applyNightLights() {
-    if (!this.styleReady) return;
-    const on = settingsStore.getState().showLightPollution;
-    if (on && !this.map.getLayer(LIGHTS_SRC)) {
-      if (!this.map.getSource(LIGHTS_SRC)) this.map.addSource(LIGHTS_SRC, { type: 'raster', tiles: [LIGHTS_URL], tileSize: 256, maxzoom: 8, attribution: LIGHTS_ATTRIBUTION });
-      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id ?? 'fov-fill';
-      this.map.addLayer({ id: LIGHTS_SRC, type: 'raster', source: LIGHTS_SRC, paint: { 'raster-opacity': 0.75 } }, before);
-    } else if (!on && this.map.getLayer(LIGHTS_SRC)) {
-      this.map.removeLayer(LIGHTS_SRC);
-    }
   }
 
   /** Lines run far past the viewport so they reach the map edge at any zoom. */
