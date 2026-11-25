@@ -9,18 +9,14 @@ import {
   type MapMouseEvent
 } from 'maplibre-gl';
 import { shallow } from 'zustand/shallow';
-import { makeObserver, SkyBody } from '@core/astro/bodies';
-import { lunarShadowCoverage } from '@core/astro/eclipse';
-import { position } from '@core/astro/positions';
-import { airDensity } from '@core/astro/refraction';
+import { SkyBody } from '@core/astro/bodies';
 import { bboxFromCorners, type Bbox } from '@core/geo/bbox';
-import { linesShiftPx } from '@core/drift';
 import { modelHeightAt } from '@core/model/heightAt';
 import { rowsCentre, rowsRings, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { atPixel, copyLngLat } from '@core/geo/coords';
 import { isUrban, placeClass, type Place } from '@core/geo/parking';
-import { distanceM, type LngLat } from '@core/geo/geodesy';
+import type { LngLat } from '@core/geo/geodesy';
 import { cellOf } from '@core/geo/grid';
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
@@ -29,14 +25,12 @@ import { ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { alignStore } from '@state/align';
 import { buildingHeightAt, buildingRowsAt } from '@state/buildings';
-import { dayDataStore } from '@state/dayData';
 import { lightProbeStore } from '@state/lightProbe';
 import { mapStatusStore } from '@state/mapStatus';
 import { markersStore } from '@state/markers';
 import { modelsStore } from '@state/models';
 import { currentBasemap, offlineStore } from '@state/offline';
 import { ClickMode, settingsStore } from '@state/settings';
-import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
 import { MarkersView, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode } from '@workers/align.protocol';
@@ -51,6 +45,7 @@ import { FovOverlay } from './fovOverlay';
 import { MapLayers } from './mapLayers';
 import { EMPTY, samePoint } from './mapShared';
 import { SatelliteLayer } from './satelliteLayer';
+import { SkyLines } from './skyLines';
 import { ensureDem, HILL_SRC, TerrainLayer } from './terrainLayer';
 import { ShadowLayer } from './shadowLayer';
 import { MapMenu } from './mapMenu';
@@ -58,12 +53,9 @@ import { ModelDrawer } from './ModelDrawer';
 import { installMotionLod } from './motionLod';
 import { NightLightsLayer } from './nightLightsLayer';
 import { MAX_PITCH, Orbit } from './orbit';
-import { eventLines, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
+import { markerFeatures } from './overlays';
 import { installTrackpadWheel } from './wheelZoom';
 
-const EVENTS_SRC = 'sky-events';
-const LIVE_SRC = 'sky-live';
-const GEO_SRC = 'geodetic';
 const MARKERS_SRC = 'markers';
 // Below this the basemap drops town labels, so a spot can look rural when it is not.
 const URBAN_MIN_ZOOM = 10;
@@ -93,7 +85,6 @@ export class MapController {
   private probe: Marker | null = null;
   private scale: ScaleControl;
   private unsubs: (() => void)[] = [];
-  private rayM = 50_000;
   private styleReady = false;
   private basemapKey = '';
   private dragging = false;
@@ -102,12 +93,12 @@ export class MapController {
   private drawStart: LngLat | null = null;
   private draftBefore: Bbox | null = null;
   private dragging2 = false;
-  private live: { src: GeoJSONSource; data: GeoJSON.FeatureCollection } | null = null;
   private drawer: ModelDrawer;
   private clouds: CloudOverlay;
   private menu: MapMenu;
   /** Fingers on the map; the browser's own long-press contextmenu is left to `LongPress`. */
   private touches = 0;
+  private sky: SkyLines;
   private terrain: TerrainLayer;
   private buildings: BuildingsLayer;
   private shadows: ShadowLayer;
@@ -243,12 +234,12 @@ export class MapController {
       this.drawer.addLayers(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
       this.clouds.addLayer(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
       this.shadows.apply();
-      this.updateRay();
+      this.sky.updateRay();
       this.renderAll();
     });
     this.map.on('moveend', (e) => {
       if ((e as { orbit?: boolean }).orbit) this.orbit.step();
-      this.updateRay();
+      this.sky.updateRay();
       this.renderAll();
       const c = this.map.getCenter();
       worldStore.getState().setView({ center: { lng: c.lng, lat: c.lat }, zoom: this.map.getZoom(), bearing: this.map.getBearing(), pitch: this.map.getPitch() });
@@ -267,24 +258,11 @@ export class MapController {
         (st) => st.pin,
         (pin) => {
           if (!this.dragging) this.pin.setLngLat([pin.lng, pin.lat]);
-          this.renderLive();
-          this.renderGeodetic();
           this.senseUrban();
         },
         { equalityFn: samePoint }
       ),
-      worldStore.subscribe(
-        (st) => st.pin2,
-        (p) => {
-          this.syncPin2(p);
-          this.renderLive();
-          this.renderGeodetic();
-        },
-        { equalityFn: samePoint }
-      ),
-      worldStore.subscribe((st) => st.time, () => this.renderLive(true)),
-      worldStore.subscribe((st) => st.pinHeightM, () => this.renderLive()),
-      worldStore.subscribe((st) => st.pin2HeightM, () => this.renderLive()),
+      worldStore.subscribe((st) => st.pin2, (p) => this.syncPin2(p), { equalityFn: samePoint }),
       worldStore.subscribe(
         (st) => st.fly,
         (f) => {
@@ -294,8 +272,6 @@ export class MapController {
           else this.map.jumpTo(opts);
         }
       ),
-      dayDataStore.subscribe(() => this.renderEvents()),
-      terrainStore.subscribe((st) => st.profile, () => this.renderGeodetic()),
       markersStore.subscribe((st) => [st.markers, st.selectedId] as const, () => this.renderMarkers(), { equalityFn: shallow }),
       markersStore.subscribe((st) => st.placing, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
       modelsStore.subscribe((st) => st.picking || st.importPick, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
@@ -308,11 +284,7 @@ export class MapController {
       offlineStore.subscribe((st) => st.draft, () => this.renderRegion()),
       modelsStore.subscribe((st) => st.importRings, () => this.renderImportPick()),
       offlineStore.subscribe((st) => st.drawing, (on) => this.setDrawingRegion(on)),
-      settingsStore.subscribe(
-        (st) => [st.showEventLines, st.showLiveLines, st.showShadow, st.showGc, st.shadowObjectHeightM] as const,
-        () => this.renderAll(),
-        { equalityFn: shallow }
-      ),
+      () => this.sky.dispose(),
       () => this.terrain.dispose(),
       () => this.buildings.dispose(),
       () => this.shadows.dispose(),
@@ -321,6 +293,7 @@ export class MapController {
       () => this.fov.dispose()
     );
     // Settings listeners run in subscribe order, which decides the stacking of layers that share an anchor.
+    this.sky = new SkyLines(this.map, () => this.styleReady);
     this.terrain = new TerrainLayer(this.map, () => this.styleReady);
     this.buildings = new BuildingsLayer(this.map, () => this.styleReady, () => this.shadows.schedule());
     this.shadows = new ShadowLayer(this.map, () => this.styleReady);
@@ -605,11 +578,8 @@ export class MapController {
   }
 
   private addOverlayLayers() {
-    if (this.map.getSource(EVENTS_SRC)) return;
+    if (this.map.getSource(MARKERS_SRC)) return;
     this.heat.addLayer(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
-    this.map.addSource(EVENTS_SRC, { type: 'geojson', data: EMPTY });
-    this.map.addSource(LIVE_SRC, { type: 'geojson', data: EMPTY });
-    this.map.addSource(GEO_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(MARKERS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(REGION_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(IMPORT_SRC, { type: 'geojson', data: EMPTY });
@@ -625,50 +595,7 @@ export class MapController {
       paint: { 'line-color': REGION_COLOR, 'line-width': 2, 'line-dasharray': [2, 2] }
     });
     this.fov.addLayers();
-    this.map.addLayer({
-      id: 'geodetic-casing',
-      type: 'line',
-      source: GEO_SRC,
-      layout: { 'line-cap': 'round' },
-      paint: { 'line-color': HALO, 'line-width': 6 }
-    });
-    this.map.addLayer({
-      id: 'geodetic-line',
-      type: 'line',
-      source: GEO_SRC,
-      layout: { 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': 3 }
-    });
-    this.map.addLayer({
-      id: 'sky-events-line',
-      type: 'line',
-      source: EVENTS_SRC,
-      filter: ['!=', ['get', 'terrain'], true],
-      layout: { 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': 0.9 }
-    });
-    this.map.addLayer({
-      id: 'sky-events-terrain-line',
-      type: 'line',
-      source: EVENTS_SRC,
-      filter: ['==', ['get', 'terrain'], true],
-      paint: { 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': 0.9, 'line-dasharray': [1, 1.25] }
-    });
-    this.map.addLayer({
-      id: 'sky-shadow-line',
-      type: 'line',
-      source: LIVE_SRC,
-      filter: ['==', ['get', 'kind'], LiveLineKind.Shadow],
-      paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.7, 'line-dasharray': [2, 2] }
-    });
-    this.map.addLayer({
-      id: 'sky-live-line',
-      type: 'line',
-      source: LIVE_SRC,
-      filter: ['==', ['get', 'kind'], LiveLineKind.Live],
-      layout: { 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': 2 }
-    });
+    this.sky.addLayers();
     this.map.addLayer({
       id: 'markers-circle',
       type: 'circle',
@@ -719,18 +646,8 @@ export class MapController {
     if (vector) mapStatusStore.getState().setUrban(pin, isUrban(pin, places));
   }
 
-  /** Lines run far past the viewport so they reach the map edge at any zoom. */
-  private updateRay() {
-    const b = this.map.getBounds();
-    const c = this.map.getCenter();
-    const corner: LngLat = { lng: b.getEast(), lat: b.getNorth() };
-    this.rayM = Math.min(15_000_000, Math.max(2_000, distanceM({ lng: c.lng, lat: c.lat }, corner) * 3));
-  }
-
   private renderAll() {
-    this.renderEvents();
-    this.renderLive();
-    this.renderGeodetic();
+    this.sky.render();
     this.fov.render();
     this.renderMarkers();
     this.heat.render();
@@ -740,47 +657,6 @@ export class MapController {
 
   private source(id: string): GeoJSONSource | undefined {
     return this.styleReady ? (this.map.getSource(id) as GeoJSONSource | undefined) : undefined;
-  }
-
-  private renderEvents() {
-    const src = this.source(EVENTS_SRC);
-    if (!src) return;
-    const s = settingsStore.getState();
-    if (!s.showEventLines) return src.setData(EMPTY);
-    const { pin } = worldStore.getState();
-    const { events } = dayDataStore.getState();
-    src.setData(eventLines(pin, events, this.rayM, { showGc: s.showGc }));
-  }
-
-  /** A clock tick redraws only once some ray has moved half a pixel since the last draw. */
-  private renderLive(tick = false) {
-    const src = this.source(LIVE_SRC);
-    if (!src) return;
-    const s = settingsStore.getState();
-    let data: GeoJSON.FeatureCollection = EMPTY;
-    if (s.showLiveLines) {
-      const w = worldStore.getState();
-      const obs = makeObserver(w.pin, pinSiteHeightM(w, terrainStore.getState()));
-      const date = new Date(w.time);
-      const pos = { Sun: position(SkyBody.Sun, date, obs), Moon: position(SkyBody.Moon, date, obs), Gc: position(SkyBody.Gc, date, obs) };
-      data = liveLines(w.pin, pos, this.rayM, { airDensity: airDensity(obs.height), showShadow: s.showShadow, showGc: s.showGc, shadowHeightM: s.shadowObjectHeightM, pin2: w.pin2, pin2HeightM: w.pin2HeightM, moonUmbra: lunarShadowCoverage(date).umbra });
-    }
-    if (tick && this.live?.src === src) {
-      const c = this.map.getContainer();
-      if (linesShiftPx(this.live.data, data, (p) => this.map.project(p), c.clientWidth, c.clientHeight) < 0.5) return;
-    }
-    this.live = { src, data };
-    src.setData(data);
-  }
-
-  private renderGeodetic() {
-    const src = this.source(GEO_SRC);
-    if (!src) return;
-    const w = worldStore.getState();
-    if (!w.pin2) return src.setData(EMPTY);
-    const t = terrainStore.getState();
-    const fresh = t.profile && t.profileKey === profileKeyFor(w, settingsStore.getState());
-    src.setData(geodeticLine(w.pin, w.pin2, fresh ? t.profile!.los.status : 'Unknown'));
   }
 
   private renderImportPick() {
