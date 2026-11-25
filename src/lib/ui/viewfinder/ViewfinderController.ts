@@ -1,16 +1,12 @@
 import type { Observer } from 'astronomy-engine';
 import { shallow } from 'zustand/shallow';
 import { BODIES, bodyVisible, makeObserver, SkyBody } from '@core/astro/bodies';
-import type { PreparedConstellations } from '@core/astro/constellations';
-import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
-import { apply, applyStar, enuToEqj, eqjToEnu, poleEnu, starFrame, type StarFrame } from '@core/astro/skyFrame';
-import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
+import { apply, enuToEqj, eqjToEnu } from '@core/astro/skyFrame';
 import { lunarEclipseLight, lunarShadowCoverage, shadowView } from '@core/astro/eclipse';
-import { lightAt, type Light } from '@core/astro/lightSource';
+import { lightAt } from '@core/astro/lightSource';
 import { moonView } from '@core/astro/moonSim';
 import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
 import { airDensity } from '@core/astro/refraction';
-import { arcWindow, rainbowArc, rainbowRadiusDeg, rainbowTop, WATER_N } from '@core/astro/rainbow';
 import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
 import { distance, height } from '@core/format';
 import { bearingDeg, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
@@ -22,13 +18,13 @@ import { prismFrameKey, type PrismShading, type PrismTile } from '@core/geo/pris
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
-import { cameraBasis, discRadiusMm, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
+import { cameraBasis, discRadiusMm, projectDir, unproject, type Camera } from '@core/optics/projection';
 import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayGl';
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import type { BodyDisc, MoonShading, SceneGl } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
-import { borderRects, fitFrame, fitViewports, type FitViewports, type Rect } from '@core/viewfinder/frameFit';
-import { behindBuilding, hiddenBySkyline, inView, placeEnu, surfaceAngle, toPx, type Frame } from '@core/viewfinder/place';
+import { borderRects, fitFrame, fitViewports } from '@core/viewfinder/frameFit';
+import { behindBuilding, inView, surfaceAngle, toPx } from '@core/viewfinder/place';
 import { segmentHitsRect } from '@core/viewfinder/segmentRect';
 import { starNight } from '@core/viewfinder/skyGate';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
@@ -42,7 +38,7 @@ import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
 import { formatTime } from '@core/time/format';
 import { buildingsStore, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
 import { lod2HeldStats, lod2Store } from '@state/lod2';
-import { aimFor, compositionStore, type Aim } from '@state/composition';
+import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { markersStore } from '@state/markers';
@@ -56,10 +52,11 @@ import { worldStore } from '@state/world';
 import { FONT_SANS } from '../inks';
 import { MODEL_ACCENT } from '../map/modelOverlay';
 import { CATEGORY_COLORS } from '../map/overlays';
+import { haloText, type Paint, type Scene, type Seen } from './paint';
+import { drawHorizon, drawRainbow, drawSky, type SkyMemo } from './skyMarks';
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
-const DAY_MS = 86_400_000;
 const MAX_COLUMNS = 2400;
 /** Sun travel that may shift the sky colours and the shading by a step; about 12 s of clock. */
 const SUN_STEP_DEG = 0.05;
@@ -71,20 +68,6 @@ const OUTLINE_MAX_PX = 4000;
 /** Occlusion tests per frame for the outline; a dense mesh gets coarser steps. */
 const OUTLINE_SAMPLES = 6000;
 const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
-/** Red to violet; each colour's own index sets its radius, so the secondary comes out reversed. */
-const BOW_COLORS = ['#e8453c', '#f59a23', '#f2dc3c', '#4cc35a', '#3a8ee8', '#8a5cd6'];
-const BOW_STEPS = 240;
-const HORIZON_RGBA = [230 / 255, 237 / 255, 243 / 255, 0.35] as const;
-/** Text inside the picture: a dark outline keeps it readable over sun-lit white towers. */
-const haloText = (ctx: CanvasRenderingContext2D, text: string, x: number, y: number) => {
-  ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-  ctx.strokeText(text, x, y);
-  ctx.restore();
-  ctx.fillText(text, x, y);
-};
 const upEighth = (k: number) => Math.ceil(k * 8 - 1e-6) / 8;
 /** Hex colour multiplied by a flat shade factor. */
 const shaded = (hex: string, k: number) => {
@@ -92,53 +75,12 @@ const shaded = (hex: string, k: number) => {
   return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`;
 };
 
-interface Scene {
-  cam: Camera;
-  basis: CameraBasis;
-  aim: Aim;
-  /** False while a locked aim has no target elevation yet, so its 0 is a placeholder. */
-  aimKnown: boolean;
-  frame: Frame;
-  /** Picture area the scene fills around the frame, CSS px, snapped to the drawn device pixels. */
-  area: Rect;
-  vp: FitViewports;
-  hfov: number;
-  vfov: number;
-  /** Field of view across the whole area. */
-  viewHfov: number;
-  viewVfov: number;
-  view: ViewProfile | null;
-  eyeM: number;
-  eyeAboveGroundM: number;
-  sunAlt: number;
-  sunAz: number;
-  /** The body casting shadows, from the light-source setting. */
-  light: Light | null;
-  time: Date;
-  obs: Observer;
-  /** Air at the eye relative to sea level; scales refraction. */
-  airDensity: number;
-  /** How dark the sky is for stars, 0 by day to 1 in astronomical night. */
-  night: number;
-  /** Moonlight washing out faint stars and the Milky Way, 0..1. */
-  moonFactor: number;
-  /** Moon's lit fraction times what a lunar eclipse leaves of its light. */
-  moonLight: number;
-  /** Highest skyline angle in the sweep; directions above it need no occlusion test. */
-  maxSkyline: number;
-}
-
 interface BodyLabel {
   x: number;
   y: number;
   text: string;
   color: string;
   alpha: number;
-}
-
-interface StarGroup {
-  rgba: [number, number, number, number];
-  idx: number[];
 }
 
 /** Synthetic camera view: terrain layers from the DEM sweep, sky, sun/moon/GC paths, target and markers. */
@@ -151,8 +93,7 @@ export class ViewfinderController {
   private h = 0;
   private dpr = 1;
   private drag: { x: number; y: number; az: number; el: number } | null = null;
-  private starGroups: { cat: StarCatalog; groups: StarGroup[]; polaris: number } | null = null;
-  private showers: { day: number; list: ShowerStatus[] } | null = null;
+  private readonly skyMemo: SkyMemo = { starGroups: null, showers: null };
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
   /** Eye-relative prisms per tile, only those placed for the current camera location. */
   private prisms = new Map<string, PrismTile>();
@@ -182,7 +123,7 @@ export class ViewfinderController {
   /** Dev: marks with the exact CPU answer, 6 numbers each, while `__scape.markProbe` is set. */
   private probe: number[] | null = null;
   /** What the overlay hid this frame, for `__scape.overlay`. */
-  private seen: { bodies: Record<string, { az: number; alt: number; x: number; y: number; r: number; hidden: boolean }>; markers: Record<string, boolean>; pathLabels: { body: SkyBody; text: string; x: number; y: number; w: number; h: number; skipped: boolean }[] } = { bodies: {}, markers: {}, pathLabels: [] };
+  private seen: Seen = { bodies: {}, markers: {}, pathLabels: [] };
   /** Placed models, rebuilt when the camera location or any model changes. */
   private modelCache: { key: string; meshes: SurfaceMesh[]; ids: string[] } | null = null;
   /** The selected model's outline, eye-relative e, n, u pairs. */
@@ -673,10 +614,6 @@ export class ViewfinderController {
     return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows: this.prismHidden, held: lod2HeldStats() };
   }
 
-  private behindEnu(v: Float64Array): boolean {
-    return !!this.occ && this.occ.occludes(v[0], v[1], v[2], Infinity);
-  }
-
   /** Sky, terrain, buildings and shadows on the GPU, into the canvas that sits under this one. */
   private drawSceneGl(sc: Scene, gl: SceneGl) {
     const pal = palette(sc.sunAlt);
@@ -790,209 +727,6 @@ export class ViewfinderController {
     return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), umbra: lunarShadowCoverage(sc.time).umbra, shadow, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
   }
 
-  /** Stars bucketed by colour and brightness so the canvas style changes a few dozen times, not 9k. */
-  private groupsFor(cat: StarCatalog): { groups: StarGroup[]; polaris: number } {
-    if (this.starGroups?.cat === cat) return this.starGroups;
-    const map = new Map<string, StarGroup>();
-    let polaris = -1;
-    for (let i = 0; i < cat.n; i++) {
-      const r = cat.rgb[i * 3];
-      const g = cat.rgb[i * 3 + 1];
-      const b = cat.rgb[i * 3 + 2];
-      const m = cat.mag[i];
-      const alpha = m <= 1 ? 1 : m <= 2.5 ? 0.88 : m <= 4 ? 0.7 : m <= 5.2 ? 0.5 : 0.36;
-      const key = `${r >> 4},${g >> 4},${b >> 4},${alpha}`;
-      let grp = map.get(key);
-      if (!grp) {
-        grp = { rgba: [((r >> 4) * 16 + 8) / 255, ((g >> 4) * 16 + 8) / 255, ((b >> 4) * 16 + 8) / 255, alpha], idx: [] };
-        map.set(key, grp);
-      }
-      grp.idx.push(i);
-      if (cat.names.get(i) === 'Polaris') polaris = i;
-    }
-    this.starGroups = { cat, groups: [...map.values()], polaris };
-    return this.starGroups;
-  }
-
-  /** Faintest magnitude worth drawing: wider frames and moonlight both hide the faint end. */
-  private magLimit(sc: Scene): number {
-    return clamp(4.6 + 60 / sc.hfov, 4.5, 6.5) - 1.5 * sc.moonFactor;
-  }
-
-  private drawStars(sc: Scene, M: StarFrame, cat: StarCatalog, names: boolean) {
-    const { ctx } = this;
-    const { groups, polaris } = this.groupsFor(cat);
-    const limit = this.magLimit(sc);
-    const out = new Float64Array(3);
-    const labels: { x: number; y: number; name: string }[] = [];
-    const rgba: [number, number, number, number] = [0, 0, 0, 0];
-    for (const g of groups) {
-      rgba[0] = g.rgba[0];
-      rgba[1] = g.rgba[1];
-      rgba[2] = g.rgba[2];
-      rgba[3] = g.rgba[3] * sc.night;
-      for (const i of g.idx) {
-        if (cat.mag[i] > limit) break;
-        applyStar(M, cat.x[i], cat.y[i], cat.z[i], out);
-        const p = placeEnu(sc, this.occ, out[0], out[1], out[2], 4, false);
-        if (!p || p.hidden) continue;
-        const r = starRadiusPx(cat.mag[i]);
-        if (r < 1.1) this.marks.box(p.x, p.y, r, rgba);
-        else this.marks.disc(p.x, p.y, r, rgba);
-        this.probe?.push(0, p.x, p.y, r, this.behindEnu(out) ? 1 : 0, 0);
-        if (names && (cat.mag[i] <= 1.6 || i === polaris) && cat.names.has(i) && !this.behindEnu(out)) labels.push({ x: p.x, y: p.y, name: cat.names.get(i)! });
-      }
-    }
-    ctx.globalAlpha = sc.night;
-    ctx.fillStyle = 'rgba(230,237,243,0.8)';
-    ctx.font = `10px ${FONT_SANS}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    for (const l of labels) haloText(ctx, l.name, l.x + 5, l.y - 4);
-    ctx.globalAlpha = 1;
-  }
-
-  private drawConstellations(sc: Scene, M: StarFrame, pc: PreparedConstellations) {
-    const { ctx } = this;
-    const a = new Float64Array(3);
-    const b = new Float64Array(3);
-    const seg = pc.segments;
-    const rgba = [160 / 255, 150 / 255, 230 / 255, 0.5 * sc.night] as const;
-    for (let s = 0; s < seg.length; s += 6) {
-      applyStar(M, seg[s], seg[s + 1], seg[s + 2], a);
-      applyStar(M, seg[s + 3], seg[s + 4], seg[s + 5], b);
-      const p = placeEnu(sc, this.occ, a[0], a[1], a[2], 600, false);
-      const q = placeEnu(sc, this.occ, b[0], b[1], b[2], 600, false);
-      if (!p || !q || p.hidden || q.hidden) continue;
-      this.marks.segment(p.x, p.y, q.x, q.y, 1, 0, 0, rgba);
-    }
-    ctx.globalAlpha = sc.night;
-    if (sc.hfov > 20) {
-      ctx.fillStyle = 'rgba(180,170,240,0.7)';
-      ctx.font = `italic 11px ${FONT_SANS}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      for (let i = 0; i < pc.ids.length; i++) {
-        applyStar(M, pc.centres[i * 3], pc.centres[i * 3 + 1], pc.centres[i * 3 + 2], a);
-        const p = placeEnu(sc, this.occ, a[0], a[1], a[2], 0);
-        if (p && !p.hidden) haloText(ctx, pc.names[i], p.x, p.y);
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  private drawPole(sc: Scene) {
-    const [e, n, u] = poleEnu(sc.time, sc.obs);
-    const p = placeEnu(sc, this.occ, e, n, u, 0);
-    if (!p || p.hidden) return;
-    const { ctx } = this;
-    ctx.globalAlpha = sc.night;
-    ctx.strokeStyle = 'rgba(230,237,243,0.6)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-    ctx.moveTo(p.x - 9, p.y);
-    ctx.lineTo(p.x + 9, p.y);
-    ctx.moveTo(p.x, p.y - 9);
-    ctx.lineTo(p.x, p.y + 9);
-    ctx.stroke();
-    // Below the mark: Polaris' own label sits above-right, less than a degree away.
-    ctx.fillStyle = 'rgba(230,237,243,0.7)';
-    ctx.font = `10px ${FONT_SANS}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    haloText(ctx, 'Celestial pole', p.x, p.y + 11);
-    ctx.globalAlpha = 1;
-  }
-
-  /** Trails of the brighter stars over the chosen span, starting at the simulated time. */
-  private drawTrails(sc: Scene, cat: StarCatalog) {
-    const c = compositionStore.getState();
-    const steps = clamp(Math.round(c.trailMinutes / 3), 6, 40);
-    const dtMs = (c.trailMinutes * 60_000) / steps;
-    const mats: StarFrame[] = [];
-    for (let k = 0; k <= steps; k++) mats.push(starFrame(new Date(sc.time.getTime() + k * dtMs), sc.obs, mats[0]?.beta));
-    const limit = Math.min(4.5, this.magLimit(sc));
-    const out = new Float64Array(3);
-    const run: number[] = [];
-    const rgba: [number, number, number, number] = [0, 0, 0, 0.55 * sc.night];
-    // One run of joined segments, round only at its two ends so the joins do not blend twice.
-    const flush = (width: number) => {
-      const last = run.length / 2 - 1;
-      for (let k = 0; k < last; k++) {
-        const flags = (k === 0 ? OverlayFlag.RoundStart : 0) | (k === last - 1 ? OverlayFlag.RoundEnd : 0);
-        this.marks.segment(run[2 * k], run[2 * k + 1], run[2 * k + 2], run[2 * k + 3], width, flags, 0, rgba);
-      }
-      run.length = 0;
-    };
-    for (let i = 0; i < cat.n && cat.mag[i] <= limit; i++) {
-      rgba[0] = cat.rgb[i * 3] / 255;
-      rgba[1] = cat.rgb[i * 3 + 1] / 255;
-      rgba[2] = cat.rgb[i * 3 + 2] / 255;
-      const width = Math.max(0.7, starRadiusPx(cat.mag[i]) * 0.9);
-      for (const m of mats) {
-        applyStar(m, cat.x[i], cat.y[i], cat.z[i], out);
-        const p = placeEnu(sc, this.occ, out[0], out[1], out[2], 40, false);
-        if (p && !p.hidden) run.push(p.x, p.y);
-        else if (run.length > 0) flush(width);
-      }
-      if (run.length > 0) flush(width);
-    }
-  }
-
-  private drawRadiants(sc: Scene, M: StarFrame) {
-    const t = sc.time.getTime();
-    const day = Math.floor(t / DAY_MS);
-    if (!this.showers || this.showers.day !== day) this.showers = { day, list: activeShowers(t) };
-    if (this.showers.list.length === 0) return;
-    const { ctx } = this;
-    const out = new Float64Array(3);
-    ctx.font = `11px ${FONT_SANS}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 1.2;
-    for (const st of this.showers.list) {
-      const { raDeg, decDeg } = radiantEquatorial({ ...st, daysFromPeak: (t - st.peakMs) / DAY_MS });
-      const [x, y, z] = eqjVector(raDeg, decDeg);
-      applyStar(M, x, y, z, out);
-      const p = placeEnu(sc, this.occ, out[0], out[1], out[2], 20);
-      if (!p) continue;
-      ctx.globalAlpha = (p.hidden ? 0.35 : 0.9) * sc.night;
-      ctx.strokeStyle = '#ffe08a';
-      ctx.fillStyle = '#ffe08a';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-      for (let k = 0; k < 8; k++) {
-        const a = (k * Math.PI) / 4;
-        ctx.moveTo(p.x + 8 * Math.cos(a), p.y + 8 * Math.sin(a));
-        ctx.lineTo(p.x + 13 * Math.cos(a), p.y + 13 * Math.sin(a));
-      }
-      ctx.stroke();
-      haloText(ctx, `${st.shower.name} · ZHR ${st.shower.zhr ?? 'variable'}`, p.x + 16, p.y);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  /** Stars, constellation figures, the pole, trails and meteor radiants once the sky is dark enough. */
-  private drawSky(sc: Scene) {
-    const c = compositionStore.getState();
-    if (sc.night <= 0 || !(c.showStars || c.showConstellations || c.showTrails || c.showRadiants)) return;
-    const sky = skyStore.getState();
-    sky.ensure();
-    const { ctx } = this;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
-    ctx.clip();
-    const M = starFrame(sc.time, sc.obs);
-    if (c.showConstellations && sky.constellations) this.drawConstellations(sc, M, sky.constellations);
-    if (c.showTrails && sky.stars) this.drawTrails(sc, sky.stars);
-    if (c.showStars && sky.stars) this.drawStars(sc, M, sky.stars, c.showStarNames);
-    if (c.showStars) this.drawPole(sc);
-    if (c.showRadiants) this.drawRadiants(sc, M);
-    ctx.restore();
-  }
-
   private drawPath(sc: Scene, body: SkyBody, color: string) {
     const { curve } = dayDataStore.getState();
     if (!curve) return;
@@ -1051,64 +785,6 @@ export class ViewfinderController {
       prevSky = sky;
     }
     ctx.globalAlpha = 1;
-  }
-
-  /** Horizon (0°) as a faint dashed line, over the ground. */
-  private drawHorizon(sc: Scene) {
-    const pts: number[] = [];
-    for (let i = 0; i <= 40; i++) {
-      const az = sc.aim.azimuthDeg - sc.hfov * 0.75 + (sc.hfov * 1.5 * i) / 40;
-      const p = toPx(sc, az, 0);
-      if (p) pts.push(p.x, p.y);
-    }
-    this.marks.dashed(pts, 1, 4, 6, OverlayFlag.Over, HORIZON_RGBA);
-    // Out into the wider area as separate lines, so the dashes inside the frame keep their phase.
-    const reach = sc.viewHfov * 0.75 - sc.hfov * 0.75;
-    if (reach <= 0) return;
-    for (const side of [-1, 1]) {
-      const ext: number[] = [];
-      for (let i = 0; i <= 40; i++) {
-        const p = toPx(sc, sc.aim.azimuthDeg + side * (sc.hfov * 0.75 + (reach * i) / 40), 0);
-        if (p) ext.push(p.x, p.y);
-      }
-      this.marks.dashed(ext, 1, 4, 6, OverlayFlag.Over, HORIZON_RGBA);
-    }
-  }
-
-  /** Primary and secondary bows as colour bands; dashed and dim where terrain or a building is in front. */
-  private drawRainbow(sc: Scene) {
-    const minAlt = flatHorizonDeg(sc.eyeAboveGroundM) - 0.5;
-    const seen = { clear: 0, dim: 0 };
-    for (const [k, alpha] of [[1, 0.8], [2, 0.45]] as const) {
-      const mid = rainbowRadiusDeg(WATER_N.Yellow, k);
-      if (!rainbowTop(sc.sunAz, sc.sunAlt, mid).possible) continue;
-      const width = Math.abs(rainbowRadiusDeg(WATER_N.Red, k) - rainbowRadiusDeg(WATER_N.Violet, k));
-      // Sample only what the frame can show, so long lenses keep a smooth arc.
-      const range = arcWindow(sc.sunAz, sc.sunAlt, mid, sc.aim.azimuthDeg, sc.aim.elevationDeg, Math.hypot(sc.viewHfov, sc.viewVfov) / 2 + width);
-      if (!range) continue;
-      const centre = rainbowArc(sc.sunAz, sc.sunAlt, mid, -90, BOW_STEPS, range);
-      const hidden = centre.map((p) => p.altitudeDeg < minAlt || hiddenBySkyline(sc, p.azimuthDeg, p.altitudeDeg) || behindBuilding(this.occ, p.azimuthDeg, p.altitudeDeg, Infinity));
-      const lineWidth = Math.max(1.5, (sc.frame.pxPerMm * sc.cam.focalMm * width * D2R) / (BOW_COLORS.length - 1));
-      BOW_COLORS.forEach((color, ci) => {
-        const n = WATER_N.Red + ((WATER_N.Violet - WATER_N.Red) * ci) / (BOW_COLORS.length - 1);
-        const pts = rainbowArc(sc.sunAz, sc.sunAlt, rainbowRadiusDeg(n, k), -90, BOW_STEPS, range);
-        const rgba = hexRgba(color, alpha);
-        let prev: { x: number; y: number } | null = null;
-        for (let i = 0; i < pts.length; i++) {
-          const p = pts[i].altitudeDeg >= minAlt ? toPx(sc, pts[i].azimuthDeg, pts[i].altitudeDeg) : null;
-          if (p && prev && segmentHitsRect(prev, p, sc.area, 40)) {
-            const dim = hidden[i] || hidden[i - 1];
-            if (inView(sc, p)) seen[dim ? 'dim' : 'clear']++;
-            this.marks.segment(prev.x, prev.y, p.x, p.y, lineWidth, OverlayFlag.Over | (dim ? OverlayFlag.Hidden : 0), alpha * 0.35, rgba);
-          }
-          prev = p;
-        }
-      });
-    }
-    if (import.meta.env.DEV) {
-      const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
-      if (dev) dev.rainbow = { ...seen, at: Date.now() };
-    }
   }
 
   private drawBody(sc: Scene, body: SkyBody, date: Date): BodyLabel | null {
@@ -1400,10 +1076,11 @@ export class ViewfinderController {
     this.seen = { bodies: {}, markers: {}, pathLabels: [] };
     this.marks.clear();
     this.probe = import.meta.env.DEV && (window as unknown as { __scape?: { markProbe?: boolean } }).__scape?.markProbe ? [] : null;
+    const p: Paint = { ctx, marks: this.marks, probe: this.probe, occ: this.occ, seen: this.seen };
     // First in the batch, so every mark draws over them.
-    this.drawHorizon(sc);
-    if (c.showRainbow) this.drawRainbow(sc);
-    this.drawSky(sc);
+    drawHorizon(p, sc);
+    if (c.showRainbow) drawRainbow(p, sc);
+    drawSky(p, sc, this.skyMemo);
 
     const date = new Date(worldStore.getState().time);
     const labels: BodyLabel[] = [];
