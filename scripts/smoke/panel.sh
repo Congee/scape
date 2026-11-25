@@ -119,6 +119,9 @@ wait_for 'window.__scape && document.querySelector("[role=tablist]")' 80
 grammar Sky 'moon and core rows' '.night .brow' 3
 grammar Weather 'rainbow readouts' '.tools .readout-row' 1
 grammar Weather 'tide extremes' '.tide-extremes .brow' 2
+# Forecasts reach back only PAST_DAYS, so sightlines need a recent date.
+ab open "$BASE/?camera=40.7359,-74.0286&t=$(date -u +%Y-%m-%d)T16:00Z" >/dev/null
+wait_for 'window.__scape && document.querySelector("[role=tablist]")' 80
 grammar Weather 'sightlines' '.wx-sight summary.brow' 1
 sec=$(js '(() => { const p = document.createElement("i"); p.style.color = "var(--bg-3)"; document.body.append(p); const want = getComputedStyle(p).color; p.remove(); const b = [...document.querySelectorAll("#ptabpanel .psec-b")]; return `${b.length} ${b.filter((e) => getComputedStyle(e).backgroundColor === want).length}`; })()')
 check "section bodies sit on bg-3" "$(awk -v a="${sec% *}" -v b="${sec#* }" 'BEGIN { print (a > 0 && a == b) ? 1 : 0 }')" "$sec"

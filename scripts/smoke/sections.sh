@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Panel sections smoke: every tab of the map and viewfinder panels, desktop and 390 px. Section heads in fg, field labels in fg-2,
-# a 1px line rule on every section after the first, no section inside a section, and Aim heading the Now tab.
+# a 1px line rule on every section after the first, no section inside a section, and the map Now tab opening with the readout, then Aim.
 # Usage: scripts/smoke/sections.sh [port] [cdp-port] [screenshot-dir]
 # Needs a dev server on the port; launches a headless Brave on the CDP port unless one answers, and stops only what it started.
 set -uo pipefail
@@ -77,8 +77,8 @@ for vp in "desktop 1600 1000" "390 390 844"; do
   # Aim heads the Now tab; Today follows as its own ruled section.
   js '(() => { document.getElementById("ptab-Now").click(); return "ok"; })()' >/dev/null
   wait_for '!!document.querySelector(".tab-body .psec-h")' 40
-  f=$(js '(() => { const hs = [...document.querySelectorAll(".tab-body .psec-h")]; const s = (t) => hs.find((h) => h.textContent.startsWith(t))?.closest(".psec"); const a = s("Aim"), d = s("Today"); return `${!!a && !!d && hs[0]?.textContent === "Aim"} ${d ? getComputedStyle(d).borderTopWidth : "none"} ${hs.map((h) => h.textContent).join(",")}`; })()')
-  check "map $name Now: Aim first, Today a ruled section" "$([[ "$f" == "true 1px "* ]] && echo 1 || echo 0)" "$f"
+  f=$(js '(() => { const hs = [...document.querySelectorAll(".tab-body .psec-h")]; const s = (t) => hs.find((h) => h.textContent.startsWith(t))?.closest(".psec"); const a = s("Aim"), d = s("Today"); return `${!!a && !!d && hs[0]?.textContent === "Now" && hs[1]?.textContent === "Aim"} ${d ? getComputedStyle(d).borderTopWidth : "none"} ${hs.map((h) => h.textContent).join(",")}`; })()')
+  check "map $name Now: readout then Aim, Today a ruled section" "$([[ "$f" == "true 1px "* ]] && echo 1 || echo 0)" "$f"
   ab screenshot "$OUT/sections-now-$name.png" >/dev/null
   open_panel /viewfinder
   scan_tabs "viewfinder $name"

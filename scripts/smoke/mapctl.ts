@@ -2,6 +2,7 @@
 /* oxlint-disable no-await-in-loop -- smoke steps run one after another */
 // Usage: bun scripts/smoke/mapctl.ts <cdp> <dev-port> <shot-dir>
 import { mkdirSync } from 'node:fs';
+import { atPixel } from '../../src/lib/core/geo/coords';
 import { Tab } from './cdp';
 
 const [cdp = '9440', port = '5440', shots = '/tmp/mapctl'] = process.argv.slice(2);
@@ -32,11 +33,13 @@ const mode = () => tab.eval<string>('__scape.settings.getState().clickMode');
 const markers = () => tab.eval<number>('__scape.markers.getState().markers.length');
 const menuOpen = () => tab.eval<boolean>('!!document.querySelector(".map-menu")');
 const near = (a: P | null | undefined, b: P, eps = 1e-6) => !!a && Math.abs(a.lng - b.lng) < eps && Math.abs(a.lat - b.lat) < eps;
+// What the map stores for a click there: rounded to the pixel at that zoom.
+const picked = (s: { ll: P; zoom: number }) => atPixel(s.ll, s.zoom);
 const fmt = (p: P | null | undefined) => (p ? `${p.lat.toFixed(5)},${p.lng.toFixed(5)}` : 'null');
 const sleep = (ms: number) => Bun.sleep(ms);
 
 /** A client point at fractions of the canvas, nudged until nothing but the canvas is under it; with its lng/lat. */
-async function spot(fx: number, fy: number): Promise<{ x: number; y: number; ll: P }> {
+async function spot(fx: number, fy: number): Promise<{ x: number; y: number; ll: P; zoom: number }> {
   return tab.eval(`(() => {
     const r = __scapeMap.getCanvas().getBoundingClientRect();
     for (let k = 0; k < 121; k++) {
@@ -44,7 +47,7 @@ async function spot(fx: number, fy: number): Promise<{ x: number; y: number; ll:
       if (document.elementFromPoint(x, y) !== __scapeMap.getCanvas()) continue;
       if (__scapeMap.getLayer('markers-circle') && __scapeMap.queryRenderedFeatures([x - r.left, y - r.top], { layers: ['markers-circle'] }).length) continue;
       const ll = __scapeMap.unproject([x - r.left, y - r.top]);
-      return { x, y, ll: { lng: ll.lng, lat: ll.lat } };
+      return { x, y, ll: { lng: ll.lng, lat: ll.lat }, zoom: __scapeMap.getZoom() };
     }
     throw new Error('no clear spot');
   })()`);
@@ -149,14 +152,14 @@ async function run(vp: 'desktop' | 'phone') {
     const s = await spot(fx, 0.55);
     await click(s.x, s.y);
     const after = await world();
-    const ok = m === 'camera' ? near(after.pin, s.ll) && near(after.pin2, before.pin2!) : m === 'target' ? near(after.pin2, s.ll) && near(after.pin, before.pin) : near(after.pin, before.pin) && near(after.pin2, before.pin2!);
+    const ok = m === 'camera' ? near(after.pin, picked(s)) && near(after.pin2, before.pin2!) : m === 'target' ? near(after.pin2, picked(s)) && near(after.pin, before.pin) : near(after.pin, before.pin) && near(after.pin2, before.pin2!);
     check(`${vp} mode ${m}: a plain click ${m === 'off' ? 'moves nothing' : `sets the ${m}`}`, ok, `camera ${fmt(after.pin)}, target ${fmt(after.pin2)}`);
   }
   // Shortcuts, from Off.
   {
     const s = await spot(0.3, 0.7);
     await click(s.x, s.y, MOD.Shift);
-    check(`${vp} Shift-click sets the target in Off mode`, near((await world()).pin2, s.ll), fmt((await world()).pin2));
+    check(`${vp} Shift-click sets the target in Off mode`, near((await world()).pin2, picked(s)), fmt((await world()).pin2));
     const n0 = await markers();
     const a = await spot(0.4, 0.7);
     await click(a.x, a.y, MOD.Alt);
@@ -193,10 +196,10 @@ async function run(vp: 'desktop' | 'phone') {
     };
     const c1 = await spot(0.2, 0.4);
     await item('Camera here', c1);
-    check(`${vp} menu: Camera here`, near((await world()).pin, c1.ll) && !(await menuOpen()), fmt((await world()).pin));
+    check(`${vp} menu: Camera here`, near((await world()).pin, picked(c1)) && !(await menuOpen()), fmt((await world()).pin));
     const t1 = await spot(0.3, 0.4);
     await item('Target here', t1);
-    check(`${vp} menu: Target here`, near((await world()).pin2, t1.ll), fmt((await world()).pin2));
+    check(`${vp} menu: Target here`, near((await world()).pin2, picked(t1)), fmt((await world()).pin2));
     const n0 = await markers();
     const m1 = await spot(0.4, 0.4);
     await item('Add marker', m1);
@@ -291,7 +294,7 @@ async function run(vp: 'desktop' | 'phone') {
     await sleep(300);
     const still = await menuOpen();
     const pin = (await world()).pin;
-    check(`${vp} long-press opens the menu and the lift does not pick an item`, open && still && !near(pin, s.ll), `open ${open}, after lift ${still}`);
+    check(`${vp} long-press opens the menu and the lift does not pick an item`, open && still && !near(pin, picked(s)), `open ${open}, after lift ${still}`);
     await tab.shot(`${shots}/${vp}-longpress.png`);
     await key('Escape', 27);
     const d = await spot(0.4, 0.5);
@@ -335,9 +338,9 @@ async function migration() {
       return 1;
     })()`);
     await load();
-    const stored = await tab.eval<{ version: number; mode: string; old: boolean }>(`(() => { const r = JSON.parse(localStorage.getItem('scape.settings')); return { version: r.version, mode: r.state.clickMode, old: 'clickMovesPin' in r.state }; })()`);
+    const stored = await tab.eval<{ version: number; current: number; mode: string; old: boolean }>(`(() => { const r = JSON.parse(localStorage.getItem('scape.settings')); return { version: r.version, current: __scape.settings.persist.getOptions().version, mode: r.state.clickMode, old: 'clickMovesPin' in r.state }; })()`);
     const p = await picker();
-    check(`migration: clickMovesPin ${old} → ${want}`, (await mode()) === want && p.modes[0] === want && stored.version === 1 && stored.mode === want && !stored.old, `store ${await mode()}, icon ${p.modes[0]}, stored v${stored.version} ${stored.mode}, old key ${stored.old}`);
+    check(`migration: clickMovesPin ${old} → ${want}`, (await mode()) === want && p.modes[0] === want && stored.current > 0 && stored.version === stored.current && stored.mode === want && !stored.old, `store ${await mode()}, icon ${p.modes[0]}, stored v${stored.version}/${stored.current} ${stored.mode}, old key ${stored.old}`);
   }
 }
 
