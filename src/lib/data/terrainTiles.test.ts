@@ -61,3 +61,13 @@ describe('DemCache past coverage', () => {
     expect(c.get(2, 1, 1)).toBeNull();
   });
 });
+
+describe('DemCache stats', () => {
+  it('counts decoded tiles and their bytes apart from remembered absences', async () => {
+    answers['3/1/1'] = 5;
+    const c = new DemCache(10);
+    await c.load({ z: 3, x: 1, y: 1 });
+    await c.load({ z: 0, x: 0, y: 0 });
+    expect(c.stats()).toEqual({ tiles: 1, nulls: 1, maxTiles: 10, bytes: SIZE * SIZE * 4, keys: ['3/1/1'] });
+  });
+});

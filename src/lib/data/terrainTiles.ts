@@ -145,7 +145,22 @@ export class DemCache implements DemSource {
   constructor(
     private maxTiles = 200,
     private concurrency = 12
-  ) {}
+  ) {
+    // Dev: lets a CDP session in the worker read every cache's fill.
+    if (import.meta.env.DEV) ((globalThis as { __scapeDem?: DemCache[] }).__scapeDem ??= []).push(this);
+  }
+
+  /** Decoded tiles held, their float bytes and keys; nulls are remembered absences. */
+  stats(): { tiles: number; nulls: number; maxTiles: number; bytes: number; keys: string[] } {
+    let bytes = 0;
+    const keys: string[] = [];
+    for (const [k, t] of this.tiles) {
+      if (!t) continue;
+      bytes += t.elev.byteLength;
+      keys.push(k);
+    }
+    return { tiles: keys.length, nulls: this.tiles.size - keys.length, maxTiles: this.maxTiles, bytes, keys };
+  }
 
   get(z: number, x: number, y: number): DemTile | null | undefined {
     const k = tileKey(z, x, y);
