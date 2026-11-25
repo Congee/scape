@@ -9,12 +9,8 @@ import { moonInfo, position, semidiameterDeg } from '@core/astro/positions';
 import { airDensity } from '@core/astro/refraction';
 import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
 import { type LngLat } from '@core/geo/geodesy';
-import { anyOccluder, MeshOccluder, type Occluder } from '@core/geo/meshOcclude';
-import { placeModel } from '@core/geo/modelPlace';
-import { PrismOccluder } from '@core/geo/prismOcclude';
-import { prismFrameKey, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
-import type { SurfaceMesh } from '@core/geo/surfaces';
-import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm } from '@core/optics/fov';
+import { type Occluder } from '@core/geo/meshOcclude';
+import { effectiveOptics, frameFov, frameMm } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, projectDir, unproject, type Camera } from '@core/optics/projection';
 import { OverlayBatch } from '@core/viewfinder/gl/overlayGl';
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
@@ -22,15 +18,14 @@ import type { BodyDisc, MoonShading, SceneGl } from '@core/viewfinder/gl/sceneGl
 import { fitFrame, fitViewports } from '@core/viewfinder/frameFit';
 import { behindBuilding, toPx } from '@core/viewfinder/place';
 import { starNight } from '@core/viewfinder/skyGate';
-import { clamp, palette, smooth } from '@core/viewfinder/palette';
+import { palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges, visibleRuns } from '@core/model/draw';
-import { modelMesh } from '@core/model/mesh';
 import { fitPhoto, photoHfovDeg } from '@core/photo/fit';
 import { flatHorizonDeg } from '@core/terrain/los';
-import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
+import { type MeshLevel } from '@core/terrain/mesh';
 import { occluded, type ViewProfile } from '@core/terrain/view';
-import { buildingsStore, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
-import { lod2HeldStats, lod2Store } from '@state/lod2';
+import { buildingsStore } from '@state/buildings';
+import { lod2Store } from '@state/lod2';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
@@ -40,28 +35,26 @@ import { photoStore } from '@state/photo';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
 import { EYE_HEIGHT_M, meshEyeKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
-import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
+import { viewfinderStore } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { MODEL_ACCENT } from '../map/modelOverlay';
+import { BuildingLayer } from './buildingLayer';
 import { drawBodies, drawBodyLabels, drawPaths, type PathMemo } from './bodies';
 import { drawFrame, drawGlError, drawHud } from './hud';
 import { drawMarkers, drawTarget } from './markers';
 import { type Paint, type Scene, type Seen } from './paint';
 import { drawHorizon, drawRainbow, drawSky, type SkyMemo } from './skyMarks';
+import { ensureViewWindow } from './viewWindow';
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
-const MAX_COLUMNS = 2400;
 /** Sun travel that may shift the sky colours and the shading by a step; about 12 s of clock. */
 const SUN_STEP_DEG = 0.05;
-/** Buildings are only worth fetching and drawing this far out. */
-const BUILDING_RANGE_M = 20_000;
 /** The selected model's outline is tested for occluders about this often along its length. */
 const OUTLINE_STEP_PX = 3;
 const OUTLINE_MAX_PX = 4000;
 /** Occlusion tests per frame for the outline; a dense mesh gets coarser steps. */
 const OUTLINE_SAMPLES = 6000;
-const upEighth = (k: number) => Math.ceil(k * 8 - 1e-6) / 8;
 
 /** Synthetic camera view: terrain layers from the DEM sweep, sky, sun/moon/GC paths, target and markers. */
 export class ViewfinderController {
@@ -75,14 +68,8 @@ export class ViewfinderController {
   private drag: { x: number; y: number; az: number; el: number } | null = null;
   private readonly skyMemo: SkyMemo = { starGroups: null, showers: null };
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
-  /** Eye-relative prisms per tile, only those placed for the current camera location. */
-  private prisms = new Map<string, PrismTile>();
   private readonly pathHidden: PathMemo = new Map();
-  private prismSrc: { frame: string; tiles: unknown } | null = null;
-  /** Overture rows the LoD2 and model footprints hid, over the tiles drawn. */
-  private prismHidden = 0;
-  /** One index per LoD2 tile, so a tile streaming in does not re-index the others. */
-  private lod2Occ = new WeakMap<SurfaceMesh, MeshOccluder>();
+  private readonly buildings = new BuildingLayer();
   private prismMs = 0;
   private prismStats = { buildings: 0, tiles: 0 };
   private rasterMs = 0;
@@ -93,19 +80,12 @@ export class ViewfinderController {
   private drawn: { time: number; obs: Observer; sunAlt: number; sunAz: number; pxPerDeg: number; halfDiagDeg: number; moving: boolean } | null = null;
   /** Per-object building occlusion for the current frame; the GPU picture cannot mask objects. */
   private occ: Occluder | null = null;
-  private occCache: { key: string; occ: Occluder | null } | null = null;
-  /** Bumps whenever `prisms` changes, so the prism index is rebuilt only then. */
-  private prismRev = 0;
-  private meshOccCache: { key: string; occ: MeshOccluder | null } | null = null;
-  private anyOccCache: { key: string; occ: Occluder | null } | null = null;
   /** Sky marks for the picture pass, rebuilt each frame. */
   private readonly marks = new OverlayBatch();
   /** Dev: marks with the exact CPU answer, 6 numbers each, while `__scape.markProbe` is set. */
   private probe: number[] | null = null;
   /** What the overlay hid this frame, for `__scape.overlay`. */
   private seen: Seen = { bodies: {}, markers: {}, pathLabels: [] };
-  /** Placed models, rebuilt when the camera location or any model changes. */
-  private modelCache: { key: string; meshes: SurfaceMesh[]; ids: string[] } | null = null;
   /** The selected model's outline, eye-relative e, n, u pairs. */
   private outlineCache: { key: string; seg: Float32Array } | null = null;
   private gpuMs = -1;
@@ -246,84 +226,10 @@ export class ViewfinderController {
 
   /** Asks the terrain worker for a wedge wider than the frame so small pans need no new sweep. */
   private ensureWindow() {
-    const s = settingsStore.getState();
     if (this.w < 40) return;
-    const sc = this.scene();
-    if (!s.terrain) {
-      // Buildings stand on the terrain, so they are hidden with it.
-      stopBuildings();
-      return;
-    }
-    const wantStep = clamp(sc.hfov / Math.max(100, sc.frame.w), 0.02, 0.5);
-    const wantSpan = Math.min(360, Math.max(30, sc.viewHfov * 2 + 10));
-    const stepForSpan = Math.max(wantStep, wantSpan / MAX_COLUMNS);
-    const rangeM = s.horizonRangeKm * 1000;
-    this.ensureMeshWindow(sc, rangeM);
-    const minStepDeg = Math.max(0.005, sc.vfov / Math.max(100, sc.frame.h) / 2);
-    const cur = viewfinderStore.getState().window;
-    const needFrom = sc.aim.azimuthDeg - sc.viewHfov / 2 - 5;
-    const needTo = sc.aim.azimuthDeg + sc.viewHfov / 2 + 5;
-    if (cur && cur.rangeM === rangeM && cur.minStepDeg === minStepDeg && cur.azStepDeg <= stepForSpan * 1.3 && cur.azStepDeg >= stepForSpan / 3) {
-      const rel = (a: number) => (((a - cur.azFromDeg) % 360) + 360) % 360;
-      const covered = cur.azSpanDeg >= 360 || (rel(needFrom) <= cur.azSpanDeg && rel(needTo) <= cur.azSpanDeg && rel(needFrom) <= rel(needTo));
-      if (covered) {
-        this.askBuildings(cur, sc);
-        return;
-      }
-    }
-    const win: ViewWindow = {
-      // On the step's grid, so the worker keeps the columns a pan still covers.
-      azFromDeg: Math.round(((((sc.aim.azimuthDeg - wantSpan / 2) % 360) + 360) % 360) / stepForSpan) * stepForSpan,
-      azSpanDeg: wantSpan,
-      azStepDeg: stepForSpan,
-      rangeM,
-      minStepDeg
-    };
-    viewfinderStore.getState().setWindow(win);
-    this.askBuildings(win, sc);
+    ensureViewWindow(this.scene(), this.dpr);
   }
 
-  /**
-   * Cuts the terrain mesh for the frame. Focal and target land on a quarter-octave ladder and the
-   * aim on a grid one pad wide on each axis, so zooming, panning or tilting inside the wedge the
-   * last mesh was built for changes nothing and no rebuild is asked for.
-   */
-  private ensureMeshWindow(sc: Scene, rangeM: number) {
-    // Cutting the mesh for a placeholder pitch would build the whole thing again once the real one lands.
-    if (!sc.aimKnown) return;
-    const focalMm = 2 ** (Math.round(Math.log2(sc.cam.focalMm) * 4) / 4);
-    // The whole area, in eighths so a resize seldom asks for a new wedge.
-    const wMm = sc.cam.frameWmm * upEighth(sc.vp.area.w / sc.vp.frame.w);
-    const hMm = sc.cam.frameHmm * upEighth(sc.vp.area.h / sc.vp.frame.h);
-    const hfovDeg = fovDeg(wMm, focalMm);
-    const pxH = Math.max(100, sc.frame.h * this.dpr);
-    const targetRad = 2 ** (Math.round(Math.log2((MESH_PX_PER_CELL * sc.cam.frameHmm) / (focalMm * pxH)) * 4) / 4);
-    const step = meshAzPadDeg(hfovDeg);
-    const azimuthDeg = Math.round(sc.aim.azimuthDeg / step) * step;
-    const vfovDeg = fovDeg(hMm, focalMm);
-    const elStep = meshElPadDeg(vfovDeg);
-    const pitchDeg = Math.round(sc.aim.elevationDeg / elStep) * elStep;
-    const span = frameElevationSpanDeg(pitchDeg, wMm, hMm, focalMm);
-    const elHalfDeg = Math.max(span.maxDeg - pitchDeg, pitchDeg - span.minDeg);
-    const cur = viewfinderStore.getState().meshWindow;
-    // Frame height sets the wedge as well as the band, so hfov and pitch alone do not pin the mesh.
-    if (cur && cur.rangeM === rangeM && cur.hfovDeg === hfovDeg && cur.targetRad === targetRad && cur.azimuthDeg === azimuthDeg && cur.pitchDeg === pitchDeg && cur.elHalfDeg === elHalfDeg && cur.vfovDeg === vfovDeg) return;
-    viewfinderStore.getState().setMeshWindow({ rangeM, azimuthDeg, hfovDeg, vfovDeg, pitchDeg, elHalfDeg, targetRad });
-  }
-
-  /** Building volumes for the same wedge the terrain sweep covers, so small pans need no new fetch. */
-  private askBuildings(win: ViewWindow, sc: Scene) {
-    if (!compositionStore.getState().showBuildings) {
-      stopBuildings();
-      return;
-    }
-    const pin = worldStore.getState().pin;
-    const rangeM = Math.min(win.rangeM, BUILDING_RANGE_M);
-    requestBuildings(pin, sc.eyeM, win.azFromDeg, win.azSpanDeg, rangeM);
-    // An octave ladder, so zooming only asks again once the tileset's error test could change.
-    const pxPerRad = 2 ** Math.round(Math.log2(Math.max(100, sc.frame.w) / (sc.hfov * D2R)));
-    requestLod2(pin, sc.eyeM, win.azFromDeg, win.azSpanDeg, rangeM, pxPerRad);
-  }
 
   private onDown = (e: PointerEvent) => {
     // Otherwise a drag from the canvas selects the toolbar text behind it.
@@ -386,53 +292,11 @@ export class ViewfinderController {
     e.preventDefault();
   };
 
-  /** Prisms the worker placed for the current camera location; a tile from an old one waits for its rebuild. */
-  private prismTiles(sc: Scene): Map<string, PrismTile> {
-    const frame = prismFrameKey(worldStore.getState().pin, sc.eyeM);
-    const { tiles } = buildingsStore.getState();
-    // The store replaces its map on change, so the same identity means nothing new.
-    if (this.prismSrc?.frame === frame && this.prismSrc.tiles === tiles) return this.prisms;
-    this.prismSrc = { frame, tiles };
-    this.prisms = new Map();
-    this.prismHidden = 0;
-    for (const [k, t] of tiles) {
-      if (t.frame !== frame) continue;
-      this.prisms.set(k, t.prism);
-      this.prismHidden += t.hidden;
-    }
-    this.prismRev++;
-    return this.prisms;
-  }
-
-  /** Visible models in the same eye-relative frame as the prisms. */
-  private modelSurfaces(sc: Scene): SurfaceMesh[] {
-    const w = worldStore.getState();
-    const { models, rev } = modelsStore.getState();
-    const key = `${w.pin.lat.toFixed(6)},${w.pin.lng.toFixed(6)}|${sc.eyeM.toFixed(2)}|${rev}`;
-    if (this.modelCache?.key !== key) {
-      const meshes: SurfaceMesh[] = [];
-      const ids: string[] = [];
-      for (const m of models) {
-        const mesh = m.visible ? modelMesh(m) : null;
-        if (!mesh || mesh.idx.length === 0) continue;
-        meshes.push(placeModel(mesh, m.anchor, m.groundM, w.pin, sc.eyeM));
-        ids.push(m.id);
-      }
-      this.modelCache = { key, meshes, ids };
-    }
-    return this.modelCache.meshes;
-  }
-
-  /** Placed LoD2 meshes; they share the models' pass, index and shadows. */
-  private lod2Surfaces(): SurfaceMesh[] {
-    return [...lod2Store.getState().tiles.values()].map((t) => t.mesh);
-  }
-
   /** Accent silhouette of the selected model, over the picture; terrain and buildings in front hide it. */
   private drawModelOutline(sc: Scene) {
     const dev = import.meta.env.DEV ? (window as unknown as { __scape?: Record<string, unknown> }).__scape : undefined;
     const id = modelsStore.getState().selectedId;
-    const cache = this.modelCache;
+    const cache = this.buildings.models;
     const shown = compositionStore.getState().showBuildings && settingsStore.getState().terrain;
     const at = shown && id && cache ? cache.ids.indexOf(id) : -1;
     if (!cache || at < 0) {
@@ -551,49 +415,6 @@ export class ViewfinderController {
     }
   }
 
-  /** Tiles and shading for the GPU prism pass, or null when buildings are off or none have arrived. */
-  private glPrisms(sc: Scene, hazeRgb: readonly number[]): { tiles: Iterable<PrismTile>; models: Iterable<SurfaceMesh>; shading: PrismShading } | null {
-    this.prismStats = { buildings: 0, tiles: 0 };
-    if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
-    const tiles = this.prismTiles(sc);
-    const models = [...this.modelSurfaces(sc), ...this.lod2Surfaces()];
-    if (tiles.size === 0 && models.length === 0) return null;
-    this.prismStats = { buildings: 0, tiles: tiles.size };
-    const lightAzDeg = sc.light?.azimuthDeg ?? sc.aim.azimuthDeg + 135;
-    const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    return { tiles: [...tiles.values()], models, shading: { lightAzDeg, hazeRgb, night: sc.night, rangeM } };
-  }
-
-  /** Index of the same prisms the picture draws; it only changes when the tiles or the camera move. */
-  private occluder(sc: Scene): Occluder | null {
-    if (!compositionStore.getState().showBuildings || !settingsStore.getState().terrain) return null;
-    const tiles = this.prismTiles(sc);
-    const models = this.modelSurfaces(sc);
-    const lod2 = this.lod2Surfaces();
-    if (tiles.size === 0 && models.length === 0 && lod2.length === 0) return null;
-    const rangeM = Math.min(sc.view?.rangeM ?? BUILDING_RANGE_M, BUILDING_RANGE_M);
-    const key = `${this.prismRev}|${rangeM}`;
-    const modelKey = this.modelCache?.key ?? '';
-    // Separate caches: tiles streaming in must not re-index a large imported mesh.
-    if (this.meshOccCache?.key !== modelKey) this.meshOccCache = { key: modelKey, occ: models.length > 0 ? new MeshOccluder(models) : null };
-    if (this.occCache?.key !== key) this.occCache = { key, occ: tiles.size > 0 ? new PrismOccluder(tiles.values(), rangeM) : null };
-    const both = `${key}|${modelKey}|${lod2Store.getState().version}`;
-    if (this.anyOccCache?.key !== both) {
-      const lod2Occ = [...lod2Store.getState().tiles.values()].map((t) => {
-        let occ = this.lod2Occ.get(t.mesh);
-        if (!occ) this.lod2Occ.set(t.mesh, (occ = new MeshOccluder(t.occ)));
-        return occ;
-      });
-      this.anyOccCache = { key: both, occ: anyOccluder([this.occCache.occ, this.meshOccCache.occ, ...lod2Occ]) };
-    }
-    return this.anyOccCache.occ;
-  }
-
-  private lod2Stats() {
-    const l = lod2Store.getState();
-    return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows: this.prismHidden, held: lod2HeldStats() };
-  }
-
   /** Sky, terrain, buildings and shadows on the GPU, into the canvas that sits under this one. */
   private drawSceneGl(sc: Scene, gl: SceneGl) {
     const pal = palette(sc.sunAlt);
@@ -619,7 +440,7 @@ export class ViewfinderController {
         groundNear: pal.groundNear,
         groundFar: pal.groundFar,
         terrain: settingsStore.getState().terrain ? this.meshLevels() : [],
-        prism: this.glPrisms(sc, pal.groundFar),
+        prism: this.buildings.glPrisms(sc, pal.groundFar),
         milkyWay: tex,
         eqj: tex ? enuToEqj(sc.time, sc.obs) : null,
         airDensity: sc.airDensity,
@@ -646,7 +467,7 @@ export class ViewfinderController {
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       const shade = { on: stats.cascades > 0, light: sc.light?.body ?? null, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, fit: stats.shadowFit, viewRangeM: stats.viewRangeM };
-      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, gpuPass: stats.gpuPassMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, area: sc.area, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => behindBuilding(this.occ, az, alt, d) };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, gpuPass: stats.gpuPassMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.buildings.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, area: sc.area, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => behindBuilding(this.occ, az, alt, d) };
       if (dev) dev.moonDisc = this.moonGeometry(sc);
       if (dev) {
         dev.shadowBytes = () => gl.shadowBytes;
@@ -724,7 +545,7 @@ export class ViewfinderController {
       return;
     }
     const c = compositionStore.getState();
-    this.occ = this.occluder(sc);
+    this.occ = this.buildings.occluder(sc);
     this.seen = { bodies: {}, markers: {}, pathLabels: [] };
     this.marks.clear();
     this.probe = import.meta.env.DEV && (window as unknown as { __scape?: { markProbe?: boolean } }).__scape?.markProbe ? [] : null;
@@ -756,7 +577,7 @@ export class ViewfinderController {
   dispose() {
     this.photo?.image?.close();
     this.photo = null;
-    stopBuildings();
+    this.buildings.dispose();
     for (const u of this.unsubs) u();
     this.ro.disconnect();
     cancelAnimationFrame(this.raf);
