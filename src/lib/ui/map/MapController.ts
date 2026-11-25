@@ -20,10 +20,8 @@ import { rowsCentre, rowsRings, seedModel } from '@core/model/seed';
 import { buildingLayerIds, heightFromFeatures } from '@core/geo/buildingHeight';
 import { atPixel, copyLngLat } from '@core/geo/coords';
 import { isUrban, placeClass, type Place } from '@core/geo/parking';
-import { bearingDeg, destination, distanceM, type LngLat } from '@core/geo/geodesy';
+import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { cellOf } from '@core/geo/grid';
-import { depthOfField } from '@core/optics/dof';
-import { cocMm, effectiveOptics, focalForFovMm, fovDeg, frameMm, sensorPixels, tcFactor } from '@core/optics/fov';
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
 import { ensureDemProtocol } from '@data/demProtocol';
@@ -31,9 +29,7 @@ import { ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { alignStore } from '@state/align';
 import { buildingHeightAt, buildingRowsAt } from '@state/buildings';
-import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
-import { gearStore, sensorById, zoomPatch } from '@state/gear';
 import { lightProbeStore } from '@state/lightProbe';
 import { mapStatusStore } from '@state/mapStatus';
 import { markersStore } from '@state/markers';
@@ -50,6 +46,8 @@ import { CloudOverlay } from './cloudOverlay';
 import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
 import { HeatLayer } from './heatLayer';
+import { draggableMarker, type MarkerOpts } from './draggableMarker';
+import { FovOverlay } from './fovOverlay';
 import { MapLayers } from './mapLayers';
 import { EMPTY, samePoint } from './mapShared';
 import { SatelliteLayer } from './satelliteLayer';
@@ -60,13 +58,12 @@ import { ModelDrawer } from './ModelDrawer';
 import { installMotionLod } from './motionLod';
 import { NightLightsLayer } from './nightLightsLayer';
 import { MAX_PITCH, Orbit } from './orbit';
-import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
+import { eventLines, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 import { installTrackpadWheel } from './wheelZoom';
 
 const EVENTS_SRC = 'sky-events';
 const LIVE_SRC = 'sky-live';
 const GEO_SRC = 'geodetic';
-const FOV_SRC = 'fov';
 const MARKERS_SRC = 'markers';
 // Below this the basemap drops town labels, so a spot can look rural when it is not.
 const URBAN_MIN_ZOOM = 10;
@@ -77,10 +74,8 @@ const PIN2_COLOR = Ink.pinTarget;
 const PROBE_COLOR = Ink.edit;
 // Read at load: the route rewrites the URL without it.
 const ZOOM_PROBE = new URLSearchParams(location.search).has('zoomprobe');
-const FOV_COLOR = Ink.edit;
 const REGION_COLOR = Ink.edit;
 const IMPORT_COLOR = Ink.edit;
-const DEFAULT_FOV_RANGE_M = 5_000;
 
 /** Rectangle ring for a draft region; a box crossing the antimeridian runs past +180. */
 function regionFeatures(b: Bbox | null): GeoJSON.FeatureCollection {
@@ -90,23 +85,12 @@ function regionFeatures(b: Bbox | null): GeoJSON.FeatureCollection {
   return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } }] };
 }
 
-const angleDiff = (a: number, b: number) => Math.abs(((a - b + 540) % 360) - 180);
-
-function handleElement(title: string, cls: string): HTMLElement {
-  const el = document.createElement('div');
-  el.className = `fov-handle ${cls}`;
-  el.title = title;
-  return el;
-}
-
 /** Owns the MapLibre instance and keeps its overlays in sync with the stores. No React inside. */
 export class MapController {
   private map: MaplibreMap;
   private pin: Marker;
   private pin2: Marker | null = null;
   private probe: Marker | null = null;
-  private fovHandle: Marker | null = null;
-  private fovEdgeHandle: Marker | null = null;
   private scale: ScaleControl;
   private unsubs: (() => void)[] = [];
   private rayM = 50_000;
@@ -118,7 +102,6 @@ export class MapController {
   private drawStart: LngLat | null = null;
   private draftBefore: Bbox | null = null;
   private dragging2 = false;
-  private draggingFov = false;
   private live: { src: GeoJSONSource; data: GeoJSON.FeatureCollection } | null = null;
   private drawer: ModelDrawer;
   private clouds: CloudOverlay;
@@ -130,6 +113,7 @@ export class MapController {
   private shadows: ShadowLayer;
   private heat: HeatLayer;
   private orbit: Orbit;
+  private fov: FovOverlay;
   private nightLights: NightLightsLayer;
 
   constructor(container: HTMLElement) {
@@ -285,7 +269,6 @@ export class MapController {
           if (!this.dragging) this.pin.setLngLat([pin.lng, pin.lat]);
           this.renderLive();
           this.renderGeodetic();
-          this.renderFov();
           this.senseUrban();
         },
         { equalityFn: samePoint }
@@ -296,7 +279,6 @@ export class MapController {
           this.syncPin2(p);
           this.renderLive();
           this.renderGeodetic();
-          this.renderFov();
         },
         { equalityFn: samePoint }
       ),
@@ -314,8 +296,6 @@ export class MapController {
       ),
       dayDataStore.subscribe(() => this.renderEvents()),
       terrainStore.subscribe((st) => st.profile, () => this.renderGeodetic()),
-      compositionStore.subscribe(() => this.renderFov()),
-      gearStore.subscribe(() => this.renderFov()),
       markersStore.subscribe((st) => [st.markers, st.selectedId] as const, () => this.renderMarkers(), { equalityFn: shallow }),
       markersStore.subscribe((st) => st.placing, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
       modelsStore.subscribe((st) => st.picking || st.importPick, (on) => (this.map.getCanvas().style.cursor = on ? 'crosshair' : '')),
@@ -337,7 +317,8 @@ export class MapController {
       () => this.buildings.dispose(),
       () => this.shadows.dispose(),
       () => this.heat.dispose(),
-      () => this.nightLights.dispose()
+      () => this.nightLights.dispose(),
+      () => this.fov.dispose()
     );
     // Settings listeners run in subscribe order, which decides the stacking of layers that share an anchor.
     this.terrain = new TerrainLayer(this.map, () => this.styleReady);
@@ -345,8 +326,8 @@ export class MapController {
     this.shadows = new ShadowLayer(this.map, () => this.styleReady);
     this.heat = new HeatLayer(this.map, () => this.styleReady);
     this.nightLights = new NightLightsLayer(this.map, () => this.styleReady);
+    this.fov = new FovOverlay(this.map, () => this.styleReady);
     this.unsubs.push(
-      settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
       lightProbeStore.subscribe((st, prev) => {
         if (st.point !== prev.point) this.syncProbe(st.point);
@@ -385,28 +366,10 @@ export class MapController {
   }
 
   /** Draggable marker whose drags reach the store at most once per frame. */
-  private makeMarker(opts: { at: LngLat; color?: string; scale?: number; element?: HTMLElement }, commit: (p: LngLat, final: boolean) => void, setDragging: (d: boolean) => void) {
-    const m = new Marker({ draggable: true, color: opts.color, scale: opts.scale, element: opts.element }).setLngLat([opts.at.lng, opts.at.lat]).addTo(this.map);
-    let raf = 0;
-    const commitPos = (final: boolean) => {
-      commit(this.picked(m.getLngLat()), final);
-    };
-    m.on('dragstart', () => setDragging(true));
-    m.on('drag', () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        commitPos(false);
-      });
-    });
-    m.on('dragend', () => {
-      cancelAnimationFrame(raf);
-      raf = 0;
-      setDragging(false);
-      commitPos(true);
-    });
-    this.unsubs.push(() => cancelAnimationFrame(raf));
-    return m;
+  private makeMarker(opts: MarkerOpts, commit: (p: LngLat, final: boolean) => void, setDragging: (d: boolean) => void) {
+    const { marker, cancel } = draggableMarker(this.map, opts, commit, setDragging);
+    this.unsubs.push(cancel);
+    return marker;
   }
 
   private syncPin2(p: LngLat | null) {
@@ -647,7 +610,6 @@ export class MapController {
     this.map.addSource(EVENTS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(LIVE_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(GEO_SRC, { type: 'geojson', data: EMPTY });
-    this.map.addSource(FOV_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(MARKERS_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(REGION_SRC, { type: 'geojson', data: EMPTY });
     this.map.addSource(IMPORT_SRC, { type: 'geojson', data: EMPTY });
@@ -662,50 +624,7 @@ export class MapController {
       source: REGION_SRC,
       paint: { 'line-color': REGION_COLOR, 'line-width': 2, 'line-dasharray': [2, 2] }
     });
-    this.map.addLayer({
-      id: 'fov-fill',
-      type: 'fill',
-      source: FOV_SRC,
-      filter: ['==', ['get', 'kind'], FovKind.Fill],
-      paint: { 'fill-color': FOV_COLOR, 'fill-opacity': 0.14 }
-    });
-    this.map.addLayer({
-      id: 'fov-pano',
-      type: 'line',
-      source: FOV_SRC,
-      filter: ['==', ['get', 'kind'], FovKind.Pano],
-      paint: { 'line-color': FOV_COLOR, 'line-width': 1.5, 'line-opacity': 0.7, 'line-dasharray': [3, 3] }
-    });
-    this.map.addLayer({
-      id: 'fov-axis',
-      type: 'line',
-      source: FOV_SRC,
-      filter: ['==', ['get', 'kind'], FovKind.Axis],
-      paint: { 'line-color': FOV_COLOR, 'line-width': 1, 'line-opacity': 0.6, 'line-dasharray': [2, 4] }
-    });
-    this.map.addLayer({
-      id: 'fov-dof',
-      type: 'line',
-      source: FOV_SRC,
-      filter: ['==', ['get', 'kind'], FovKind.Dof],
-      paint: { 'line-color': FOV_COLOR, 'line-width': 2, 'line-opacity': 0.6 }
-    });
-    this.map.addLayer({
-      id: 'fov-edge-casing',
-      type: 'line',
-      source: FOV_SRC,
-      filter: ['==', ['get', 'kind'], FovKind.Edge],
-      layout: { 'line-cap': 'round' },
-      paint: { 'line-color': HALO, 'line-width': 6 }
-    });
-    this.map.addLayer({
-      id: 'fov-edge',
-      type: 'line',
-      source: FOV_SRC,
-      filter: ['==', ['get', 'kind'], FovKind.Edge],
-      layout: { 'line-cap': 'round' },
-      paint: { 'line-color': FOV_COLOR, 'line-width': 2 }
-    });
+    this.fov.addLayers();
     this.map.addLayer({
       id: 'geodetic-casing',
       type: 'line',
@@ -812,7 +731,7 @@ export class MapController {
     this.renderEvents();
     this.renderLive();
     this.renderGeodetic();
-    this.renderFov();
+    this.fov.render();
     this.renderMarkers();
     this.heat.render();
     this.renderRegion();
@@ -880,69 +799,11 @@ export class MapController {
     src.setData(markerFeatures(markers, selectedId));
   }
 
-  /** Cone from the camera along the aim, with draggable tip (azimuth, length) and edge (focal length) handles. */
-  private renderFov() {
-    const src = this.source(FOV_SRC);
-    if (!src) return;
-    const w = worldStore.getState();
-    const c = compositionStore.getState();
-    if (!c.showFov) {
-      src.setData(EMPTY);
-      this.fovHandle?.remove();
-      this.fovEdgeHandle?.remove();
-      this.fovHandle = this.fovEdgeHandle = null;
-      return;
-    }
-    const sensor = sensorById(c.sensorId, gearStore.getState().cameras);
-    const frame = frameMm(sensor, c.orientation);
-    const opt = effectiveOptics(c);
-    const hfov = fovDeg(frame.w, opt.focalMm);
-    const aim = aimFor(c, w, null);
-    const targetM = w.pin2 ? distanceM(w.pin, w.pin2) : null;
-    const rangeM = c.fovRangeM ?? targetM ?? DEFAULT_FOV_RANGE_M;
-    const focusM = c.focusDistM ?? targetM;
-    const dof = focusM ? depthOfField(opt.focalMm, opt.fNumber, cocMm(sensor, sensorPixels(sensor), settingsStore.getState().cocRule), focusM) : null;
-    src.setData(fovCone(w.pin, aim.azimuthDeg, hfov, { rangeM, dofNearM: dof?.nearM, dofFarM: dof?.farM, panoDeg: c.panoTotalDeg }));
-
-    if (this.draggingFov) return;
-    const tip = destination(w.pin, aim.azimuthDeg, rangeM);
-    const edge = destination(w.pin, aim.azimuthDeg - hfov / 2, rangeM);
-    if (!this.fovHandle) {
-      this.fovHandle = this.makeMarker(
-        { at: tip, element: handleElement('Drag to aim the camera and set the cone length', 'tip') },
-        (p) => {
-          const cs = compositionStore.getState();
-          const a = aimFor(cs, worldStore.getState(), null);
-          cs.aim(bearingDeg(worldStore.getState().pin, p), a.elevationDeg);
-          cs.update({ fovRangeM: Math.max(50, distanceM(worldStore.getState().pin, p)) });
-        },
-        (d) => (this.draggingFov = d)
-      );
-      this.fovEdgeHandle = this.makeMarker(
-        { at: edge, element: handleElement('Drag to change the focal length', 'edge') },
-        (p) => {
-          const cs = compositionStore.getState();
-          const ws = worldStore.getState();
-          const a = aimFor(cs, ws, null);
-          const half = Math.max(0.5, angleDiff(bearingDeg(ws.pin, p), a.azimuthDeg));
-          const fr = frameMm(sensorById(cs.sensorId, gearStore.getState().cameras), cs.orientation);
-          cs.update(zoomPatch(cs, focalForFovMm(fr.w, half * 2) / tcFactor(cs.teleconverters)));
-        },
-        (d) => (this.draggingFov = d)
-      );
-      return;
-    }
-    this.fovHandle.setLngLat([tip.lng, tip.lat]);
-    this.fovEdgeHandle!.setLngLat([edge.lng, edge.lat]);
-  }
-
   dispose() {
     for (const u of this.unsubs) u();
     this.menu.close();
     this.pin.remove();
     this.pin2?.remove();
-    this.fovHandle?.remove();
-    this.fovEdgeHandle?.remove();
     this.recordView();
     this.map.remove();
   }
