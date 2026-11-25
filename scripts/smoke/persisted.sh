@@ -47,11 +47,13 @@ go() { ab open "$BASE/?$Q" >/dev/null; loaded; }
 reload() { js 'location.reload(), "ok"' >/dev/null; sleep 1; loaded; }
 # Each store's persisted fields as JSON, read back through its own partialize.
 SNAP="JSON.stringify(Object.fromEntries('$STORES'.split(' ').map((k) => { const s = window.__scape[k]; return [k, JSON.parse(JSON.stringify(s.persist.getOptions().partialize(s.getState())))]; })))"
-# Fields whose values differ between two snapshots, as store.field; key order is not a difference.
-CANON="((v) => JSON.stringify(v, (_, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort()) : x)))"
-DIFF="((a, b) => Object.keys(a).flatMap((k) => [...new Set([...Object.keys(a[k]), ...Object.keys(b[k])])].filter((f) => $CANON(a[k][f]) !== $CANON(b[k][f])).map((f) => k + '.' + f)).join(' ') || 'none')"
+# Fields whose values differ between two snapshots, as store.field; key order is not a difference, nor zoom past the URL's 0.01.
+CANON="((v) => JSON.stringify(v, (k, x) => (k === 'zoom' && typeof x === 'number' ? Math.round(x * 100) / 100 : x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort()) : x)))"
+DIFF="((a, b) => Object.keys(a).flatMap((k) => [...new Set([...Object.keys(a[k]), ...Object.keys(b[k])])].filter((f) => $CANON(a[k][f]) !== $CANON(b[k][f])).map((f) => k + '.' + f + ' ' + $CANON(a[k][f]) + ' → ' + $CANON(b[k][f]))).join('; ') || 'none')"
 settings() { js "(() => { const s = window.__scape.settings.getState(); return [$1].join(' '); })()"; }
 
+go
+ab set viewport 1400 900 >/dev/null # a landscape-phone viewport folds the panel on load
 go
 check "app loads" "$( [ "$(js '!!window.__scape')" = true ] && echo 1 || echo 0)" "$BASE"
 
@@ -61,7 +63,12 @@ js "window.__scape.settings.getState().update({ units: 'imperial', coordFormat: 
 sleep 0.5
 js "sessionStorage.setItem('smoke-snap', $SNAP), 'ok'" >/dev/null
 reload
-diff=$(js "($DIFF)(JSON.parse(sessionStorage.getItem('smoke-snap')), JSON.parse($SNAP))")
+# Derived fields (a target-locked aim) settle after load; give them 10 s.
+for _ in $(seq 20); do
+  diff=$(js "($DIFF)(JSON.parse(sessionStorage.getItem('smoke-snap')), JSON.parse($SNAP))")
+  [ "$diff" = none ] && break
+  sleep 0.5
+done
 check "every saved field survives a reload" "$([ "$diff" = none ] && echo 1 || echo 0)" "changed: $diff"
 check "non-default settings kept" "$([ "$(settings 's.units, s.coordFormat, s.offlineFlavor, s.goldenAltitude')" = 'imperial dms dark 8' ] && echo 1 || echo 0)" "$(settings 's.units, s.coordFormat, s.offlineFlavor, s.goldenAltitude')"
 

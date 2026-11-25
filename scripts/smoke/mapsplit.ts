@@ -61,6 +61,17 @@ const settle = () =>
     if (m.loaded() && !m.isMoving() && m.areTilesLoaded()) done(); else m.once('idle', done);
   })`, 30_000);
 const layerIds = () => tab.eval<string[]>('window.__scapeMap.getStyle().layers.map((l) => l.id)');
+// Worker-fed layers (the shadow credit) land after the map goes idle; wait for three equal reads.
+const steadyIds = async () => {
+  let last = await layerIds();
+  for (let same = 0, i = 0; same < 2 && i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const now = await layerIds();
+    same = now.join() === last.join() ? same + 1 : 0;
+    last = now;
+  }
+  return last;
+};
 const styleLoad = () => tab.eval(`new Promise((r) => { const t = setTimeout(r, 20000); window.__scapeMap.once('style.load', () => { clearTimeout(t); r(); }); })`, 30_000);
 const set = (patch: Record<string, unknown>) => tab.eval(`void window.__scape.settings.getState().update(${JSON.stringify(patch)})`);
 
@@ -74,7 +85,7 @@ const orders: Record<string, string[]> = {};
 orders.load = await layerIds();
 await set({ showBuildings: true, showSunShadows: true, showSatellite: true, showLightPollution: true, showHillshade: true, showDayNight: true });
 await settle();
-orders.featuresOn = await layerIds();
+orders.featuresOn = await steadyIds();
 const switched = styleLoad();
 await set({ basemapId: 'ofm-dark' });
 await switched;
