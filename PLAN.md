@@ -45,7 +45,7 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 - Altitude chart (sun, moon, GC) with drag-to-scrub, keyboard nudge, twilight shading (T)
 - Map lines: thick daily-event azimuth lines (rise/set), thin live sun/moon azimuth lines,
   sun shadow line; drawn as geodesics (T)
-- Place search (online Photon; offline gazetteer later) and coordinate paste in DD/DMS (T, P★)
+- Place search (online Photon; offline gazetteer ✔ Phase 6) and coordinate paste in DD/DMS (T, P★)
 - URL-encoded view state for sharing (★ — TPE lacks share links)
 - Settings: units, time format, theme, twilight/golden-hour thresholds (P★ user-adjustable)
 - PWA shell; visited tiles cached automatically
@@ -99,7 +99,7 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 - Light & shadow: object shadow length (✔ 2026-09-12), light-reach on terrain, auto light-source switch (P)
 - Rainbow geometry (42° antisolar), cloud-distance calculator (P)
 - Tides: NOAA harmonic constituents + offline prediction for US stations (P)
-- Eclipses (✔ calendar marks 2026-09-12; local circumstances later), 3D terrain orbit view (MapLibre
+- Eclipses (✔ calendar marks 2026-09-12; local circumstances ✔ 2026-09-24), 3D terrain orbit view (MapLibre
   terrain), Moon simulator (T)
 - Parking links to SpotHero/SpotAngels for city spots (user, 2026-09-28)
 
@@ -180,12 +180,12 @@ typed search params.
 ```
 ┌──────┬───────────────────────────────────────────────┬───────────────┐
 │ nav  │ date bar · search · badges (coords, elev)     │ panel tabs    │
-│ rail │                                               │ Timeline      │
-│      │                    MAP                        │ Layers        │
-│ 56px │                                               │ Geodetics     │
-│      │                                               │ FOV / Plan    │
-│      ├───────────────────────────────────────────────┤ Bodies        │
-│      │ altitude chart (sun/moon/GC) · scrub · play   │ Finder        │
+│ rail │                                               │ Now           │
+│      │                    MAP                        │ Shot · Sky    │
+│ 56px │                                               │ Find          │
+│      │                                               │ Weather       │
+│      ├───────────────────────────────────────────────┤ Map | View    │
+│      │ altitude chart (sun/moon/GC) · scrub · play   │ Markers       │
 └──────┴───────────────────────────────────────────────┴───────────────┘
 ```
 
@@ -309,6 +309,13 @@ z14 OpenStreetMap tiles (§8), the target takes the building's height for the ai
 the texture is sampled bilinearly. On phones (≤ 900 px) the nav rail is a bottom toolbar and the collapsed
 panel keeps its tab row as a peek bar (`a6ed48e`, user's choice): the canvas at 390×844 went 19% → 57%
 collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts collapsed at 32%.
+Phase 7's calculators, tides, eclipses and light extras merged on 2026-09-24/25 (§9); its PlanIt
+acceptance is still open (§9 Remaining).
+After the phases: official LoD2 buildings and models P1–P4 (2026-09-24/25), weather and alpenglow
+(09-25), satellite imagery (09-28/30), the seven-tab panel — Now, Shot, Sky, Find, Weather,
+Map|View, Markers — with its design-system pass (10-01/02), the URL as the scene's truth (10-02), and
+the architecture pass (11-25): layer lint, field-checked stores and imports, `app.css` in ordered
+parts, and the map and viewfinder controllers split into layer and painter modules.
 
 ## 8. Risks and decisions taken
 
@@ -407,8 +414,8 @@ collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts
   archive, by a point-in-footprint query in the worker (395 m for 30 Hudson Yards against the
   387 m architectural height, kept as the data says; 443.2 m for the Empire State). Limits: no
   facade detail; a concave footprint can push a hipped ridge outside its walls, so a poor box fit
-  reverts to gabled and then flat; building tiles are fetched live and are not yet part of the
-  offline regions.
+  reverts to gabled and then flat; offline regions carry the z14 building tiles since
+  2026-09-24 (§9).
 - **Ground shadows are a draped raster mask, not geometry.** Decided 2026-09-17. One march of a
   height grid along the sun's ground direction (`core/geo/sunCeiling.ts`) gives, per cell, the
   height at or below which a point is shadowed, which answers terrain→terrain, terrain→building,
@@ -480,8 +487,8 @@ collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts
   the Protomaps daily build, whose CORS allowlist covers only local development origins
   (localhost:5173, localhost:3000), so it serves dogfooding but not a deployed origin; the source URL
   is editable. For deployment the candidate is packing OpenFreeMap's per-tile PBFs (CORS `*`) the way
-  terrain is packed, with the Liberty style, sprites and glyphs cached alongside; that is an open
-  decision, deferred by the user on 2026-09-12.
+  terrain is packed, with the Liberty style, sprites and glyphs cached alongside; deferred on
+  2026-09-12, merged 2026-09-24 (§9).
 - **OPFS is the source of truth for archives** (each `<id>.pmtiles` with an `<id>.json` sidecar);
   IndexedDB stays for the library.
 - **Name**: "scape" is a placeholder.
@@ -493,34 +500,70 @@ collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts
 - **Satellite sources needing their own keys are skipped** (user, 2026-09-28): DK, FI and NZ LINZ;
   Canada, Norway and Slovenia follow later.
 
-## 9. Open work (2026-09-18)
+## 9. Open work (2026-11-25)
+
+**Remaining (2026-11-25).** Next, each measured:
+
+1. **DEM workers** (`scripts/smoke/demmem.sh`, Alps session, Chromium). The glowPoint and lightProbe
+   workers never terminate and hold 124 + 84 MB. Their caches pass the 80-tile cap (123 and 83 tiles)
+   because they trim only on insert. Fix: terminate idle workers and trim to the cap. Peak cached tiles
+   across all workers: 298 MB.
+2. **Viewfinder buffer pool.** After the viewfinder the terrain worker holds 723 MB of array buffers,
+   159 MB after 5.5 min idle, and the "viewfinder after zoom" idle case is still 3.0–3.1 % (GC, **23**).
+   Both come from the pool's size and release time, so one change trades them.
+3. **Phase 7 acceptance.** Only depth of field is checked against a PlanIt worked example. Exposure/ND,
+   time-lapse, rainbow, cloud distance and tides are not.
+4. **Verification owed on master**: `idle.sh` after the controller splits, `markstop`, and the
+   satellite smoke (needs a MapTiler key).
+
+Waiting on the user:
+
+- **Apple imagery.** Proposed: an optional Apple mode with a Look Around panel, prototyped first
+  (Apple imagery may only show inside Apple's map view). Unanswered; §2 keeps it deferred.
+- **Models P4 photos**: memory only, or IndexedDB per plan.
+- **Drawn building height**: 10 m, or the median of nearby Overture buildings.
+- **Pinned sources**: swissBUILDINGS3D `v1/20260520` and 3DBAG `v20250903`, or follow the latest.
+  Overture resolves its newest release at runtime (`423fe49`).
+- **Safari/iOS terrain** reads up to 197 m low: software WebP decode (a new path or dependency), or accept.
+- **Twilight and moonlight scene EVs** need field readings.
+- **Name**: "scape" is a placeholder (§8).
+- `PRODUCT.md` and `.impeccable/` are untracked, and there is no `DESIGN.md`.
+
+Backlog, low priority:
+
+- PLATEAU beyond the Tokyo 23 wards.
+- Satellite imagery for Canada, Norway and Slovenia (§8).
+- A water mask: the Hudson currently sits 1.5 m below sea level.
+- Finer rise/set azimuth steps [leave for now].
+- Esri World Imagery with the user's own key.
+- Google 3D Tiles with the user's own key (§2).
 
 Numbered items below are a register, not a queue; most are landed and kept for the measurements in
 them. **14** and **18** were measured and closed unfixed, **8** is a watch rather than a task, and
 **22** is fixed, which also closed both of **21**'s open defects — the empty canvas was 22's own
 doing, and the thin dark lines turned out to be real rock gullies.
 
-**Waiting on the user (2026-09-24, overnight run).** Each has a default shipped or a task held:
+**Defaults shipped (2026-09-24/25, overnight run).** Questions still open are under Remaining:
 
 - Basemap source for a deployed origin: OpenFreeMap per-tile PBFs packed into PMTiles, Liberty style,
   sprites and glyphs cached (merged 2026-09-24). Joins the terrain download by default up to 100 tiles;
   Liberty's shaded relief is dropped offline.
 - Official LoD2 buildings (merged 2026-09-24): 3DBAG (meshopt), swissBUILDINGS3D and PLATEAU Tokyo 23 wards (Draco, decoder lazy-loaded only for those tiles); worker-built BVH occluder. PLATEAU heights use a user-imported GSIGEO2011 `.asc` (OPFS, bilinear per vertex; never bundled, GSI 測量法); without it, 36.7 m and a note.
 - Target height on a model: apex (A/B pick 2026-09-25).
-- Tools tab (Phase 7 calculators, merged): name "Tools" after Night; tab min width 62 px so 9 tabs
+- Tools tab (Phase 7 calculators, merged; folded into Shot by the seven-tab panel, 2026-10-02): name "Tools" after Night; tab min width 62 px so 9 tabs
   fit two rows; Rainbow overlay off by default; RAW size 14-bit uncompressed (worst case); rainbow
   behind terrain drawn dim and dashed, not hidden; Earth-shadow cloud light without refraction
   (~0.5°, a few minutes short); cloud heights above the camera's ground; time-lapse playback capped
   at 30 Hz and looping. Twilight and moonlight scene EVs are estimates awaiting field readings.
 - Offline buildings (merged): z14 only, "download with the terrain" on by default up to 100 tiles
-  (~30 MB dense city; NYC 50 km = 686 tiles / 146 MB); separate Estimate/Download too. Open: should
-  one click also fetch the basemap for the region? Yes, up to 100 tiles.
+  (~30 MB dense city; NYC 50 km = 686 tiles / 146 MB); separate Estimate/Download too. One click
+  also fetches the region's basemap, up to 100 tiles.
 - Hidden buildings (or terrain off, or the viewfinder closed) stop both building streams: queued fetches dropped, on-wire ones aborted, no redraws; showing them reloads (smoke `coldtiles.sh`).
 - Models P1 (merged): a hidden model does not suppress Overture rows, nor the map's fill-extrusion
   under it (`models-fill` hides it under a visible one); "Model this building" seeds from every z14
   tile the building spans; `.scape.json` export omits models until P3b.
 - Tides and eclipses (merged): NOAA harmonic (1251) and subordinate (2242) stations; a closer subordinate station wins; Timeline tide row landed later; lunar eclipse moon tinted by umbra coverage (the map's live Moon line too) (moon-free window and Milky Way status count an eclipsed Moon as dark (user, 2026-09-25));
-  eclipses via astronomy-engine (within 30 s of NASA), no Besselian elements.
+  eclipses via astronomy-engine (within 30 s of NASA); solar contacts from NASA Besselian elements 2000–2100 (`872f7fe`).
 - Light extras (moon simulator, auto light source, first/last light, orbit) merged at `aa61568`. Defaults:
   moon shade on the map neutral grey (A/B pick 2026-09-25); first/last light counts terrain only; earthshine under 35 % lit;
   orbit pitch 65° (max 80°), 6°/s, not saved.
@@ -1285,7 +1328,7 @@ visible errors are design choices, each waiting on a decision (recommendation in
     about 0.5 s of the 0.76 s it spends in V8 GC (background marking and a memory-reducing major
     GC) cleaning up after the zoom's mesh rebuild. Main-thread JS is 0.1 s. The one GL frame is
     the minute tick, not the zoom. **Open**: to cut this, the viewfinder mesh rebuild has to
-    allocate less.
+    allocate less (Remaining 2).
 
     **Baseline, time pinned** (2026-09-26, after strip re-stamps) — a minute tick landing a
     low-sun mask re-stamp failed cases at random, so every visible case is pinned at local noon
