@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { compass, distance, height } from '@core/format';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { bearingDeg, distanceM } from '@core/geo/geodesy';
 import { groundUnknown, modelBaseM, ModelSource, type ModelPart, type SavedModel } from '@core/model';
 import { apexOf, applyNudge, azElTo, NUDGE_STEPS, NudgeKind, ringEdges, withEdgeBearing, withEdgeLength, withPart } from '@core/model/draw';
@@ -10,8 +11,7 @@ import { finishDraft, retryGround, useModels, modelsStore } from '@state/models'
 import { useSettings } from '@state/settings';
 import { EYE_HEIGHT_M, useTerrain } from '@state/terrain';
 import { useWorld, worldStore } from '@state/world';
-import { RoofShape } from '@workers/buildings.protocol';
-import { downloadBlob } from './download';
+import { downloadBlob } from '@data/download';
 import { ModelImportSheet } from './ModelImport';
 import { useMedia } from './useMedia';
 import { useOnline } from './useOnline';

@@ -2,7 +2,7 @@
 
 import { bearingDeg, destination, distanceM, normalizeBearing, type LngLat } from '@core/geo/geodesy';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, type TileCoord } from '@core/terrain/tiles';
-import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
+import { RoofShape, type BuildingBatch } from '@core/geo/buildingBatch';
 
 /** Minimal shape of a decoded MVT feature, so tests can pass plain objects. */
 export interface VectorFeatureLike {

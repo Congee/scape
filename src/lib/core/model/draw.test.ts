@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { distanceM, bearingDeg } from '@core/geo/geodesy';
 import { lngLatToLocal, localToLngLat } from '@core/model';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { partsMesh } from './mesh';
 import { applyNudge, apexOf, drawnModel, nearestWithin, NudgeKind, nudgeForKey, ringEdges, silhouetteEdges, snapRightAngle, visibleRuns, withEdgeBearing, withEdgeLength } from './draw';
 

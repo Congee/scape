@@ -8,7 +8,7 @@ import { fetchViirsListing, listViirs, removeViirs, type ViirsStore, type ViirsT
 import { localBuildings, localTerrain } from '@data/localTiles';
 import { announceArchives, listArchives, opfsSupported, readArchiveFile, removeArchive, writeMeta } from '@data/opfs';
 import { registerArchive, unregisterArchive } from '@data/pmtiles';
-import { downloadBlob } from '@ui/download';
+import { downloadBlob } from '@data/download';
 import { ArchiveKind, RegionRequestKind, RegionResponseKind, type ArchiveMeta, type Estimate, type RegionRequest, type RegionResponse, type RegionSpec } from '@workers/region.protocol';
 import { setBuildingGeoid } from './buildings';
 import { findBasemap, settingsStore } from './settings';

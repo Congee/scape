@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cameraBasis, type Camera } from '@core/optics/projection';
 import { PrismGl } from '@core/viewfinder/gl/prismGl';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { batchOf, PIN, rect, square, type Box } from './batchFixture';
 import { buildPrisms } from './prismRaster';
 import { adoptPrismSurfaces, earClip, earClipAt, gpuOnly, isReleased, prismReleased, prismSurfaces, releaseUploaded, surfaceBuffers, tileSurfaces } from './surfaces';

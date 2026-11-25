@@ -15,5 +15,49 @@
     "unicorn/require-post-message-target-origin": "off",
     "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
   },
-  "ignorePatterns": ["dist", "dev-dist", "src/routeTree.gen.ts", "docs"]
+  "ignorePatterns": ["dist", "dev-dist", "src/routeTree.gen.ts", "docs"],
+  "overrides": [
+    {
+      "files": ["src/lib/core/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["@data/**", "@state/**", "@ui/**", "@workers/**", "**/data/**", "**/state/**", "**/ui/**", "**/workers/**", "**/routes/**"], "message": "core imports nothing outside core." }
+        ] }]
+      }
+    },
+    {
+      "files": ["src/lib/data/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["@state/**", "@ui/**", "**/state/**", "**/ui/**", "**/routes/**"], "message": "data imports only core and worker protocols." },
+          { "group": ["@workers/**", "!@workers/*.protocol", "**/workers/**", "!**/workers/*.protocol"], "message": "data imports only core and worker protocols." }
+        ] }]
+      }
+    },
+    {
+      "files": ["src/lib/state/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["@ui/**", "**/ui/**", "**/routes/**"], "message": "state imports only data, core and worker protocols." },
+          { "group": ["@workers/**", "!@workers/*.protocol", "**/workers/**", "!**/workers/*.protocol"], "message": "state imports only data, core and worker protocols." }
+        ] }]
+      }
+    },
+    {
+      "files": ["src/lib/workers/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["@state/**", "@ui/**", "**/state/**", "**/ui/**", "**/routes/**"], "message": "workers import only data and core." }
+        ] }]
+      }
+    },
+    {
+      "files": ["src/lib/ui/**", "src/routes/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["@workers/**", "!@workers/*.protocol", "**/workers/**", "!**/workers/*.protocol"], "message": "ui reaches workers only through their protocols." }
+        ] }]
+      }
+    }
+  ]
 }

@@ -1,7 +1,7 @@
 /** OpenStreetMap footprints extruded to closed prisms in the viewfinder's eye-relative frame. */
 
 import type { CameraBasis } from '@core/optics/projection';
-import type { BuildingBatch } from '@workers/buildings.protocol';
+import type { BuildingBatch } from '@core/geo/buildingBatch';
 import { curvatureDropM, type LngLat } from './geodesy';
 import { frameAt } from './pinFrame';
 import { buildRoof } from './roofs';

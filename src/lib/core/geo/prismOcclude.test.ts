@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
+import { RoofShape, type BuildingBatch } from '@core/geo/buildingBatch';
 import { destination, type LngLat } from './geodesy';
 import { batchOf, rect, square, type Box } from './batchFixture';
 import { adoptPrismSlots, PrismOccluder, prismSlots } from './prismOcclude';

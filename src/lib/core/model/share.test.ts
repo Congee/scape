@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AltitudeRef, ModelSource, partsFootprint, type ModelAnchor, type ModelPart, type SavedModel } from '@core/model';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { COMPRESSED_MESSAGE, GltfError, ModelOrigin, ModelUnit, parseGlb, readGlb, type ImportOptions } from './gltf';
 import { partsMesh } from './mesh';
 import { decodeExtras, exportModelGlb, fromModelRecord, importModelFile, isModelRecord, modelFileName, modelRecord, placeDraft, toBase64 } from './share';

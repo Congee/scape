@@ -7,7 +7,8 @@ import { adoptPrismSlots } from '@core/geo/prismOcclude';
 import { prismFrameKey } from '@core/geo/prismRaster';
 import { adoptPrismSurfaces, prismReleased } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingBatch, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import type { BuildingBatch } from '@core/geo/buildingBatch';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, dropUploadedLod2, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
 
 /** Placed tiles kept in the store; beyond this the farthest from the pin are dropped. */

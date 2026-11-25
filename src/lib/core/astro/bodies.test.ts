@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { BODIES, bodyVisible, siteHeightM, SkyBody } from './bodies';
-import { DEFAULT_COMPOSITION } from '@state/composition';
 
 describe('bodyVisible', () => {
   const on = { showSun: true, showMoon: true };
@@ -20,13 +19,6 @@ describe('bodyVisible', () => {
 
   it('shows every body when all flags are on', () => {
     expect(BODIES.every((b) => bodyVisible(b, on, { showGc: true }))).toBe(true);
-  });
-});
-
-describe('composition defaults', () => {
-  it('shows the sun and the moon', () => {
-    expect(DEFAULT_COMPOSITION.showSun).toBe(true);
-    expect(DEFAULT_COMPOSITION.showMoon).toBe(true);
   });
 });
 

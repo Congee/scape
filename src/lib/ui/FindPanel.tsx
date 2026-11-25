@@ -10,7 +10,7 @@ import { useSettings } from '@state/settings';
 import { useWorld, worldStore } from '@state/world';
 import { HeatMode } from '@workers/align.protocol';
 import { Dial } from './Dial';
-import { downloadText } from './download';
+import { downloadText } from '@data/download';
 import { useOnMap } from './panelPage';
 import { Disclosure } from './Section';
 import { Segmented } from './Segmented';

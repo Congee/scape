@@ -1,6 +1,6 @@
 /**
  * Artificial zenith skyglow from VIIRS radiance, binned by azimuth sector and distance ring.
- * The GPU path (ui/sky/skyglowGl.ts) integrates the same kernel over the same bins; the sums here are the
+ * The GPU path (skyglowGl.ts) integrates the same kernel over the same bins; the sums here are the
  * exact per-pixel reference used by tests and calibration only.
  */
 

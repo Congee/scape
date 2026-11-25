@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { cameraBasis, type Camera } from '@core/optics/projection';
-import { RoofShape } from '@workers/buildings.protocol';
 import { batchOf, PIN, rect, square, type Box } from './batchFixture';
 import { buildPrisms, sphereVisible, type PrismTile } from './prismRaster';
 

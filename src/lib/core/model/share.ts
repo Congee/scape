@@ -1,7 +1,7 @@
 /** Sharing precise models: placement in `asset.extras.scape`, picked files as drafts, and `.scape.json` records. */
 
 import { AltitudeRef, hullFootprint, ModelSource, partsFootprint, type ModelAnchor, type ModelPart, type SavedModel } from '@core/model';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { DEFAULT_IMPORT, GltfError, ModelOrigin, ModelUnit, packGltf, parseGlb, readGlb, replaceGlbJson, validateMesh, writeGlb, type ImportOptions, type MeshStats } from './gltf';
 import { partsMesh } from './mesh';
 

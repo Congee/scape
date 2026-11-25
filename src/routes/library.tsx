@@ -13,7 +13,7 @@ import { useSettings } from '@state/settings';
 import { PanelPage, PanelTab, uiStore } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
 import { Confirm, ConfirmAsk } from '@ui/Confirm';
-import { downloadText } from '@ui/download';
+import { downloadText } from '@data/download';
 import { Icon } from '@ui/Icon';
 
 export const Route = createFileRoute('/library')({ component: LibraryPage });

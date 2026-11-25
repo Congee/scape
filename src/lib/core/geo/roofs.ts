@@ -1,6 +1,6 @@
 /** OSM Simple 3D Buildings roof shapes turned into wall-top heights and planar roof polygons. */
 
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 
 const D2R = Math.PI / 180;
 /** Pitch assumed for a ridged roof whose `roof:height` is missing. */

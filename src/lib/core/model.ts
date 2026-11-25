@@ -2,7 +2,7 @@
 
 import type { LngLat } from './geo/geodesy';
 import { frameAt } from './geo/pinFrame';
-import type { RoofShape } from '@workers/buildings.protocol';
+import type { RoofShape } from '@core/geo/buildingBatch';
 import type { ImportOptions } from './model/gltf';
 
 export const ModelSource = { Drawn: 'Drawn', Imported: 'Imported' } as const;

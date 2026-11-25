@@ -5,7 +5,7 @@ import { SkySourceKind, type SkySource } from '@core/sky/readout';
 import { referenceBins, REACH_KM, SKYGLOW_PARAMS, type GlowBins } from '@core/sky/skyglow';
 import { tileName, tileOf, tilesForWindow, VIIRS_MARGIN_KM, windowAround, type ViirsWindow } from '@core/sky/viirs';
 import { readViirsWindow, type ViirsStore } from '@data/viirs';
-import { SkyglowGl } from '@ui/sky/skyglowGl';
+import { SkyglowGl } from '@core/sky/skyglowGl';
 import { clearGibs as clearGibsStore } from '@data/gibs';
 import { GibsOutcome, type GibsClearRequest, type GibsRequest, type GibsResponse } from '../workers/gibs.protocol';
 import { offlineStore } from './offline';

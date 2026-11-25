@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { buildRoof, orientedBox, type RoofGeom } from './roofs';
 
 const rect = (w: number, d: number, rotDeg = 0): { e: number[]; n: number[] } => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CAMERAS, LENSES, type CameraRow, type LensRow } from '@data/gearCatalog';
-import { gearTokens, longApertureOf, normalizeGearText, scoreGear, searchGear } from './gearSearch';
+import { CAMERAS, LENSES, type CameraRow, type LensRow } from './gearCatalog';
+import { gearTokens, longApertureOf, normalizeGearText, scoreGear, searchGear } from '@core/optics/gearSearch';
 
 const camHay = (r: CameraRow) => `${r[0]} ${r[1]} ${r[5]}`;
 const lensHay = (r: LensRow) => `${r[0]} ${r[1]} ${r[5]}`;

@@ -2,7 +2,7 @@
 
 import { AltitudeRef, lngLatToLocal, ModelSource, partsFootprint, type ModelAnchor, type ModelPart, type SavedModel } from '@core/model';
 import type { LngLat } from '@core/geo/geodesy';
-import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
+import { RoofShape, type BuildingBatch } from '@core/geo/buildingBatch';
 
 /** The rows a seed reads; a `BuildingBatch` or any subset of one. */
 export type SeedRows = Pick<BuildingBatch, 'count' | 'ringStart' | 'lng' | 'lat' | 'heightM' | 'minHeightM' | 'roofShape' | 'roofHeightM' | 'roofDirDeg' | 'roofAcross' | 'groundM'>;

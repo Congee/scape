@@ -54,3 +54,10 @@ describe('parseAimLock', () => {
     expect(legacyAimLock('yes')).toBe(AimLock.Free);
   });
 });
+
+describe('composition defaults', () => {
+  it('shows the sun and the moon', () => {
+    expect(DEFAULT_COMPOSITION.showSun).toBe(true);
+    expect(DEFAULT_COMPOSITION.showMoon).toBe(true);
+  });
+});

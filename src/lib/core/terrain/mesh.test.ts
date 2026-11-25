@@ -4,8 +4,7 @@ import { curvatureDropM } from '@core/geo/geodesy';
 import { frameAt } from '@core/geo/pinFrame';
 import { buildPrisms } from '@core/geo/prismRaster';
 import { frameElevationSpanDeg } from '@core/optics/fov';
-import type { BuildingBatch } from '@workers/buildings.protocol';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape, type BuildingBatch } from '@core/geo/buildingBatch';
 import { lngLatToTilePixel, metersPerPixel, tilesInBounds } from '@core/terrain/tiles';
 import {
   BASE_CELL_M,

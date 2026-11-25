@@ -1,6 +1,6 @@
 /** Synthetic Overture batches for the tests, laid out in local metres around a pin. */
 
-import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
+import { RoofShape, type BuildingBatch } from '@core/geo/buildingBatch';
 import type { LngLat } from './geodesy';
 import { pinFrame } from './pinFrame';
 

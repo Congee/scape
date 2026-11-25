@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { at, batchOf, PIN, rect, square } from '@core/geo/batchFixture';
 import { AltitudeRef, convexHull, groundUnknown, inLngLatRing, lngLatToLocal, localToLngLat, modelOutlines, type ModelAnchor, type ModelPart } from '@core/model';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 import { modelHeightAt } from './heightAt';
 import { partsMesh } from './mesh';
 import { modelApexM, newPart, rowsRings, seedModel, spirePart } from './seed';

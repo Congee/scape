@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { decodeBuildings, groundForRows, heightAtPoint, tilesForWedge, type VectorFeatureLike, type VectorLayerLike } from './buildingTiles';
 import { bearingDeg, destination, distanceM, normalizeBearing } from './geodesy';
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat } from '@core/terrain/tiles';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 
 const PIN = { lat: 40.74795, lng: -74.02369 };
 const EXTENT = 4096;

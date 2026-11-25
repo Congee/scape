@@ -2,7 +2,7 @@
 
 import { bearingDeg, destination, distanceM, elevationAngleDeg, type LngLat } from '@core/geo/geodesy';
 import { AltitudeRef, localToLngLat, lngLatToLocal, ModelSource, partsFootprint, type ModelAnchor, type ModelPart, type SavedModel } from '@core/model';
-import { RoofShape } from '@workers/buildings.protocol';
+import { RoofShape } from '@core/geo/buildingBatch';
 
 type EN = [e: number, n: number];
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AltitudeRef, localToLngLat, type ModelAnchor, type ModelPart } from '@core/model';
 import { partsMesh } from '@core/model/mesh';
 import { seedModel } from '@core/model/seed';
-import { RoofShape, type BuildingBatch } from '@workers/buildings.protocol';
+import { RoofShape, type BuildingBatch } from '@core/geo/buildingBatch';
 import { destination } from './geodesy';
 import { modelTriangles, placeModel } from './modelPlace';
 import { buildPrisms, type PrismTile } from './prismRaster';

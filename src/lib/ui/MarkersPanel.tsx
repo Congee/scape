@@ -10,7 +10,7 @@ import { useSettings } from '@state/settings';
 import { MarkersView, useUi } from '@state/ui';
 import { useWorld, worldStore } from '@state/world';
 import { Dial } from './Dial';
-import { downloadText } from './download';
+import { downloadText } from '@data/download';
 import { CATEGORY_COLORS } from './map/overlays';
 import { ModelsPanel } from './ModelsPanel';
 import { useOnMap } from './panelPage';
