@@ -41,7 +41,7 @@ import { modelsStore } from '@state/models';
 import { currentBasemap, offlineStore } from '@state/offline';
 import { ClickMode, settingsStore } from '@state/settings';
 import { pinSiteHeightM, profileKeyFor, terrainStore } from '@state/terrain';
-import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
+import { MarkersView, PanelTab, uiStore } from '@state/ui';
 import { worldStore } from '@state/world';
 import { HeatMode } from '@workers/align.protocol';
 import { HALO, Ink } from '../inks';
@@ -59,6 +59,7 @@ import { MapMenu } from './mapMenu';
 import { ModelDrawer } from './ModelDrawer';
 import { installMotionLod } from './motionLod';
 import { NightLightsLayer } from './nightLightsLayer';
+import { MAX_PITCH, Orbit } from './orbit';
 import { eventLines, FovKind, fovCone, geodeticLine, LiveLineKind, liveLines, markerFeatures } from './overlays';
 import { installTrackpadWheel } from './wheelZoom';
 
@@ -74,14 +75,8 @@ const IMPORT_SRC = 'import-pick';
 const PIN_COLOR = Ink.pin;
 const PIN2_COLOR = Ink.pinTarget;
 const PROBE_COLOR = Ink.edit;
-const MAX_PITCH = 60;
 // Read at load: the route rewrites the URL without it.
 const ZOOM_PROBE = new URLSearchParams(location.search).has('zoomprobe');
-// Short of 90° so the ground and the lines drawn on it stay in view.
-const ORBIT_MAX_PITCH = 80;
-const ORBIT_PITCH = 65;
-const ORBIT_DEG_PER_S = 6;
-const ORBIT_STEP_DEG = 90;
 const FOV_COLOR = Ink.edit;
 const REGION_COLOR = Ink.edit;
 const IMPORT_COLOR = Ink.edit;
@@ -134,6 +129,7 @@ export class MapController {
   private buildings: BuildingsLayer;
   private shadows: ShadowLayer;
   private heat: HeatLayer;
+  private orbit: Orbit;
   private nightLights: NightLightsLayer;
 
   constructor(container: HTMLElement) {
@@ -229,15 +225,10 @@ export class MapController {
       o.setDraft(bbox);
       o.setDrawing(false);
     });
-    for (const type of ['mousedown', 'touchstart', 'wheel'] as const) {
-      this.map.on(type, () => {
-        const u = uiStore.getState();
-        if (u.orbit !== OrbitPivot.Off && u.orbitSpin) u.setOrbit(u.orbit, false);
-      });
-    }
+    this.orbit = new Orbit(this.map);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('online', this.onOnline);
-    this.unsubs.push(() => window.removeEventListener('keydown', this.onKeyDown), () => window.removeEventListener('online', this.onOnline));
+    this.unsubs.push(() => this.orbit.dispose(), () => window.removeEventListener('keydown', this.onKeyDown), () => window.removeEventListener('online', this.onOnline));
 
     this.map.on('click', 'markers-circle', (e) => {
       const id = e.features?.[0]?.properties?.id as string | undefined;
@@ -272,7 +263,7 @@ export class MapController {
       this.renderAll();
     });
     this.map.on('moveend', (e) => {
-      if ((e as { orbit?: boolean }).orbit) this.orbitStep();
+      if ((e as { orbit?: boolean }).orbit) this.orbit.step();
       this.updateRay();
       this.renderAll();
       const c = this.map.getCenter();
@@ -357,9 +348,6 @@ export class MapController {
     this.unsubs.push(
       settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
       settingsStore.subscribe((st) => st.units, (u) => this.scale.setUnit(u)),
-      uiStore.subscribe((st, prev) => {
-        if (st.orbit !== prev.orbit || st.orbitSpin !== prev.orbitSpin) this.applyOrbit();
-      }),
       lightProbeStore.subscribe((st, prev) => {
         if (st.point !== prev.point) this.syncProbe(st.point);
         if (st.picking !== prev.picking) this.map.getCanvas().style.cursor = st.picking ? 'crosshair' : '';
@@ -465,42 +453,6 @@ export class MapController {
       const c = rows && rowsCentre(rows);
       modelsStore.setState(rows && c ? { importAt: c, importRings: rowsRings(rows), pickError: null } : { pickError: 'No Overture building there.' });
     });
-  }
-
-  private orbitPivot(): LngLat {
-    const w = worldStore.getState();
-    return uiStore.getState().orbit === OrbitPivot.Target && w.pin2 ? w.pin2 : w.pin;
-  }
-
-  private orbitGroundM(): number | null {
-    const t = terrainStore.getState();
-    return uiStore.getState().orbit === OrbitPivot.Target && worldStore.getState().pin2 ? t.pin2GroundM : t.pinGroundM;
-  }
-
-  /** Tilts onto the pivot when the orbit starts, then hands over to the spin. */
-  private applyOrbit() {
-    const { orbit } = uiStore.getState();
-    if (orbit === OrbitPivot.Off) {
-      this.map.stop();
-      this.map.setCenterClampedToGround(true);
-      this.map.setMaxPitch(MAX_PITCH);
-      return;
-    }
-    const s = settingsStore.getState();
-    if (!s.terrain3d) s.update({ terrain3d: true });
-    this.map.setMaxPitch(ORBIT_MAX_PITCH);
-    const p = this.orbitPivot();
-    this.map.setCenterClampedToGround(false);
-    this.map.easeTo({ center: [p.lng, p.lat], pitch: Math.max(this.map.getPitch(), ORBIT_PITCH), duration: 800 }, { orbit: true });
-  }
-
-  private orbitStep() {
-    const { orbit, orbitSpin } = uiStore.getState();
-    if (orbit === OrbitPivot.Off || !orbitSpin || this.map.isMoving()) return;
-    const p = this.orbitPivot();
-    // The camera turns about the centre's height, which the map's own terrain sample can get far wrong at a summit.
-    this.map.jumpTo({ elevation: this.orbitGroundM() ?? this.map.queryTerrainElevation([p.lng, p.lat]) ?? 0 });
-    this.map.rotateTo(this.map.getBearing() + ORBIT_STEP_DEG, { duration: (ORBIT_STEP_DEG / ORBIT_DEG_PER_S) * 1000, easing: (t) => t, freezeElevation: true }, { orbit: true });
   }
 
   private syncProbe(p: LngLat | null) {
