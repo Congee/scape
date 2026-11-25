@@ -3,7 +3,7 @@ import { shallow } from 'zustand/shallow';
 import { BODIES, bodyVisible, makeObserver, SkyBody } from '@core/astro/bodies';
 import type { PreparedConstellations } from '@core/astro/constellations';
 import { activeShowers, radiantEquatorial, type ShowerStatus } from '@core/astro/meteors';
-import { apply, applyStar, enuToEqj, eqjToEnu, horizontalOf, poleEnu, refractEnu, starFrame, type StarFrame } from '@core/astro/skyFrame';
+import { apply, applyStar, enuToEqj, eqjToEnu, poleEnu, starFrame, type StarFrame } from '@core/astro/skyFrame';
 import { eqjVector, starRadiusPx, type StarCatalog } from '@core/astro/stars';
 import { lunarEclipseLight, lunarShadowCoverage, shadowView } from '@core/astro/eclipse';
 import { lightAt, type Light } from '@core/astro/lightSource';
@@ -22,12 +22,13 @@ import { prismFrameKey, type PrismShading, type PrismTile } from '@core/geo/pris
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
-import { cameraBasis, discRadiusMm, project, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
+import { cameraBasis, discRadiusMm, projectDir, unproject, type Camera, type CameraBasis } from '@core/optics/projection';
 import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayGl';
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import type { BodyDisc, MoonShading, SceneGl } from '@core/viewfinder/gl/sceneGl';
 import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { borderRects, fitFrame, fitViewports, type FitViewports, type Rect } from '@core/viewfinder/frameFit';
+import { behindBuilding, hiddenBySkyline, inView, placeEnu, surfaceAngle, toPx, type Frame } from '@core/viewfinder/place';
 import { segmentHitsRect } from '@core/viewfinder/segmentRect';
 import { starNight } from '@core/viewfinder/skyGate';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
@@ -59,8 +60,6 @@ import { CATEGORY_COLORS } from '../map/overlays';
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 const DAY_MS = 86_400_000;
-const SIN_10_DEG = Math.sin(10 * D2R);
-const LIFT = new Float64Array(3);
 const MAX_COLUMNS = 2400;
 /** Sun travel that may shift the sky colours and the shading by a step; about 12 s of clock. */
 const SUN_STEP_DEG = 0.05;
@@ -92,14 +91,6 @@ const shaded = (hex: string, k: number) => {
   const n = Number.parseInt(hex.slice(1), 16);
   return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`;
 };
-
-interface Frame {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  pxPerMm: number;
-}
 
 interface Scene {
   cam: Camera;
@@ -135,14 +126,6 @@ interface Scene {
   moonLight: number;
   /** Highest skyline angle in the sweep; directions above it need no occlusion test. */
   maxSkyline: number;
-}
-
-interface Placed {
-  x: number;
-  y: number;
-  altDeg: number;
-  /** Behind the terrain skyline (or below the flat horizon). */
-  hidden: boolean;
 }
 
 interface BodyLabel {
@@ -482,17 +465,6 @@ export class ViewfinderController {
     e.preventDefault();
   };
 
-  private toPx(sc: Scene, azDeg: number, altDeg: number): { x: number; y: number } | null {
-    const p = project(sc.cam, sc.basis, azDeg, altDeg);
-    if (!p) return null;
-    return { x: sc.frame.x + sc.frame.w / 2 + p.x * sc.frame.pxPerMm, y: sc.frame.y + sc.frame.h / 2 - p.y * sc.frame.pxPerMm };
-  }
-
-  private inView(sc: Scene, p: { x: number; y: number } | null, slack = 0): p is { x: number; y: number } {
-    const a = sc.area;
-    return !!p && p.x >= a.x - slack && p.x <= a.x + a.w + slack && p.y >= a.y - slack && p.y <= a.y + a.h + slack;
-  }
-
   /** Prisms the worker placed for the current camera location; a tile from an old one waits for its rebuild. */
   private prismTiles(sc: Scene): Map<string, PrismTile> {
     const frame = prismFrameKey(worldStore.getState().pin, sc.eyeM);
@@ -701,13 +673,6 @@ export class ViewfinderController {
     return { tiles: l.tiles.size, tris: l.tris, buildMs: l.buildMs, busy: l.busy, missing: l.missing, error: l.error, hiddenRows: this.prismHidden, held: lod2HeldStats() };
   }
 
-  /** True when a building stands between the eye and a direction; `distM` is Infinity for the sky. */
-  private behindBuilding(azDeg: number, altDeg: number, distM: number): boolean {
-    if (!this.occ) return false;
-    const ca = Math.cos(altDeg * D2R);
-    return this.occ.occludes(ca * Math.sin(azDeg * D2R), ca * Math.cos(azDeg * D2R), Math.sin(altDeg * D2R), distM);
-  }
-
   private behindEnu(v: Float64Array): boolean {
     return !!this.occ && this.occ.occludes(v[0], v[1], v[2], Infinity);
   }
@@ -764,7 +729,7 @@ export class ViewfinderController {
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       const shade = { on: stats.cascades > 0, light: sc.light?.body ?? null, cascades: stats.cascades, casterTris: stats.shadowTriangles, casterPrismTris: stats.shadowPrismTriangles, casterModelTris: stats.shadowModelTriangles, rasterMs: this.rasterMs, info: stats.cascadeInfo, fit: stats.shadowFit, viewRangeM: stats.viewRangeM };
-      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, gpuPass: stats.gpuPassMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, area: sc.area, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => this.behindBuilding(az, alt, d) };
+      if (dev) dev.prism = { ms: this.prismMs, gpuMs: this.gpuMs, gpuPass: stats.gpuPassMs, ...this.prismStats, models: stats.prism?.models ?? 0, modelTris: stats.prism?.modelTriangles ?? 0, lod2: this.lod2Stats(), terrain: stats.terrain, rw: vw, rh: vh, shadow: shade, cam: { ...sc.cam, eyeM: sc.eyeM, frame: sc.frame, area: sc.area, sunAlt: sc.sunAlt, sunAz: sc.sunAz }, behindBuilding: (az: number, alt: number, d: number) => behindBuilding(this.occ, az, alt, d) };
       if (dev) dev.moonDisc = this.moonGeometry(sc);
       if (dev) {
         dev.shadowBytes = () => gl.shadowBytes;
@@ -813,62 +778,16 @@ export class ViewfinderController {
   /** Where the moon disc lands, for the smoke checks. */
   private moonGeometry(sc: Scene) {
     const pos = position(SkyBody.Moon, sc.time, sc.obs);
-    const p = this.toPx(sc, pos.azimuth, pos.altitude);
+    const p = toPx(sc, pos.azimuth, pos.altitude);
     const mv = moonView(sc.time, sc.obs);
     const r = this.canvas.getBoundingClientRect();
     const radiusPx = discRadiusMm(sc.cam, mv.semidiameterDeg) * sc.frame.pxPerMm;
     const d = cameraBasis({ azimuthDeg: pos.azimuth, elevationDeg: pos.altitude }).forward;
     const sh = this.earthShadow(sc, [d.x, d.y, d.z]);
-    const q = sh && this.toPx(sc, (Math.atan2(sh.axis[0], sh.axis[1]) * 180) / Math.PI, (Math.asin(sh.axis[2]) * 180) / Math.PI);
+    const q = sh && toPx(sc, (Math.atan2(sh.axis[0], sh.axis[1]) * 180) / Math.PI, (Math.asin(sh.axis[2]) * 180) / Math.PI);
     const px = (rad: number) => discRadiusMm(sc.cam, (rad * 180) / Math.PI) * sc.frame.pxPerMm;
     const shadow = sh && q ? { x: r.left + q.x, y: r.top + q.y, umbraPx: px(sh.umbra), penumbraPx: px(sh.penumbra) } : null;
     return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), umbra: lunarShadowCoverage(sc.time).umbra, shadow, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
-  }
-
-  private hiddenBySkyline(sc: Scene, azDeg: number, altDeg: number): boolean {
-    if (!sc.view) return altDeg < flatHorizonDeg(sc.eyeAboveGroundM);
-    const col = columnAt(sc.view, azDeg);
-    return col >= 0 && altDeg < sc.view.skylineDeg[col];
-  }
-
-  /**
-   * Frame position of a local direction. Low directions take the exact path; the rest, refracted,
-   * project straight through the camera basis, which is what makes 9k stars cheap.
-   */
-  /** `buildings` false leaves them to the picture pass, which tests each drawn pixel instead. */
-  private placeEnu(sc: Scene, e: number, n: number, u: number, slack: number, buildings = true): Placed | null {
-    const len = Math.hypot(e, n, u);
-    const uz = u / len;
-    if (uz < -0.05) return null;
-    let az = Number.NaN;
-    let alt: number;
-    let p: { x: number; y: number } | null;
-    if (uz < SIN_10_DEG) {
-      const h = horizontalOf(e / len, n / len, uz, sc.airDensity);
-      az = h.azimuthDeg;
-      alt = h.altitudeDeg;
-      p = this.toPx(sc, az, alt);
-    } else {
-      const { forward: F, right: R, up: U } = sc.basis;
-      refractEnu(e / len, n / len, uz, LIFT, sc.airDensity);
-      const le = LIFT[0];
-      const ln = LIFT[1];
-      const lu = LIFT[2];
-      alt = Math.asin(lu) / D2R;
-      const depth = le * F.x + ln * F.y + lu * F.z;
-      if (depth <= 1e-6) return null;
-      const xs = ((le * R.x + ln * R.y + lu * R.z) / depth) * sc.cam.focalMm;
-      const ys = ((le * U.x + ln * U.y + lu * U.z) / depth) * sc.cam.focalMm;
-      p = { x: sc.frame.x + sc.frame.w / 2 + xs * sc.frame.pxPerMm, y: sc.frame.y + sc.frame.h / 2 - ys * sc.frame.pxPerMm };
-    }
-    if (!this.inView(sc, p, slack)) return null;
-    let hidden = false;
-    if (alt < sc.maxSkyline) {
-      if (Number.isNaN(az)) az = Math.atan2(e, n) / D2R;
-      hidden = this.hiddenBySkyline(sc, az, alt);
-    }
-    if (!hidden && buildings && this.occ) hidden = this.occ.occludes(e, n, u, Infinity);
-    return { x: p.x, y: p.y, altDeg: alt, hidden };
   }
 
   /** Stars bucketed by colour and brightness so the canvas style changes a few dozen times, not 9k. */
@@ -915,7 +834,7 @@ export class ViewfinderController {
       for (const i of g.idx) {
         if (cat.mag[i] > limit) break;
         applyStar(M, cat.x[i], cat.y[i], cat.z[i], out);
-        const p = this.placeEnu(sc, out[0], out[1], out[2], 4, false);
+        const p = placeEnu(sc, this.occ, out[0], out[1], out[2], 4, false);
         if (!p || p.hidden) continue;
         const r = starRadiusPx(cat.mag[i]);
         if (r < 1.1) this.marks.box(p.x, p.y, r, rgba);
@@ -942,8 +861,8 @@ export class ViewfinderController {
     for (let s = 0; s < seg.length; s += 6) {
       applyStar(M, seg[s], seg[s + 1], seg[s + 2], a);
       applyStar(M, seg[s + 3], seg[s + 4], seg[s + 5], b);
-      const p = this.placeEnu(sc, a[0], a[1], a[2], 600, false);
-      const q = this.placeEnu(sc, b[0], b[1], b[2], 600, false);
+      const p = placeEnu(sc, this.occ, a[0], a[1], a[2], 600, false);
+      const q = placeEnu(sc, this.occ, b[0], b[1], b[2], 600, false);
       if (!p || !q || p.hidden || q.hidden) continue;
       this.marks.segment(p.x, p.y, q.x, q.y, 1, 0, 0, rgba);
     }
@@ -955,7 +874,7 @@ export class ViewfinderController {
       ctx.textBaseline = 'middle';
       for (let i = 0; i < pc.ids.length; i++) {
         applyStar(M, pc.centres[i * 3], pc.centres[i * 3 + 1], pc.centres[i * 3 + 2], a);
-        const p = this.placeEnu(sc, a[0], a[1], a[2], 0);
+        const p = placeEnu(sc, this.occ, a[0], a[1], a[2], 0);
         if (p && !p.hidden) haloText(ctx, pc.names[i], p.x, p.y);
       }
     }
@@ -964,7 +883,7 @@ export class ViewfinderController {
 
   private drawPole(sc: Scene) {
     const [e, n, u] = poleEnu(sc.time, sc.obs);
-    const p = this.placeEnu(sc, e, n, u, 0);
+    const p = placeEnu(sc, this.occ, e, n, u, 0);
     if (!p || p.hidden) return;
     const { ctx } = this;
     ctx.globalAlpha = sc.night;
@@ -1013,7 +932,7 @@ export class ViewfinderController {
       const width = Math.max(0.7, starRadiusPx(cat.mag[i]) * 0.9);
       for (const m of mats) {
         applyStar(m, cat.x[i], cat.y[i], cat.z[i], out);
-        const p = this.placeEnu(sc, out[0], out[1], out[2], 40, false);
+        const p = placeEnu(sc, this.occ, out[0], out[1], out[2], 40, false);
         if (p && !p.hidden) run.push(p.x, p.y);
         else if (run.length > 0) flush(width);
       }
@@ -1036,7 +955,7 @@ export class ViewfinderController {
       const { raDeg, decDeg } = radiantEquatorial({ ...st, daysFromPeak: (t - st.peakMs) / DAY_MS });
       const [x, y, z] = eqjVector(raDeg, decDeg);
       applyStar(M, x, y, z, out);
-      const p = this.placeEnu(sc, out[0], out[1], out[2], 20);
+      const p = placeEnu(sc, this.occ, out[0], out[1], out[2], 20);
       if (!p) continue;
       ctx.globalAlpha = (p.hidden ? 0.35 : 0.9) * sc.night;
       ctx.strokeStyle = '#ffe08a';
@@ -1088,8 +1007,8 @@ export class ViewfinderController {
     // The picture draws these under the overlay; ghosted ones behind geometry still show.
     const discs: Disc[] = [SkyBody.Sun, SkyBody.Moon].flatMap((b) => this.seen.bodies[b] ?? []);
     ctx.font = `10px ${FONT_SANS}`;
-    const pxs = Array.from({ length: curve.n }, (_, i) => this.toPx(sc, azs[i], alts[i]));
-    const ins = pxs.map((p) => this.inView(sc, p, 40));
+    const pxs = Array.from({ length: curve.n }, (_, i) => toPx(sc, azs[i], alts[i]));
+    const ins = pxs.map((p) => inView(sc, p, 40));
     // Occlusion does not depend on the aim, so a drag reuses it until the path or occluders change.
     let memo = this.pathHidden.get(body);
     if (!memo || memo.occ !== this.occ || memo.view !== sc.view || memo.curve !== curve) this.pathHidden.set(body, (memo = { occ: this.occ, view: sc.view, curve, h: new Int8Array(curve.n) }));
@@ -1103,14 +1022,14 @@ export class ViewfinderController {
       if (p && prev && segmentHitsRect(prev, p, sc.area, 40)) {
         this.marks.segment(prev.x, prev.y, p.x, p.y, 1.5, sky || prevSky ? OverlayFlag.Hidden : 0, 0.35, line);
         if (this.probe) {
-          const a = this.behindBuilding(azs[i - 1], alts[i - 1], Infinity);
-          const b = this.behindBuilding(azs[i], alts[i], Infinity);
+          const a = behindBuilding(this.occ, azs[i - 1], alts[i - 1], Infinity);
+          const b = behindBuilding(this.occ, azs[i], alts[i], Infinity);
           this.probe.push(1, prev.x, prev.y, p.x, p.y, sky || prevSky ? 2 : a && b ? 1 : a || b ? 3 : 0);
         }
       }
       const t = curve.startMs + i * curve.stepMs;
       if (inside && p && new Date(t).getUTCMinutes() === 0 && t % 3_600_000 === (curve.startMs % 3_600_000 + (i * curve.stepMs)) % 3_600_000) {
-        const hidden = sky || (h[i] !== 0 ? h[i] > 0 : (h[i] = this.behindBuilding(azs[i], alts[i], Infinity) ? 1 : -1) > 0);
+        const hidden = sky || (h[i] !== 0 ? h[i] > 0 : (h[i] = behindBuilding(this.occ, azs[i], alts[i], Infinity) ? 1 : -1) > 0);
         const label = formatTime(t, world.tz, hour12).replace(':00', '');
         ctx.globalAlpha = hidden ? 0.5 : 0.95;
         ctx.fillStyle = color;
@@ -1139,7 +1058,7 @@ export class ViewfinderController {
     const pts: number[] = [];
     for (let i = 0; i <= 40; i++) {
       const az = sc.aim.azimuthDeg - sc.hfov * 0.75 + (sc.hfov * 1.5 * i) / 40;
-      const p = this.toPx(sc, az, 0);
+      const p = toPx(sc, az, 0);
       if (p) pts.push(p.x, p.y);
     }
     this.marks.dashed(pts, 1, 4, 6, OverlayFlag.Over, HORIZON_RGBA);
@@ -1149,7 +1068,7 @@ export class ViewfinderController {
     for (const side of [-1, 1]) {
       const ext: number[] = [];
       for (let i = 0; i <= 40; i++) {
-        const p = this.toPx(sc, sc.aim.azimuthDeg + side * (sc.hfov * 0.75 + (reach * i) / 40), 0);
+        const p = toPx(sc, sc.aim.azimuthDeg + side * (sc.hfov * 0.75 + (reach * i) / 40), 0);
         if (p) ext.push(p.x, p.y);
       }
       this.marks.dashed(ext, 1, 4, 6, OverlayFlag.Over, HORIZON_RGBA);
@@ -1168,7 +1087,7 @@ export class ViewfinderController {
       const range = arcWindow(sc.sunAz, sc.sunAlt, mid, sc.aim.azimuthDeg, sc.aim.elevationDeg, Math.hypot(sc.viewHfov, sc.viewVfov) / 2 + width);
       if (!range) continue;
       const centre = rainbowArc(sc.sunAz, sc.sunAlt, mid, -90, BOW_STEPS, range);
-      const hidden = centre.map((p) => p.altitudeDeg < minAlt || this.hiddenBySkyline(sc, p.azimuthDeg, p.altitudeDeg) || this.behindBuilding(p.azimuthDeg, p.altitudeDeg, Infinity));
+      const hidden = centre.map((p) => p.altitudeDeg < minAlt || hiddenBySkyline(sc, p.azimuthDeg, p.altitudeDeg) || behindBuilding(this.occ, p.azimuthDeg, p.altitudeDeg, Infinity));
       const lineWidth = Math.max(1.5, (sc.frame.pxPerMm * sc.cam.focalMm * width * D2R) / (BOW_COLORS.length - 1));
       BOW_COLORS.forEach((color, ci) => {
         const n = WATER_N.Red + ((WATER_N.Violet - WATER_N.Red) * ci) / (BOW_COLORS.length - 1);
@@ -1176,10 +1095,10 @@ export class ViewfinderController {
         const rgba = hexRgba(color, alpha);
         let prev: { x: number; y: number } | null = null;
         for (let i = 0; i < pts.length; i++) {
-          const p = pts[i].altitudeDeg >= minAlt ? this.toPx(sc, pts[i].azimuthDeg, pts[i].altitudeDeg) : null;
+          const p = pts[i].altitudeDeg >= minAlt ? toPx(sc, pts[i].azimuthDeg, pts[i].altitudeDeg) : null;
           if (p && prev && segmentHitsRect(prev, p, sc.area, 40)) {
             const dim = hidden[i] || hidden[i - 1];
-            if (this.inView(sc, p)) seen[dim ? 'dim' : 'clear']++;
+            if (inView(sc, p)) seen[dim ? 'dim' : 'clear']++;
             this.marks.segment(prev.x, prev.y, p.x, p.y, lineWidth, OverlayFlag.Over | (dim ? OverlayFlag.Hidden : 0), alpha * 0.35, rgba);
           }
           prev = p;
@@ -1194,13 +1113,13 @@ export class ViewfinderController {
 
   private drawBody(sc: Scene, body: SkyBody, date: Date): BodyLabel | null {
     const pos = position(body, date, sc.obs);
-    const p = this.toPx(sc, pos.azimuth, pos.altitude);
-    if (!this.inView(sc, p, 60)) return null;
+    const p = toPx(sc, pos.azimuth, pos.altitude);
+    if (!inView(sc, p, 60)) return null;
     const { ctx } = this;
     const col = sc.view ? columnAt(sc.view, pos.azimuth) : -1;
     const skyline = col >= 0 && sc.view ? sc.view.skylineDeg[col] : flatHorizonDeg(sc.eyeAboveGroundM);
     const semi = semidiameterDeg(body, date, sc.obs);
-    const hidden = pos.altitude + semi < skyline || this.behindBuilding(pos.azimuth, pos.altitude, Infinity);
+    const hidden = pos.altitude + semi < skyline || behindBuilding(this.occ, pos.azimuth, pos.altitude, Infinity);
     const r = Math.max(3, discRadiusMm(sc.cam, semi) * sc.frame.pxPerMm);
     this.seen.bodies[body] = { az: pos.azimuth, alt: pos.altitude, x: p.x, y: p.y, r, hidden };
     // The picture pass draws the discs itself, clipped per pixel; only the label is left here.
@@ -1284,8 +1203,8 @@ export class ViewfinderController {
     const d = distanceM(w.pin, w.pin2);
     const alt = targetAngleFor(w, s, t);
     if (alt == null) return;
-    const p = this.toPx(sc, az, alt);
-    if (!this.inView(sc, p, 30)) return;
+    const p = toPx(sc, az, alt);
+    if (!inView(sc, p, 30)) return;
     const { ctx } = this;
     const blocked = fresh?.los.status === 'Blocked';
     ctx.save();
@@ -1334,14 +1253,14 @@ export class ViewfinderController {
       const g = grounds[m.id];
       const ground = g === undefined || Number.isNaN(g) ? null : g;
       // Without ground data the marker sits on the visible terrain surface at its distance.
-      const baseAlt = ground != null ? elevationAngleDeg(d, ground - sc.eyeM) : this.surfaceAngle(sc, az, d);
+      const baseAlt = ground != null ? elevationAngleDeg(d, ground - sc.eyeM) : surfaceAngle(sc, az, d);
       if (baseAlt == null) continue;
       const topAlt = ground != null ? elevationAngleDeg(d, ground + m.heightM - sc.eyeM) : baseAlt + (m.heightM / d) / D2R;
-      const base = this.toPx(sc, az, baseAlt);
-      const top = this.toPx(sc, az, topAlt);
+      const base = toPx(sc, az, baseAlt);
+      const top = toPx(sc, az, topAlt);
       const halfW = m.widthM > 0 ? (Math.atan(m.widthM / 2 / d) / D2R / sc.hfov) * sc.frame.w : 0;
-      if (!base || !top || !(this.inView(sc, base, 20 + halfW) || this.inView(sc, top, 20 + halfW))) continue;
-      const hidden = (!!sc.view && occluded(sc.view, az, topAlt, d)) || this.behindBuilding(az, topAlt, d);
+      if (!base || !top || !(inView(sc, base, 20 + halfW) || inView(sc, top, 20 + halfW))) continue;
+      const hidden = (!!sc.view && occluded(sc.view, az, topAlt, d)) || behindBuilding(this.occ, az, topAlt, d);
       this.seen.markers[m.id] = hidden;
       const color = CATEGORY_COLORS[m.category];
       ctx.globalAlpha = hidden ? 0.4 : 1;
@@ -1382,7 +1301,7 @@ export class ViewfinderController {
       const gp = local.fromEn(v.e, v.n);
       const dv = distanceM(pin, gp);
       if (dv < 1e-6) return null;
-      return this.toPx(sc, bearingDeg(pin, gp), elevationAngleDeg(dv, groundM + v.u - sc.eyeM));
+      return toPx(sc, bearingDeg(pin, gp), elevationAngleDeg(dv, groundM + v.u - sc.eyeM));
     });
     // Vertices projected well past the frame are still drawn; only a wholly off-screen face is dropped.
     const slack = Math.max(sc.frame.w, sc.frame.h) * 2;
@@ -1390,7 +1309,7 @@ export class ViewfinderController {
     for (const f of facesToward(solid, eye)) {
       const poly = f.v.map((i) => pts[i]);
       if (poly.some((p) => p == null)) continue;
-      if (poly.every((p) => !this.inView(sc, p, slack))) continue;
+      if (poly.every((p) => !inView(sc, p, slack))) continue;
       ctx.fillStyle = shaded(color, faceShade(f, lightAzDeg));
       ctx.strokeStyle = color;
       ctx.beginPath();
@@ -1403,19 +1322,6 @@ export class ViewfinderController {
       ctx.stroke();
     }
     ctx.lineWidth = 1.5;
-  }
-
-  /** Elevation angle of the terrain surface at a distance along an azimuth, from the sweep's visible points. */
-  private surfaceAngle(sc: Scene, az: number, d: number): number | null {
-    if (!sc.view) return flatHorizonDeg(sc.eyeAboveGroundM);
-    const col = columnAt(sc.view, az);
-    if (col < 0) return null;
-    let best = sc.view.start[col];
-    for (let m = sc.view.start[col]; m < sc.view.start[col + 1]; m++) {
-      if (sc.view.distM[m] <= d) best = m;
-      else break;
-    }
-    return sc.view.start[col] === sc.view.start[col + 1] ? null : sc.view.angleDeg[best];
   }
 
   /** One line under the frame: the lens on the left, whatever the view is waiting on to the right. */
