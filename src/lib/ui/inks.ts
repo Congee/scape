@@ -1,4 +1,4 @@
-/** Canvas and GL inks; mirrors the colour tokens in app.css :root. */
+/** Canvas and GL inks; mirrors the colour tokens in styles/tokens.css :root. */
 const fg = '#f1f1f1';
 const fg2 = '#ababab';
 const sun = '#f5a524';

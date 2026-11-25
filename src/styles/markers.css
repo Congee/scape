@@ -1,0 +1,89 @@
+/* Markers */
+.marker-list li {
+  display: block;
+  padding: 0;
+  border-bottom: 1px dotted var(--line);
+}
+
+.panel .marker-list .marker-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) minmax(64px, auto) minmax(56px, auto);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.marker-list li.selected .name {
+  outline: 1.5px solid var(--fg);
+  outline-offset: 1px;
+  border-radius: 8px;
+  padding: 0 4px;
+}
+
+.marker-list .cat {
+  justify-self: center;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.marker-list .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marker-list .time,
+.marker-list .az {
+  text-align: right;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+
+.markers textarea {
+  width: 100%;
+  min-height: 48px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 7px;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+}
+
+.markers .kv input[type='text'] {
+  width: 100%;
+}
+
+.markers .kv select {
+  max-width: 100%;
+}
+
+.stars button {
+  background: none;
+  border: 0;
+  padding: 0 1px;
+  font-size: 15px;
+  color: var(--fg-3);
+}
+
+.stars button.on {
+  color: var(--sun);
+}
+
+.ok {
+  color: var(--terrain);
+}
+
+/* Library page */
+.list li .meta {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+

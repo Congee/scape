@@ -1,0 +1,315 @@
+/* Hit targets (2.5.8): 24 px, 44 px on touch; :where so larger local sizes win. */
+.panel {
+  --hit: 24px;
+}
+
+@media (pointer: coarse) {
+  .panel {
+    --hit: var(--size-target);
+    --size-control: var(--size-target);
+  }
+}
+
+.panel :where(button, select, summary, label.toggle, label:has(> input:is([type='checkbox'], [type='radio'])), label.file-pick, input:not([type='checkbox'], [type='radio'], [type='file'])) {
+  min-height: var(--hit);
+}
+
+.panel :where(button, select, .radio-list label, .cloud-chart) {
+  min-width: var(--hit);
+}
+
+.panel .cloud-chart {
+  min-height: var(--hit);
+}
+
+.panel :is(a[href], button.link, .nd-pick) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit);
+}
+
+.panel .nd-table td {
+  padding-block: 0;
+}
+
+.panel :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), select, textarea):hover:enabled {
+  border-bottom-color: var(--fg);
+}
+
+.panel select {
+  appearance: none;
+  padding-right: 16px;
+  background: linear-gradient(45deg, transparent 50%, var(--fg-2) 50%) right 6px center / 5px 5px no-repeat, linear-gradient(-45deg, transparent 50%, var(--fg-2) 50%) right 1px center / 5px 5px no-repeat;
+}
+
+.panel select option {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+
+.panel :is(.chip, .tree .dot.active) {
+  border-radius: 0;
+}
+
+.panel .radio-list input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panel .radio-list label > span {
+  color: var(--fg-2);
+}
+
+.panel .radio-list label:has(> input:checked) > span {
+  color: var(--fg);
+  font-weight: 700;
+  box-shadow: inset 0 calc(-1 * var(--stroke-mark)) 0 var(--fg);
+}
+
+.panel .radio-list label:has(> input:focus-visible) > span {
+  outline: var(--stroke-mark) solid var(--fg);
+  outline-offset: 1px;
+}
+
+.panel input[type='range'] {
+  appearance: none;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+}
+
+.panel input[type='range']::-webkit-slider-runnable-track {
+  height: var(--stroke-hair);
+  background: var(--fg-3);
+}
+
+.panel input[type='range']::-moz-range-track {
+  height: var(--stroke-hair);
+  background: var(--fg-3);
+}
+
+.panel input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 14px;
+  margin-top: -7px;
+  border: 0;
+  border-radius: 0;
+  background: var(--fg);
+}
+
+.panel input[type='range']::-moz-range-thumb {
+  width: 10px;
+  height: 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--fg);
+}
+
+.panel .progress {
+  border-radius: 0;
+  background: var(--bg-4);
+}
+
+.panel .progress i {
+  background: var(--fg);
+}
+
+.panel .dot {
+  width: var(--size-box);
+  height: var(--size-box);
+  border-radius: 0;
+}
+
+.panel .brow .time {
+  color: var(--fg);
+}
+
+.panel .brow .note {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* One step above the Disclosure sub-heads (10.5px, --fg-2). */
+.panel .psec-h {
+  padding: var(--space-6) var(--space-6) var(--space-3);
+  font-size: 12px;
+}
+
+.panel .psec-b {
+  margin: 0 var(--space-3);
+  padding: var(--space-3);
+}
+
+.panel :is(h3, .layers h3, .frame h3, .markers h3, .find h3, .night details h3, details.disc h3) {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--fg-2);
+}
+
+/* Sub-heads share the section head's left edge. */
+.panel .psec-b h3 {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.panel .kv {
+  grid-template-columns: 104px minmax(0, 1fr);
+  row-gap: 0;
+}
+
+.panel .kv > :is(.k, .v) {
+  padding: var(--space-2) 0;
+  border-bottom: var(--stroke-hair) dotted var(--line);
+}
+
+.panel .kv > :is(.k, .v):nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.panel .kv .v {
+  text-align: right;
+}
+
+.panel .kv .k {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.panel .field > span:first-child {
+  color: var(--fg-2);
+}
+
+.panel :is(.list li, .night details, details.disc, .tree summary) {
+  border-bottom: 1px dotted var(--line);
+}
+
+.panel :is(.night details > summary:hover, details.disc > summary:hover, .tree summary:hover) {
+  background: var(--bg-4);
+}
+
+.panel a {
+  color: var(--fg);
+}
+
+.panel .progress {
+  border-radius: 0;
+  background: var(--bg-4);
+}
+
+/* Viewfinder View tab: label column, then controls. */
+.panel .vrow {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  column-gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 6px;
+  border-bottom: var(--stroke-hair) dotted var(--line);
+}
+
+.panel .vrow:last-child,
+.panel .vf-photo-tools > :last-child {
+  border-bottom: 0;
+}
+
+.panel .vrow-k {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.panel .vrow-v {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  min-width: 0;
+}
+
+.panel .vrow-v > button[aria-pressed] {
+  min-height: var(--hit);
+}
+
+.panel .vrow-v .actions {
+  margin: 0;
+}
+
+.panel .vrow-num {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.panel .unit {
+  white-space: nowrap;
+}
+
+.panel .vrow-num input {
+  width: 48px;
+}
+
+.panel button.blank {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 2px;
+  border: 0;
+  border-bottom: var(--stroke-hair) solid var(--fg-3);
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.panel .vrange {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: var(--space-4);
+  align-items: center;
+  flex: 1;
+}
+
+.panel .vrange span {
+  text-align: right;
+}
+
+.panel .nudge {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.panel .nudge button {
+  display: grid;
+  place-items: center;
+  width: var(--size-control);
+  height: var(--size-control);
+  padding: 0;
+  border: var(--stroke-hair) solid var(--line);
+  color: var(--fg);
+  font-size: var(--size-icon);
+}
+
+.panel .credit {
+  margin: 0;
+  padding: var(--space-2) 6px;
+  border-bottom: var(--stroke-hair) dotted var(--line);
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+.panel .credit:last-child {
+  border-bottom: 0;
+}
+
+.panel .credit .alert {
+  color: var(--danger);
+}

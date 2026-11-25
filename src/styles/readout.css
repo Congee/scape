@@ -1,0 +1,151 @@
+/* Live readout */
+.readout {
+  margin: 2px 0 8px;
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.parking {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: -4px 0 8px;
+  padding: 0 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.parking .label {
+  color: var(--fg-2);
+}
+
+.parking a {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.readout-row.below,
+.readout-row.below :is(.label, .val, .extra) {
+  color: var(--fg-3);
+}
+
+.readout-row.below .brg line {
+  stroke: var(--fg-3);
+}
+
+.readout-row .label { grid-area: label; }
+.readout-row .val[title='Altitude'] { grid-area: time; text-align: right; color: var(--fg-2); }
+.readout-row .val[title='Azimuth'] { grid-area: az; text-align: right; color: var(--fg-2); white-space: nowrap; }
+.readout-row .extra { grid-area: extra; color: var(--fg-3); font-size: 11.5px; }
+
+.error {
+  margin: 4px;
+  padding: 6px 8px;
+  background: rgb(255 92 92 / 0.12);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.hint {
+  margin: 6px 4px 0;
+  font-size: 12px;
+}
+
+/* Key/value grids (Geodetics, Frame, Markers) */
+.kv {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 12px;
+  align-items: center;
+  padding: 6px;
+}
+
+.kv .k {
+  color: var(--fg-2);
+}
+
+.kv .v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kv input {
+  width: 76px;
+  margin-right: 4px;
+}
+
+.kv .nowrap {
+  white-space: nowrap;
+}
+
+.los.clear { color: var(--los-clear); }
+.los.marginal { color: var(--los-marginal); }
+.los.blocked { color: var(--los-blocked); }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 6px;
+}
+
+.profile {
+  display: block;
+  width: 100%;
+  height: 130px;
+  margin: 6px 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.geo p {
+  margin: 8px 6px;
+}
+
+/* Frame panel */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 6px;
+}
+
+.chips button {
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.chips button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08111c;
+}
+
+.panel :is(.chips, .segmented) button {
+  border-color: transparent;
+  color: var(--fg-2);
+}
+
+.kv .v.wide {
+  grid-column: 1 / -1;
+}
+
+.kv.aim .segmented {
+  display: flex;
+  justify-content: space-between;
+}
+
+.frame h3,
+.markers h3 {
+  margin: 12px 6px 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+
+.frame label.toggle,
+.markers label.toggle {
+  padding: 3px 6px;
+}
+

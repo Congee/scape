@@ -1,0 +1,112 @@
+/* MapLibre tweaks */
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+
+/* MapLibre's own controls, drawn as the design system's map control */
+.maplibregl-ctrl-group:not(:empty),
+.maplibregl-ctrl-group.click-mode {
+  background: var(--scrim);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.maplibregl-ctrl-group button {
+  display: grid;
+  place-items: center;
+  width: var(--size-mapctl);
+  height: var(--size-mapctl);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--fg-2);
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--line);
+}
+
+.maplibregl-ctrl-group button:focus:first-child,
+.maplibregl-ctrl-group button:focus:last-child,
+.maplibregl-ctrl-group button:focus:only-child {
+  border-radius: 0;
+}
+
+.maplibregl-ctrl button:not(:disabled):hover {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+
+.maplibregl-ctrl-group button:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.maplibregl-ctrl-group button:focus:not(:focus-visible) {
+  box-shadow: none;
+}
+
+/* MapLibre's icons are dark images; these turn them fg-2, and fg on hover. */
+.maplibregl-ctrl button .maplibregl-ctrl-icon {
+  filter: invert(1) brightness(0.84);
+}
+
+.maplibregl-ctrl button:not(:disabled):hover .maplibregl-ctrl-icon,
+.maplibregl-ctrl button.maplibregl-ctrl-geolocate-active .maplibregl-ctrl-icon,
+.maplibregl-ctrl button.maplibregl-ctrl-geolocate-background .maplibregl-ctrl-icon {
+  filter: brightness(0) invert(0.945);
+}
+
+.maplibregl-ctrl button.maplibregl-ctrl-geolocate-active,
+.maplibregl-ctrl button.maplibregl-ctrl-geolocate-background {
+  box-shadow: inset 0 -2px 0 var(--fg);
+}
+
+.maplibregl-ctrl button.maplibregl-ctrl-geolocate-active-error .maplibregl-ctrl-icon,
+.maplibregl-ctrl button.maplibregl-ctrl-geolocate-background-error .maplibregl-ctrl-icon {
+  filter: none;
+}
+
+@media (pointer: coarse) {
+  .maplibregl-ctrl-group button {
+    width: var(--size-target);
+    height: var(--size-target);
+  }
+}
+
+.maplibregl-ctrl.maplibregl-ctrl-attrib {
+  background: var(--scrim);
+  color: var(--fg-2);
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--fg-2);
+}
+
+.maplibregl-ctrl-attrib a:hover {
+  color: var(--fg);
+}
+
+.maplibregl-ctrl-attrib.maplibregl-compact,
+.maplibregl-ctrl-attrib.maplibregl-compact-show,
+.maplibregl-ctrl-attrib-button {
+  border-radius: 0;
+}
+
+/* Inverted with its dark glyph: #eaeaea lands on the scrim. */
+.maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+  background-color: #eaeaea;
+  filter: invert(1) brightness(0.84);
+}
+
+.maplibregl-ctrl-scale {
+  background: var(--scrim);
+  border-color: var(--fg-2);
+  color: var(--fg);
+  font-size: 10px;
+  line-height: 12px;
+}
+

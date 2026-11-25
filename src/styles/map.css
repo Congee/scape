@@ -1,0 +1,294 @@
+/* Map page */
+.map-page {
+  display: grid;
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr) var(--panel);
+  grid-template-rows: auto minmax(0, 1fr) var(--chart);
+  grid-template-areas:
+    'top panel'
+    'map panel'
+    'chart panel';
+}
+
+.topbar {
+  grid-area: top;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.map-area {
+  grid-area: map;
+  position: relative;
+  min-height: 0;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+  background: #111;
+}
+
+.map-badges {
+  position: absolute;
+  z-index: var(--z-overlay);
+  top: 10px;
+  left: 10px;
+}
+
+.map-notice-slot {
+  position: absolute;
+  z-index: 6;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 20px);
+  pointer-events: none;
+}
+
+.map-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--scrim);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 16px;
+  pointer-events: auto;
+}
+
+.map-notice::before {
+  content: '';
+  flex: none;
+  width: var(--size-box);
+  height: var(--size-box);
+  background: var(--fg-2);
+}
+
+.map-notice[data-kind='Offline']::before {
+  background: var(--caution);
+}
+
+.map-notice[data-kind='TilesFailed']::before {
+  background: var(--danger);
+}
+
+.map-legends {
+  position: absolute;
+  z-index: 5;
+  left: 10px;
+  bottom: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  pointer-events: none;
+}
+
+.map-legend {
+  display: grid;
+  gap: 6px;
+  max-width: min(360px, 100%);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--scrim);
+  line-height: 14px;
+  color: var(--fg);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.legend-chip i {
+  width: 10px;
+  height: 10px;
+  border: 1px solid transparent;
+}
+
+.legend-line {
+  width: 14px;
+  height: 2px;
+}
+
+.legend-elev {
+  display: grid;
+  width: min(280px, calc(100vw - 40px));
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
+  align-items: start;
+}
+
+.legend-bar {
+  height: 8px;
+}
+
+.legend-ticks {
+  position: relative;
+  grid-column: 1;
+  height: 13px;
+}
+
+.legend-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.legend-ticks span:last-child {
+  transform: translateX(-100%);
+}
+
+.legend-elev .muted {
+  grid-row: 1;
+  grid-column: 2;
+  line-height: 8px;
+}
+
+.legend-wheel {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+
+.legend-wheel b {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: #000;
+}
+
+.chart-wrap {
+  grid-area: chart;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.chart:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--fg);
+}
+
+.panel {
+  grid-area: panel;
+  min-height: 0;
+  background: var(--bg-2);
+  border-left: 1px solid var(--line);
+  display: flex;
+}
+
+.map-page.panel-collapsed,
+.vf-page.panel-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+
+.panel-collapsed > .panel {
+  display: none;
+}
+
+.panel-expand {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  padding: 10px 4px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+@media (max-width: 900px) {
+  /* Collapsed, the bottom sheet keeps its tab row as a peek bar. */
+  .map-page.panel-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) var(--chart) auto;
+  }
+  .vf-page.panel-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) var(--chart) auto;
+  }
+  .panel-expand {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --panel: 0px;
+    --chart: 80px;
+  }
+  .map-page {
+    grid-template-columns: minmax(0, 1fr);
+    /* The floor keeps the map from being squeezed to nothing on a landscape phone. */
+    grid-template-rows: auto minmax(25vh, 1fr) var(--chart) minmax(0, 38vh);
+    grid-template-areas:
+      'top'
+      'map'
+      'chart'
+      'panel';
+  }
+  .map-page.panel-tall {
+    grid-template-rows: auto 12vh var(--chart) minmax(0, 1fr);
+  }
+  .panel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  /* The rail becomes a bottom toolbar. */
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .rail {
+    order: 1;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: 0 0 env(safe-area-inset-bottom);
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+  /* Each tab fills its quarter, so the current-view fill and hit area span the cell. */
+  .rail-link {
+    flex: 1 1 0;
+  }
+  .rail-spacer {
+    display: none;
+  }
+}
+

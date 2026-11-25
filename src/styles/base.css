@@ -1,0 +1,58 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* The app owns the viewport: panels scroll internally, the document never does. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+input,
+textarea {
+  caret-color: var(--fg);
+}
+
+* {
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+
+:is(.btn-icon, .search) > .icon {
+  flex: none;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  vertical-align: middle;
+}
+
+.shell {
+  height: 100%;
+}
+

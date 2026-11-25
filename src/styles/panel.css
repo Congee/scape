@@ -1,0 +1,131 @@
+/* Panel */
+.panel-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* without this wide tab-body content widens the panel past its grid column */
+  min-width: 0;
+}
+
+.sheet-handle {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .panel .sheet-handle {
+    display: block;
+    flex: none;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  .panel .sheet-handle::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 0 auto;
+    border-radius: 2px;
+    background: var(--fg-3);
+  }
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+
+.tablist {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.tabs button {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 9px 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--fg-2);
+}
+
+.tablist button {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tabs button.active {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+
+.tabs button:focus-visible {
+  outline-offset: -2px;
+}
+
+.tabs-collapse {
+  flex: none;
+  width: 28px;
+  color: var(--fg-3);
+}
+
+/* Place and date */
+.band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-6) var(--space-5);
+  border-bottom: var(--stroke-hair) solid var(--line);
+  background: var(--bg);
+  min-width: 0;
+}
+
+.band-name {
+  font-size: 17px;
+  line-height: 20px;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 0 6px;
+}
+
+@media (max-width: 900px) {
+  .tabs button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .tabs .tabs-collapse {
+    min-width: 44px;
+    transform: rotate(90deg);
+  }
+  .panel-collapsed > .panel {
+    display: flex;
+  }
+  .panel-collapsed .tab-body,
+  .panel-collapsed .band {
+    display: none;
+  }
+  .panel-collapsed .tabs .tabs-collapse {
+    transform: rotate(-90deg);
+  }
+}
+

@@ -1,0 +1,128 @@
+/* Badges */
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  background: var(--scrim);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.badge .k {
+  color: var(--fg-2);
+}
+
+button.badge:hover {
+  background: var(--bg-4);
+}
+
+/* Screen-reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Search */
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 300px;
+  min-width: 200px;
+  color: var(--fg-2);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--fg-3);
+  color: var(--fg);
+}
+
+.search input:focus-visible {
+  outline: none;
+  border-bottom: 2px solid var(--fg);
+}
+
+.search-results {
+  position: absolute;
+  z-index: var(--z-popover);
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-float);
+  color: var(--fg);
+}
+
+.search-results ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-results .search-status {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--fg-3);
+  cursor: default;
+}
+
+.search-results li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.search-results li .text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-results li:hover {
+  background: var(--bg-4);
+}
+
+.search-results li.active {
+  background: var(--bg-3);
+  box-shadow: inset 2px 0 0 var(--fg);
+}
+
+.search-results li.search-status:hover {
+  background: none;
+}
+
+.search-results .detail,
+.list .detail {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+

@@ -1,0 +1,180 @@
+/* Pages */
+.page {
+  max-width: 640px;
+  padding: 18px 24px 40px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.page h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  line-height: 24px;
+}
+
+.field {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 0;
+}
+
+/* Labels never wrap; a row too narrow for label and control stacks them instead. */
+.field > span:first-child {
+  flex: 1 0 auto;
+  white-space: nowrap;
+}
+
+/* Controls end on the right edge, stacked or not. */
+.field > :last-child {
+  margin-left: auto;
+}
+
+.field input[type='number'] {
+  width: calc(6ch + 1.5em);
+}
+
+/* Library and Settings: Field, ListItem and Button from the design system. */
+.page h2 {
+  margin: 24px 0 8px;
+  color: var(--fg-3);
+  font-size: 10.5px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.page h3 {
+  margin: 16px 0 6px;
+  color: var(--fg-2);
+  font-size: 10.5px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* Panel sections on a page (Offline) read as flat sub-heads, like Gear's. */
+.page .psec {
+  margin: 0;
+}
+
+.page .psec + .psec {
+  border-top: 0;
+}
+
+.page .psec-h {
+  margin: 16px 0 6px;
+  padding: 0;
+  color: var(--fg-2);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.page .psec-b {
+  margin: 0;
+  background: none;
+}
+
+.page .field {
+  min-height: var(--size-control);
+  padding: 2px 0;
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.page input:not([type='file']),
+.page select {
+  height: 24px;
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--fg-3);
+  color: var(--fg);
+}
+
+.page input:not([type='file']):focus-visible,
+.page select:focus-visible {
+  outline: none;
+  border-bottom: 2px solid var(--fg);
+}
+
+.page select option {
+  background: var(--bg-2);
+}
+
+/* Firefox dims placeholders by default. */
+::placeholder {
+  color: var(--fg-3);
+  opacity: 1;
+}
+
+.page button:not(.btn-link, .link, .tgl, .primary, [role='radio']) {
+  height: var(--size-control);
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.page button:not(.btn-link, .link, .tgl, .primary, [role='radio']):hover:enabled {
+  background: var(--bg-4);
+}
+
+.page button.link {
+  padding: 0 2px;
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--fg-3);
+  text-underline-offset: 3px;
+}
+
+.page button.link:hover {
+  background: none;
+  color: var(--fg);
+  text-decoration-color: var(--fg);
+}
+
+.page .list li {
+  padding: 6px 12px;
+  border-bottom: 1px dotted var(--line);
+}
+
+.page .list li:hover {
+  background: var(--bg-4);
+}
+
+.page .list li .primary {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+.page .list li .primary .name {
+  font-weight: 700;
+}
+
+.page .list li .detail {
+  color: var(--fg-3);
+}
+
+.list li .primary {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+
+.muted {
+  color: var(--fg-3);
+}
+

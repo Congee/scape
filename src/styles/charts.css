@@ -1,0 +1,134 @@
+/* Time-axis mini charts: press or drag anywhere scrubs the clock; the resize cursor only on the line or mid-drag */
+[data-scrub] {
+  cursor: default;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[data-scrub][data-grab] {
+  cursor: ew-resize;
+}
+
+[data-scrub]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.scrub-cursor .knob {
+  stroke: var(--sun);
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.night .moon-chart .scrub-cursor .knob {
+  stroke: var(--fg-2);
+}
+
+.tide-curve {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 6px 0 2px;
+}
+
+.tide-curve polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.tide-curve polyline.interpolated {
+  stroke-dasharray: 4 3;
+}
+
+.tide-curve .datum {
+  stroke: var(--line);
+}
+
+.tide-curve .now {
+  stroke: var(--sun);
+}
+
+.tide-curve .high {
+  fill: var(--accent);
+}
+
+.tide-curve .low {
+  fill: var(--bg);
+  stroke: var(--accent);
+}
+
+.tide-curve .hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.cal-eclipse {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.cal-eclipse-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+}
+
+.cal-eclipse table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-eclipse td {
+  padding: 2px 3px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.cal-eclipse td:first-child {
+  text-align: left;
+  color: var(--sun);
+}
+
+.cal-eclipse tr {
+  cursor: pointer;
+}
+
+.cal-eclipse tr:hover {
+  background: var(--bg-3);
+}
+
+.cal-eclipse tr.on {
+  color: var(--accent);
+}
+
+.cal-eclipse tr.hidden {
+  color: var(--fg-3);
+}
+
+.cal-eclipse p {
+  margin: 4px 0 0;
+}
+
+.viirs-need .chip {
+  margin: 0 4px 2px 0;
+}
+
+.viirs-need .viirs-have {
+  color: var(--terrain);
+}
+
+.viirs-need .viirs-missing {
+  color: var(--sun);
+}
+
+.viirs-need .viirs-ocean {
+  color: var(--fg-3);
+  text-decoration: line-through;
+}
+

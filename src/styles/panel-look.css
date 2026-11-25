@@ -1,0 +1,236 @@
+/* Panel sections: brighter heads than field labels, ruled apart */
+.psec {
+  margin: 0 0 var(--space-6);
+}
+
+.psec + .psec {
+  border-top: var(--stroke-hair) solid var(--line);
+}
+
+.psec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 10px 6px 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+
+.psec-b {
+  margin: 0 6px;
+  background: var(--bg-3);
+}
+
+.psec > .psec-b:first-child {
+  margin-top: 8px;
+}
+
+.psec-b:empty {
+  display: none;
+}
+
+.list li .brow {
+  display: grid;
+}
+
+.list li:has(> .brow) {
+  padding: 0;
+}
+
+/* Hybrid look inside the panel: neutral, square, ruled. */
+.panel {
+  --accent: var(--fg);
+  accent-color: var(--fg);
+}
+
+.panel :is(button, input, select, textarea, details, summary, .profile, .verdict, .progress, .error) {
+  border-radius: 0;
+}
+
+.panel :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), select, textarea) {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--fg-3);
+  padding: 3px 2px;
+}
+
+.panel :is(input, select, textarea, button):focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+
+.panel button {
+  background: transparent;
+}
+
+.panel :is(.chips, .segmented, .radio-list) :is(button, label):hover {
+  color: var(--fg);
+}
+
+.icon {
+  vertical-align: -0.125em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: square;
+}
+
+.panel summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.panel summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Same chevron as Icon 'right'. */
+.panel summary::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  background: var(--fg-3);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 3l5 5-5 5' fill='none' stroke='black' stroke-width='2'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.panel details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.panel label.file-pick {
+  display: inline-block;
+  margin: 4px 6px;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* State grammar: box = on/off, bar under = one-of, left bar on bg-3 = cursor, bg-4 = hover. */
+.panel :is(.actions, .field-row, .tl-sim, .tool-row) > button:not([aria-pressed], .link) {
+  min-height: var(--size-control);
+  padding: 0 var(--space-5);
+  border: var(--stroke-hair) solid var(--line);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel button:hover:enabled {
+  background: var(--bg-4);
+}
+
+/* Primary: one per surface. */
+.panel button.on:not([aria-pressed], .chips button, .stars button) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+.panel button.on:not([aria-pressed], .chips button, .stars button):hover:enabled {
+  background: var(--fg-2);
+  border-color: var(--fg-2);
+}
+
+.panel .stars button.on {
+  background: transparent;
+  color: var(--sun);
+}
+
+.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.chips.one button, .stars button, .marker-row, .nd-pick)) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+}
+
+.panel :is(.chips:not(.one) button, button[aria-pressed]:not(.chips.one button, .stars button, .marker-row, .nd-pick))::before,
+.panel input[type='checkbox'] {
+  content: '';
+  flex: none;
+  width: var(--size-box);
+  height: var(--size-box);
+  border: var(--stroke-hair) solid var(--fg-2);
+}
+
+.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.chips.one button, .stars button, .marker-row, .nd-pick)),
+.panel label:has(> input[type='checkbox']:checked) {
+  color: var(--fg);
+  font-weight: 700;
+}
+
+.panel :is(.chips:not(.one) button.on, button[aria-pressed='true']:not(.chips.one button, .stars button, .marker-row, .nd-pick))::before,
+.panel input[type='checkbox']:checked {
+  background: var(--fg);
+  border-color: var(--fg);
+}
+
+.panel input[type='checkbox'] {
+  appearance: none;
+  margin: 0 var(--space-3) 0 0;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.panel .segmented {
+  border: 0;
+}
+
+.panel .segmented button + button {
+  border-left: 0;
+}
+
+.panel :is(.segmented, .chips.one) {
+  gap: var(--space-5);
+}
+
+.panel :is(.segmented, .chips.one) button {
+  border: 0;
+  padding: 0 var(--space-1);
+  background: none;
+  color: var(--fg-2);
+}
+
+.panel .segmented button {
+  height: auto;
+  min-height: var(--size-control);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel :is(.segmented button[aria-checked='true'], .chips.one button.on) {
+  color: var(--fg);
+  font-weight: 700;
+  box-shadow: inset 0 calc(-1 * var(--stroke-mark)) 0 var(--fg);
+}
+
+.panel button:disabled {
+  opacity: 1;
+  color: var(--fg-3);
+  border-color: var(--line);
+  background: transparent;
+}
+
+.panel button.link {
+  padding: 0;
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--fg-3);
+  text-underline-offset: 3px;
+}
+
+.panel button.link:hover:enabled {
+  background: none;
+  color: var(--fg);
+  text-decoration-color: var(--fg);
+}
+

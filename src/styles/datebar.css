@@ -1,0 +1,134 @@
+/* Date bar */
+.datebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.datebar .tz {
+  max-width: min(260px, 40vw);
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Calendar */
+.cal {
+  position: relative;
+}
+
+/* Fixed, not absolute: the shell clips overflow, and top/left come from the button's rect. */
+.cal-pop {
+  position: fixed;
+  z-index: var(--z-calendar);
+  width: 268px;
+  max-width: calc(100vw - 16px);
+  padding: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-float);
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.cal-head strong {
+  flex: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.cal-wd {
+  padding-bottom: 2px;
+  color: var(--fg-3);
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.cal-day:hover {
+  background: var(--bg-4);
+}
+
+.cal-day:focus-visible {
+  outline-offset: -2px;
+}
+
+.cal-day.out {
+  color: var(--fg-3);
+}
+
+.cal-day.today {
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.cal-day[aria-pressed='true'] {
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--fg);
+}
+
+.cal-day.today[aria-pressed='true'] {
+  box-shadow:
+    inset 0 -2px 0 var(--fg),
+    inset 0 0 0 1px var(--line);
+}
+
+/* Reserve the glyph row so day numbers stay on one baseline. */
+.cal-day .marks {
+  display: flex;
+  gap: 1px;
+  height: 11px;
+}
+
+.cal-glyph .lit {
+  fill: var(--fg);
+}
+
+.cal-glyph .dark {
+  fill: var(--bg);
+  stroke: var(--fg-2);
+  stroke-width: 1;
+}
+
+.cal-glyph .ring {
+  fill: none;
+  stroke: var(--sun);
+  stroke-width: 2.2;
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+}
+

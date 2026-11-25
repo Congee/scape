@@ -1,0 +1,90 @@
+/* Gear search (Frame tab) */
+.gear-search {
+  position: relative;
+  padding: 4px 6px;
+}
+
+.gear-search input {
+  width: 100%;
+}
+
+.gear-results {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 100%;
+  z-index: 5;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+}
+
+.gear-results .group {
+  padding: 6px 8px 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+
+.gear-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 5px 8px;
+}
+
+.gear-results button:hover {
+  background: var(--bg-3);
+}
+
+.gear-results .meta,
+.list li .name .meta {
+  display: block;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+
+.list li .name .meta {
+  display: inline;
+  margin-left: 4px;
+}
+
+/* Kits (Frame tab) */
+.chips.kits {
+  align-items: center;
+}
+
+.chips.kits .k {
+  color: var(--fg-2);
+  margin-right: 2px;
+}
+
+/* Kit names run long; the chip keeps one line and the title attribute holds the rest. */
+.chips.kits button {
+  max-width: 22ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kit-name {
+  padding: 0 6px;
+}
+
+.kv input.zoom {
+  width: 100%;
+  margin: 0;
+}
+
+/* Long catalogue names must not widen the panel's grid column. */
+.frame .kv select {
+  max-width: 100%;
+}
+

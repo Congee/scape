@@ -1,0 +1,100 @@
+/* Night tab */
+.night .verdict {
+  margin: 4px 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgb(180 140 255 / 0.14);
+  color: var(--gc);
+}
+
+.night .verdict.off {
+  background: rgb(255 255 255 / 0.04);
+  color: var(--fg-2);
+}
+
+.night label.toggle input[type='number'] {
+  margin: 0 4px;
+}
+
+:is(.night details, details.disc) {
+  border-bottom: 1px solid var(--line);
+}
+
+/* A block, not a flex row, so an over-long summary can ellipsize. */
+:is(.night details, details.disc) > summary {
+  display: block;
+  list-style: none;
+  padding: 7px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:is(.night details, details.disc) > summary::-webkit-details-marker {
+  display: none;
+}
+
+
+:is(.night details, details.disc) > summary:hover {
+  background: var(--bg-3);
+}
+
+/* The verdict colouring carries over to the Milky Way summary; its own margin would break the row. */
+.night details > summary.verdict {
+  margin: 0;
+  border-radius: 0;
+}
+
+:is(.night details, details.disc)[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.night .sky-readout .darkhours,
+.night .sky-missing .darkhours {
+  white-space: nowrap;
+}
+
+.night .sky-error {
+  color: var(--danger);
+}
+
+.night .moon-chart {
+  margin: 0 6px 6px;
+}
+
+.night .moon-chart svg {
+  display: block;
+  width: 100%;
+  height: 56px;
+}
+
+.night .moon-chart .axis {
+  stroke: var(--line);
+}
+
+.night .moon-chart .curve {
+  fill: none;
+  stroke: var(--moon);
+  stroke-width: 1.5;
+}
+
+.night .moon-chart .now {
+  stroke: var(--fg-3);
+  stroke-dasharray: 2 2;
+}
+
+.night .moon-chart figcaption {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+:is(.night details, details.disc) h3 {
+  margin: 10px 6px 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+
