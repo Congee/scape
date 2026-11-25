@@ -66,7 +66,7 @@ Legend: T = TPE has it, P = PlanIt has it, ★ = our improvement.
 - Depth-of-field and panorama calculators drawn on the map (P)
 - Markers with categories, rating, notes, height/width, "show in viewfinder" flag; KML/GPX/
   GeoJSON import/export (P, T)
-- **Viewfinder VR** (Three.js): synthetic view from the camera location — terrain silhouette from
+- **Viewfinder VR**: synthetic view from the camera location — terrain silhouette from
   DEM, markers, sun/moon/GC paths, FOV frame, star field (P, T FPV)
 - Library: locations, plans, searches, lists, favourites; export/import (T)
 
@@ -113,45 +113,53 @@ MapKit JS offers only its own Look Around view, no camera or FOV control, no mes
 
 ```
 src/lib/
-  core/        pure TS, no DOM, unit-tested
-    astro/     wrappers over astronomy-engine: positions, day events, phases, GC
-    geo/       geodesy (great-circle, destination, bearing), coordinate parsing/formatting
-    time/      local-day bounds per IANA zone, formatting, tz lookup
-    optics/    FOV, DoF, panorama, star-trail rules, EV
-    terrain/   DEM decode, point elevation, profile, horizon sweep (worker-friendly)
-    search/    constrained ephemeris search engine
-  data/        storage & sources: idb library, OPFS tile store, PMTiles sources,
-               Terrarium tile fetcher, gazetteer, geocoder
-  state/       Zustand stores: world (time, camera and target, tz), settings, overlays, gear
-  ui/          components: Map, DateBar, Timeline, AltitudeChart, panels, Viewfinder
-  workers/     horizon sweep, finders, region downloader
-src/routes/    TanStack Router file routes: / (map), /library, /gear, /settings
+  core/        pure TS, no I/O, unit-tested; viewfinder/gl is the one WebGL2 exception
+    astro/     astronomy-engine wrappers: positions, day events, phases, GC, eclipses, finder search
+    geo/       geodesy, coordinate formats, building tiles to prisms and roofs, sun-ceiling shadow mask
+    terrain/   DEM decode and sampling, profile, horizon sweep, terrain mesh levels
+    optics/    projection, FOV, DoF, panorama, star-trail rules, EV
+    sky/       star field, skyglow and Bortle model on VIIRS radiance
+    model/     user building models (glTF, part editor, share)
+    lod2/      official LoD2 meshes and their occluder
+    tiles/     PMTiles reads, satellite source table and per-tile choice
+    viewfinder/ frame fit, label layout; gl/ the viewfinder renderer
+    align/ io/ photo/ tides/ time/ weather/
+  data/        I/O: IndexedDB library, OPFS archives, MapLibre protocols (scape-dem, scape-bld,
+               scape-sat, pmtiles), basemaps, geocoder, gazetteer, gear catalogue, weather, tides
+  state/       Zustand stores; world (time, pins, tz) is the hub. A store owns its worker client
+               (the DEM worker's is `data/demWorker.ts`).
+  ui/          React panels; Map, Viewfinder and Chart controllers drive their canvases from
+               store subscriptions, outside React
+  workers/     astro, terrain, buildings (+ shadow-mask instance), dem, align, finder, gibs, region;
+               each with a `.protocol.ts`
+src/routes/    / (map), /viewfinder, /library, /settings
                (the offline data manager is the map panel's Offline tab, not a route)
 ```
 
-Rendering: MapLibre owns the map canvas; overlays are GeoJSON sources updated in place
-(cheap) plus a CustomLayer for heatmaps later. The altitude chart is a 2D canvas. The
-viewfinder is a separate Three.js canvas. Nothing re-renders the DOM per frame. deck.gl is
-dynamically imported only by features that need it (heatmaps, large point sets) and interleaved
-into MapLibre's GL context, so the 2D map stays a single canvas and a plain map view never
-pays for deck.gl or Three.js.
+Rendering: MapLibre owns the map canvas. Overlays are GeoJSON or image sources updated in place;
+DEM, building and satellite tiles arrive through `addProtocol` handlers; DEM tiles decode in a
+worker. The altitude chart is a 2D canvas. The viewfinder is Scape's own WebGL2 renderer
+(`core/viewfinder/gl`): terrain mesh, building prisms, models and LoD2 meshes, cascaded sun
+shadows and overlays, all under the frame's pinhole projection; a 2D canvas over it carries the
+stars and labels. MapLibre is not a first-person renderer (§8). No Three.js, no deck.gl. A canvas
+draws only when invalidated, and nothing re-renders the DOM per frame.
 
 State: Zustand stores living outside React. Components subscribe with selectors, so a time
-scrub re-renders only the readouts whose values changed; the map controller and the chart
-subscribe to the store directly and never go through React. Derived astronomy is memoised per
-(camera location, day, tz); heavy sweeps run in workers. URL sync is debounced through the router's typed
-search params.
+scrub re-renders only the readouts whose values changed; the controllers subscribe to the stores
+directly and never go through React. Derived astronomy is memoised per (camera location, day, tz);
+heavy work runs in workers. The URL is the scene's truth, synced both ways through the router's
+typed search params.
 
 ## 4. Stack (verified 2026-09-11, see docs/research/tech-research.md)
 
 | Concern | Choice | Notes |
 |---|---|---|
 | Framework | React 19.3 + React Compiler (official Babel plugin via `@rolldown/plugin-babel`), Vite 8 SPA | user's decision 2026-09-11; compiler auto-memoises, store discipline keeps hot paths out of React; `eslint-plugin-react-hooks` v7 enforces compiler rules |
-| Routing / URL state | TanStack Router 1.170, file-based, typed search params | route-level code splitting keeps Three.js / deck.gl out of the initial bundle |
+| Routing / URL state | TanStack Router 1.170, file-based, typed search params | `autoCodeSplitting` keeps each route's code out of the initial bundle |
 | State | Zustand 5 | selector subscriptions in React; direct subscriptions for map and chart |
 | Language / build | TypeScript strict, Vite 8, Bun for scripts | |
 | Astronomy | astronomy-engine 2.1.19 (MIT) | ±1′; rise/set/twilight/transit, phases, galactic frame, eclipses |
-| Map | MapLibre GL JS 6.9 always; deck.gl 9.4 lazy-loaded only where a feature needs it | globe, raster-dem terrain, hillshade, custom layers; "don't pay for what we don't need" |
+| Map | MapLibre GL JS 6.9 | globe, raster-dem terrain, hillshade, custom protocols; "don't pay for what we don't need" |
 | Basemaps | User-selectable layer list: OpenFreeMap vector styles (default), OSM raster, any PMTiles archive (remote URL or local file) | keyless; PMTiles is first-class, not an offline afterthought |
 | Offline basemap | Protomaps PMTiles builds + `@protomaps/basemaps` style | ODbL data, CC0 style |
 | Terrain | Mapterhorn 512 px lossless-WebP terrarium tiles (z0–17), decoded with WebCodecs `ImageDecoder`; AWS Terrarium as fallback | best open national DEM per region (0.5 m Switzerland); canvas decode is lossy for terrarium, attribution per region |
@@ -159,10 +167,10 @@ search params.
 | Storage | IndexedDB via `idb` (library, settings); OPFS for tile bytes | persist() requested |
 | PWA | `vite-plugin-pwa` 1.3 (Workbox) | precache shell, runtime-cache tiles |
 | Geocoding | Photon public API online; GeoNames cities offline | |
-| 3D viewfinder | MapLibre terrain under the 2D canvas: camera placed at the eye (`calculateCameraOptionsFromCameraLngLatAltRotation`, pitch to 180°, vertical FOV = frame), DEM sweep for skyline, occlusion and sky | Three.js unused |
+| 3D viewfinder | Own WebGL2 renderer (`core/viewfinder/gl`) | MapLibre's first-person camera removed 2026-09-13 (§8); no Three.js |
 | Sky data | HYG v4.1 (CC BY-SA), NASA SVS Deep Star Maps (PD), d3-celestial lines (BSD-3) | built into `public/sky` by `scripts/build-sky.ts`; sources listed in `public/sky/README.md` |
 | Light pollution | NASA GIBS VIIRS Black Marble raster (PD) | Falchi's atlas and the usual tile sets are CC BY-NC; estimated Bortle and mag/arcsec² at camera and target come from our own scattering model on VIIRS radiance (2026-09-24) |
-| Tests | Vitest for core; Playwright later for UI smoke | pure unit tests, no I/O; `@maplibre/maplibre-gl-style-spec` (devDependency, pinned to maplibre-gl's copy) evaluates and validates our style expressions (user, 2026-09-25) |
+| Tests | Vitest for core; agent-browser smoke scripts in `scripts/smoke` | pure unit tests, no I/O; `@maplibre/maplibre-gl-style-spec` (devDependency, pinned to maplibre-gl's copy) evaluates and validates our style expressions (user, 2026-09-25) |
 
 ## 5. UI layout
 
