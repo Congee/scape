@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyBudget, rateLimited, refusal, spend, spent, succeeded } from './budget';
+import { emptyBudget, rateLimited, readBudget, refusal, spend, spent, succeeded } from './budget';
 
 const T = Date.parse('2026-09-25T10:00:00Z');
 
@@ -25,5 +25,12 @@ describe('budget', () => {
     s = rateLimited(s, T + 60_000);
     expect(s.backoffUntil).toBe(T + 180_000);
     expect(succeeded(s).backoffMs).toBe(0);
+  });
+});
+
+describe('readBudget', () => {
+  it('keeps good fields and empties bad ones', () => {
+    expect(readBudget({ minutes: { 5: 2, x: 1, 6: 'a' }, backoffUntil: 'later', backoffMs: 60_000 })).toEqual({ minutes: { 5: 2 }, backoffUntil: 0, backoffMs: 60_000 });
+    for (const bad of [undefined, null, 'x', []]) expect(readBudget(bad)).toEqual(emptyBudget());
   });
 });

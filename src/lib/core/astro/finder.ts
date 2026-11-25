@@ -1,5 +1,6 @@
 import { SearchAltitude, type Observer } from 'astronomy-engine';
 import { normalizeBearing } from '@core/geo/geodesy';
+import { bool, inRange, listOf, nullable, num, oneOf, positive, type Check, type Checks } from '@core/io/check';
 import { horizonAngleAt, type HorizonProfile } from '@core/terrain/horizon';
 import { localParts } from '@core/time/localDay';
 import { BODY, SkyBody } from './bodies';
@@ -88,6 +89,44 @@ export interface FinderSettings {
   /** Half-width of a window taken from the target or the frame, degrees. */
   toleranceDeg: number;
 }
+
+export const DEFAULT_FINDER_SETTINGS: FinderSettings = {
+  body: SkyBody.Sun,
+  azFromDeg: 240,
+  azToDeg: 300,
+  altMinDeg: 0,
+  altMaxDeg: 10,
+  startIso: '',
+  days: 90,
+  sky: SkyFilter.Any,
+  moonIllumMin: 0,
+  moonIllumMax: 1,
+  moonDown: false,
+  weekdays: null,
+  aboveTerrain: true,
+  toleranceDeg: 2
+};
+
+/** Empty for today, else a "YYYY-MM-DD" day. */
+const isoDay: Check<string> = (v) => (typeof v === 'string' && (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) ? v : undefined);
+const weekday: Check<number> = (v) => (Number.isInteger(v) ? inRange(0, 6)(v) : undefined);
+
+export const FINDER_SETTINGS_CHECKS: Checks<FinderSettings> = {
+  body: oneOf(SkyBody),
+  azFromDeg: num,
+  azToDeg: num,
+  altMinDeg: num,
+  altMaxDeg: num,
+  startIso: isoDay,
+  days: inRange(1, 3660),
+  sky: oneOf(SkyFilter),
+  moonIllumMin: num,
+  moonIllumMax: num,
+  moonDown: bool,
+  weekdays: nullable(listOf(weekday)),
+  aboveTerrain: bool,
+  toleranceDeg: positive
+};
 
 /** One stay of the body inside the window. */
 export interface Pass {

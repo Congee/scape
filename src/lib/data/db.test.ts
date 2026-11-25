@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DB_VERSION, isScapeExport, replaceQuestion, upgradeScape, type Upgradable } from './db';
+import { DEFAULT_FINDER_SETTINGS } from '@core/astro/finder';
+import { DB_VERSION, parseScapeExport, replaceQuestion, upgradeScape, type Upgradable } from './db';
 
 function recorder() {
   const made: string[] = [];
@@ -37,19 +38,43 @@ describe('upgradeScape', () => {
   });
 });
 
-describe('isScapeExport', () => {
+describe('parseScapeExport', () => {
   const base = { format: 'scape', version: 1, exportedAt: '', locations: [], markers: [], plans: [] };
   const record = { id: 'm', name: 'M', source: 'Imported', groundM: null, suppressOverture: true, visible: true, attribution: '', notes: '', createdAt: 0, updatedAt: 0, glb: '' };
+  const composition = { sensorId: 'ff', focalMm: 50, fNumber: 8, orientation: 'Landscape', azimuthDeg: 10, elevationDeg: 2 };
+  const plan = { id: 'p', name: 'P', camera: { lat: 1, lng: 2, heightM: 0 }, target: null, time: 5, tz: 'Asia/Tokyo', tzAuto: false, composition, notes: '', createdAt: 1, updatedAt: 2 };
 
   it('accepts older exports without searches or models', () => {
-    expect(isScapeExport(base)).toBe(true);
-    expect(isScapeExport({ ...base, searches: [] })).toBe(true);
+    expect(parseScapeExport(base)).toEqual(base);
+    expect(parseScapeExport({ ...base, searches: [] }).searches).toEqual([]);
   });
 
   it('accepts model records and rejects malformed ones', () => {
-    expect(isScapeExport({ ...base, models: [record] })).toBe(true);
-    expect(isScapeExport({ ...base, models: {} })).toBe(false);
-    expect(isScapeExport({ ...base, models: [{ ...record, glb: 1 }] })).toBe(false);
+    expect(parseScapeExport({ ...base, models: [record] }).models).toEqual([record]);
+    expect(() => parseScapeExport({ ...base, models: {} })).toThrow();
+    expect(() => parseScapeExport({ ...base, models: [{ ...record, glb: 1 }] })).toThrow('Model 1');
+  });
+
+  it('refuses garbage and records without an id or position', () => {
+    for (const bad of [null, 'scape', [], { ...base, format: 'other' }, { ...base, plans: {} }]) expect(() => parseScapeExport(bad)).toThrow('Not a Scape export file');
+    expect(() => parseScapeExport({ ...base, markers: [{ id: 'a', lat: 1 }] })).toThrow('Marker 1');
+    expect(() => parseScapeExport({ ...base, locations: [{ lat: 1, lng: 2 }] })).toThrow('Location 1');
+    expect(() => parseScapeExport({ ...base, plans: [plan, { ...plan, composition: { ...composition, orientation: 'Square' } }] })).toThrow('Plan 2');
+    expect(() => parseScapeExport({ ...base, searches: [{ name: 'x' }] })).toThrow('Search 1');
+  });
+
+  it('keeps a good plan whole, legacy fields included', () => {
+    const old = { ...plan, composition: { ...composition, teleconverter: 2, aimAtTarget: true } };
+    expect(parseScapeExport({ ...base, plans: [plan, old] }).plans).toEqual([plan, old]);
+  });
+
+  it('gives soft fields their defaults', () => {
+    const m = parseScapeExport({ ...base, markers: [{ id: 'a', lat: 1, lng: 2, category: 'Castle', rating: 'x', shape: 'Blob', stale: 1 }] }, 9).markers[0];
+    expect(m).toEqual({ id: 'a', name: '', category: 'Other', lat: 1, lng: 2, heightM: 0, widthM: 0, rating: 0, notes: '', showInViewfinder: true, createdAt: 9, updatedAt: 9 });
+    expect(parseScapeExport({ ...base, plans: [{ ...plan, tz: 'Mars/Olympus' }] }).plans[0].tz).toBe('Etc/UTC');
+    const s = parseScapeExport({ ...base, searches: [{ id: 's', settings: { body: 'Pluto', days: 30 }, pin: 'here' }] }, 9).searches![0];
+    expect(s.pin).toBeNull();
+    expect(s.settings).toEqual({ ...DEFAULT_FINDER_SETTINGS, days: 30 });
   });
 });
 

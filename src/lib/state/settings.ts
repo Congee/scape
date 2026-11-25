@@ -4,8 +4,9 @@ import { LightMode } from '@core/astro/lightSource';
 import { MoonRule } from '@core/astro/milkyWay';
 import { Units } from '@core/format';
 import { CoordFormat } from '@core/geo/coords';
+import { bool, checkFields, isObject, listOf, num, oneOf, optional, record, str, type Checks } from '@core/io/check';
 import { CocRule } from '@core/optics/fov';
-import { BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, PmFlavor, type Basemap } from '@data/basemaps';
+import { BasemapKind, BUILTIN_BASEMAPS, DEFAULT_BASEMAP_ID, PmFlavor, type Basemap } from '@data/basemaps';
 
 /** What a plain map click sets. Values are persisted in settings. */
 export const ClickMode = { Camera: 'camera', Target: 'target', Off: 'off' } as const;
@@ -122,7 +123,7 @@ export const SETTINGS_VERSION = 2;
  * Version 1 persisted the old `dd` default, indistinguishable from a choice, so it moves to signed once.
  */
 export function migrateSettings(state: unknown, version: number): Settings {
-  const s = (state ?? {}) as Partial<Settings> & { clickMovesPin?: boolean };
+  const s = (isObject(state) ? state : {}) as Partial<Settings> & { clickMovesPin?: boolean };
   if (version >= SETTINGS_VERSION) return s as Settings;
   let out: Partial<Settings> = s;
   if (version < 1) {
@@ -133,11 +134,68 @@ export function migrateSettings(state: unknown, version: number): Settings {
   return out as Settings;
 }
 
+const basemap = record<Basemap>({
+  id: str,
+  name: str,
+  kind: oneOf(BasemapKind),
+  url: str,
+  attribution: optional(str),
+  maxzoom: optional(num),
+  flavor: optional(oneOf(PmFlavor)),
+  builtin: optional(bool),
+  local: optional(bool)
+});
+
+const SETTINGS_CHECKS: Checks<Settings> = {
+  units: oneOf(Units),
+  hour12: bool,
+  coordFormat: oneOf(CoordFormat),
+  basemapId: str,
+  customBasemaps: listOf(basemap),
+  offlineFlavor: oneOf(PmFlavor),
+  goldenAltitude: num,
+  cocRule: oneOf(CocRule),
+  showEventLines: bool,
+  showLiveLines: bool,
+  showShadow: bool,
+  shadowObjectHeightM: num,
+  showGc: bool,
+  showBuildings: bool,
+  showSunShadows: bool,
+  lightSource: oneOf(LightMode),
+  timelineDetail: bool,
+  clickMode: oneOf(ClickMode),
+  terrain: bool,
+  terrainHorizon: bool,
+  horizonRangeKm: num,
+  showHillshade: bool,
+  terrain3d: bool,
+  showLightPollution: bool,
+  showSatellite: bool,
+  weather: bool,
+  showDayNight: bool,
+  dayNightOpacity: num,
+  showElevation: bool,
+  elevationOpacity: num,
+  showSlope: bool,
+  slopeOpacity: num,
+  showAspect: bool,
+  aspectOpacity: num,
+  mwSunMaxAlt: num,
+  mwGcMinAlt: num,
+  mwMoonRule: oneOf(MoonRule),
+  mwMoonMaxIllum: num
+};
+
+/** Saved settings over the current ones, field by field; a bad field keeps the current value. */
+export const mergeSettings = (saved: unknown, current: SettingsState): SettingsState => ({ ...current, ...checkFields(SETTINGS_CHECKS, saved, current) });
+
 /** Exported so a test can check the store is wired to the migration, which storage-less Node hides. */
 export const SETTINGS_PERSIST = {
   name: 'scape.settings',
   version: SETTINGS_VERSION,
   migrate: migrateSettings,
+  merge: mergeSettings,
   // Local-file basemaps only live for the session; their bytes are not persisted.
   partialize: ({ update: _u, addBasemap: _a, removeBasemap: _r, ...rest }: SettingsState): Settings => ({
     ...rest,

@@ -4,7 +4,7 @@ import { formatLngLat } from '@core/geo/coords';
 import type { LngLat } from '@core/geo/geodesy';
 import { planOptics, type ScapeExport } from '@core/plan';
 import { formatDateTime } from '@core/time/format';
-import { countAll, exportAll, importAll, ImportMode, isScapeExport, replaceQuestion } from '@data/db';
+import { countAll, exportAll, importAll, ImportMode, parseScapeExport, replaceQuestion } from '@data/db';
 import { libraryStore, useLibrary } from '@state/library';
 import { markersStore, useMarkers } from '@state/markers';
 import { applyPlan, capturePlan, plansStore, usePlans } from '@state/plans';
@@ -97,8 +97,7 @@ function LibraryPage() {
     if (!file) return;
     setReplacing(null);
     try {
-      const data: unknown = JSON.parse(await file.text());
-      if (!isScapeExport(data)) throw new Error('Not a Scape export file');
+      const data = parseScapeExport(JSON.parse(await file.text()));
       const question = mode === ImportMode.Replace ? replaceQuestion(await countAll()) : null;
       if (question) setReplacing({ data, question });
       else await runImport(data, mode);

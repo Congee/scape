@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { bearingDeg, normalizeBearing } from '@core/geo/geodesy';
-import { clampBaseFocalMm, DEFAULT_SENSOR_ID, Orientation, tcFactor, type Teleconverter } from '@core/optics/fov';
+import { bool, checkFields, isObject, listOf, nullable, num, oneOf, positive, str, type Checks } from '@core/io/check';
+import { clampBaseFocalMm, DEFAULT_SENSOR_ID, Orientation, tcFactor, Teleconverter } from '@core/optics/fov';
 import { worldStore, type WorldState } from './world';
 
 /** What the camera follows; any manual aim switches to Free. */
@@ -117,7 +118,7 @@ export const COMPOSITION_VERSION = 2;
 
 /** Version 0 stored one teleconverter multiplier, where 1 meant none; versions before 2 stored `aimAtTarget`. */
 export function migrateComposition(state: unknown, version: number): Composition {
-  let s = (state ?? {}) as Partial<Composition> & { teleconverter?: number; aimAtTarget?: unknown };
+  let s = (isObject(state) ? state : {}) as Partial<Composition> & { teleconverter?: number; aimAtTarget?: unknown };
   if (version >= COMPOSITION_VERSION) return s as Composition;
   if (version < 1) {
     const { teleconverter, ...rest } = s;
@@ -125,6 +126,44 @@ export function migrateComposition(state: unknown, version: number): Composition
   }
   const { aimAtTarget, ...rest } = s;
   return { ...rest, aimLock: legacyAimLock(aimAtTarget) } as Composition;
+}
+
+const COMPOSITION_CHECKS: Checks<Composition> = {
+  sensorId: str,
+  focalMm: positive,
+  fNumber: positive,
+  teleconverters: listOf(oneOf(Teleconverter)),
+  orientation: oneOf(Orientation),
+  azimuthDeg: num,
+  elevationDeg: num,
+  aimLock: oneOf(AimLock),
+  showFov: bool,
+  fovRangeM: nullable(positive),
+  focusDistM: nullable(positive),
+  panoTotalDeg: nullable(positive),
+  panoOverlap: num,
+  showGrid: bool,
+  showMarkers: bool,
+  showPaths: bool,
+  showStars: bool,
+  showConstellations: bool,
+  showStarNames: bool,
+  showMilkyWay: bool,
+  showSun: bool,
+  showMoon: bool,
+  showTrails: bool,
+  trailMinutes: num,
+  showRadiants: bool,
+  showBuildings: bool,
+  showSunShadows: bool,
+  showRainbow: bool,
+  lensId: nullable(str)
+};
+
+/** Saved framing over the current one, field by field; an unknown lock aims freely. */
+export function mergeComposition(saved: unknown, current: CompositionState): CompositionState {
+  const c = checkFields(COMPOSITION_CHECKS, saved, current);
+  return { ...current, ...c, aimLock: isObject(saved) && 'aimLock' in saved ? parseAimLock(saved.aimLock) : current.aimLock };
 }
 
 export const compositionStore = create<CompositionState>()(
@@ -144,12 +183,9 @@ export const compositionStore = create<CompositionState>()(
       {
         name: 'scape.composition',
         version: COMPOSITION_VERSION,
-        partialize: ({ update: _u, aim: _a, ...rest }) => rest,
+        partialize: ({ update: _u, aim: _a, ...rest }): Composition => rest,
         migrate: migrateComposition,
-        merge: (persisted, current) => {
-          const p = (persisted ?? {}) as Partial<Composition>;
-          return { ...current, ...p, aimLock: 'aimLock' in p ? parseAimLock(p.aimLock) : current.aimLock };
-        }
+        merge: mergeComposition
       }
     )
   )

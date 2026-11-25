@@ -1,6 +1,7 @@
 /** The user-imported GSI geoid in OPFS: `geoid/<grid>.f32` plus a `meta.json` naming it, written after it. Worker-safe: no DOM. */
 
-import { parseGsiGeoid, type GeoidGrid, type GeoidHeader } from '@core/geo/geoid';
+import { GeoidVersion, parseGsiGeoid, type GeoidGrid, type GeoidHeader } from '@core/geo/geoid';
+import { num, oneOf, optional, parseJson, positive, record, str, type Check } from '@core/io/check';
 import { findZipEntry, isGzip, isZip, ZipMethod } from '@core/io/zip';
 import { opfsSupported, writeFileBytes } from './opfs';
 
@@ -73,11 +74,27 @@ export async function storeGeoid(dir: FileSystemDirectoryHandle, grid: Uint8Arra
   await Promise.all(stale.map((name) => dir.removeEntry(name).catch(() => undefined)));
 }
 
+const count: Check<number> = (v) => (Number.isInteger(v) ? positive(v) : undefined);
+
+export const geoidMeta = record<GeoidMeta>({
+  lat0: num,
+  lng0: num,
+  dLat: positive,
+  dLng: positive,
+  rows: count,
+  cols: count,
+  version: oneOf(GeoidVersion),
+  fileName: str,
+  importedAt: str,
+  bytes: num,
+  grid: optional(str)
+});
+
 export async function readGeoidMeta(): Promise<GeoidMeta | null> {
   if (!opfsSupported()) return null;
   try {
     const dir = await geoidDir(false);
-    return JSON.parse(await (await (await dir.getFileHandle(META)).getFile()).text()) as GeoidMeta;
+    return geoidMeta(parseJson(await (await (await dir.getFileHandle(META)).getFile()).text())) ?? null;
   } catch {
     return null;
   }

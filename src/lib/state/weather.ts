@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
+import { checkFields, isObject, num, oneOf, type Check, type Checks } from '@core/io/check';
 import { CloudLayer } from '@core/weather/layer';
 import { WeatherModel } from '@core/weather/models';
 
@@ -31,13 +32,21 @@ export interface CloudInfo {
   note: string;
 }
 
-type Persisted = Partial<Pick<WeatherState, 'model' | 'layer' | 'lastLayer' | 'opacity'>>;
+export type PersistedWeather = Pick<WeatherState, 'model' | 'layer' | 'lastLayer' | 'opacity'>;
+
+const cloudLayer = oneOf(CloudLayer);
+const shownLayer: Check<Exclude<CloudLayer, 'Off'>> = (v) => {
+  const l = cloudLayer(v);
+  return l === CloudLayer.Off ? undefined : l;
+};
+
+const WEATHER_CHECKS: Checks<PersistedWeather> = { model: oneOf(WeatherModel), layer: cloudLayer, lastLayer: shownLayer, opacity: num };
 
 /** State saved before `lastLayer` existed brings back the layer it had on. */
 export function mergeWeather(saved: unknown, current: WeatherState): WeatherState {
-  const p = (saved ?? {}) as Persisted;
-  const lastLayer = p.lastLayer ?? (p.layer && p.layer !== CloudLayer.Off ? p.layer : current.lastLayer);
-  return { ...current, ...p, lastLayer };
+  const p = isObject(saved) ? saved : {};
+  const lastLayer = shownLayer(p.lastLayer) ?? shownLayer(p.layer) ?? current.lastLayer;
+  return { ...current, ...checkFields(WEATHER_CHECKS, p, current), lastLayer };
 }
 
 export const weatherStore = create<WeatherState>()(
@@ -55,7 +64,7 @@ export const weatherStore = create<WeatherState>()(
         cloudInfo: null,
         setCloudInfo: (cloudInfo) => set({ cloudInfo })
       }),
-      { name: 'scape.weather', partialize: ({ model, layer, lastLayer, opacity }) => ({ model, layer, lastLayer, opacity }), merge: mergeWeather }
+      { name: 'scape.weather', partialize: ({ model, layer, lastLayer, opacity }): PersistedWeather => ({ model, layer, lastLayer, opacity }), merge: mergeWeather }
     )
   )
 );

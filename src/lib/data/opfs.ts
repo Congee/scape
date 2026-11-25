@@ -1,6 +1,8 @@
 /** Offline archives in OPFS: `<id>.pmtiles` plus an `<id>.json` sidecar. Worker-safe: no DOM. */
 
 import { bytesToHeader, PMTiles, TileType, type Header, type RangeResponse, type Source } from 'pmtiles';
+import type { Bbox } from '@core/geo/bbox';
+import { digits, num, oneOf, optional, parseJson, record, str } from '@core/io/check';
 import { ArchiveKind, type ArchiveMeta } from '@workers/region.protocol';
 
 const DIR = 'archives';
@@ -74,6 +76,23 @@ export async function readHeader(file: Blob): Promise<Header> {
   return bytesToHeader(await file.slice(0, HEADER_BYTES).arrayBuffer());
 }
 
+const bbox = record<Bbox>({ west: num, south: num, east: num, north: num, digits: optional(digits) });
+
+/** A sidecar's fields; null when one is unusable, so the header rebuilds it. */
+export const archiveMeta = record<ArchiveMeta>({
+  id: str,
+  name: str,
+  kind: oneOf(ArchiveKind),
+  bbox,
+  minZoom: num,
+  maxZoom: num,
+  bytes: num,
+  tileCount: num,
+  sourceUrl: str,
+  downloadedAt: str,
+  style: optional(str)
+});
+
 /** The directory is the source of truth; a missing sidecar is rebuilt from the PMTiles header. */
 export async function listArchives(): Promise<ArchiveMeta[]> {
   if (!opfsSupported()) return [];
@@ -91,9 +110,11 @@ export async function listArchives(): Promise<ArchiveMeta[]> {
         const file = await (await dir.getFileHandle(archiveName(id))).getFile();
         if (names.includes(`${id}.json`)) {
           const text = await (await (await dir.getFileHandle(`${id}.json`)).getFile()).text();
-          const meta = JSON.parse(text) as ArchiveMeta;
-          meta.bytes = file.size;
-          return meta;
+          const meta = archiveMeta(parseJson(text));
+          if (meta) {
+            meta.bytes = file.size;
+            return meta;
+          }
         }
         const header = await readHeader(file);
         const layers = header.tileType === TileType.Mvt ? await vectorLayerIds(new OpfsSource(id)) : [];

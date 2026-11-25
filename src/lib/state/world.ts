@@ -2,6 +2,7 @@ import tzLookup from '@photostructure/tz-lookup';
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
 import type { LngLat } from '@core/geo/geodesy';
+import { bool, checkFields, lngLat, nullable, num, optional, record, str, timeZone, type Checks } from '@core/io/check';
 import { addLocalDays, withLocalDate } from '@core/time/localDay';
 
 export interface MapView {
@@ -66,6 +67,25 @@ const SAME_POINT_DEG = 1e-5;
 const samePoint = (a: LngLat | null, b: LngLat | null) =>
   a === b || (!!a && !!b && Math.abs(a.lat - b.lat) < SAME_POINT_DEG && Math.abs(a.lng - b.lng) < SAME_POINT_DEG);
 
+export type PersistedWorld = Pick<WorldState, 'pin' | 'pinHeightM' | 'pin2' | 'pin2HeightM' | 'pin2HeightAuto' | 'pin2HeightFrom' | 'tz' | 'tzAuto' | 'view' | 'live'> & Partial<Pick<WorldState, 'time'>>;
+
+const WORLD_CHECKS: Checks<PersistedWorld> = {
+  pin: lngLat,
+  pinHeightM: num,
+  pin2: nullable(lngLat),
+  pin2HeightM: num,
+  pin2HeightAuto: bool,
+  pin2HeightFrom: nullable(str),
+  tz: timeZone,
+  tzAuto: bool,
+  view: record<MapView>({ center: lngLat, zoom: num, bearing: optional(num), pitch: optional(num) }),
+  live: bool,
+  time: optional(num)
+};
+
+/** Saved place, target and clock over the current ones, field by field. */
+export const mergeWorld = (saved: unknown, current: WorldState): WorldState => ({ ...current, ...checkFields(WORLD_CHECKS, saved, current) });
+
 export const worldStore = create<WorldState>()(
   subscribeWithSelector(
     persist(
@@ -102,7 +122,8 @@ export const worldStore = create<WorldState>()(
       {
         name: 'scape.world',
         // A live clock needs no stored instant; leaving it out also keeps the per-second tick from waking the other tabs.
-        partialize: (s) => ({ pin: s.pin, pinHeightM: s.pinHeightM, pin2: s.pin2, pin2HeightM: s.pin2HeightM, pin2HeightAuto: s.pin2HeightAuto, pin2HeightFrom: s.pin2HeightFrom, tz: s.tz, tzAuto: s.tzAuto, view: s.view, live: s.live, ...(s.live ? {} : { time: s.time }) })
+        merge: mergeWorld,
+        partialize: (s): PersistedWorld => ({ pin: s.pin, pinHeightM: s.pinHeightM, pin2: s.pin2, pin2HeightM: s.pin2HeightM, pin2HeightAuto: s.pin2HeightAuto, pin2HeightFrom: s.pin2HeightFrom, tz: s.tz, tzAuto: s.tzAuto, view: s.view, live: s.live, ...(s.live ? {} : { time: s.time }) })
       }
     )
   )

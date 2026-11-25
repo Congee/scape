@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { SkyBody } from '@core/astro/bodies';
 import type { LngLat } from '@core/geo/geodesy';
+import { checkFields, inRange, num, oneOf, positive, type Checks } from '@core/io/check';
 import { AlignRequestKind, AlignResponseKind, HeatMode, type AlignCandidate, type AlignRequest, type AlignResponse, type HeatParams, type HeatResult } from '@workers/align.protocol';
 import { settingsStore } from './settings';
 import { EYE_HEIGHT_M } from './terrain';
@@ -45,6 +46,22 @@ export const DEFAULT_ALIGN_SETTINGS: AlignSettings = {
   offsetAltDeg: 0,
   minAltAboveTerrainDeg: 0
 };
+
+const ALIGN_CHECKS: Checks<AlignSettings> = {
+  mode: oneOf(HeatMode),
+  body: oneOf(SkyBody),
+  toleranceDeg: positive,
+  windowMin: positive,
+  rangeKm: positive,
+  cells: inRange(1, 256),
+  opacity: num,
+  offsetAzDeg: num,
+  offsetAltDeg: num,
+  minAltAboveTerrainDeg: num
+};
+
+/** Saved heat-layer settings over the current ones, field by field. */
+export const mergeAlign = (saved: unknown, current: AlignState): AlignState => ({ ...current, ...checkFields(ALIGN_CHECKS, saved, current) });
 
 const needsTarget = (mode: HeatMode) => mode === HeatMode.Align || mode === HeatMode.Time;
 
@@ -123,6 +140,7 @@ export const alignStore = create<AlignState>()(
       }),
       {
         name: 'scape.align',
+        merge: mergeAlign,
         partialize: (s): AlignSettings => ({
           mode: s.mode,
           body: s.body,

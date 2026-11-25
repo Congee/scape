@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { checkFields, isObject, listOf, nullable, optional, positive, record, str, type Checks } from '@core/io/check';
 import { clampFocalMm, fitToLens, maxApertureAt, SENSORS, tcFactor, type LensSpec, type SensorFormat } from '@core/optics/fov';
 import { longApertureOf } from '@core/optics/gearSearch';
 import { compositionStore, type Composition } from './composition';
@@ -36,7 +37,7 @@ export interface GearState {
 }
 
 /** The slice of {@link GearState} written to storage. */
-type PersistedGear = Pick<GearState, 'cameras' | 'lenses' | 'focalPresets' | 'kits'>;
+export type PersistedGear = Pick<GearState, 'cameras' | 'lenses' | 'focalPresets' | 'kits'>;
 
 export const GEAR_VERSION = 4;
 
@@ -59,7 +60,7 @@ function withLongAperture(lens: LensSpec): LensSpec {
  * are gated separately so a v1+ profile does not re-run the preset union.
  */
 export function migrateGear(persisted: unknown, version: number): PersistedGear {
-  const s = (persisted ?? {}) as Partial<PersistedGear>;
+  const s = (isObject(persisted) ? persisted : {}) as Partial<PersistedGear>;
   const stored = Array.isArray(s.focalPresets) ? s.focalPresets : [];
   const lenses = Array.isArray(s.lenses) ? s.lenses : [];
   return {
@@ -70,11 +71,25 @@ export function migrateGear(persisted: unknown, version: number): PersistedGear 
   };
 }
 
+const GEAR_CHECKS: Checks<PersistedGear> = {
+  cameras: listOf(record<SensorFormat>({ id: str, name: str, widthMm: positive, heightMm: positive, pixelsWide: optional(positive), mount: optional(str) })),
+  lenses: listOf(record<LensSpec>({ id: str, name: str, minMm: positive, maxMm: positive, maxAperture: positive, maxApertureLong: optional(positive), mount: str })),
+  focalPresets: (v) => {
+    const list = listOf(positive)(v);
+    return list && sortedFocals(list);
+  },
+  kits: listOf(record<Kit>({ id: str, name: str, cameraId: str, lensId: nullable(str) }))
+};
+
+/** Saved gear over the current lists; a bad camera, lens or kit is dropped, the rest kept. */
+export const mergeGear = (saved: unknown, current: GearState): GearState => ({ ...current, ...checkFields(GEAR_CHECKS, saved, current) });
+
 /** Exported so a test can check the store is wired to the migration, which storage-less Node hides. */
 export const GEAR_PERSIST = {
   name: 'scape.gear',
   version: GEAR_VERSION,
   migrate: migrateGear,
+  merge: mergeGear,
   partialize: ({ cameras, lenses, focalPresets, kits }: GearState): PersistedGear => ({ cameras, lenses, focalPresets, kits })
 };
 

@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { LngLat } from '@core/geo/geodesy';
-import { emptyBudget, rateLimited, refusal, spend, succeeded, type BudgetState } from '@core/weather/budget';
+import { parseJson } from '@core/io/check';
+import { emptyBudget, rateLimited, readBudget, refusal, spend, succeeded, type BudgetState } from '@core/weather/budget';
 import { callWeight, forecastUrl, forecastWindow, parseForecast, roundCoord, windowDays, type DateWindow, type HourlyVar, type PointSeries } from '@core/weather/openMeteo';
 
 /** Cached forecasts are refetched after this, and only when something asks. */
@@ -91,7 +92,7 @@ export function db(): Promise<IDBPDatabase<WeatherDB> | null> {
 const BUDGET_KEY = 'scape.weatherBudget';
 let budget: BudgetState = (() => {
   try {
-    return { ...emptyBudget(), ...(JSON.parse(localStorage.getItem(BUDGET_KEY) ?? '{}') as Partial<BudgetState>) };
+    return readBudget(parseJson(localStorage.getItem(BUDGET_KEY) ?? '{}'));
   } catch {
     return emptyBudget();
   }

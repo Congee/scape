@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { SkyBody } from '@core/astro/bodies';
-import { SkyFilter, type FinderHit, type FinderQuery, type FinderSettings } from '@core/astro/finder';
+import { DEFAULT_FINDER_SETTINGS, FINDER_SETTINGS_CHECKS, type FinderHit, type FinderQuery, type FinderSettings } from '@core/astro/finder';
 import { height, Units } from '@core/format';
 import { bearingDeg, normalizeBearing, type LngLat } from '@core/geo/geodesy';
+import { checkFields, isObject, type Checks } from '@core/io/check';
 import { effectiveOptics, frameFov } from '@core/optics/fov';
 import { formatDate, formatTime } from '@core/time/format';
 import { addLocalDays, dayBounds, localMidnight } from '@core/time/localDay';
@@ -36,22 +36,7 @@ export interface FinderState {
   toCsv(units: Units): string;
 }
 
-export const DEFAULT_FINDER_SETTINGS: FinderSettings = {
-  body: SkyBody.Sun,
-  azFromDeg: 240,
-  azToDeg: 300,
-  altMinDeg: 0,
-  altMaxDeg: 10,
-  startIso: '',
-  days: 90,
-  sky: SkyFilter.Any,
-  moonIllumMin: 0,
-  moonIllumMax: 1,
-  moonDown: false,
-  weekdays: null,
-  aboveTerrain: true,
-  toleranceDeg: 2
-};
+export { DEFAULT_FINDER_SETTINGS };
 
 const todayIso = () => dayBounds(new Date(), worldStore.getState().tz).isoDate;
 
@@ -79,6 +64,17 @@ export function finderQuery(f: FinderSettings, tz: string): FinderQuery {
   };
 }
 
+export type PersistedFinder = Pick<FinderState, 'settings'>;
+
+const defaultSettings = (): FinderSettings => ({ ...DEFAULT_FINDER_SETTINGS, startIso: todayIso() });
+
+const FINDER_CHECKS: Checks<PersistedFinder> = {
+  settings: (v) => (isObject(v) ? checkFields(FINDER_SETTINGS_CHECKS, v, defaultSettings()) : undefined)
+};
+
+/** Saved search settings over the current ones; a bad field takes its default. */
+export const mergeFinder = (saved: unknown, current: FinderState): FinderState => ({ ...current, ...checkFields(FINDER_CHECKS, saved, current) });
+
 let worker: Worker | null = null;
 let seq = 0;
 
@@ -99,7 +95,7 @@ function finderWorker(): Worker {
 export const finderStore = create<FinderState>()(
   persist(
     (set, get) => ({
-      settings: { ...DEFAULT_FINDER_SETTINGS, startIso: todayIso() },
+      settings: defaultSettings(),
       running: false,
       progress: 0,
       hits: [],
@@ -176,7 +172,8 @@ export const finderStore = create<FinderState>()(
     }),
     {
       name: 'scape.finder',
-      partialize: (s) => ({ settings: s.settings })
+      partialize: (s): PersistedFinder => ({ settings: s.settings }),
+      merge: mergeFinder
     }
   )
 );

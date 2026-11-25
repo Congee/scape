@@ -1,5 +1,6 @@
 /** GIBS nightly VIIRS tiles, fetched on demand and kept in OPFS: `gibs/<date>/<z>-<row>-<col>.png` (empty: no tile), `gibs/latest.json`. Worker-safe: no DOM. */
 
+import { num, parseJson, record } from '@core/io/check';
 import { gibsNights, gibsTileUrl, isStale, probeDates, type GibsTile } from '@core/sky/gibs';
 import { opfsSupported, writeFileBytes } from './opfs';
 
@@ -28,12 +29,14 @@ async function readFile(dir: FileSystemDirectoryHandle, name: string): Promise<U
   }
 }
 
+const gibsLatest = record<GibsLatest>({ newest: (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined), checkedAtMs: num });
+
 export async function readLatest(): Promise<GibsLatest | null> {
   const dir = await root();
   const bytes = dir && (await readFile(dir, LATEST));
   if (!bytes) return null;
   try {
-    return JSON.parse(new TextDecoder().decode(bytes)) as GibsLatest;
+    return gibsLatest(parseJson(new TextDecoder().decode(bytes))) ?? null;
   } catch {
     return null;
   }

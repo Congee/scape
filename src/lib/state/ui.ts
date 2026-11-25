@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { bool, checkFields, oneOf, type Checks } from '@core/io/check';
 
 export const PanelTab = { Now: 'Now', Shot: 'Shot', Sky: 'Sky', Find: 'Find', Weather: 'Weather', Map: 'Map', View: 'View', Markers: 'Markers' } as const;
 export type PanelTab = (typeof PanelTab)[keyof typeof PanelTab];
@@ -90,6 +91,16 @@ export interface UiState {
   setCloudLegendOpen(open: boolean): void;
 }
 
+export type PersistedUi = Pick<UiState, 'panelTabs' | 'panelCollapsed' | 'panelTall' | 'markersView' | 'cloudLegendOpen'>;
+
+const UI_CHECKS: Checks<PersistedUi> = { panelTabs: toPanelTabs, panelCollapsed: bool, panelTall: bool, markersView: oneOf(MarkersView), cloudLegendOpen: bool };
+
+/** Saved layout over the current one, field by field; the shown tab follows the page. */
+export function mergeUi(saved: unknown, current: UiState): UiState {
+  const s = { ...current, ...checkFields(UI_CHECKS, saved, current) };
+  return { ...s, panelTab: s.panelTabs[s.panelPage] };
+}
+
 export const uiStore = create<UiState>()(
   persist(
     (set) => ({
@@ -118,13 +129,9 @@ export const uiStore = create<UiState>()(
     {
       name: 'scape.ui',
       version: 2,
-      partialize: ({ panelTabs, panelCollapsed, panelTall, markersView, cloudLegendOpen }) => ({ panelTabs, panelCollapsed, panelTall, markersView, cloudLegendOpen }),
+      partialize: ({ panelTabs, panelCollapsed, panelTall, markersView, cloudLegendOpen }): PersistedUi => ({ panelTabs, panelCollapsed, panelTall, markersView, cloudLegendOpen }),
       migrate: (stored, version) => migrateUi(stored, version) as unknown as UiState,
-      merge: (stored, current) => {
-        const s = { ...current, ...(stored as Partial<UiState>) };
-        const panelTabs = toPanelTabs(s.panelTabs);
-        return { ...s, panelTabs, panelTab: panelTabs[s.panelPage] };
-      }
+      merge: mergeUi
     }
   )
 );

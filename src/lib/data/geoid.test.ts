@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GeoidVersion } from '@core/geo/geoid';
-import { storeGeoid, type GeoidMeta } from './geoid';
+import { geoidMeta, storeGeoid, type GeoidMeta } from './geoid';
 
 /** An in-memory OPFS directory whose writes fail once `quota` bytes are stored. */
 function memDir(quota = Infinity) {
@@ -67,5 +67,14 @@ describe('storeGeoid', () => {
     await expect(storeGeoid(dir, new Uint8Array(12), meta('grid-b.f32', 12))).rejects.toThrow('quota');
     expect([...files.keys()].toSorted()).toEqual(['grid-a.f32', 'meta.json']);
     expect(files.get('meta.json')).toEqual(oldMeta);
+  });
+});
+
+describe('geoidMeta', () => {
+  const stored: GeoidMeta = { lat0: 20, lng0: 120, dLat: 1 / 60, dLng: 1.5 / 60, rows: 1801, cols: 1201, version: GeoidVersion.V22, fileName: 'g.zip', importedAt: 'now', bytes: 4 };
+
+  it('reads stored meta and refuses a damaged one', () => {
+    expect(geoidMeta(stored)).toEqual(stored);
+    for (const bad of [null, [], { ...stored, rows: 1.5 }, { ...stored, version: 'Ver.3' }, { ...stored, dLat: 0 }]) expect(geoidMeta(bad)).toBeUndefined();
   });
 });

@@ -1,5 +1,6 @@
 /** User-imported VNP46A4 tiles in OPFS: `viirs/<year>/<hXXvYY>.u16` counts, plus the year's LAADS `listing.json`. Worker-safe: no DOM. */
 
+import { listOf, parseJson, str } from '@core/io/check';
 import { blobSource } from '@core/io/hdf5';
 import { laadsListingUrl, parseViirsName, tileName, tilesForWindow, VIIRS_COLS, VIIRS_TILE_PX, type TileId, type ViirsWindow } from '@core/sky/viirs';
 import { decodeViirsTile } from '@core/sky/viirsTile';
@@ -51,7 +52,10 @@ export async function listViirs(): Promise<ViirsStore> {
     for await (const [f, fh] of (h as DirEntries).entries()) {
       if (fh.kind !== 'file') continue;
       const file = await (fh as FileSystemFileHandle).getFile();
-      if (f === LISTING) out.listings[year] = JSON.parse(await file.text()) as string[];
+      if (f === LISTING) {
+        const listed = listOf(str)(parseJson(await file.text()));
+        if (listed) out.listings[year] = listed;
+      }
       else if (/^h\d\dv\d\d\.u16$/.test(f) && file.size === TILE_BYTES) out.tiles.push({ year, tile: f.slice(0, 6), bytes: file.size });
     }
   }

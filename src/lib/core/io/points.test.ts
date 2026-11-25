@@ -51,3 +51,11 @@ describe('points io', () => {
     expect(escapeXml(`a"b'c`)).toBe('a&quot;b&apos;c');
   });
 });
+
+describe('pointsFromGeoJson on garbage', () => {
+  it('skips what is not a point and never throws', () => {
+    for (const bad of [null, 1, 'x', [], { type: 'FeatureCollection', features: 'x' }, { type: 'Feature', geometry: null }, { type: 'Point', coordinates: ['a', 1] }]) expect(pointsFromGeoJson(bad)).toEqual([]);
+    const [p] = pointsFromGeoJson({ type: 'Feature', properties: 'junk', geometry: { type: 'Point', coordinates: [2, 1] } });
+    expect(p).toMatchObject({ name: 'Point 1', lat: 1, lng: 2 });
+  });
+});

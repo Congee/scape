@@ -1,3 +1,5 @@
+import { checkFields, isObject, num, type Check, type Checks } from '@core/io/check';
+
 /** Open-Meteo's free-tier limits, weighted calls. */
 export const LIMITS = { minute: 600, hour: 5000, day: 10000 } as const;
 /** Headroom kept below each limit; the IP may be shared. */
@@ -14,6 +16,18 @@ export interface BudgetState {
 }
 
 export const emptyBudget = (): BudgetState => ({ minutes: {}, backoffUntil: 0, backoffMs: 0 });
+
+const minuteCounts: Check<Record<number, number>> = (v) => {
+  if (!isObject(v)) return undefined;
+  const out: Record<number, number> = {};
+  for (const [k, n] of Object.entries(v)) if (Number.isInteger(+k) && num(n) !== undefined) out[+k] = n as number;
+  return out;
+};
+
+const BUDGET_CHECKS: Checks<BudgetState> = { minutes: minuteCounts, backoffUntil: num, backoffMs: num };
+
+/** A stored budget, field by field; a bad field starts empty. */
+export const readBudget = (saved: unknown): BudgetState => checkFields(BUDGET_CHECKS, saved, emptyBudget());
 
 function sum(s: BudgetState, now: number, spanMin: number): number {
   const m = Math.floor(now / MIN_MS);

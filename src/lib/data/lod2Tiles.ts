@@ -1,5 +1,6 @@
 import { MeshoptDecoder } from 'meshoptimizer/decoder';
 import { geoidAt, type GeoidGrid } from '@core/geo/geoid';
+import { isObject, parseJson } from '@core/io/check';
 import { isB3dm, readB3dm, type B3dm } from '@core/lod2/b3dm';
 import { fetchFault, httpFault, Lod2Failures, Lod2Fault } from '@core/lod2/failures';
 import { lod2Tile, type Lod2Tile } from '@core/lod2/tile';
@@ -38,11 +39,10 @@ async function fetchTileset(url: string): Promise<void> {
   } catch (err) {
     return fault(url, fetchFault(err), err);
   }
-  try {
-    tilesets.set(url, JSON.parse(text) as TilesetJson);
-  } catch (err) {
-    fault(url, Lod2Fault.Permanent, err);
-  }
+  const json = parseJson(text);
+  // The walk reads `root` unguarded.
+  if (isObject(json) && isObject(json.root)) tilesets.set(url, json as unknown as TilesetJson);
+  else fault(url, Lod2Fault.Permanent, 'Not a 3D Tiles tileset');
 }
 
 function loadTileset(url: string): Promise<void> {
