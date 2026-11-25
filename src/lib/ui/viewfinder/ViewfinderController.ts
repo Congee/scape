@@ -5,7 +5,7 @@ import { apply, enuToEqj, eqjToEnu } from '@core/astro/skyFrame';
 import { lunarEclipseLight, lunarShadowCoverage, shadowView } from '@core/astro/eclipse';
 import { lightAt } from '@core/astro/lightSource';
 import { moonView } from '@core/astro/moonSim';
-import { moonInfo, moonTerminator, position, semidiameterDeg } from '@core/astro/positions';
+import { moonInfo, position, semidiameterDeg } from '@core/astro/positions';
 import { airDensity } from '@core/astro/refraction';
 import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
 import { distance, height } from '@core/format';
@@ -19,13 +19,11 @@ import type { SurfaceMesh } from '@core/geo/surfaces';
 import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, projectDir, unproject, type Camera } from '@core/optics/projection';
-import { hexRgba, OverlayBatch, OverlayFlag } from '@core/viewfinder/gl/overlayGl';
+import { OverlayBatch } from '@core/viewfinder/gl/overlayGl';
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import type { BodyDisc, MoonShading, SceneGl } from '@core/viewfinder/gl/sceneGl';
-import { labelHitsDiscs, type Disc } from '@core/viewfinder/labelClash';
 import { borderRects, fitFrame, fitViewports } from '@core/viewfinder/frameFit';
 import { behindBuilding, inView, surfaceAngle, toPx } from '@core/viewfinder/place';
-import { segmentHitsRect } from '@core/viewfinder/segmentRect';
 import { starNight } from '@core/viewfinder/skyGate';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges, visibleRuns } from '@core/model/draw';
@@ -34,8 +32,7 @@ import { fitPhoto, photoHfovDeg } from '@core/photo/fit';
 import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
-import { columnAt, occluded, type ViewProfile } from '@core/terrain/view';
-import { formatTime } from '@core/time/format';
+import { occluded, type ViewProfile } from '@core/terrain/view';
 import { buildingsStore, requestBuildings, requestLod2, stopBuildings } from '@state/buildings';
 import { lod2HeldStats, lod2Store } from '@state/lod2';
 import { aimFor, compositionStore } from '@state/composition';
@@ -52,6 +49,7 @@ import { worldStore } from '@state/world';
 import { FONT_SANS } from '../inks';
 import { MODEL_ACCENT } from '../map/modelOverlay';
 import { CATEGORY_COLORS } from '../map/overlays';
+import { drawBodies, drawBodyLabels, drawPaths, type PathMemo } from './bodies';
 import { haloText, type Paint, type Scene, type Seen } from './paint';
 import { drawHorizon, drawRainbow, drawSky, type SkyMemo } from './skyMarks';
 
@@ -67,21 +65,12 @@ const OUTLINE_STEP_PX = 3;
 const OUTLINE_MAX_PX = 4000;
 /** Occlusion tests per frame for the outline; a dense mesh gets coarser steps. */
 const OUTLINE_SAMPLES = 6000;
-const BODY_COLOR: Record<SkyBody, string> = { Sun: '#f5a524', Moon: '#9ccbff', Gc: '#b48cff' };
 const upEighth = (k: number) => Math.ceil(k * 8 - 1e-6) / 8;
 /** Hex colour multiplied by a flat shade factor. */
 const shaded = (hex: string, k: number) => {
   const n = Number.parseInt(hex.slice(1), 16);
   return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`;
 };
-
-interface BodyLabel {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-}
 
 /** Synthetic camera view: terrain layers from the DEM sweep, sky, sun/moon/GC paths, target and markers. */
 export class ViewfinderController {
@@ -97,7 +86,7 @@ export class ViewfinderController {
   private skylineMax: { view: ViewProfile | null; max: number } = { view: null, max: -90 };
   /** Eye-relative prisms per tile, only those placed for the current camera location. */
   private prisms = new Map<string, PrismTile>();
-  private pathHidden = new Map<SkyBody, { occ: unknown; view: unknown; curve: unknown; h: Int8Array }>();
+  private readonly pathHidden: PathMemo = new Map();
   private prismSrc: { frame: string; tiles: unknown } | null = null;
   /** Overture rows the LoD2 and model footprints hid, over the tiles drawn. */
   private prismHidden = 0;
@@ -727,148 +716,6 @@ export class ViewfinderController {
     return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), umbra: lunarShadowCoverage(sc.time).umbra, shadow, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
   }
 
-  private drawPath(sc: Scene, body: SkyBody, color: string) {
-    const { curve } = dayDataStore.getState();
-    if (!curve) return;
-    const { ctx } = this;
-    const alts = curve.altitude[body];
-    const azs = curve.azimuth[body];
-    const world = worldStore.getState();
-    const hour12 = settingsStore.getState().hour12;
-    const line = hexRgba(color, 0.9);
-    let prev: { x: number; y: number } | null = null;
-    let prevSky = false;
-    // The picture draws these under the overlay; ghosted ones behind geometry still show.
-    const discs: Disc[] = [SkyBody.Sun, SkyBody.Moon].flatMap((b) => this.seen.bodies[b] ?? []);
-    ctx.font = `10px ${FONT_SANS}`;
-    const pxs = Array.from({ length: curve.n }, (_, i) => toPx(sc, azs[i], alts[i]));
-    const ins = pxs.map((p) => inView(sc, p, 40));
-    // Occlusion does not depend on the aim, so a drag reuses it until the path or occluders change.
-    let memo = this.pathHidden.get(body);
-    if (!memo || memo.occ !== this.occ || memo.view !== sc.view || memo.curve !== curve) this.pathHidden.set(body, (memo = { occ: this.occ, view: sc.view, curve, h: new Int8Array(curve.n) }));
-    const h = memo.h;
-    for (let i = 0; i < curve.n; i++) {
-      const p = pxs[i];
-      const inside = ins[i];
-      const col = sc.view ? columnAt(sc.view, azs[i]) : -1;
-      const sky = col >= 0 && alts[i] < sc.view!.skylineDeg[col];
-      // Segments are clipped per pixel in the picture pass; the skyline is only known here.
-      if (p && prev && segmentHitsRect(prev, p, sc.area, 40)) {
-        this.marks.segment(prev.x, prev.y, p.x, p.y, 1.5, sky || prevSky ? OverlayFlag.Hidden : 0, 0.35, line);
-        if (this.probe) {
-          const a = behindBuilding(this.occ, azs[i - 1], alts[i - 1], Infinity);
-          const b = behindBuilding(this.occ, azs[i], alts[i], Infinity);
-          this.probe.push(1, prev.x, prev.y, p.x, p.y, sky || prevSky ? 2 : a && b ? 1 : a || b ? 3 : 0);
-        }
-      }
-      const t = curve.startMs + i * curve.stepMs;
-      if (inside && p && new Date(t).getUTCMinutes() === 0 && t % 3_600_000 === (curve.startMs % 3_600_000 + (i * curve.stepMs)) % 3_600_000) {
-        const hidden = sky || (h[i] !== 0 ? h[i] > 0 : (h[i] = behindBuilding(this.occ, azs[i], alts[i], Infinity) ? 1 : -1) > 0);
-        const label = formatTime(t, world.tz, hour12).replace(':00', '');
-        ctx.globalAlpha = hidden ? 0.5 : 0.95;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-        this.probe?.push(2, p.x, p.y, 0, 0, 0);
-        const box = { x: p.x + 4, y: p.y - 13, w: ctx.measureText(label).width, h: 10 };
-        // Margin is the halo's half stroke.
-        const skipped = labelHitsDiscs(box, discs, 1.5);
-        this.seen.pathLabels.push({ body, text: label, ...box, skipped });
-        if (!skipped) {
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'bottom';
-          haloText(ctx, label, box.x, p.y - 3);
-        }
-      }
-      prev = p;
-      prevSky = sky;
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  private drawBody(sc: Scene, body: SkyBody, date: Date): BodyLabel | null {
-    const pos = position(body, date, sc.obs);
-    const p = toPx(sc, pos.azimuth, pos.altitude);
-    if (!inView(sc, p, 60)) return null;
-    const { ctx } = this;
-    const col = sc.view ? columnAt(sc.view, pos.azimuth) : -1;
-    const skyline = col >= 0 && sc.view ? sc.view.skylineDeg[col] : flatHorizonDeg(sc.eyeAboveGroundM);
-    const semi = semidiameterDeg(body, date, sc.obs);
-    const hidden = pos.altitude + semi < skyline || behindBuilding(this.occ, pos.azimuth, pos.altitude, Infinity);
-    const r = Math.max(3, discRadiusMm(sc.cam, semi) * sc.frame.pxPerMm);
-    this.seen.bodies[body] = { az: pos.azimuth, alt: pos.altitude, x: p.x, y: p.y, r, hidden };
-    // The picture pass draws the discs itself, clipped per pixel; only the label is left here.
-    const inPicture = !!this.sceneGl && body !== SkyBody.Gc;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
-    ctx.clip();
-    ctx.globalAlpha = hidden ? 0.35 : 1;
-    if (body === SkyBody.Gc) {
-      ctx.strokeStyle = BODY_COLOR.Gc;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(p.x - 10, p.y);
-      ctx.lineTo(p.x + 10, p.y);
-      ctx.moveTo(p.x, p.y - 10);
-      ctx.lineTo(p.x, p.y + 10);
-      ctx.stroke();
-    } else if (inPicture) {
-      // Nothing to draw over the picture.
-    } else if (body === SkyBody.Sun) {
-      const g = ctx.createRadialGradient(p.x, p.y, r * 0.5, p.x, p.y, r * 4);
-      g.addColorStop(0, 'rgba(255,220,120,0.55)');
-      g.addColorStop(1, 'rgba(255,200,80,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r * 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#fff3c4';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      const info = moonInfo(date);
-      ctx.fillStyle = '#2b3442';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      // Lit fraction as a lens shape; the bright limb faces the sun, i.e. west when waxing (northern view).
-      const term = moonTerminator(info.illumination, info.waxing);
-      ctx.fillStyle = '#e8eef5';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, -Math.PI / 2, Math.PI / 2, term.litSide < 0);
-      ctx.ellipse(p.x, p.y, Math.max(0.01, term.rx * r), r, 0, Math.PI / 2, -Math.PI / 2, term.gibbous === (term.litSide < 0));
-      ctx.fill();
-    }
-    ctx.restore();
-    return { x: p.x, y: p.y + r + 4, text: body === SkyBody.Gc ? 'Galactic Centre' : body === SkyBody.Sun ? 'Sun' : 'Moon', color: BODY_COLOR[body], alpha: hidden ? 0.35 : 1 };
-  }
-
-  /** Body names, drawn over the picture so a tower never swallows a label. */
-  private drawBodyLabels(sc: Scene, labels: BodyLabel[]) {
-    if (labels.length === 0) return;
-    const { ctx } = this;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
-    ctx.clip();
-    ctx.font = `11px ${FONT_SANS}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    for (const l of labels) {
-      ctx.globalAlpha = l.alpha;
-      ctx.fillStyle = l.color;
-      haloText(ctx, l.text, l.x, l.y);
-    }
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  }
-
   private drawTarget(sc: Scene) {
     const w = worldStore.getState();
     if (!w.pin2) return;
@@ -1070,7 +917,6 @@ export class ViewfinderController {
       this.drawGlError(sc);
       return;
     }
-    const s = settingsStore.getState();
     const c = compositionStore.getState();
     this.occ = this.occluder(sc);
     this.seen = { bodies: {}, markers: {}, pathLabels: [] };
@@ -1082,28 +928,12 @@ export class ViewfinderController {
     if (c.showRainbow) drawRainbow(p, sc);
     drawSky(p, sc, this.skyMemo);
 
-    const date = new Date(worldStore.getState().time);
-    const labels: BodyLabel[] = [];
-    for (const b of BODIES) {
-      if (!bodyVisible(b, c, s)) continue;
-      const l = this.drawBody(sc, b, date);
-      if (l) labels.push(l);
-    }
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
-    ctx.clip();
-    if (c.showPaths) {
-      for (const b of BODIES) {
-        if (!bodyVisible(b, c, s)) continue;
-        this.drawPath(sc, b, BODY_COLOR[b]);
-      }
-    }
-    ctx.restore();
+    const labels = drawBodies(p, sc, !!this.sceneGl);
+    drawPaths(p, sc, this.pathHidden);
     // After the marks are placed: the picture pass draws them.
     this.drawSceneGl(sc, this.sceneGl);
 
-    this.drawBodyLabels(sc, labels);
+    drawBodyLabels(p, sc, labels);
     this.drawMarkers(sc);
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
