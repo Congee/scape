@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { yieldTurn } from './yieldTurn';
 
+const fetchSource = vi.fn();
 const getZxy = vi.fn<(z: number, x: number, y: number, signal?: AbortSignal) => Promise<{ data: ArrayBuffer } | undefined>>();
 
 vi.mock('pmtiles', () => ({
-  FetchSource: vi.fn(),
+  FetchSource: fetchSource,
   PMTiles: class {
     getZxy = getZxy;
   }
@@ -14,7 +15,9 @@ vi.mock('./localTiles', () => ({
   readThrough: async <T>(local: () => Promise<T | null>, remote: () => Promise<T | null>) => (await local()) ?? remote()
 }));
 
-const { abandonBuildingFetches, fetchBuildingBatch } = await import('./buildingTiles');
+const { abandonBuildingFetches, fetchBuildingBatch, setBuildingsRelease } = await import('./buildingTiles');
+// As a worker: the release comes from the main thread, never from the network.
+setBuildingsRelease('2026-12-16.0');
 
 let seq = 0;
 /** Module state lives for the worker's lifetime, so each test gets fresh tiles. */
@@ -24,6 +27,46 @@ const calls = (t: { x: number }) => getZxy.mock.calls.filter(([, x]) => x === t.
 beforeEach(() => {
   getZxy.mockReset();
   getZxy.mockResolvedValue(undefined);
+});
+
+describe('live archive', () => {
+  it('reads the release the main thread sent', async () => {
+    await fetchBuildingBatch(tile());
+    expect(fetchSource).toHaveBeenLastCalledWith('https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-12-16.0/buildings.pmtiles');
+  });
+});
+
+/** A fresh main-thread module, as on page load. */
+const fresh = async (fetchImpl: typeof fetch, onLine = true) => {
+  vi.resetModules();
+  vi.stubGlobal('fetch', vi.fn(fetchImpl));
+  vi.stubGlobal('navigator', { onLine });
+  return (await import('./buildingTiles')).buildingsRelease;
+};
+
+describe('buildingsRelease', () => {
+  const xml = '<ListBucketResult><Contents><Key>tiles/2026-10-21.0/buildings.pmtiles</Key></Contents><Contents><Key>tiles/2026-11-18.0/buildings.pmtiles</Key></Contents></ListBucketResult>';
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lists the bucket once and takes the newest release', async () => {
+    const release = await fresh(async () => new Response(xml));
+    expect(await Promise.all([release(), release()])).toEqual(['2026-11-18.0', '2026-11-18.0']);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the pinned release when the listing fails or is garbled', async () => {
+    const { OVERTURE_BUILDINGS_RELEASE } = await import('./buildingTiles');
+    expect(await (await fresh(() => Promise.reject(new TypeError('Failed to fetch'))))()).toBe(OVERTURE_BUILDINGS_RELEASE);
+    expect(await (await fresh(async () => new Response('denied', { status: 403 })))()).toBe(OVERTURE_BUILDINGS_RELEASE);
+    expect(await (await fresh(async () => new Response('<ListBucketResult/>')))()).toBe(OVERTURE_BUILDINGS_RELEASE);
+  });
+
+  it('does not list the bucket offline', async () => {
+    const { OVERTURE_BUILDINGS_RELEASE } = await import('./buildingTiles');
+    const release = await fresh(async () => new Response(xml), false);
+    expect(await release()).toBe(OVERTURE_BUILDINGS_RELEASE);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
 
 describe('fetchBuildingBatch wanted', () => {

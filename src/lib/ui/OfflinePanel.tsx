@@ -7,7 +7,7 @@ import { bytes } from '@core/format';
 import { BUILDINGS_DEFAULT_MAX_TILES, BUILDINGS_ZOOM, buildingsByDefault } from '@core/tiles/buildingsRegion';
 import { offlineSources, SAT_OFFLINE_MIN_ZOOM, SAT_OFFLINE_SOURCE, SAT_OFFLINE_ZOOMS } from '@core/tiles/satellite';
 import { PmFlavor } from '@data/basemaps';
-import { OVERTURE_BUILDINGS_RELEASE, OVERTURE_BUILDINGS_URL } from '@data/buildingTiles';
+import { buildingsRelease, OVERTURE_BUILDINGS_RELEASE, overtureBuildingsUrl } from '@data/buildingTiles';
 import { BASEMAP_DEFAULT_MAX_TILES, basemapByDefault, isPmtilesUrl, OFM_STYLE, OFM_TILEJSON } from '@data/openfreemap';
 import { PROTOMAPS_BUILD } from '@data/protomaps';
 import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
@@ -74,8 +74,8 @@ function estimateLabel(e: Estimate): string {
 const todayName = () => `Region ${new Date().toISOString().slice(0, 10)}`;
 
 /** A dated Protomaps build is refreshed to today's; any other source is reused as is. */
-const freshSource = (a: ArchiveMeta) =>
-  a.kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : a.kind === ArchiveKind.Satellite ? SAT_OFFLINE_SOURCE : a.kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : a.sourceUrl.startsWith(PROTOMAPS_BUILD) ? defaultBasemapSourceUrl() : a.sourceUrl;
+const freshSource = (a: ArchiveMeta, buildingsUrl: string) =>
+  a.kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : a.kind === ArchiveKind.Satellite ? SAT_OFFLINE_SOURCE : a.kind === ArchiveKind.Buildings ? buildingsUrl : a.sourceUrl.startsWith(PROTOMAPS_BUILD) ? defaultBasemapSourceUrl() : a.sourceUrl;
 
 const ZOOMS: Record<ArchiveKind, [number, number] | null> = {
   [ArchiveKind.Basemap]: null,
@@ -118,11 +118,14 @@ export function OfflinePanel() {
   /** Null follows the region's size. */
   const [withBuildings, setWithBuildings] = useState<boolean | null>(null);
   const [withBasemap, setWithBasemap] = useState<boolean | null>(null);
+  const [release, setRelease] = useState(OVERTURE_BUILDINGS_RELEASE);
+  const buildingsUrl = overtureBuildingsUrl(release);
 
   useEffect(() => {
     const s = offlineStore.getState();
     if (!s.loaded) void s.load();
     void s.refreshGibs();
+    void buildingsRelease().then(setRelease);
   }, []);
 
   const o = offlineStore.getState();
@@ -144,7 +147,7 @@ export function OfflinePanel() {
       bbox,
       minZoom,
       maxZoom: maxZ,
-      sourceUrl: kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : kind === ArchiveKind.Buildings ? OVERTURE_BUILDINGS_URL : kind === ArchiveKind.Satellite ? SAT_OFFLINE_SOURCE : url,
+      sourceUrl: kind === ArchiveKind.Terrain ? TERRAIN_TILE_URL : kind === ArchiveKind.Buildings ? buildingsUrl : kind === ArchiveKind.Satellite ? SAT_OFFLINE_SOURCE : url,
       ...(kind === ArchiveKind.Basemap && !isPmtilesUrl(url) && { styleUrl: OFM_STYLE })
     };
   };
@@ -180,7 +183,7 @@ export function OfflinePanel() {
       minZoom: a.minZoom,
       maxZoom: a.maxZoom,
       replaces: a.id,
-      sourceUrl: freshSource(a),
+      sourceUrl: freshSource(a, buildingsUrl),
       ...(a.style && { styleUrl: a.style })
     });
   };
@@ -324,7 +327,7 @@ export function OfflinePanel() {
         <div className="field">
           <span>Buildings</span>
           <span className="muted">
-            zoom {BUILDINGS_ZOOM}, Overture {OVERTURE_BUILDINGS_RELEASE}
+            zoom {BUILDINGS_ZOOM}, Overture {release}
           </span>
         </div>
         <label className="toggle">

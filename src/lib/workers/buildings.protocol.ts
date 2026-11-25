@@ -6,7 +6,7 @@ import type { PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done', Geoid: 'Geoid', Stop: 'Stop' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done', Geoid: 'Geoid', Release: 'Release', Stop: 'Stop' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** Building volumes for the wedge the viewfinder is looking into; one Tiles response per tile, then Done. */
@@ -76,6 +76,13 @@ export interface GeoidSync {
   key: string;
 }
 
+/** The Overture release the main thread listed; live tile reads wait for it. No response. */
+export interface ReleaseSync {
+  kind: typeof BuildingsKind.Release;
+  id: number;
+  release: string;
+}
+
 /** Abandons the wedge and LoD2 streams in flight, fetching nothing more for them. No response. */
 export interface StopRequest {
   kind: typeof BuildingsKind.Stop;
@@ -120,7 +127,7 @@ export interface Lod2Request {
   seen: number;
 }
 
-export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request | GeoidSync | StopRequest;
+export type BuildingsRequest = TilesRequest | HeightAtRequest | MaskRequest | ModelsSync | RowsAtRequest | SuppressedIdsRequest | GroundAtRequest | Lod2Request | GeoidSync | ReleaseSync | StopRequest;
 
 /** One LoD2 content tile placed in the viewfinder's frame. */
 export interface Lod2Placed {

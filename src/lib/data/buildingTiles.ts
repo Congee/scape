@@ -2,12 +2,15 @@ import { VectorTile } from '@mapbox/vector-tile';
 import { FetchSource, PMTiles } from 'pmtiles';
 import { PbfReader } from 'pbf';
 import { decodeBuildings, type DecodedBuildings, type VectorLayerLike } from '@core/geo/buildingTiles';
+import { newestOvertureRelease, OVERTURE_TILES_LISTING, overtureTilesUrl } from '@core/tiles/overtureRelease';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
 import { localBuildings, readThrough } from './localTiles';
 import { yieldTurn } from './yieldTurn';
 
-export const OVERTURE_BUILDINGS_RELEASE = '2026-08-19.0';
-export const OVERTURE_BUILDINGS_URL = `https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_BUILDINGS_RELEASE}/buildings.pmtiles`;
+/** Fallback when the bucket listing cannot be read; Overture deletes all but its last two releases. */
+export const OVERTURE_BUILDINGS_RELEASE = '2026-11-18.0';
+export const overtureBuildingsUrl = (r: string): string => overtureTilesUrl(r, 'buildings');
+const LISTING_TIMEOUT_MS = 5000;
 export const BUILDINGS_ATTRIBUTION = '© OpenStreetMap contributors, © Overture Maps Foundation';
 
 let maxCachedTiles = 128;
@@ -20,8 +23,39 @@ export function setBuildingTileCacheSize(n: number): void {
 
 export type { DecodedBuildings };
 
+let listed: Promise<string> | null = null;
+let provide: ((r: string) => void) | null = null;
+
+async function listRelease(): Promise<string> {
+  if (navigator.onLine === false) return OVERTURE_BUILDINGS_RELEASE;
+  try {
+    const res = await fetch(OVERTURE_TILES_LISTING, { signal: AbortSignal.timeout(LISTING_TIMEOUT_MS) });
+    return (res.ok && newestOvertureRelease(await res.text(), 'buildings')) || OVERTURE_BUILDINGS_RELEASE;
+  } catch {
+    return OVERTURE_BUILDINGS_RELEASE;
+  }
+}
+
+/** The newest Overture release, listed once per session; never rejects. Workers get it from the main thread. */
+export function buildingsRelease(): Promise<string> {
+  listed ??= listRelease();
+  return listed;
+}
+
+/** A worker's live reads wait for `setBuildingsRelease` rather than listing the bucket again. */
+export function awaitBuildingsRelease(): void {
+  listed ??= new Promise((resolve) => (provide = resolve));
+}
+
+export function setBuildingsRelease(r: string): void {
+  if (provide) provide(r);
+  else listed = Promise.resolve(r);
+  provide = null;
+}
+
 /** The 180 GB planet archive is never downloaded whole: tiles are read with HTTP range requests. */
-let archive = new PMTiles(new FetchSource(OVERTURE_BUILDINGS_URL));
+let archive: Promise<PMTiles> | null = null;
+const liveArchive = (): Promise<PMTiles> => (archive ??= buildingsRelease().then((r) => new PMTiles(new FetchSource(overtureBuildingsUrl(r)))));
 
 /** Decompressed MVT bytes of one tile: an offline region first, the live archive otherwise; null when empty. */
 export function buildingTileBytes(z: number, x: number, y: number, signal?: AbortSignal): Promise<ArrayBuffer | null> {
@@ -29,10 +63,10 @@ export function buildingTileBytes(z: number, x: number, y: number, signal?: Abor
     () => localBuildings.tile(z, x, y),
     async () => {
       try {
-        return (await archive.getZxy(z, x, y, signal))?.data ?? null;
+        return (await (await liveArchive()).getZxy(z, x, y, signal))?.data ?? null;
       } catch (e) {
         // pmtiles keeps a rejected header or directory, so a fetch made offline would fail for good.
-        if (!signal?.aborted) archive = new PMTiles(new FetchSource(OVERTURE_BUILDINGS_URL));
+        if (!signal?.aborted) archive = null;
         throw e;
       }
     }

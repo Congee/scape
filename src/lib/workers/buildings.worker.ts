@@ -17,7 +17,7 @@ import { cubicStencilTiles, demRowAt, elevationAtCubic, lowestGroundAt, withDemT
 import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { InFlight } from '@core/inFlight';
 import { yieldTurn } from '@data/yieldTurn';
-import { abandonBuildingFetches, fetchBuildingBatch, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
+import { abandonBuildingFetches, awaitBuildingsRelease, fetchBuildingBatch, setBuildingsRelease, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
 import { abandonLod2Fetches, fetchLod2Tile, setLod2Geoid, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import type { BuildingBatch } from '@core/geo/buildingBatch';
@@ -28,6 +28,7 @@ const scope = self as unknown as DedicatedWorkerGlobalScope;
 const isMask = scope.name === MASK_WORKER_NAME;
 const dem = new DemCache(demCacheTiles(isMask ? 320 : 512));
 if (isMask) setBuildingTileCacheSize(96);
+awaitBuildingsRelease();
 setLod2TileCacheSize(isMask ? 24 : 12);
 /** Zoom of the buildings archive; `tilesForWedge` enumerates the same level. */
 const BUILDINGS_ZOOM = 14;
@@ -710,6 +711,10 @@ scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
   }
   if (req.kind === BuildingsKind.Geoid) {
     syncGeoid(req);
+    return;
+  }
+  if (req.kind === BuildingsKind.Release) {
+    setBuildingsRelease(req.release);
     return;
   }
   if (req.kind === BuildingsKind.Stop) {

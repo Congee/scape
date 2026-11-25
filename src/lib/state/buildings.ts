@@ -8,8 +8,9 @@ import { prismFrameKey } from '@core/geo/prismRaster';
 import { adoptPrismSurfaces, prismReleased } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
 import type { BuildingBatch } from '@core/geo/buildingBatch';
-import { BuildingsKind, MASK_WORKER_NAME, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
+import { BuildingsKind, MASK_WORKER_NAME, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type ReleaseSync, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, dropUploadedLod2, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
+import { buildingsRelease } from '@data/buildingTiles';
 
 /** Placed tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
@@ -102,6 +103,10 @@ function evict(tiles: Map<string, PrismPlaced>, pin: LngLat): Map<string, PrismP
   return tiles;
 }
 
+function postRelease(w: Worker): void {
+  void buildingsRelease().then((release) => w.postMessage({ kind: BuildingsKind.Release, id: ++seq, release } satisfies ReleaseSync));
+}
+
 function ensureWorker(): Worker {
   if (worker) return worker;
   worker = new Worker(new URL('../workers/buildings.worker.ts', import.meta.url), { type: 'module' });
@@ -150,6 +155,7 @@ function ensureWorker(): Worker {
   });
   if (modelsSync) worker.postMessage(modelsSync);
   if (geoidSync) worker.postMessage(geoidSync);
+  postRelease(worker);
   return worker;
 }
 
@@ -170,6 +176,7 @@ function ensureMaskWorker(): Worker {
   });
   if (modelsSync) maskWorker.postMessage(modelsSync);
   if (geoidSync) maskWorker.postMessage(geoidSync);
+  postRelease(maskWorker);
   return maskWorker;
 }
 

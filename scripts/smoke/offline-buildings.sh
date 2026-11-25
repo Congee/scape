@@ -62,9 +62,9 @@ check "terrain + buildings archives saved" "$(echo "$bld" | grep -q buildings &&
 ab screenshot "$SHOTS/panel-desktop.png" >/dev/null
 
 # Dev modules load on first use, which cannot happen offline: visit the viewfinder route and the height lookup first.
-js "(()=>{document.querySelector('a[href=\"/viewfinder\"]').click(); return 1})()" >/dev/null
+js "(()=>{document.querySelector('a[href^=\"/viewfinder\"]').click(); return 1})()" >/dev/null
 poll "location.pathname==='/viewfinder' && !!__scape.prism" 30
-js "(()=>{document.querySelector('a[href=\"/\"]').click(); return 1})()" >/dev/null
+js "(()=>{document.querySelector('a[href^=\"/?\"],a[href=\"/\"]').click(); return 1})()" >/dev/null
 poll "location.pathname==='/' && !!window.__scapeMap" 30
 js "import('/src/lib/state/buildings.ts').then(()=>1)" >/dev/null
 js "(()=>{__scape.world.getState().setTime(Date.parse('2026-09-24T10:00Z')); return 1})()" >/dev/null
@@ -98,7 +98,7 @@ miss=$(js "(async()=>{const m=await import('/src/lib/state/buildings.ts'); retur
 check "outside region stays empty offline" "$([ "$miss" = null ] && echo 1 || echo 0)" "Chrysler height=$miss"
 
 # Viewfinder matrix, entered in-app since a page load cannot happen offline.
-js "(()=>{document.querySelector('a[href=\"/viewfinder\"]').click(); return 1})()" >/dev/null
+js "(()=>{document.querySelector('a[href^=\"/viewfinder\"]').click(); return 1})()" >/dev/null
 poll "location.pathname==='/viewfinder' && !!__scape.prism" 30
 for f in 24 200 600 2400; do
   for o in Landscape Portrait; do
