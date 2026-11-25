@@ -29,15 +29,14 @@ import { frameOf, keepsCentre, MASK_SNAP_CELLS, maskCorners, maskFrame, maskPixe
 import { depthOfField } from '@core/optics/dof';
 import { cocMm, effectiveOptics, focalForFovMm, fovDeg, frameMm, sensorPixels, tcFactor } from '@core/optics/fov';
 import '@data/maplibre';
-import { isDarkBasemap, styleFor, type Basemap } from '@data/basemaps';
-import { buildingsSource } from '@data/buildingsProtocol';
+import { styleFor, type Basemap } from '@data/basemaps';
 import { ensureDemProtocol } from '@data/demProtocol';
 import { GEOID_DOWNLOAD_URL, geoidCredit } from '@data/geoid';
 import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
 import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
-import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask, suppressedBuildingIds, type ShadowMaskField } from '@state/buildings';
+import { buildingsStore, buildingHeightAt, buildingRowsAt, requestShadowMask, type ShadowMaskField } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
 import { dayDataStore } from '@state/dayData';
 import { gearStore, sensorById, zoomPatch } from '@state/gear';
@@ -52,10 +51,9 @@ import { MarkersView, OrbitPivot, PanelTab, uiStore } from '@state/ui';
 import { planTime, worldStore } from '@state/world';
 import { HeatMode, type AlignCandidate } from '@workers/align.protocol';
 import { HALO, Ink } from '../inks';
-import { buildingFilter, buildingPaint } from './buildingStyle';
+import { BLD_LAYER, BLD_MIN_ZOOM, BLD_PART_LAYER, BuildingsLayer } from './buildingsLayer';
 import { CloudOverlay } from './cloudOverlay';
 import { paintHeat } from './heat';
-import { latestOnly } from './latest';
 import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
 import { MapLayers } from './mapLayers';
@@ -87,15 +85,10 @@ const HILL_SRC = 'terrain-dem-hillshade';
 const LIGHTS_SRC = 'night-lights';
 const LIGHTS_URL = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png';
 const LIGHTS_ATTRIBUTION = 'Night lights: <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>, VIIRS Black Marble 2016';
-// Scape's own Overture buildings, replacing whatever the basemap draws.
-const BLD_SRC = 'overture-buildings';
-const BLD_LAYER = 'overture-building';
-const BLD_PART_LAYER = 'overture-building-part';
 const SHADOW_SRC = 'sun-shadow';
 const SHADOW_LAYER = 'sun-shadow';
 // An empty, invisible source that only carries the mask's LoD2 credit while the mask uses it.
 const SHADOW_CREDIT_SRC = 'sun-shadow-credit';
-const BLD_MIN_ZOOM = 14;
 /** Below this the mask's cell outgrows the coarsest DEM zoom and its tile count runs away: 12 tiles here, 108 two zooms out. */
 const SHADOW_MIN_ZOOM = 8;
 const SHADOW_OPACITY = 0.35;
@@ -185,10 +178,7 @@ export class MapController {
   private menu: MapMenu;
   /** Fingers on the map; the browser's own long-press contextmenu is left to `LongPress`. */
   private touches = 0;
-  /** Overture feature ids a visible model stands in for. */
-  private hiddenIds: string[] = [];
-  /** A later model change's answer may land first; only the newest applies. */
-  private askSuppressed = latestOnly(suppressedBuildingIds);
+  private buildings: BuildingsLayer;
   /** Body behind the mask on screen; the smoke test reads it. */
   lightBody: SkyBody | null = null;
 
@@ -320,7 +310,7 @@ export class MapController {
       this.addOverlayLayers();
       this.applyTerrain();
       this.applyNightLights();
-      this.applyBuildings();
+      this.buildings.apply();
       this.drawer.addLayers(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
       this.clouds.addLayer(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
       this.applyShadows();
@@ -345,7 +335,6 @@ export class MapController {
       () => clearTimeout(this.shadowTimer),
       () => this.drawer.dispose(),
       () => this.clouds.dispose(),
-      modelsStore.subscribe((st) => st.rev, () => void this.refreshSuppression()),
       mapStatusStore.subscribe((st) => st.retrySeq, () => this.retryTiles()),
       buildingsStore.subscribe((st) => st.shadowMask, () => this.paintShadowMask()),
       worldStore.subscribe(
@@ -414,7 +403,11 @@ export class MapController {
         () => this.applyTerrain(),
         { equalityFn: shallow }
       ),
-      settingsStore.subscribe((st) => st.showBuildings, () => this.applyBuildings()),
+      () => this.buildings.dispose()
+    );
+    // Settings listeners run in subscribe order, which decides the stacking of layers that share an anchor.
+    this.buildings = new BuildingsLayer(this.map, () => this.styleReady, () => this.scheduleShadows());
+    this.unsubs.push(
       settingsStore.subscribe((st) => st.showSunShadows, () => this.applyShadows()),
       settingsStore.subscribe((st) => st.lightSource, () => this.scheduleShadows()),
       settingsStore.subscribe((st) => st.cocRule, () => this.renderFov()),
@@ -978,57 +971,6 @@ export class MapController {
       this.creditShadow([]);
     }
     this.scheduleShadows();
-  }
-
-  /** Our extrusions sit under the labels, over the shadow mask, and in place of the basemap's buildings. */
-  private applyBuildings() {
-    if (!this.styleReady) return;
-    const on = settingsStore.getState().showBuildings;
-    if (on && !this.map.getLayer(BLD_LAYER)) {
-      if (!this.map.getSource(BLD_SRC)) this.map.addSource(BLD_SRC, buildingsSource(BLD_MIN_ZOOM));
-      const before = this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
-      const paint = buildingPaint(isDarkBasemap(currentBasemap()));
-      this.map.addLayer(
-        {
-          id: BLD_LAYER,
-          type: 'fill-extrusion',
-          source: BLD_SRC,
-          'source-layer': 'building',
-          minzoom: BLD_MIN_ZOOM,
-          // Overture replaces a building that has parts with those parts; drawing both double-draws it.
-          filter: buildingFilter(true, this.hiddenIds),
-          paint
-        },
-        before
-      );
-      this.map.addLayer(
-        { id: BLD_PART_LAYER, type: 'fill-extrusion', source: BLD_SRC, 'source-layer': 'building_part', minzoom: BLD_MIN_ZOOM, filter: buildingFilter(false, this.hiddenIds), paint },
-        before
-      );
-    } else if (!on) {
-      for (const id of [BLD_LAYER, BLD_PART_LAYER]) if (this.map.getLayer(id)) this.map.removeLayer(id);
-    }
-    this.setBasemapBuildings(!on);
-    this.scheduleShadows();
-  }
-
-  /** The worker knows which Overture rows the models suppress; the map hides the same ones. */
-  private async refreshSuppression() {
-    const answer = await this.askSuppressed();
-    if (answer === undefined) return;
-    const ids = answer ?? this.hiddenIds;
-    if (ids.length === this.hiddenIds.length && ids.every((id, i) => id === this.hiddenIds[i])) return;
-    this.hiddenIds = ids;
-    if (!this.styleReady) return;
-    for (const id of [BLD_LAYER, BLD_PART_LAYER]) if (this.map.getLayer(id)) this.map.setFilter(id, buildingFilter(id === BLD_LAYER, this.hiddenIds));
-  }
-
-  /** The basemap's own extrusions are hidden, not removed: `applyRenderedHeight` still queries them. */
-  private setBasemapBuildings(visible: boolean) {
-    for (const id of buildingLayerIds(this.map.getStyle()?.layers)) {
-      if (id === BLD_LAYER || id === BLD_PART_LAYER || !this.map.getLayer(id)) continue;
-      this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
-    }
   }
 
   /** The build is async through the worker, so it is debounced rather than driven per frame. */
