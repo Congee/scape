@@ -27,9 +27,8 @@ import { cocMm, effectiveOptics, focalForFovMm, fovDeg, frameMm, sensorPixels, t
 import '@data/maplibre';
 import { styleFor, type Basemap } from '@data/basemaps';
 import { ensureDemProtocol } from '@data/demProtocol';
-import { demSourceSpec, ensureDemSourceType } from '@data/demSource';
+import { ensureDemSourceType } from '@data/demSource';
 import { ensurePmtilesProtocol } from '@data/pmtiles';
-import { DEM_TILE_TEMPLATE, TERRAIN_ATTRIBUTION, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import { alignStore } from '@state/align';
 import { buildingHeightAt, buildingRowsAt } from '@state/buildings';
 import { aimFor, compositionStore } from '@state/composition';
@@ -50,10 +49,11 @@ import { BLD_LAYER, BLD_PART_LAYER, BuildingsLayer } from './buildingsLayer';
 import { CloudOverlay } from './cloudOverlay';
 import { ClickModeControl } from './ClickModeControl';
 import { LONG_PRESS_MS, LongPress, type Pt } from './longPress';
-import { HEAT_LAYER, HeatLayer } from './heatLayer';
+import { HeatLayer } from './heatLayer';
 import { MapLayers } from './mapLayers';
 import { EMPTY, samePoint } from './mapShared';
 import { SatelliteLayer } from './satelliteLayer';
+import { ensureDem, HILL_SRC, TerrainLayer } from './terrainLayer';
 import { ShadowLayer } from './shadowLayer';
 import { MapMenu } from './mapMenu';
 import { ModelDrawer } from './ModelDrawer';
@@ -70,9 +70,6 @@ const MARKERS_SRC = 'markers';
 const URBAN_MIN_ZOOM = 10;
 const REGION_SRC = 'region';
 const IMPORT_SRC = 'import-pick';
-// MapLibre wants separate DEM sources for hillshade and 3D terrain; same tiles, cached once by the browser.
-const DEM_SRC = 'terrain-dem';
-const HILL_SRC = 'terrain-dem-hillshade';
 // NASA GIBS, public domain; a coarse (zoom ≤ 8) proxy for light pollution.
 const LIGHTS_SRC = 'night-lights';
 const LIGHTS_URL = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png';
@@ -136,6 +133,7 @@ export class MapController {
   private menu: MapMenu;
   /** Fingers on the map; the browser's own long-press contextmenu is left to `LongPress`. */
   private touches = 0;
+  private terrain: TerrainLayer;
   private buildings: BuildingsLayer;
   private shadows: ShadowLayer;
   private heat: HeatLayer;
@@ -266,7 +264,7 @@ export class MapController {
       this.styleReady = true;
       mapStatusStore.getState().setError(null);
       this.addOverlayLayers();
-      this.applyTerrain();
+      this.terrain.apply();
       this.applyNightLights();
       this.buildings.apply();
       this.drawer.addLayers(this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id);
@@ -284,7 +282,7 @@ export class MapController {
     });
     this.map.on('idle', () => this.senseUrban());
 
-    const layers = new MapLayers(this.map, HILL_SRC, (id) => this.ensureDem(id));
+    const layers = new MapLayers(this.map, HILL_SRC, (id) => ensureDem(this.map, id));
     const satellite = new SatelliteLayer(this.map);
     this.unsubs.push(
       () => layers.dispose(),
@@ -346,16 +344,13 @@ export class MapController {
         () => this.renderAll(),
         { equalityFn: shallow }
       ),
-      settingsStore.subscribe(
-        (st) => [st.terrain, st.showHillshade, st.terrain3d] as const,
-        () => this.applyTerrain(),
-        { equalityFn: shallow }
-      ),
+      () => this.terrain.dispose(),
       () => this.buildings.dispose(),
       () => this.shadows.dispose(),
       () => this.heat.dispose()
     );
     // Settings listeners run in subscribe order, which decides the stacking of layers that share an anchor.
+    this.terrain = new TerrainLayer(this.map, () => this.styleReady);
     this.buildings = new BuildingsLayer(this.map, () => this.styleReady, () => this.shadows.schedule());
     this.shadows = new ShadowLayer(this.map, () => this.styleReady);
     this.heat = new HeatLayer(this.map, () => this.styleReady);
@@ -852,42 +847,6 @@ export class MapController {
       }
     }
     if (vector) mapStatusStore.getState().setUrban(pin, isUrban(pin, places));
-  }
-
-  private ensureDem(id: string) {
-    if (this.map.getSource(id)) return;
-    this.map.addSource(
-      id,
-      demSourceSpec({
-        tiles: [DEM_TILE_TEMPLATE],
-        tileSize: TERRAIN_TILE_SIZE,
-        encoding: 'terrarium',
-        // The source's own maximum: where a region's coverage ends short of it, the loader
-        // resamples from the deepest ancestor it has rather than leaving a hole.
-        maxzoom: TERRAIN_MAX_ZOOM,
-        attribution: TERRAIN_ATTRIBUTION
-      })
-    );
-  }
-
-  /** Hillshade sits under labels and our lines. */
-  private applyTerrain() {
-    if (!this.styleReady) return;
-    const s = settingsStore.getState();
-    const hill = s.terrain && s.showHillshade;
-    const t3d = s.terrain && s.terrain3d;
-    if (hill && !this.map.getLayer('hillshade')) {
-      this.ensureDem(HILL_SRC);
-      const before = this.map.getLayer(HEAT_LAYER) ? HEAT_LAYER : (this.map.getStyle().layers.find((l) => l.type === 'symbol')?.id ?? 'fov-fill');
-      this.map.addLayer(
-        { id: 'hillshade', type: 'hillshade', source: HILL_SRC, paint: { 'hillshade-method': 'igor', 'hillshade-exaggeration': 0.6 } },
-        before
-      );
-    } else if (!hill && this.map.getLayer('hillshade')) {
-      this.map.removeLayer('hillshade');
-    }
-    if (t3d) this.ensureDem(DEM_SRC);
-    this.map.setTerrain(t3d ? { source: DEM_SRC, exaggeration: 1 } : null);
   }
 
   private applyNightLights() {
