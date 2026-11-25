@@ -8,28 +8,24 @@ import { moonView } from '@core/astro/moonSim';
 import { moonInfo, position, semidiameterDeg } from '@core/astro/positions';
 import { airDensity } from '@core/astro/refraction';
 import { onlyChanged, skyAngleDeg, skyDriftPx } from '@core/drift';
-import { distance, height } from '@core/format';
-import { bearingDeg, distanceM, elevationAngleDeg, heightAtAngle, type LngLat } from '@core/geo/geodesy';
-import { pinFrame } from '@core/geo/pinFrame';
+import { type LngLat } from '@core/geo/geodesy';
 import { anyOccluder, MeshOccluder, type Occluder } from '@core/geo/meshOcclude';
 import { placeModel } from '@core/geo/modelPlace';
 import { PrismOccluder } from '@core/geo/prismOcclude';
 import { prismFrameKey, type PrismShading, type PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
-import { faceShade, facesToward, solidOf, type Solid } from '@core/geo/solids';
 import { effectiveOptics, fovDeg, frameElevationSpanDeg, frameFov, frameMm, tcFactor } from '@core/optics/fov';
 import { cameraBasis, discRadiusMm, projectDir, unproject, type Camera } from '@core/optics/projection';
 import { OverlayBatch } from '@core/viewfinder/gl/overlayGl';
 import type { PhotoLayer } from '@core/viewfinder/gl/photoGl';
 import type { BodyDisc, MoonShading, SceneGl } from '@core/viewfinder/gl/sceneGl';
 import { borderRects, fitFrame, fitViewports } from '@core/viewfinder/frameFit';
-import { behindBuilding, inView, surfaceAngle, toPx } from '@core/viewfinder/place';
+import { behindBuilding, toPx } from '@core/viewfinder/place';
 import { starNight } from '@core/viewfinder/skyGate';
 import { clamp, palette, smooth } from '@core/viewfinder/palette';
 import { applyNudge, nudgeForKey, silhouetteEdges, visibleRuns } from '@core/model/draw';
 import { modelMesh } from '@core/model/mesh';
 import { fitPhoto, photoHfovDeg } from '@core/photo/fit';
-import { MarkerShape, type SavedMarker } from '@core/plan';
 import { flatHorizonDeg } from '@core/terrain/los';
 import { meshAzPadDeg, meshElPadDeg, MESH_PX_PER_CELL, type MeshLevel } from '@core/terrain/mesh';
 import { occluded, type ViewProfile } from '@core/terrain/view';
@@ -43,13 +39,13 @@ import { modelsStore } from '@state/models';
 import { photoStore } from '@state/photo';
 import { settingsStore } from '@state/settings';
 import { skyStore } from '@state/sky';
-import { EYE_HEIGHT_M, meshEyeKeyFor, profileKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
+import { EYE_HEIGHT_M, meshEyeKeyFor, targetAngleFor, terrainStore } from '@state/terrain';
 import { viewfinderStore, type ViewWindow } from '@state/viewfinder';
 import { worldStore } from '@state/world';
 import { FONT_SANS } from '../inks';
 import { MODEL_ACCENT } from '../map/modelOverlay';
-import { CATEGORY_COLORS } from '../map/overlays';
 import { drawBodies, drawBodyLabels, drawPaths, type PathMemo } from './bodies';
+import { drawMarkers, drawTarget } from './markers';
 import { haloText, type Paint, type Scene, type Seen } from './paint';
 import { drawHorizon, drawRainbow, drawSky, type SkyMemo } from './skyMarks';
 
@@ -66,11 +62,6 @@ const OUTLINE_MAX_PX = 4000;
 /** Occlusion tests per frame for the outline; a dense mesh gets coarser steps. */
 const OUTLINE_SAMPLES = 6000;
 const upEighth = (k: number) => Math.ceil(k * 8 - 1e-6) / 8;
-/** Hex colour multiplied by a flat shade factor. */
-const shaded = (hex: string, k: number) => {
-  const n = Number.parseInt(hex.slice(1), 16);
-  return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`;
-};
 
 /** Synthetic camera view: terrain layers from the DEM sweep, sky, sun/moon/GC paths, target and markers. */
 export class ViewfinderController {
@@ -716,137 +707,6 @@ export class ViewfinderController {
     return p && { x: r.left + p.x, y: r.top + p.y, radiusPx, illumination: mv.illumination, eclipseLight: lunarEclipseLight(sc.time), umbra: lunarShadowCoverage(sc.time).umbra, shadow, limbFromUpDeg: (((mv.brightLimbPaDeg - mv.parallacticDeg) % 360) + 360) % 360, at: Date.now() };
   }
 
-  private drawTarget(sc: Scene) {
-    const w = worldStore.getState();
-    if (!w.pin2) return;
-    const t = terrainStore.getState();
-    const s = settingsStore.getState();
-    const fresh = t.profile && t.profileKey === profileKeyFor(w, s) ? t.profile : null;
-    const az = bearingDeg(w.pin, w.pin2);
-    const d = distanceM(w.pin, w.pin2);
-    const alt = targetAngleFor(w, s, t);
-    if (alt == null) return;
-    const p = toPx(sc, az, alt);
-    if (!inView(sc, p, 30)) return;
-    const { ctx } = this;
-    const blocked = fresh?.los.status === 'Blocked';
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
-    ctx.clip();
-    ctx.strokeStyle = blocked ? '#ff5c5c' : '#8fd18c';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y - 9);
-    ctx.lineTo(p.x + 9, p.y);
-    ctx.lineTo(p.x, p.y + 9);
-    ctx.lineTo(p.x - 9, p.y);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.font = `11px ${FONT_SANS}`;
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = ctx.strokeStyle;
-    const label = `Target · ${distance(d, s.units)}${w.pin2HeightM > 0 ? ` · ${height(w.pin2HeightM, s.units)}` : ''}${blocked ? ' · behind terrain' : ''}`;
-    const spills = p.x + 13 + ctx.measureText(label).width > sc.area.x + sc.area.w;
-    ctx.textAlign = spills ? 'right' : 'left';
-    haloText(ctx, label, spills ? p.x - 13 : p.x + 13, p.y);
-    ctx.restore();
-  }
-
-  private drawMarkers(sc: Scene) {
-    if (!compositionStore.getState().showMarkers) return;
-    const w = worldStore.getState();
-    const s = settingsStore.getState();
-    const grounds = terrainStore.getState().markerGroundM;
-    const { ctx } = this;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sc.area.x, sc.area.y, sc.area.w, sc.area.h);
-    ctx.clip();
-    ctx.font = `11px ${FONT_SANS}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    // Flat shading follows the picked light (or the sun at dusk), else a fixed key light from the camera's left.
-    const sunAz = sc.light?.azimuthDeg ?? (sc.sunAlt > -6 ? sc.sunAz : null);
-    const markers: SavedMarker[] = markersStore.getState().markers.filter((m) => m.showInViewfinder);
-    for (const m of markers) {
-      const d = distanceM(w.pin, m);
-      if (d < 5) continue;
-      const az = bearingDeg(w.pin, m);
-      const g = grounds[m.id];
-      const ground = g === undefined || Number.isNaN(g) ? null : g;
-      // Without ground data the marker sits on the visible terrain surface at its distance.
-      const baseAlt = ground != null ? elevationAngleDeg(d, ground - sc.eyeM) : surfaceAngle(sc, az, d);
-      if (baseAlt == null) continue;
-      const topAlt = ground != null ? elevationAngleDeg(d, ground + m.heightM - sc.eyeM) : baseAlt + (m.heightM / d) / D2R;
-      const base = toPx(sc, az, baseAlt);
-      const top = toPx(sc, az, topAlt);
-      const halfW = m.widthM > 0 ? (Math.atan(m.widthM / 2 / d) / D2R / sc.hfov) * sc.frame.w : 0;
-      if (!base || !top || !(inView(sc, base, 20 + halfW) || inView(sc, top, 20 + halfW))) continue;
-      const hidden = (!!sc.view && occluded(sc.view, az, topAlt, d)) || behindBuilding(this.occ, az, topAlt, d);
-      this.seen.markers[m.id] = hidden;
-      const color = CATEGORY_COLORS[m.category];
-      ctx.globalAlpha = hidden ? 0.4 : 1;
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 1.5;
-      const shape = m.shape ?? MarkerShape.Bar;
-      const solid = shape === MarkerShape.Bar ? null : solidOf(shape, { widthM: m.widthM, depthM: m.depthM ?? m.widthM, heightM: m.heightM, rotationDeg: m.rotationDeg ?? 0 });
-      if (solid?.faces.length) {
-        const groundM = ground ?? heightAtAngle(sc.eyeM, d, baseAlt);
-        this.drawSolid(sc, m, solid, d, groundM, color, sunAz ?? bearingDeg(m, w.pin) + 90);
-        ctx.fillStyle = color;
-      } else if (m.heightM > 0 || halfW > 0) {
-        ctx.beginPath();
-        ctx.rect(base.x - Math.max(halfW, 1), top.y, Math.max(halfW * 2, 2), Math.max(1, base.y - top.y));
-        ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.moveTo(top.x, top.y);
-      ctx.lineTo(top.x, top.y - 14);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(top.x, top.y - 17, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-      haloText(ctx, `${m.name} · ${distance(d, s.units)}`, top.x, top.y - 22);
-    }
-    ctx.restore();
-  }
-
-  /** Flat-shaded prism for a marker: every footprint vertex placed on the ground, faces painted back to front. */
-  private drawSolid(sc: Scene, m: SavedMarker, solid: Solid, distM: number, groundM: number, color: string, lightAzDeg: number) {
-    const { ctx } = this;
-    const pin = worldStore.getState().pin;
-    const toCam = bearingDeg(m, pin) * D2R;
-    const eye = { e: distM * Math.sin(toCam), n: distM * Math.cos(toCam), u: sc.eyeM - groundM };
-    const local = pinFrame(m);
-    const pts = solid.vertices.map((v) => {
-      const gp = local.fromEn(v.e, v.n);
-      const dv = distanceM(pin, gp);
-      if (dv < 1e-6) return null;
-      return toPx(sc, bearingDeg(pin, gp), elevationAngleDeg(dv, groundM + v.u - sc.eyeM));
-    });
-    // Vertices projected well past the frame are still drawn; only a wholly off-screen face is dropped.
-    const slack = Math.max(sc.frame.w, sc.frame.h) * 2;
-    ctx.lineWidth = 1;
-    for (const f of facesToward(solid, eye)) {
-      const poly = f.v.map((i) => pts[i]);
-      if (poly.some((p) => p == null)) continue;
-      if (poly.every((p) => !inView(sc, p, slack))) continue;
-      ctx.fillStyle = shaded(color, faceShade(f, lightAzDeg));
-      ctx.strokeStyle = color;
-      ctx.beginPath();
-      for (const [i, p] of poly.entries()) {
-        if (i === 0) ctx.moveTo(p!.x, p!.y);
-        else ctx.lineTo(p!.x, p!.y);
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
-    ctx.lineWidth = 1.5;
-  }
-
   /** One line under the frame: the lens on the left, whatever the view is waiting on to the right. */
   private drawHud(sc: Scene) {
     const { ctx } = this;
@@ -934,14 +794,14 @@ export class ViewfinderController {
     this.drawSceneGl(sc, this.sceneGl);
 
     drawBodyLabels(p, sc, labels);
-    this.drawMarkers(sc);
+    drawMarkers(p, sc);
     if (import.meta.env.DEV) {
       const dev = (window as unknown as { __scape?: Record<string, unknown> }).__scape;
       if (dev) dev.overlay = { ...this.seen, at: Date.now() };
       if (dev) dev.marks = { count: this.marks.count, probe: this.probe };
     }
     this.drawModelOutline(sc);
-    this.drawTarget(sc);
+    drawTarget(p, sc);
 
     // Frame border where the picture reaches past it, thirds grid and centre mark.
     ctx.save();
