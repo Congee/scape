@@ -113,7 +113,7 @@ MapKit JS offers only its own Look Around view, no camera or FOV control, no mes
 
 ```
 src/lib/
-  core/        pure TS, no I/O, unit-tested; viewfinder/gl is the one WebGL2 exception
+  core/        pure TS, no I/O, unit-tested; WebGL2 only in viewfinder/gl and sky/skyglowGl
     astro/     astronomy-engine wrappers: positions, day events, phases, GC, eclipses, finder search
     geo/       geodesy, coordinate formats, building tiles to prisms and roofs, sun-ceiling shadow mask
     terrain/   DEM decode and sampling, profile, horizon sweep, terrain mesh levels
@@ -135,6 +135,9 @@ src/lib/
 src/routes/    / (map), /viewfinder, /library, /settings
                (the offline data manager is the map panel's Offline tab, not a route)
 ```
+
+Layers: ui and routes → state → data → core, with worker protocols importable from ui, state and
+data, and workers → data, core. `core` imports nothing outside itself. `.oxlintrc.json` enforces it.
 
 Rendering: MapLibre owns the map canvas. Overlays are GeoJSON or image sources updated in place;
 DEM, building and satellite tiles arrive through `addProtocol` handlers; DEM tiles decode in a
