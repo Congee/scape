@@ -513,8 +513,11 @@ parts, and the map and viewfinder controllers split into layer and painter modul
   no Scape bugs. PlanIt's horizon-cloud last light is wrong (−7.5°/−6.1°; −5.0°/−4.0° is right).
   Modelling choices kept: rainbow 42.08°, shot count round(T/i), full moon EV 15, dark night EV −10.
 
+- **markstop on master**: every cell passes. The full 16-scene run twice lost its CDP session partway
+  (load 7–15), so the last scenes were run with its filter.
+
 Next: **verification owed on master**: `idle.sh` after the controller splits and the worker change,
-`markstop`, and the satellite smoke (needs a MapTiler key).
+and the satellite smoke (needs a MapTiler key).
 
 Waiting on the user:
 
