@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeObserver, SkyBody } from './bodies';
-import { litAreaFraction, MOON_NEW_MAX, moonPhaseName, moonTerminator, semidiameterDeg } from './positions';
+import { litAreaFraction, MOON_NEW_MAX, moonPhaseName, moonTerminator, position, semidiameterDeg } from './positions';
 
 describe('moon terminator', () => {
   it('covers exactly the illuminated fraction of the disc', () => {
@@ -59,5 +59,18 @@ describe('moonPhaseName', () => {
   });
   it('never calls a moon above the threshold new', () => {
     for (const f of [MOON_NEW_MAX, 0.05, 0.1]) for (const w of [true, false]) expect(moonPhaseName(f, w)).not.toBe('New moon');
+  });
+});
+
+describe('PlanIt sun positions', () => {
+  it('Washington Monument, 2017-05-26 4:00 PM EDT: sun +48.7°', () => {
+    const p = position(SkyBody.Sun, new Date('2017-05-26T20:00:00Z'), makeObserver({ lat: 38.890287, lng: -77.034811 }));
+    expect(Math.abs(p.altitude - 48.7)).toBeLessThan(0.15);
+  });
+
+  it('Artist Point, Yellowstone, 2015-08-13 9:36 AM MDT: sun +33.2° at 102.8°', () => {
+    const p = position(SkyBody.Sun, new Date('2015-08-13T15:36:30Z'), makeObserver({ lat: 44.7203, lng: -110.4793 }, 2400));
+    expect(Math.abs(p.altitude - 33.2)).toBeLessThan(0.2);
+    expect(Math.abs(p.azimuth - 102.8)).toBeLessThan(0.2);
   });
 });

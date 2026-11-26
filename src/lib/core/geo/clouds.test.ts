@@ -18,3 +18,20 @@ describe('cloud distance', () => {
     expect(cloudDistanceM(100, 5, 500)).toBeNull();
   });
 });
+
+describe('PlanIt cloud distance guide', () => {
+  const FT = 0.3048;
+  const MI = 1609.344;
+
+  it('a 20,000 ft cloud on the horizon is 173 mi away (no refraction)', () => {
+    expect(cloudDistanceM(20000 * FT, 0, 0, 0)! / MI).toBeCloseTo(173, 0);
+  });
+
+  it('a 13,000 ft cloud on the horizon is 140 mi away (no refraction)', () => {
+    expect(cloudDistanceM(13000 * FT, 0, 0, 0)! / MI).toBeCloseTo(140, 0);
+  });
+
+  it('standard refraction carries the 20,000 ft horizon out to 186 mi', () => {
+    expect(cloudDistanceM(20000 * FT, 0)! / MI).toBeCloseTo(186, 0);
+  });
+});

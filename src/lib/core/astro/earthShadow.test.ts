@@ -29,3 +29,30 @@ describe("Earth's shadow on clouds", () => {
     expect((last - sunset) / 60_000).toBeCloseTo(12.8, 0);
   });
 });
+
+describe('PlanIt cloud distance guide', () => {
+  const FT = 0.3048;
+  const R = 6371008.8;
+  const horizon = (h: number) => Math.sqrt(2 * R * h);
+  const lit = (h: number, sunAlt: number) => cloudSunlit(h, horizon(h), 270, { altitudeDeg: sunAlt, azimuthDeg: 270 });
+
+  it('a 20,000 ft cloud on the sunset horizon stays lit until the sun is −5.0°, not −7.5°', () => {
+    const h = 20000 * FT;
+    expect(lit(h, -4.98)).toBe(true);
+    expect(lit(h, -5.02)).toBe(false);
+    expect(lit(h, -7.5)).toBe(false);
+  });
+
+  it('a 13,000 ft cloud on the sunset horizon stays lit until the sun is −4.0°, not −6.1°', () => {
+    const h = 13000 * FT;
+    expect(lit(h, -4.0)).toBe(true);
+    expect(lit(h, -4.1)).toBe(false);
+    expect(lit(h, -6.1)).toBe(false);
+  });
+
+  it('a cloud 519 mi out (3 × the 20,000 ft horizon) blocks the sun for a 20,000 ft cloud on the horizon', () => {
+    const d = horizon(20000 * FT);
+    expect((3 * d) / 1609.344).toBeCloseTo(519, -1);
+    expect(sunAltitudeAtDeg(-5.0, 270, 270, 2 * d)).toBeCloseTo(0, 1);
+  });
+});

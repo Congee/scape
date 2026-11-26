@@ -245,3 +245,93 @@ Scape additionally corrects for earth curvature, which PlanIt does not. Not a de
 
 `SEMIDIAMETER_DEG` in `terrainEvents.ts` is unchanged: the mean value is fine for
 terrain rise/set bracketing, where the ≤ 0.014° difference is far below DEM resolution.
+
+## Phase 7 calculators: worked examples
+
+PlanIt's user guides 07–10 (2018 archive copies) give the worked examples; NASA covers
+the eclipse. Tests sit next to each calculator under a `PlanIt …` describe.
+
+[G07]: http://web.archive.org/web/20180826143414id_/http://planitphoto.com/pdfs/07.PlanIt-User-Guide-Timelapse-Sequence.pdf
+[G08]: http://web.archive.org/web/20180826155922id_/http://planitphoto.com/pdfs/08.PlanIt-User-Guide-Exposure.pdf
+[G09]: http://web.archive.org/web/20180826145337id_/http://planitphoto.com/pdfs/09.PlanIt-User-Guide-Light-Shadow-Rainbow-Tide.pdf
+[G10]: http://web.archive.org/web/20180826154823id_/http://planitphoto.com/pdfs/10.PlanIt-User-Guide-Cloud-Distance.pdf
+[LE2019]: https://eclipse.gsfc.nasa.gov/LEplot/LEplot2001/LE2019Jan21T.pdf
+
+| calculator | example | source | expected | Scape | Δ | verdict |
+|---|---|---|---|---|---|---|
+| exposure | EV 15 scene at 1/250, f/8, ISO 100 | [G08] | 1 stop over | 1.03 | 0.03 | match |
+| exposure | Sunny 16: f/16, 1/100, ISO 100 | [G08] | EV 14.6 | 14.64 | 0.04 | match |
+| exposure | Looney 11 / 8 / 5.6 at 1/100 | [G08] | 13.6 / 12.6 / 11.6 | 13.56 / 12.64 / 11.61 | ≤ 0.04 | match |
+| exposure | night skyline 30 s, f/8, ISO 100 | [G08] | EV 1 | 1.09 | 0.09 | match |
+| exposure | Milky Way 30 s, f/2.8, ISO 3200 | [G08] | EV −6.9 | −6.94 | 0.04 | match |
+| exposure scene | clear day, daytime | [G08] | 15 | 15 | 0 | match |
+| exposure scene | moon as subject | [G08] | 14 | 15 (full disc) | +1 | decision |
+| exposure scene | clear dark night | [G08] | −6 | −10 | −4 | decision |
+| exposure scene | sunset | [G08] | 5.5 | 12 | +6.5 | decision |
+| exposure scene | start of blue hour (−4°) | [G08] | 1.6 | 10 | +8.4 | decision |
+| sequence | 2019-01-21 lunar eclipse, 10 min over the umbral phase | [G07] | 20 shots | 20 | 0 | match |
+| eclipse (lunar) | 2019-01-21 contacts P1…P4 | [LE2019] | 02:36:30 … 07:48:00 | 02:36:27 … 07:48:02 | ≤ 3 s | match |
+| eclipse (lunar) | 2019-01-21 magnitudes | [LE2019] | 2.1684 / 1.1953 | 2.1681 / 1.1950 | 0.0003 | match |
+| rainbow | Lower Yellowstone Falls, sun +33.2° / 102.8° | [G09] | top +8.8° at 282.8° | +8.88° at 282.8° | 0.08° | match (radius) |
+| rainbow | same, feet | [G09] | 255.4° / 310.2° | 255.30° / 310.30° | 0.1° | match (radius) |
+| rainbow | no bow with the sun above 42° | [G09] | none | none above 42.08° | 0.08° | match (radius) |
+| sun position | Artist Point, 2015-08-13 9:36 MDT | [G09] | +33.2° / 102.8° | +33.05° / 102.70° | 0.15° | match (minute truncated) |
+| sun position | Washington Monument, 2017-05-26 16:00 EDT | [G09] | +48.7° | +48.79° | 0.09° | match |
+| shadow | 554 ft at +48.7° | [G09] | 486.18 ft | 486.70 ft | 0.5 ft | match (altitude rounding) |
+| cloud distance | 20,000 ft on the horizon | [G10] | 173 mi | 173.2 mi (k = 0) | 0.2 | match; 185.7 mi with k = 0.13 |
+| cloud distance | 13,000 ft on the horizon | [G10] | 140 mi | 139.6 mi (k = 0) | 0.4 | match; 149.7 mi with k = 0.13 |
+| cloud distance | furthest blocking cloud, 20,000 ft | [G10] | 519 mi | 3 · d_h = 519.5 mi | 0.5 | match (no output in Scape) |
+| Earth-shadow light | 20,000 ft horizon cloud last light | [G10] | sun −7.5° | −5.0° | 2.5° | PlanIt wrong |
+| Earth-shadow light | 13,000 ft horizon cloud last light | [G10] | sun −6.1° | −4.0° | 2.1° | PlanIt wrong |
+
+Counts: exposure 10 (6 match, 4 decisions), sequence 1/1, lunar eclipse 2/2, rainbow 3/3,
+sun position 2/2, shadow 1/1, cloud distance 3/3, Earth-shadow light 0/2 (PlanIt wrong).
+No Scape bugs found.
+
+### Modelling choices and tolerances
+
+- **Rainbow radius**: Scape derives 42.08° from n = 1.333; PlanIt uses a flat 42°.
+  Tolerance 0.15°.
+- **Cloud horizon refraction**: PlanIt's 173 / 140 mi are geometric (k = 0). Scape
+  defaults to k = 0.13, 7 % further. Tests pin both.
+- **Sequence shot count**: PlanIt counts ⌊T / i⌋ + 1 frames, Scape round(T / i), the
+  PhotoPills convention. They agree on this example (11,805 s / 600 s → 20) but differ
+  by one when T / i is near an integer, e.g. 3 h 20 min at 10 min: PlanIt 21, Scape 20.
+- **Shadow and sun positions**: PlanIt rounds the altitude to 0.1° and truncates the
+  minute. Tolerances: 1 ft, 0.15–0.2°.
+
+### PlanIt wrong: horizon-cloud last light
+
+PlanIt's −7.5° is the central angle of 3 · d_h (519 mi), the far point where the
+grazing ray climbs back to cloud height. The ray that lights a cloud at d_h grazes the
+ground at 2 · d_h, so the cloud goes dark when the sun is 2 · d_h / R below the
+observer's horizon: −5.0° at 20,000 ft and −4.0° at 13,000 ft. `cloudSunlit` agrees to
+0.02°.
+
+### Tides and eclipses
+
+Tides and solar eclipses were already pinned against the authorities, beyond the brief:
+NOAA CO-OPS October 2026 highs and lows at 7 harmonic stations (`tides/predict.test.ts`)
+and their subordinates (`tides/subordinate.test.ts`), and NASA JSEX local circumstances
+for 14 solar sites plus four lunar eclipses (`astro/eclipse.test.ts`). PlanIt's tide
+example (746 m, 15 results) names no station, so it can't be reproduced. Time-lapse has
+no PlanIt numeric example; the existing PhotoPills tests stand.
+
+### Gaps
+
+1. No furthest-blocking-cloud distance (3 · d_h) output.
+2. The "stays lit until" readout gives the overhead cloud value (−2.5° at 20,000 ft),
+   not the horizon cloud (−5.0°).
+3. No night-skyline scene row (PlanIt EV 1).
+
+### Decisions for the user
+
+1. **Moon disc EV**: Scape's full disc is 15 (ANSI); PlanIt 14, Looney 11 13.6.
+   Recommend keeping 15.
+2. **Dark night EV**: Scape −10 (ANSI, matches the 0.002 lux of a moonless sky) vs
+   PlanIt −6 and the Milky Way rule −6.9, both practical exposures. Keep −10 or move to
+   the shooting value.
+3. **Twilight scene EVs**: Scape's sunset 12 and −4° 10 are sky-as-subject values;
+   PlanIt's 5.5 and 1.6 sit near the ambient light (≈ 7.3 at 400 lux, ≈ 0.4 at 3.4 lux).
+   Recommend adding a landscape-lit row from lux; ties into the open field-readings item.
+4. **Optional**: add horizon-cloud last light and the 3 · d_h distance (gaps 1–2).

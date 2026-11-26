@@ -54,3 +54,18 @@ describe('rainbow geometry', () => {
     expect(arcWindow(250, 12, PRIMARY_DEG, 70, -12, 50)).toEqual([-Math.PI, Math.PI]);
   });
 });
+
+describe('PlanIt rainbow guide', () => {
+  it('Lower Yellowstone Falls from Artist Point, sun +33.2° at 102.8°: top +8.8° at 282.8°, feet at 255.4° and 310.2°', () => {
+    const top = rainbowTop(102.8, 33.2);
+    expect(top.possible).toBe(true);
+    expect(Math.abs(top.altitudeDeg - 8.8)).toBeLessThan(0.15);
+    expect(top.azimuthDeg).toBeCloseTo(282.8, 6);
+    expect(Math.abs(top.azimuthDeg - top.halfSpanDeg - 255.4)).toBeLessThan(0.15);
+    expect(Math.abs(top.azimuthDeg + top.halfSpanDeg - 310.2)).toBeLessThan(0.15);
+  });
+
+  it('no rainbow once the sun is above 42°', () => {
+    expect(rainbowTop(180, 42.2).possible).toBe(false);
+  });
+});

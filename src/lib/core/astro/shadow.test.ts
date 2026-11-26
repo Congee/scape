@@ -19,3 +19,9 @@ describe('shadowLengthM', () => {
     expect(shadowLengthM(0, 30)).toBeNull();
   });
 });
+
+describe('PlanIt shadow guide', () => {
+  it('the 554 ft Washington Monument with the sun at +48.7° casts a 486 ft shadow', () => {
+    expect(Math.abs(shadowLengthM(554, 48.7)! - 486.18)).toBeLessThan(1);
+  });
+});

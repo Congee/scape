@@ -32,3 +32,12 @@ describe('time-lapse calculator', () => {
     expect(sequenceTime(1000, 2, 10, -1)).toBe(19000);
   });
 });
+
+describe('PlanIt sequence guide', () => {
+  it('2019-01-21 lunar eclipse, 7:33 PM to 10:50 PM at a 10 min interval is 20 shots', () => {
+    const eventS = 3 * 3600 + 16 * 60 + 45;
+    expect(timelapse({ intervalS: 600, eventS, clipS: 0, fps: 1 }, TimelapseSolve.Clip).shots).toBe(20);
+    const start = Date.UTC(2019, 0, 21, 3, 33, 54);
+    expect(sequenceTime(start, 600, 20, 19)).toBeLessThanOrEqual(start + eventS * 1000);
+  });
+});

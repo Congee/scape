@@ -117,3 +117,50 @@ describe('scene suggestion', () => {
     expect(sceneExposure({ sunAltDeg: 50, ...none }).some((r) => r.label.startsWith('Rainbow'))).toBe(false);
   });
 });
+
+describe('PlanIt exposure guide', () => {
+  const none = { moonAltDeg: -20, moonIllumination: 0 };
+
+  it('an EV 15 scene shot at 1/250 s, f/8, ISO 100 is 1 stop over', () => {
+    expect(15 - ev100(8, 1 / 250, 100)).toBeCloseTo(1, 1);
+  });
+
+  it('Sunny 16: f/16, 1/100 s, ISO 100 is EV 14.6', () => {
+    expect(ev100(16, 1 / 100, 100)).toBeCloseTo(14.6, 1);
+  });
+
+  it('Looney 11, 8, 5.6: full, gibbous and crescent moon at 1/100 s, ISO 100', () => {
+    expect(ev100(11, 1 / 100, 100)).toBeCloseTo(13.6, 1);
+    expect(ev100(8, 1 / 100, 100)).toBeCloseTo(12.6, 1);
+    expect(ev100(5.6, 1 / 100, 100)).toBeCloseTo(11.6, 1);
+  });
+
+  it('night skyline rule: 30 s, f/8, ISO 100 is EV 1', () => {
+    expect(ev100(8, 30, 100)).toBeCloseTo(1, 0);
+  });
+
+  it('Milky Way rule: 30 s, f/2.8, ISO 3200 is EV −6.9; Scape tabulates the core 3 stops darker', () => {
+    const mw = ev100(2.8, 30, 3200);
+    expect(mw).toBeCloseTo(-6.9, 1);
+    expect(mw - sceneExposure({ sunAltDeg: -30, ...none })[0].ev).toBeCloseTo(3.1, 1);
+  });
+
+  it('scene mode, a clear day at daytime: EV 15', () => {
+    expect(sceneExposure({ sunAltDeg: 45, ...none })[0].ev).toBe(15);
+  });
+
+  it('scene mode, the moon as the subject: EV 14; Scape tabulates the full disc a stop brighter', () => {
+    const disc = sceneExposure({ sunAltDeg: -30, moonAltDeg: 50, moonIllumination: 1 }).find((r) => r.label === 'Moon disc, full');
+    expect(disc?.ev).toBe(14 + 1);
+  });
+
+  it('scene mode, a clear dark night: EV −6; Scape tabulates −10, the 0.002 lux of a moonless sky', () => {
+    expect(sceneExposure({ sunAltDeg: -30, ...none })[0].ev).toBe(-6 - 4);
+    expect(Math.log2((0.002 * 100) / 250)).toBeCloseTo(-10.3, 1);
+  });
+
+  it('scene mode, sunset EV 5.5 and the start of the blue hour EV 1.6: Scape reads the sunset-sky rows, 6–8 stops brighter', () => {
+    expect(sceneExposure({ sunAltDeg: -0.5, ...none })[0].ev - 5.5).toBe(6.5);
+    expect(sceneExposure({ sunAltDeg: -4, ...none })[0].ev - 1.6).toBeCloseTo(8.4, 9);
+  });
+});
