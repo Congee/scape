@@ -8,6 +8,8 @@ import { BUILDINGS_DEFAULT_MAX_TILES, BUILDINGS_ZOOM, buildingsByDefault } from 
 import { offlineSources, SAT_OFFLINE_MIN_ZOOM, SAT_OFFLINE_SOURCE, SAT_OFFLINE_ZOOMS } from '@core/tiles/satellite';
 import { PmFlavor } from '@data/basemaps';
 import { buildingsRelease, OVERTURE_BUILDINGS_RELEASE, overtureBuildingsUrl } from '@data/buildingTiles';
+import { onReleaseChange } from '@data/releases';
+import { ReleaseSource } from '@core/tiles/latestRelease';
 import { BASEMAP_DEFAULT_MAX_TILES, basemapByDefault, isPmtilesUrl, OFM_STYLE, OFM_TILEJSON } from '@data/openfreemap';
 import { PROTOMAPS_BUILD } from '@data/protomaps';
 import { demZoom, TERRAIN_TILE_URL } from '@data/terrainTiles';
@@ -126,6 +128,7 @@ export function OfflinePanel() {
     if (!s.loaded) void s.load();
     void s.refreshGibs();
     void buildingsRelease().then(setRelease);
+    return onReleaseChange((source, r) => source === ReleaseSource.Overture && setRelease(r));
   }, []);
 
   const o = offlineStore.getState();

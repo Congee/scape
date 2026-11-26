@@ -10,7 +10,8 @@ import type { Lod2Source } from '@core/lod2/regions';
 import type { BuildingBatch } from '@core/geo/buildingBatch';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type ReleaseSync, type RowsAtRequest, type StopRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from '@workers/buildings.protocol';
 import { addLod2Tile, dropUploadedLod2, finishLod2, holdLod2Tile, lod2HeldUrls, lod2Store, resetLod2 } from './lod2';
-import { buildingsRelease } from '@data/buildingTiles';
+import { ReleaseSource } from '@core/tiles/latestRelease';
+import { onReleaseChange, releaseGone, sessionRelease } from '@data/releases';
 
 /** Placed tiles kept in the store; beyond this the farthest from the pin are dropped. */
 const MAX_TILES = 96;
@@ -103,15 +104,36 @@ function evict(tiles: Map<string, PrismPlaced>, pin: LngLat): Map<string, PrismP
   return tiles;
 }
 
-function postRelease(w: Worker): void {
-  void buildingsRelease().then((release) => w.postMessage({ kind: BuildingsKind.Release, id: ++seq, release } satisfies ReleaseSync));
+function postRelease(w: Worker, source: ReleaseSource, release: string): void {
+  w.postMessage({ kind: BuildingsKind.Release, id: ++seq, source, release } satisfies ReleaseSync);
 }
+
+/** Sources resolve independently, so a slow publisher holds up only its own reads. */
+function postReleases(w: Worker): void {
+  for (const source of Object.values(ReleaseSource)) void sessionRelease(source).then((release) => postRelease(w, source, release));
+}
+
+/** A release replaced mid-session (its predecessor 404'd): hand it over and re-ask for what was built on it. */
+onReleaseChange((source, release) => {
+  for (const w of [worker, maskWorker]) if (w) postRelease(w, source, release);
+  if (worker && lastLod2) {
+    lod2Key = '';
+    requestLod2(...lastLod2);
+  }
+  lastKey = '';
+  refreshBuildings();
+  if (maskWorker && lastMask?.buildings) {
+    maskId = ++seq;
+    maskWorker.postMessage({ ...lastMask, id: maskId } satisfies MaskRequest);
+  }
+});
 
 function ensureWorker(): Worker {
   if (worker) return worker;
   worker = new Worker(new URL('../workers/buildings.worker.ts', import.meta.url), { type: 'module' });
   worker.addEventListener('message', (e: MessageEvent<BuildingsResponse>) => {
     const res = e.data;
+    if (res.kind === BuildingsKind.Gone) return releaseGone(res.source, res.release);
     const waiter = waiters.get(res.id);
     if (waiter) {
       waiters.delete(res.id);
@@ -155,7 +177,7 @@ function ensureWorker(): Worker {
   });
   if (modelsSync) worker.postMessage(modelsSync);
   if (geoidSync) worker.postMessage(geoidSync);
-  postRelease(worker);
+  postReleases(worker);
   return worker;
 }
 
@@ -164,6 +186,7 @@ function ensureMaskWorker(): Worker {
   maskWorker = new Worker(new URL('../workers/buildings.worker.ts', import.meta.url), { type: 'module', name: MASK_WORKER_NAME });
   maskWorker.addEventListener('message', (e: MessageEvent<BuildingsResponse>) => {
     const res = e.data;
+    if (res.kind === BuildingsKind.Gone) return releaseGone(res.source, res.release);
     if (res.id === maskId) maskAnswered = res.id;
     if (res.kind === BuildingsKind.Shade) {
       const { centre, originE, originN, nx, ny, cellM, mask, lod2 } = res;
@@ -176,7 +199,7 @@ function ensureMaskWorker(): Worker {
   });
   if (modelsSync) maskWorker.postMessage(modelsSync);
   if (geoidSync) maskWorker.postMessage(geoidSync);
-  postRelease(maskWorker);
+  postReleases(maskWorker);
   return maskWorker;
 }
 

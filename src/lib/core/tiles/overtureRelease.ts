@@ -4,6 +4,9 @@ export const OVERTURE_TILES_BUCKET = 'https://overturemaps-extras-us-west-2.s3.u
 /** Keys rather than prefixes: a release directory can appear before its archive finishes uploading. */
 export const OVERTURE_TILES_LISTING = `${OVERTURE_TILES_BUCKET}/?list-type=2&prefix=tiles/`;
 
+/** Fallback when the bucket cannot be listed; Overture deletes all but its last two releases. */
+export const OVERTURE_BUILDINGS_RELEASE = '2026-11-18.0';
+
 export const overtureTilesUrl = (release: string, theme: string): string => `${OVERTURE_TILES_BUCKET}/tiles/${release}/${theme}.pmtiles`;
 
 const RELEASE = /^(\d{4}-\d{2}-\d{2})\.(\d+)$/;

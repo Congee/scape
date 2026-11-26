@@ -18,7 +18,8 @@ import { lngLatToTilePixel, tileKey, tilePixelToLngLat, tilesInBounds, zoomForRe
 import { InFlight } from '@core/inFlight';
 import { yieldTurn } from '@data/yieldTurn';
 import { abandonBuildingFetches, awaitBuildingsRelease, fetchBuildingBatch, setBuildingsRelease, setBuildingTileCacheSize, type DecodedBuildings } from '@data/buildingTiles';
-import { abandonLod2Fetches, fetchLod2Tile, setLod2Geoid, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
+import { abandonLod2Fetches, awaitLod2Releases, fetchLod2Tile, setLod2Geoid, setLod2Release, setLod2TileCacheSize, walkRegion } from '@data/lod2Tiles';
+import { ReleaseSource } from '@core/tiles/latestRelease';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
 import type { BuildingBatch } from '@core/geo/buildingBatch';
 import { BuildingsKind, MASK_WORKER_NAME, type BuildingsRequest, type BuildingsResponse, type GeoidSync, type GroundAtRequest, type HeightAtRequest, type Lod2Placed, type Lod2Request, type MaskRequest, type ModelsSync, type PrismPlaced, type RowsAtRequest, type SuppressedIdsRequest, type TilesRequest, type WorkerModel } from './buildings.protocol';
@@ -28,7 +29,9 @@ const scope = self as unknown as DedicatedWorkerGlobalScope;
 const isMask = scope.name === MASK_WORKER_NAME;
 const dem = new DemCache(demCacheTiles(isMask ? 320 : 512));
 if (isMask) setBuildingTileCacheSize(96);
-awaitBuildingsRelease();
+const gone = (source: ReleaseSource, release: string): void => scope.postMessage({ kind: BuildingsKind.Gone, id: 0, source, release } satisfies BuildingsResponse);
+awaitBuildingsRelease((release) => gone(ReleaseSource.Overture, release));
+awaitLod2Releases(gone);
 setLod2TileCacheSize(isMask ? 24 : 12);
 /** Zoom of the buildings archive; `tilesForWedge` enumerates the same level. */
 const BUILDINGS_ZOOM = 14;
@@ -714,7 +717,8 @@ scope.addEventListener('message', (e: MessageEvent<BuildingsRequest>) => {
     return;
   }
   if (req.kind === BuildingsKind.Release) {
-    setBuildingsRelease(req.release);
+    if (req.source === ReleaseSource.Overture) setBuildingsRelease(req.release);
+    else setLod2Release(req.source, req.release);
     return;
   }
   if (req.kind === BuildingsKind.Stop) {

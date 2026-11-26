@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOD2_RETRY_MS } from '@core/lod2/failures';
 import type { Lod2Region } from '@core/lod2/regions';
 import type { WalkContent } from '@core/lod2/tileset';
-import { abandonLod2Fetches, fetchLod2Tile, walkRegion } from './lod2Tiles';
+import { ReleaseSource } from '@core/tiles/latestRelease';
+import { abandonLod2Fetches, awaitLod2Releases, fetchLod2Tile, setLod2Release, walkRegion } from './lod2Tiles';
 import { yieldTurn } from './yieldTurn';
 
 const REGION = { id: 'nl', name: 'Test', tileset: '', bbox: [0, 0, 1, 1], licence: '', attribution: '', attributionUrl: '', geoidM: 0 } as unknown as Lod2Region;
@@ -157,5 +158,21 @@ describe('fetchLod2Tile wanted', () => {
     serve(() => new Response(null, { status: 404 }));
     expect(await fetchLod2Tile(content(u), REGION)).toBeNull();
     expect(calls(u)).toBe(1);
+  });
+});
+
+describe('walkRegion following a release', () => {
+  it('walks the release the main thread sent and reports it gone when its root 404s', async () => {
+    const gone = vi.fn();
+    awaitLod2Releases(gone);
+    const base = url('');
+    const region = { ...REGION, tileset: `${base}pinned.json`, release: { source: ReleaseSource.Swiss, fallback: 'pinned', tileset: (r: string) => `${base}${r}.json` } };
+    const walk = walkRegion(region, VIEW);
+    serve(() => new Response(null, { status: 404 }));
+    setLod2Release(ReleaseSource.Swiss, 'r2');
+    expect(await walk).toEqual([]);
+    expect(calls(`${base}r2.json`)).toBe(1);
+    expect(calls(`${base}pinned.json`)).toBe(0);
+    expect(gone).toHaveBeenCalledWith(ReleaseSource.Swiss, 'r2');
   });
 });

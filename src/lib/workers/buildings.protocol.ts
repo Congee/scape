@@ -5,8 +5,9 @@ import type { PrismSlots } from '@core/geo/prismOcclude';
 import type { PrismTile } from '@core/geo/prismRaster';
 import type { SurfaceMesh } from '@core/geo/surfaces';
 import type { Lod2Source } from '@core/lod2/regions';
+import type { ReleaseSource } from '@core/tiles/latestRelease';
 
-export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done', Geoid: 'Geoid', Release: 'Release', Stop: 'Stop' } as const;
+export const BuildingsKind = { Tiles: 'Tiles', Done: 'Done', Error: 'Error', HeightAt: 'HeightAt', Height: 'Height', Mask: 'Mask', Shade: 'Shade', Models: 'Models', RowsAt: 'RowsAt', Rows: 'Rows', SuppressedIds: 'SuppressedIds', Ids: 'Ids', GroundAt: 'GroundAt', Ground: 'Ground', Lod2: 'Lod2', Lod2Tile: 'Lod2Tile', Lod2Done: 'Lod2Done', Geoid: 'Geoid', Release: 'Release', Gone: 'Gone', Stop: 'Stop' } as const;
 export type BuildingsKind = (typeof BuildingsKind)[keyof typeof BuildingsKind];
 
 /** Building volumes for the wedge the viewfinder is looking into; one Tiles response per tile, then Done. */
@@ -76,10 +77,11 @@ export interface GeoidSync {
   key: string;
 }
 
-/** The Overture release the main thread listed; live tile reads wait for it. No response. */
+/** One source's release for this session, resolved on the main thread; reads from that source wait for it. No response. */
 export interface ReleaseSync {
   kind: typeof BuildingsKind.Release;
   id: number;
+  source: ReleaseSource;
   release: string;
 }
 
@@ -160,7 +162,9 @@ export type BuildingsResponse =
   | { kind: typeof BuildingsKind.Shade; id: number; centre: LngLat; originE: number; originN: number; nx: number; ny: number; cellM: number; mask: Uint8Array; lod2: Lod2Source[]; tallM: number; ms: number }
   | { kind: typeof BuildingsKind.Lod2Tile; id: number; n: number; tile: Lod2Placed }
   | { kind: typeof BuildingsKind.Lod2Done; id: number; urls: string[]; tris: number; missing: number; error: string | null }
-  | { kind: typeof BuildingsKind.Error; id: number; error: string };
+  | { kind: typeof BuildingsKind.Error; id: number; error: string }
+  /** Unsolicited: the publisher 404'd this release's archive or root tileset. */
+  | { kind: typeof BuildingsKind.Gone; id: number; source: ReleaseSource; release: string };
 
 /** One Overture tile's prisms, placed and indexed in the worker. */
 export interface PrismPlaced {

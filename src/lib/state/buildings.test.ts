@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BuildingsKind, type BuildingsResponse, type MaskRequest } from '@workers/buildings.protocol';
 import { requestShadowMask, shadowMaskPending } from './buildings';
 
+vi.mock('@data/releases', () => ({ sessionRelease: () => Promise.resolve('r'), onReleaseChange: () => () => {}, releaseGone: () => {} }));
+
 const shade = (r: MaskRequest): BuildingsResponse => ({ kind: BuildingsKind.Shade, id: r.id, centre: r.centre, originE: r.originE, originN: r.originN, nx: r.nx, ny: r.ny, cellM: r.cellM, mask: new Uint8Array(r.nx * r.ny), lod2: [], tallM: 0, ms: 1 });
 
 describe('shadowMaskPending', () => {

@@ -2,15 +2,15 @@ import { VectorTile } from '@mapbox/vector-tile';
 import { FetchSource, PMTiles } from 'pmtiles';
 import { PbfReader } from 'pbf';
 import { decodeBuildings, type DecodedBuildings, type VectorLayerLike } from '@core/geo/buildingTiles';
-import { newestOvertureRelease, OVERTURE_TILES_LISTING, overtureTilesUrl } from '@core/tiles/overtureRelease';
+import { Handoff, ReleaseSource } from '@core/tiles/latestRelease';
+import { OVERTURE_BUILDINGS_RELEASE, overtureTilesUrl } from '@core/tiles/overtureRelease';
 import { tileKey, type TileCoord } from '@core/terrain/tiles';
 import { localBuildings, readThrough } from './localTiles';
+import { releaseGone, sessionRelease } from './releases';
 import { yieldTurn } from './yieldTurn';
 
-/** Fallback when the bucket listing cannot be read; Overture deletes all but its last two releases. */
-export const OVERTURE_BUILDINGS_RELEASE = '2026-11-18.0';
+export { OVERTURE_BUILDINGS_RELEASE };
 export const overtureBuildingsUrl = (r: string): string => overtureTilesUrl(r, 'buildings');
-const LISTING_TIMEOUT_MS = 5000;
 export const BUILDINGS_ATTRIBUTION = '© OpenStreetMap contributors, © Overture Maps Foundation';
 
 let maxCachedTiles = 128;
@@ -23,50 +23,49 @@ export function setBuildingTileCacheSize(n: number): void {
 
 export type { DecodedBuildings };
 
-let listed: Promise<string> | null = null;
-let provide: ((r: string) => void) | null = null;
+/** Set in a worker, whose release comes from the main thread. */
+let handoff: Handoff<string> | null = null;
+let reportGone = (r: string): void => releaseGone(ReleaseSource.Overture, r);
 
-async function listRelease(): Promise<string> {
-  if (navigator.onLine === false) return OVERTURE_BUILDINGS_RELEASE;
-  try {
-    const res = await fetch(OVERTURE_TILES_LISTING, { signal: AbortSignal.timeout(LISTING_TIMEOUT_MS) });
-    return (res.ok && newestOvertureRelease(await res.text(), 'buildings')) || OVERTURE_BUILDINGS_RELEASE;
-  } catch {
-    return OVERTURE_BUILDINGS_RELEASE;
-  }
-}
-
-/** The newest Overture release, listed once per session; never rejects. Workers get it from the main thread. */
+/** This load's Overture release; never rejects. */
 export function buildingsRelease(): Promise<string> {
-  listed ??= listRelease();
-  return listed;
+  return handoff ? handoff.get() : sessionRelease(ReleaseSource.Overture);
 }
 
-/** A worker's live reads wait for `setBuildingsRelease` rather than listing the bucket again. */
-export function awaitBuildingsRelease(): void {
-  listed ??= new Promise((resolve) => (provide = resolve));
+/** A worker's live reads wait for `setBuildingsRelease`; a release that 404s goes to `gone`. */
+export function awaitBuildingsRelease(gone: (release: string) => void): void {
+  handoff ??= new Handoff();
+  reportGone = gone;
 }
 
 export function setBuildingsRelease(r: string): void {
-  if (provide) provide(r);
-  else listed = Promise.resolve(r);
-  provide = null;
+  (handoff ??= new Handoff()).set(r);
 }
 
 /** The 180 GB planet archive is never downloaded whole: tiles are read with HTTP range requests. */
-let archive: Promise<PMTiles> | null = null;
-const liveArchive = (): Promise<PMTiles> => (archive ??= buildingsRelease().then((r) => new PMTiles(new FetchSource(overtureBuildingsUrl(r)))));
+let archive: { release: string; pm: PMTiles } | null = null;
+
+async function liveArchive(): Promise<{ release: string; pm: PMTiles }> {
+  const r = await buildingsRelease();
+  if (archive?.release !== r) archive = { release: r, pm: new PMTiles(new FetchSource(overtureBuildingsUrl(r))) };
+  return archive;
+}
+
+/** pmtiles reports an HTTP status only in its message. */
+export const isGone = (e: unknown): boolean => e instanceof Error && e.message === 'Bad response code: 404';
 
 /** Decompressed MVT bytes of one tile: an offline region first, the live archive otherwise; null when empty. */
 export function buildingTileBytes(z: number, x: number, y: number, signal?: AbortSignal): Promise<ArrayBuffer | null> {
   return readThrough(
     () => localBuildings.tile(z, x, y),
     async () => {
+      const a = await liveArchive();
       try {
-        return (await (await liveArchive()).getZxy(z, x, y, signal))?.data ?? null;
+        return (await a.pm.getZxy(z, x, y, signal))?.data ?? null;
       } catch (e) {
         // pmtiles keeps a rejected header or directory, so a fetch made offline would fail for good.
-        if (!signal?.aborted) archive = null;
+        if (!signal?.aborted && archive === a) archive = null;
+        if (isGone(e)) reportGone(a.release);
         throw e;
       }
     }

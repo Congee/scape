@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Overture buildings smoke: the live release resolves once, then the map and the viewfinder show buildings with no 404.
+# Overture buildings smoke: a first load resolves the release once, a reload takes the remembered one without asking, and the map and viewfinder show buildings with no 404.
 # Usage: scripts/smoke/overture.sh [port] [cdp] [shot-dir]
 set -uo pipefail
 
@@ -57,11 +57,22 @@ check "viewfinder: Overture prisms, Hudson Yards at 200 mm" "$([ "${v:-0}" -gt 0
 ab screenshot "$SHOTS/viewfinder-nyc.png" >/dev/null
 
 lists=$(js "$BUCKET.filter(e=>e.name.includes('list-type=2')).length")
-check "release listed once per session" "$([ "$lists" = 1 ] && echo 1 || echo 0)" "$lists listing requests"
+check "first load lists the release once" "$([ "$lists" = 1 ] && echo 1 || echo 0)" "$lists listing requests"
 used=$(js "[...new Set($BUCKET.map(e=>/tiles\/([^/]+)\/buildings/.exec(e.name)?.[1]).filter(Boolean))].join(' ')")
 check "map reads the newest release" "$([ -n "$newest" ] && [ "$used" = "$newest" ] && echo 1 || echo 0)" "read '$used', newest '$newest'"
 bad=$(js "$BUCKET.filter(e=>e.responseStatus>=400).length")
 check "no failed bucket request" "$([ "$bad" = 0 ] && echo 1 || echo 0)" "$bad failed"
+
+# Reload with every release remembered: nothing may ask a publisher before (or after) the first building tile.
+ASKS="performance.getEntriesByType('resource').filter(e=>/list-type=2|swissbuildings3d\\.3d\\/v1\\/tileset\\.json|3dbag\\.nl\\/latest\\//.test(e.name))"
+remembered=$(js "Object.keys(JSON.parse(localStorage.getItem('scape.releases')??'{}')).sort().join(' ')")
+ab --init-script "$DIR/raf-shim.js" --init-script "$DIR/overture-init.js" open "$BASE/" >/dev/null
+poll "!!window.__scape && !!window.__scapeMap" 30
+js "(()=>{const w=__scape.world.getState(); w.setPin({lat:${MAP%,*},lng:${MAP#*,}}); w.setPin2(null); __scapeMap.jumpTo({center:[${MAP#*,},${MAP%,*}],zoom:15.5,pitch:0}); return 1})()" >/dev/null
+poll "__scapeMap.loaded() && $Q>0" 40
+tiles=$(js "$BUCKET.filter(e=>e.name.includes('buildings.pmtiles')).length")
+asks=$(js "$ASKS.map(e=>e.name).join(' ')")
+check "reload: remembered releases, no listing before the first tile" "$([ "$remembered" = 'Bag3d Overture Swiss' ] && [ "${tiles:-0}" -gt 0 ] && [ -z "$asks" ] && echo 1 || echo 0)" "remembered '$remembered', $tiles tile reads, asks '${asks:-none}'"
 
 echo "| check | result | detail |"
 echo "|---|---|---|"

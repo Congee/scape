@@ -1,6 +1,8 @@
 /** Official LoD2 building sets published as public 3D Tiles (CORS open, no key). */
 
 import type { LngLat } from '@core/geo/geodesy';
+import { ReleaseSource } from '@core/tiles/latestRelease';
+import { BAG3D_RELEASE, bag3dTileset, SWISS_RELEASE, swissTileset } from './releases';
 
 export const Lod2Source = { Bag3d: 'Bag3d', Swiss: 'Swiss', Plateau: 'Plateau' } as const;
 export type Lod2Source = (typeof Lod2Source)[keyof typeof Lod2Source];
@@ -8,8 +10,10 @@ export type Lod2Source = (typeof Lod2Source)[keyof typeof Lod2Source];
 export interface Lod2Region {
   id: Lod2Source;
   name: string;
-  /** Root tileset.json. */
+  /** Root tileset.json; for a region that follows its publisher, the fallback release's. */
   tileset: string;
+  /** Set when the region follows its publisher's newest release, which the main thread resolves. */
+  release?: { source: ReleaseSource; fallback: string; tileset: (release: string) => string };
   /** Coverage, lng0, lat0, lng1, lat1. */
   bbox: readonly [number, number, number, number];
   licence: string;
@@ -49,7 +53,8 @@ export const LOD2_REGIONS: readonly Lod2Region[] = [
   {
     id: Lod2Source.Bag3d,
     name: '3DBAG (Netherlands)',
-    tileset: 'https://data.3dbag.nl/v20250903/cesium3dtiles/lod22/tileset.json',
+    tileset: bag3dTileset(BAG3D_RELEASE),
+    release: { source: ReleaseSource.Bag3d, fallback: BAG3D_RELEASE, tileset: bag3dTileset },
     bbox: [3.2, 50.7, 7.3, 53.6],
     licence: 'CC BY 4.0',
     attribution: '© 3DBAG by tudelft3d and 3DGI, CC BY 4.0',
@@ -61,7 +66,8 @@ export const LOD2_REGIONS: readonly Lod2Region[] = [
   {
     id: Lod2Source.Swiss,
     name: 'swissBUILDINGS3D (Switzerland)',
-    tileset: 'https://3d.geo.admin.ch/ch.swisstopo.swissbuildings3d.3d/v1/20260520/tileset.json',
+    tileset: swissTileset(SWISS_RELEASE),
+    release: { source: ReleaseSource.Swiss, fallback: SWISS_RELEASE, tileset: swissTileset },
     bbox: [5.96, 45.82, 10.49, 47.81],
     licence: 'OGD (free, attribution)',
     attribution: '© swisstopo',

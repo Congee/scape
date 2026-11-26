@@ -6,6 +6,7 @@ import { fetchFault, httpFault, Lod2Failures, Lod2Fault } from '@core/lod2/failu
 import { lod2Tile, type Lod2Tile } from '@core/lod2/tile';
 import { walkTileset, type TilesetJson, type WalkContent, type WalkView } from '@core/lod2/tileset';
 import type { Lod2Region } from '@core/lod2/regions';
+import { Handoff, type ReleaseSource } from '@core/tiles/latestRelease';
 import { gltfUsesDraco, readGlbWorld, type DracoDecoder } from '@core/model/gltf';
 import { readGeoid } from './geoid';
 import { yieldTurn } from './yieldTurn';
@@ -26,6 +27,36 @@ const tilesetInflight = new Map<string, Promise<void>>();
 /** Failed tilesets and tiles; a failed tileset also stays out of the rest of its walk. */
 const faults = new Lod2Failures(() => performance.now());
 
+/** Releases handed over by the main thread; without them, as in tests, regions walk their fallback. */
+let releases: Map<ReleaseSource, Handoff<string>> | null = null;
+let reportGone: (source: ReleaseSource, release: string) => void = () => {};
+/** Root tileset URL to the release it serves, so a 404 there reports the release gone. */
+const roots = new Map<string, { source: ReleaseSource; release: string }>();
+
+/** Walks of following regions wait for `setLod2Release`; a release whose root 404s goes to `gone`. */
+export function awaitLod2Releases(gone: (source: ReleaseSource, release: string) => void): void {
+  releases ??= new Map();
+  reportGone = gone;
+}
+
+export function setLod2Release(source: ReleaseSource, r: string): void {
+  releases ??= new Map();
+  let h = releases.get(source);
+  if (!h) releases.set(source, (h = new Handoff()));
+  h.set(r);
+}
+
+async function rootOf(region: Lod2Region): Promise<string> {
+  const follow = region.release;
+  if (!follow || !releases) return region.tileset;
+  let h = releases.get(follow.source);
+  if (!h) releases.set(follow.source, (h = new Handoff()));
+  const r = await h.get();
+  const url = follow.tileset(r);
+  roots.set(url, { source: follow.source, release: r });
+  return url;
+}
+
 function fault(url: string, f: Lod2Fault, detail: unknown): void {
   if (faults.record(url, f)) console.warn(`[scape] LoD2 ${f === Lod2Fault.Permanent ? 'skipped' : 'failed, will retry'}:`, url, detail);
 }
@@ -34,7 +65,11 @@ async function fetchTileset(url: string): Promise<void> {
   let text: string;
   try {
     const res = await fetch(url);
-    if (!res.ok) return fault(url, httpFault(res.status), `HTTP ${res.status}`);
+    if (!res.ok) {
+      const root = roots.get(url);
+      if (res.status === 404 && root) reportGone(root.source, root.release);
+      return fault(url, httpFault(res.status), `HTTP ${res.status}`);
+    }
     text = await res.text();
   } catch (err) {
     return fault(url, fetchFault(err), err);
@@ -56,8 +91,9 @@ function loadTileset(url: string): Promise<void> {
 
 /** Contents the view needs, nearest first, after fetching every external tileset the walk reaches. */
 export async function walkRegion(region: Lod2Region, view: WalkView): Promise<WalkContent[]> {
+  const root = await rootOf(region);
   for (let round = 0; ; round++) {
-    const r = walkTileset(region.tileset, (u) => tilesets.get(u), view);
+    const r = walkTileset(root, (u) => tilesets.get(u), view);
     const todo = r.pending.filter((u) => !faults.blocked(u));
     if (todo.length === 0 || round === WALK_ROUNDS) return r.contents;
     // oxlint-disable-next-line no-await-in-loop -- each round's tilesets name the next ones

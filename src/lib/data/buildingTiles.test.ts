@@ -15,8 +15,10 @@ vi.mock('./localTiles', () => ({
   readThrough: async <T>(local: () => Promise<T | null>, remote: () => Promise<T | null>) => (await local()) ?? remote()
 }));
 
-const { abandonBuildingFetches, fetchBuildingBatch, setBuildingsRelease } = await import('./buildingTiles');
+const { abandonBuildingFetches, awaitBuildingsRelease, fetchBuildingBatch, setBuildingsRelease } = await import('./buildingTiles');
+const gone = vi.fn<(release: string) => void>();
 // As a worker: the release comes from the main thread, never from the network.
+awaitBuildingsRelease(gone);
 setBuildingsRelease('2026-12-16.0');
 
 let seq = 0;
@@ -36,11 +38,28 @@ describe('live archive', () => {
   });
 });
 
+describe('a release the bucket no longer has', () => {
+  it('is reported gone on a 404, pmtiles reporting it only in its message', async () => {
+    getZxy.mockRejectedValue(new Error('Bad response code: 404'));
+    await fetchBuildingBatch(tile()).catch(() => null);
+    expect(gone).toHaveBeenCalledWith('2026-12-16.0');
+  });
+
+  it('is not reported on other failures', async () => {
+    gone.mockClear();
+    getZxy.mockRejectedValue(new Error('Bad response code: 503'));
+    await fetchBuildingBatch(tile()).catch(() => null);
+    expect(gone).not.toHaveBeenCalled();
+  });
+});
+
 /** A fresh main-thread module, as on page load. */
-const fresh = async (fetchImpl: typeof fetch, onLine = true) => {
+const fresh = async (fetchImpl: typeof fetch, onLine = true, remembered: Record<string, unknown> = {}) => {
   vi.resetModules();
   vi.stubGlobal('fetch', vi.fn(fetchImpl));
   vi.stubGlobal('navigator', { onLine });
+  const store = new Map([['scape.releases', JSON.stringify(remembered)]]);
+  vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) });
   return (await import('./buildingTiles')).buildingsRelease;
 };
 
@@ -48,10 +67,16 @@ describe('buildingsRelease', () => {
   const xml = '<ListBucketResult><Contents><Key>tiles/2026-10-21.0/buildings.pmtiles</Key></Contents><Contents><Key>tiles/2026-11-18.0/buildings.pmtiles</Key></Contents></ListBucketResult>';
   afterEach(() => vi.unstubAllGlobals());
 
-  it('lists the bucket once and takes the newest release', async () => {
+  it('lists the bucket once on a first load and takes the newest release', async () => {
     const release = await fresh(async () => new Response(xml));
     expect(await Promise.all([release(), release()])).toEqual(['2026-11-18.0', '2026-11-18.0']);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes a remembered release without listing', async () => {
+    const release = await fresh(async () => new Response(xml), true, { Overture: { release: '2026-10-21.0', checkedAt: Date.now() } });
+    expect(await release()).toBe('2026-10-21.0');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('falls back to the pinned release when the listing fails or is garbled', async () => {
