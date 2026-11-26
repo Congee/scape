@@ -51,4 +51,18 @@ describe('BlockCache', () => {
     c.setAnchor('b');
     expect(gone).toEqual([b1, b2, b3]);
   });
+
+  it('clears without handing blocks back, and refills under the same eye', () => {
+    const gone: MeshBlock[] = [];
+    const c = new BlockCache(1 << 20, (b) => gone.push(b));
+    c.setAnchor('a');
+    c.set('k', block(10));
+    c.clear();
+    expect(c.size).toBe(0);
+    expect(c.bytes).toBe(0);
+    expect(gone).toHaveLength(0);
+    c.setAnchor('a');
+    c.set('k', block(10));
+    expect(c.get('k')).toBeDefined();
+  });
 });

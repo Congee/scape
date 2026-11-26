@@ -71,3 +71,34 @@ describe('DemCache stats', () => {
     expect(c.stats()).toEqual({ tiles: 1, nulls: 1, maxTiles: 10, bytes: SIZE * SIZE * 4, keys: ['3/1/1'] });
   });
 });
+
+describe('DemCache cap', () => {
+  it('holds tiles past its cap while they are read, and returns to the cap once they are let go', async () => {
+    const coords = [0, 1, 2, 3, 4].map((x) => ({ z: 3, x, y: 1 }));
+    for (const c of coords) answers[`3/${c.x}/1`] = c.x;
+    const c = new DemCache(2);
+    const release = c.retain(coords);
+    await c.loadAll(coords);
+    expect(c.stats().tiles).toBe(5);
+    release();
+    expect(c.stats().tiles).toBe(2);
+    // Least recently used go first.
+    expect(c.stats().keys).toEqual(['3/3/1', '3/4/1']);
+    release();
+    expect(c.stats().tiles).toBe(2);
+  });
+
+  it('keeps tiles another reader still holds when one releases', async () => {
+    const a = [0, 1, 2].map((x) => ({ z: 3, x, y: 1 }));
+    const b = [{ z: 3, x: 0, y: 1 }, { z: 3, x: 1, y: 1 }];
+    for (const t of a) answers[`3/${t.x}/1`] = t.x;
+    const c = new DemCache(1);
+    const ra = c.retain(a);
+    const rb = c.retain(b);
+    await c.loadAll(a);
+    ra();
+    expect(c.stats().keys.toSorted()).toEqual(['3/0/1', '3/1/1']);
+    rb();
+    expect(c.stats().tiles).toBe(1);
+  });
+});

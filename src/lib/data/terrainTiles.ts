@@ -175,7 +175,12 @@ export class DemCache implements DemSource {
 
   /** Pins tiles against eviction until the returned release is called; safe to call before they are loaded. */
   retain(coords: readonly TileCoord[]): () => void {
-    return this.holds.retain(coords.map((c) => tileKey(c.z, c.x, c.y)));
+    const release = this.holds.retain(coords.map((c) => tileKey(c.z, c.x, c.y)));
+    // Held tiles may have pushed the cache past its cap; it comes back down once they are let go.
+    return () => {
+      release();
+      this.trim();
+    };
   }
 
   load(c: TileCoord): Promise<DemTile | null> {
@@ -248,7 +253,11 @@ export class DemCache implements DemSource {
 
   private set(c: TileCoord, t: DemTile | null) {
     this.tiles.set(tileKey(c.z, c.x, c.y), t);
-    // Held tiles are skipped, so the cache can sit above `maxTiles` by at most one caller's working set.
+    this.trim();
+  }
+
+  /** Held tiles are skipped, so the cache sits above `maxTiles` by at most the working sets being read. */
+  private trim() {
     for (const k of evictionKeys(this.tiles.keys(), this.holds, this.tiles.size - this.maxTiles)) this.tiles.delete(k);
   }
 

@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { siteHeightM } from '@core/astro/bodies';
 import { distanceM, type LngLat } from '@core/geo/geodesy';
 import { endpointAngleDeg, endpointHeightM } from '@core/terrain/los';
-import { RECYCLE, TerrainKind, type HorizonResult, type MeshResult, type RecycleMessage, type ProfileResult, type TerrainRequest, type TerrainResponse, type ViewResult } from '@workers/terrain.protocol';
+import { MESH_OFF, RECYCLE, TerrainKind, type HorizonResult, type MeshOffMessage, type MeshResult, type RecycleMessage, type ProfileResult, type TerrainRequest, type TerrainResponse, type ViewResult } from '@workers/terrain.protocol';
 import { markersStore } from './markers';
 import { settingsStore, type Settings } from './settings';
 import { viewfinderStore, type MeshWindow, type ViewWindow } from './viewfinder';
@@ -300,6 +300,8 @@ export function startTerrainSync(): () => void {
       setStaged(null);
       setMesh({ mesh: [], meshKey: '' });
       setBusy(TerrainKind.Mesh, false);
+      // After the recycle above, so the pool those buffers joined goes too.
+      worker.postMessage({ kind: MESH_OFF } satisfies MeshOffMessage);
       return;
     }
     // Only the eye moving makes the levels on screen wrong; a re-cut for a new aim may stay up meanwhile.

@@ -21,6 +21,13 @@ export class BlockCache {
     this.used = 0;
   }
 
+  /** Drops every block without telling `onEvict`, so their buffers go to the GC. */
+  clear() {
+    this.anchor = '';
+    this.blocks.clear();
+    this.used = 0;
+  }
+
   get(key: string): MeshBlock | undefined {
     const b = this.blocks.get(key);
     if (!b) return undefined;

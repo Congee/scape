@@ -1,5 +1,5 @@
 // DEM cache memory: per-worker decoded tiles, bytes and heap through an Alps session, at peak and at the end.
-// Usage: bun scripts/smoke/demmem.ts <cdp> <port> [linger-s]; linger re-reads heaps after the mesh pool's idle release.
+// Usage: bun scripts/smoke/demmem.ts <cdp> <port> [linger-s]; linger re-reads heaps after the idle releases.
 /* oxlint-disable no-await-in-loop -- CDP steps are sequential */
 import { Tab } from './cdp';
 
@@ -22,11 +22,11 @@ const NAME_WORKERS = `(() => {
     }
   };
 })()`;
-const STATS = '({ name: self.name, dem: (self.__scapeDem ?? []).map((c) => c.stats()) })';
+const STATS = '({ name: self.name, dem: (self.__scapeDem ?? []).map((c) => c.stats()), mesh: self.__scapeMesh ? { pool: self.__scapeMesh.pool.bytes, n: self.__scapeMesh.pool.size, blocks: self.__scapeMesh.blocks.bytes } : null })';
 
 type Stats = { tiles: number; nulls: number; maxTiles: number; bytes: number; keys: string[] };
 type Heap = { usedSize: number; totalSize: number; backingStorageSize?: number; embedderHeapUsedSize?: number };
-type Sample = { name: string; dem: Stats[]; heap: Heap };
+type Sample = { name: string; dem: Stats[]; heap: Heap; mesh: { pool: number; n: number; blocks: number } | null };
 
 const tab = await Tab.open(Number(cdp), BASE);
 await tab.fresh(BASE);
@@ -80,6 +80,9 @@ const rail = async (href: string) => {
   await until(href === '/' ? '!!document.querySelector(".maplibregl-canvas") && !document.querySelector("canvas.vf")' : '!!document.querySelector("canvas.vf")', 30_000);
 };
 const log = (m: string) => console.error(`[${step}] ${m}`);
+/** Per-worker tiles and array buffers after a GC, at named points of the session. */
+const snaps: { at: string; all: Sample[] }[] = [];
+const snap = async (at: string) => snaps.push({ at, all: await sample(true) });
 
 step = 'load';
 await tab.navigate(`${BASE}/?camera=${CAMERA.lat},${CAMERA.lng}&target=${TARGET.lat},${TARGET.lng}&z=12`);
@@ -114,9 +117,12 @@ for (let az = 0; az < 360; az += 45) {
 await js(`window.__scape.world.getState().setPin2(${JSON.stringify(TARGET)}), 1`);
 await until(VF_SETTLED, 60_000);
 log('done');
+await snap('in viewfinder');
 
 step = 'map';
 await rail('/');
+await Bun.sleep(5000);
+await snap('left viewfinder');
 // Light pollution, the Alpenglow card for the target, and the light probe.
 step = 'light';
 await js(`(() => { const s = window.__scape; s.settings.getState().update({ showLightPollution: true, weather: true }); const u = s.ui.getState(); u.setPanelTab('Weather'); u.setPanelCollapsed(false); return 1; })()`);
@@ -134,12 +140,14 @@ sampling.on = false;
 await sampler;
 const end = await sample(true);
 record(end);
+snaps.push({ at: 'end', all: end });
 await tab.send('HeapProfiler.collectGarbage');
 const page = (await tab.send('Runtime.getHeapUsage')) as Heap;
 let later: Sample[] = [];
 if (Number(linger) > 0) {
   await Bun.sleep(Number(linger) * 1000);
   later = await sample(true);
+  snaps.push({ at: `after ${linger} s idle`, all: later });
 }
 tab.close();
 
@@ -172,3 +180,12 @@ const heapAll = end.reduce((a, s) => a + s.heap.usedSize + (s.heap.backingStorag
 console.log(`end worker heap total (V8 + backing, all named workers): ${mb(heapAll)} MB`);
 console.log(`page (main thread) heap: ${heapMb(page)} MB`);
 if (later.length) console.log(`after ${linger} s idle: ${later.map((s) => `${s.name} ${heapMb(s.heap)}`).join('; ')} MB`);
+const at = snaps.map((s) => s.at);
+console.log(`\n| worker | ${at.map((a) => `${a}: tiles / array buffers MB`).join(' | ')} |\n|---|${at.map(() => '---|').join('')}`);
+const all = [...new Set(snaps.flatMap((s) => s.all.map((x) => x.name)))].toSorted();
+for (const n of all)
+  console.log(`| ${n} | ${snaps.map((s) => s.all.find((x) => x.name === n)).map((x) => (x ? `${tiles(x)} / ${mb(x.heap.backingStorageSize ?? 0)}` : 'gone')).join(' | ')} |`);
+for (const { at: a, all: xs } of snaps) {
+  const t = xs.find((x) => x.mesh);
+  if (t?.mesh) console.log(`${a}: ${t.name} mesh pool ${mb(t.mesh.pool)} MB in ${t.mesh.n} buffers, block cache ${mb(t.mesh.blocks)} MB`);
+}

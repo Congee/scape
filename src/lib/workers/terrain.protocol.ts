@@ -73,7 +73,13 @@ export interface RecycleMessage {
   buffers: ArrayBuffer[];
 }
 
-export type TerrainMessage = TerrainRequest | RecycleMessage;
+export const MESH_OFF = 'MeshOff';
+/** The viewfinder closed: mesh buffers and blocks go until the next mesh request. */
+export interface MeshOffMessage {
+  kind: typeof MESH_OFF;
+}
+
+export type TerrainMessage = TerrainRequest | RecycleMessage | MeshOffMessage;
 
 export interface ProfileResult {
   a: LngLat;
@@ -144,3 +150,6 @@ export type TerrainResponse =
   | { kind: typeof TerrainKind.View; id: number; result: ViewResult }
   | { kind: typeof TerrainKind.Mesh; id: number; result: MeshResult }
   | { kind: 'Error'; id: number; of: TerrainKind; error: string };
+
+/** A horizon request is done with its error or its refined skyline; the coarse one comes first. */
+export const horizonSettled = (r: TerrainResponse): boolean => r.kind === 'Error' || (r.kind === TerrainKind.Horizon && r.result.refined);

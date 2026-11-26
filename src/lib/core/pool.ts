@@ -4,6 +4,9 @@ export const POOL_IDLE_RELEASE_MS = 5 * 60_000;
 /** Free buffers kept at most; past it the smallest goes, being the one least likely to fit. */
 const MAX_FREE = 64;
 
+/** About two full viewfinder level sets; past it the oldest go, as the newest match the next rebuild. */
+export const POOL_MAX_BYTES = 128 * 2 ** 20;
+
 /** Rounded up to an eighth of the next power of two, so a mesh a little larger than the last still fits its buffer. */
 export const poolSize = (bytes: number): number => {
   if (bytes <= 1024) return 1024;
@@ -36,14 +39,23 @@ export class IdleRelease {
 
 /**
  * Free ArrayBuffers for typed arrays that are rebuilt again and again. A request takes the smallest
- * buffer that fits, else a new one; buffers never shrink, so the pool settles at the largest mesh seen.
+ * buffer that fits, else a new one; buffers never shrink, so the byte cap is what bounds the pool.
  */
 export class BufferPool {
   private free: ArrayBuffer[] = [];
   private readonly idle: IdleRelease;
 
-  constructor(ms = POOL_IDLE_RELEASE_MS) {
+  constructor(
+    ms = POOL_IDLE_RELEASE_MS,
+    private readonly maxBytes = POOL_MAX_BYTES
+  ) {
     this.idle = new IdleRelease(() => (this.free = []), ms);
+  }
+
+  /** Lets every free buffer go now. */
+  clear(): void {
+    this.idle.cancel();
+    this.free = [];
   }
 
   /** A buffer of at least `bytes`; its contents are whatever the last user left. */
@@ -69,6 +81,8 @@ export class BufferPool {
       for (let i = 1; i < this.free.length; i++) if (this.free[i].byteLength < this.free[min].byteLength) min = i;
       this.free.splice(min, 1);
     }
+    let held = this.bytes;
+    while (held > this.maxBytes && this.free.length > 1) held -= this.free.shift()!.byteLength;
   }
 
   f32(n: number): Float32Array<ArrayBuffer> {

@@ -40,6 +40,33 @@ describe('BufferPool', () => {
     expect(p.size).toBe(0);
   });
 
+  it('keeps its free bytes under the cap by letting the oldest go', () => {
+    const p = new BufferPool(POOL_IDLE_RELEASE_MS, 10_000);
+    const [a, b, c] = [p.take(4096), p.take(4096), p.take(4096)];
+    p.give(a);
+    p.give(b);
+    expect(p.size).toBe(2);
+    p.give(c);
+    expect(p.size).toBe(2);
+    expect(p.bytes).toBeLessThanOrEqual(10_000);
+    expect(p.take(4096)).not.toBe(a);
+  });
+
+  it('keeps a lone buffer larger than the cap', () => {
+    const p = new BufferPool(POOL_IDLE_RELEASE_MS, 1000);
+    const a = p.take(4096);
+    p.give(a);
+    expect(p.take(4096)).toBe(a);
+  });
+
+  it('empties on clear and arms no timer', () => {
+    const p = new BufferPool();
+    p.give(p.take(4096));
+    p.clear();
+    expect(p.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('lets go of its buffers after the idle constant, and allocates afresh afterwards', () => {
     const p = new BufferPool();
     const a = p.take(4096);

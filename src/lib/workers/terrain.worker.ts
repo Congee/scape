@@ -10,7 +10,7 @@ import { analyzeSightline } from '@core/terrain/los';
 import { assembleView, refineView, type ViewProfile } from '@core/terrain/view';
 import { lngLatToTilePixel, metersPerPixel, tileKey, tilesInBounds, zoomForResolution, type TileCoord } from '@core/terrain/tiles';
 import { demCacheTiles, demZoom, DemCache, TERRAIN_MAX_ZOOM, TERRAIN_TILE_SIZE } from '@data/terrainTiles';
-import { RECYCLE, TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainMessage, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
+import { MESH_OFF, RECYCLE, TerrainKind, type ElevationRequest, type HorizonRequest, type MeshRequest, type PointsRequest, type ProfileRequest, type TerrainMessage, type TerrainRequest, type TerrainResponse, type ViewRequest } from './terrain.protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 /** Detail-bound zooms, in 256 px terms: z14 posts are ~7 m, z13 ~14 m at mid-latitudes. */
@@ -24,7 +24,12 @@ const meshPool = new BufferPool();
 let evicted: MeshBlock[] = [];
 // About 1500 blocks: an aim drag re-cuts the wedge, and most of it was built a moment ago.
 const meshBlocks = new BlockCache(96 * 2 ** 20, (b) => evicted.push(b));
+// Dev: lets a CDP session read the mesh memory.
+if (import.meta.env.DEV) (globalThis as { __scapeMesh?: unknown }).__scapeMesh = { pool: meshPool, blocks: meshBlocks };
+/** False from MeshOff until the next mesh request, so late buffers are not pooled for a closed viewfinder. */
+let meshOn = false;
 const recycleBlock = (b: MeshBlock) => {
+  if (!meshOn) return;
   meshPool.give(b.pos.buffer);
   meshPool.give(b.nrm.buffer);
 };
@@ -315,9 +320,19 @@ function dispatch(req: TerrainRequest): Promise<TerrainResponse | null> {
 scope.addEventListener('message', (e: MessageEvent<TerrainMessage>) => {
   const req = e.data;
   if (req.kind === RECYCLE) {
-    for (const b of req.buffers) meshPool.give(b);
+    if (meshOn) for (const b of req.buffers) meshPool.give(b);
     return;
   }
+  if (req.kind === MESH_OFF) {
+    meshOn = false;
+    // A build in flight stops at its next check.
+    latest.Mesh = 0;
+    meshPool.clear();
+    meshBlocks.clear();
+    evicted = [];
+    return;
+  }
+  if (req.kind === TerrainKind.Mesh) meshOn = true;
   latest[req.kind] = req.id;
   dispatch(req).then(
     (res) => {

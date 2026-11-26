@@ -4,8 +4,9 @@ import { makeObserver, siteHeightM } from '@core/astro/bodies';
 import { dayCurve } from '@core/astro/dayCurve';
 import { firstLastLight, sunLitAt, type FirstLastLight } from '@core/astro/lightSource';
 import type { LngLat } from '@core/geo/geodesy';
-import { TerrainKind, type HorizonResult, type TerrainResponse } from '@workers/terrain.protocol';
+import { horizonSettled, TerrainKind, type HorizonRequest, type HorizonResult, type TerrainResponse } from '@workers/terrain.protocol';
 import { dayBounds } from '@core/time/localDay';
+import { IdleWorker } from './idleWorker';
 import { settingsStore } from './settings';
 import { EYE_HEIGHT_M, HORIZON_AZ_STEP_DEG } from './terrain';
 import { worldStore } from './world';
@@ -24,8 +25,8 @@ export interface LightProbeState {
   setPoint: (p: LngLat | null) => void;
 }
 
-let worker: Worker | null = null;
 let seq = 0;
+let subscribed = false;
 let dayKey = '';
 let litFrom: HorizonResult | null = null;
 
@@ -51,21 +52,25 @@ export function lightPointObserver(point: LngLat, horizon: Pick<HorizonResult, '
   return makeObserver(point, siteHeightM(horizon.groundM, aboveGroundM));
 }
 
+const worker = new IdleWorker<HorizonRequest, TerrainResponse>(
+  () => new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' }),
+  (res) => {
+    if (res.id !== seq) return;
+    if (horizonSettled(res)) worker.settle();
+    if (res.kind === 'Error') return lightProbeStore.setState({ busy: false, error: res.error });
+    if (res.kind !== TerrainKind.Horizon) return;
+    lightProbeStore.setState({ busy: false, horizon: res.result });
+    relight();
+  }
+);
+
 function sweep(point: LngLat) {
-  if (!worker) {
-    worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' });
-    worker.addEventListener('message', (e: MessageEvent<TerrainResponse>) => {
-      const res = e.data;
-      if (res.id !== seq) return;
-      if (res.kind === 'Error') return lightProbeStore.setState({ busy: false, error: res.error });
-      if (res.kind !== TerrainKind.Horizon) return;
-      lightProbeStore.setState({ busy: false, horizon: res.result });
-      relight();
-    });
+  if (!subscribed) {
+    subscribed = true;
     // The day follows the clock; the sweep does not.
     worldStore.subscribe(relight);
   }
-  worker.postMessage({ kind: TerrainKind.Horizon, id: ++seq, pin: point, eyeAboveGroundM: EYE_HEIGHT_M, rangeM: settingsStore.getState().horizonRangeKm * 1000, azStepDeg: HORIZON_AZ_STEP_DEG });
+  worker.post({ kind: TerrainKind.Horizon, id: ++seq, pin: point, eyeAboveGroundM: EYE_HEIGHT_M, rangeM: settingsStore.getState().horizonRangeKm * 1000, azStepDeg: HORIZON_AZ_STEP_DEG });
 }
 
 function relight() {

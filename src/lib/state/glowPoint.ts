@@ -1,5 +1,6 @@
 import type { LngLat } from '@core/geo/geodesy';
-import { TerrainKind, type HorizonResult, type TerrainResponse } from '@workers/terrain.protocol';
+import { horizonSettled, TerrainKind, type HorizonRequest, type HorizonResult, type TerrainResponse } from '@workers/terrain.protocol';
+import { IdleWorker } from './idleWorker';
 import type { Settings } from './settings';
 import { EYE_HEIGHT_M, HORIZON_AZ_STEP_DEG, horizonKeyFor } from './terrain';
 import type { WorldState } from './world';
@@ -23,16 +24,18 @@ export function glowPointFor(w: Pick<WorldState, 'pin' | 'pinHeightM' | 'pin2'>,
   return { at: GlowAt.Pin, point: w.pin, aboveGroundM: w.pinHeightM + EYE_HEIGHT_M, horizonKey: one(w.pin, w.pinHeightM) };
 }
 
-let worker: Worker | null = null;
 let seq = 0;
 let listener: ((r: TerrainResponse) => void) | null = null;
+const worker = new IdleWorker<HorizonRequest, TerrainResponse>(
+  () => new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' }),
+  (r) => {
+    if (r.id === seq && horizonSettled(r)) worker.settle();
+    listener?.(r);
+  }
+);
 
 /** Sweeps the skyline at a point off the camera; each call supersedes the last. Returns a cancel. */
 export function sweepPointHorizon(point: LngLat, eyeAboveGroundM: number, rangeM: number, on: (r: HorizonResult | Error) => void): () => void {
-  if (!worker) {
-    worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), { type: 'module' });
-    worker.addEventListener('message', (e: MessageEvent<TerrainResponse>) => listener?.(e.data));
-  }
   const id = ++seq;
   const mine = (r: TerrainResponse) => {
     if (r.id !== id) return;
@@ -40,7 +43,7 @@ export function sweepPointHorizon(point: LngLat, eyeAboveGroundM: number, rangeM
     else if (r.kind === TerrainKind.Horizon) on(r.result);
   };
   listener = mine;
-  worker.postMessage({ kind: TerrainKind.Horizon, id, pin: point, eyeAboveGroundM, rangeM, azStepDeg: HORIZON_AZ_STEP_DEG });
+  worker.post({ kind: TerrainKind.Horizon, id, pin: point, eyeAboveGroundM, rangeM, azStepDeg: HORIZON_AZ_STEP_DEG });
   return () => {
     if (listener === mine) listener = null;
   };
