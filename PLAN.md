@@ -516,6 +516,10 @@ parts, and the map and viewfinder controllers split into layer and painter modul
 - **markstop on master**: every cell passes. The full 16-scene run twice lost its CDP session partway
   (load 7–15), so the last scenes were run with its filter.
 
+Decided 2026-11-26, in progress: swissBUILDINGS3D and 3DBAG follow their latest release instead of
+`v1/20260520` and `v20250903`, cache first (a few days stale is fine); Overture's runtime listing
+(`423fe49`) moves to the same cache-first resolver.
+
 Next: **verification owed on master**: `idle.sh` after the controller splits and the worker change,
 and the satellite smoke (needs a MapTiler key).
 
@@ -525,8 +529,6 @@ Waiting on the user:
   (Apple imagery may only show inside Apple's map view). Unanswered; §2 keeps it deferred.
 - **Models P4 photos**: memory only, or IndexedDB per plan.
 - **Drawn building height**: 10 m, or the median of nearby Overture buildings.
-- **Pinned sources**: swissBUILDINGS3D `v1/20260520` and 3DBAG `v20250903`, or follow the latest.
-  Overture resolves its newest release at runtime (`423fe49`).
 - **Safari/iOS terrain** reads up to 197 m low: software WebP decode (a new path or dependency), or accept.
 - **Twilight, moonlight and lit-landscape scene EVs** need field readings.
 - **Name**: "scape" is a placeholder (§8).
