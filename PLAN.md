@@ -310,7 +310,7 @@ the texture is sampled bilinearly. On phones (≤ 900 px) the nav rail is a bott
 panel keeps its tab row as a peek bar (`a6ed48e`, user's choice): the canvas at 390×844 went 19% → 57%
 collapsed, and the 844×390 landscape phone, which had a 0 px canvas row, starts collapsed at 32%.
 Phase 7's calculators, tides, eclipses and light extras merged on 2026-09-24/25 (§9); its PlanIt
-acceptance is still open (§9 Remaining).
+acceptance passed on 2026-11-26 (`91dd59f`, `docs/research/planit-crosscheck.md`).
 After the phases: official LoD2 buildings and models P1–P4 (2026-09-24/25), weather and alpenglow
 (09-25), satellite imagery (09-28/30), the seven-tab panel — Now, Shot, Sky, Find, Weather,
 Map|View, Markers — with its design-system pass (10-01/02), the URL as the scene's truth (10-02), and
@@ -502,19 +502,19 @@ parts, and the map and viewfinder controllers split into layer and painter modul
 
 ## 9. Open work (2026-11-25)
 
-**Remaining (2026-11-25).** Next, each measured:
+**Remaining (2026-11-26).** Done since 2026-11-25:
 
-1. **DEM workers** (`scripts/smoke/demmem.sh`, Alps session, Chromium). The glowPoint and lightProbe
-   workers never terminate and hold 124 + 84 MB. Their caches pass the 80-tile cap (123 and 83 tiles)
-   because they trim only on insert. Fix: terminate idle workers and trim to the cap. Peak cached tiles
-   across all workers: 298 MB.
-2. **Viewfinder buffer pool.** After the viewfinder the terrain worker holds 723 MB of array buffers,
-   159 MB after 5.5 min idle, and the "viewfinder after zoom" idle case is still 3.0–3.1 % (GC, **23**).
-   Both come from the pool's size and release time, so one change trades them.
-3. **Phase 7 acceptance.** Only depth of field is checked against a PlanIt worked example. Exposure/ND,
-   time-lapse, rainbow, cloud distance and tides are not.
-4. **Verification owed on master**: `idle.sh` after the controller splits, `markstop`, and the
-   satellite smoke (needs a MapTiler key).
+- **Worker memory** (`775637e`, `demmem.sh`, Alps session, MB before → after). glowPoint and
+  lightProbe terminate after 60 s idle (`state/idleWorker.ts`) and hold their caches at the 80-tile cap
+  (124 → 81, 84 → 81, then gone). The terrain worker drops its mesh pool and block cache when the
+  viewfinder closes, and the pool is capped at 128 MB: 604 → 291 MB in the viewfinder, 671 → 95 MB
+  after leaving it. Zoom rebuild unchanged (`vfzoom.sh`: median 1070 → 1092 ms, GC 39.6 → 40.4 ms).
+- **Phase 7 acceptance** (`91dd59f`): 24 worked examples (PlanIt, NOAA, NASA) pinned as unit tests,
+  no Scape bugs. PlanIt's horizon-cloud last light is wrong (−7.5°/−6.1°; −5.0°/−4.0° is right).
+  Modelling choices kept: rainbow 42.08°, shot count round(T/i), full moon EV 15, dark night EV −10.
+
+Next: **verification owed on master**: `idle.sh` after the controller splits and the worker change,
+`markstop`, and the satellite smoke (needs a MapTiler key).
 
 Waiting on the user:
 
@@ -525,7 +525,7 @@ Waiting on the user:
 - **Pinned sources**: swissBUILDINGS3D `v1/20260520` and 3DBAG `v20250903`, or follow the latest.
   Overture resolves its newest release at runtime (`423fe49`).
 - **Safari/iOS terrain** reads up to 197 m low: software WebP decode (a new path or dependency), or accept.
-- **Twilight and moonlight scene EVs** need field readings.
+- **Twilight, moonlight and lit-landscape scene EVs** need field readings.
 - **Name**: "scape" is a placeholder (§8).
 - `PRODUCT.md` and `.impeccable/` are untracked, and there is no `DESIGN.md`.
 
@@ -535,6 +535,7 @@ Backlog, low priority:
 - Satellite imagery for Canada, Norway and Slovenia (§8).
 - A water mask: the Hudson currently sits 1.5 m below sea level.
 - Finer rise/set azimuth steps [leave for now].
+- Horizon-cloud readouts (last light on a cloud past the horizon) beside the overhead-cloud ones.
 - Esri World Imagery with the user's own key.
 - Google 3D Tiles with the user's own key (§2).
 
