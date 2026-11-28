@@ -520,8 +520,11 @@ parts, and the map and viewfinder controllers split into layer and painter modul
   re-checked in the background after 3 days, at once on a 404. Swiss went 20260520 → 20261116 (Zürich
   42 → 63–65 tiles, 31 → 8 s); one cold Bern load took 393 s, warm runs about 9 s.
 
-Next: **verification owed on master**: `idle.sh` after the controller splits and the worker change,
-and the satellite smoke (needs a MapTiler key).
+- **`idle.sh` on master** (`a22829a`, 2026-11-28): all cases pass but "viewfinder after zoom", whose
+  idle window caught 15 late terrain and building tile fetches. Two reruns pass with none, and the case
+  went 3.0–3.1 → 1.6–1.7 % (the pool change).
+
+Next: the satellite smoke (needs a MapTiler key).
 
 Waiting on the user:
 
